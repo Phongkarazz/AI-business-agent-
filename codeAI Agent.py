@@ -328,7 +328,7 @@ def render_result(result: dict):
     with tab2:
         fig, method = forecast_series(df, periods=st.session_state.get("forecast_periods", 3))
         if fig is None:
-        st.info(method)
+         st.info(method)
     else:
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"Phương pháp: {method}")
