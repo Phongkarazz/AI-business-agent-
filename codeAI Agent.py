@@ -7,9 +7,41 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import sqlite3
+
+# Tự động tạo database mẫu nếu chưa có
+def init_sample_db():
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS doanh_thu (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            thang TEXT,
+            so_tien REAL,
+            san_pham TEXT
+        )
+    """)
+    # Kiểm tra nếu chưa có dữ liệu thì thêm dữ liệu mẫu
+    cursor.execute("SELECT COUNT(*) FROM doanh_thu")
+    if cursor.fetchone()[0] == 0:
+        data = [
+            ('2024-01', 15000, 'Laptop'),
+            ('2024-02', 18000, 'Laptop'),
+            ('2024-03', 22000, 'Laptop'),
+            ('2024-04', 21000, 'Điện thoại'),
+            ('2024-05', 25000, 'Điện thoại'),
+            ('2024-06', 29000, 'Điện thoại')
+        ]
+        cursor.executemany("INSERT INTO doanh_thu (thang, so_tien, san_pham) VALUES (?, ?, ?)", data)
+        conn.commit()
+    conn.close()
+
+# Gọi hàm tạo DB
+init_sample_db()
 from sqlalchemy import create_engine, text, inspect
 from google import genai
 from urllib.parse import quote_plus
+
 
 try:
     from statsmodels.tsa.holtwinters import ExponentialSmoothing
