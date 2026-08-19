@@ -5,6 +5,7 @@ import time
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import create_engine, text, inspect
 from google import genai
@@ -253,27 +254,51 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     if x_col is None:
         non_numeric = [c for c in df.columns if c not in num_cols]
         x_col = non_numeric[0] if non_numeric else df.columns[0]
-    
+
     y_candidates = [c for c in num_cols if c != x_col]
     y_col = y_candidates[0] if y_candidates else num_cols[0]
 
-    df_sorted = df.copy()
-    
-    # Hồi quy tuyến tính đơn giản cho mọi loại dữ liệu
-    df_sorted = df_sorted.reset_index(drop=True)
+    df_sorted = df.copy().reset_index(drop=True)
     y = df_sorted[y_col].values.astype(float)
-    x_idx = np.arange(len(y))
+    n = len(y)
+    x_idx = np.arange(n)
     coeffs = np.polyfit(x_idx, y, 1)
-    future_idx = np.arange(len(y), len(y) + periods)
+    future_idx = np.arange(n, n + periods)
     future_vals = np.polyval(coeffs, future_idx)
 
-    x_labels_hist = df_sorted[x_col].astype(str).tolist()
-    x_labels_future = [f"Kỳ +{i+1}" for i in range(periods)]
+    # Nếu trục X là số (VD tháng 1-12), nối tiếp số thật để đường liền mạch
+    is_numeric_x = pd.api.types.is_numeric_dtype(df_sorted[x_col])
+    if is_numeric_x:
+        step = 1
+        if n >= 2:
+            step = df_sorted[x_col].iloc[-1] - df_sorted[x_col].iloc[-2]
+            if step == 0:
+                step = 1
+        last_x = df_sorted[x_col].iloc[-1]
+        future_x = [last_x + step * (i + 1) for i in range(periods)]
+    else:
+        future_x = [f"Kỳ +{i+1}" for i in range(periods)]
 
-    hist = pd.DataFrame({x_col: x_labels_hist, y_col: y, "Loại": "Thực tế"})
-    fut = pd.DataFrame({x_col: x_labels_future, y_col: future_vals, "Loại": "Dự báo"})
-    combined = pd.concat([hist, fut], ignore_index=True)
-    return combined, "Hồi quy tuyến tính (Linear Regression)"
+    hist_x = df_sorted[x_col].tolist()
+    # Nối điểm cuối thực tế làm điểm đầu dự báo -> 2 đường liền mạch, không đứt quãng
+    bridge_x = [hist_x[-1]] + future_x
+    bridge_y = [y[-1]] + list(future_vals)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=hist_x, y=y, mode="lines+markers", name="Thực tế",
+        line=dict(color="#4C9AFF")
+    ))
+    fig.add_trace(go.Scatter(
+        x=bridge_x, y=bridge_y, mode="lines+markers", name="Dự báo",
+        line=dict(color="#FF6B6B", dash="dash")
+    ))
+    fig.update_layout(
+        title=f"Dự báo xu hướng theo {x_col}",
+        xaxis_title=x_col, yaxis_title=y_col,
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+    return fig, "Hồi quy tuyến tính (Linear Regression)"
 
 
 def render_result(result: dict):
@@ -301,20 +326,18 @@ def render_result(result: dict):
     with tab1:
         render_smart_chart(df)
     with tab2:
-        combined, method = forecast_series(df, periods=st.session_state.get("forecast_periods", 3))
-        if combined is None:
-            st.info(method)
-        else:
-            x_col = [c for c in combined.columns if c != "Loại"][0]
-            y_col = [c for c in combined.columns if c not in ("Loại", x_col)][0]
-            fig = px.line(combined, x=x_col, y=y_col, color="Loại", markers=True, title=f"Dự báo xu hướng ({method})")
-            st.plotly_chart(fig, use_container_width=True)
+    fig, method = forecast_series(df, periods=st.session_state.get("forecast_periods", 3))
+    if fig is None:
+        st.info(method)
+    else:
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(f"Phương pháp: {method}")
 
 
 # ---------------------------------------------------------
 # 7. UI Chính
 # ---------------------------------------------------------
-st.title("🤖 Universal AI Business Intelligence Agent")
+st.title("🤖 AI Business Agent for SQL")
 st.caption("Kết nối Database MySQL Cloud bất kỳ để truy vấn ngôn ngữ tự nhiên, trực quan hóa và dự báo.")
 
 st.session_state["forecast_periods"] = forecast_periods
