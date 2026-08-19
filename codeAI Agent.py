@@ -55,6 +55,11 @@ except ImportError:
 st.set_page_config(page_title="Universal AI Business Agent", page_icon="🤖", layout="wide")
 
 FORBIDDEN_KEYWORDS = ["insert", "update", "delete", "drop", "alter", "truncate", "create", "grant", "revoke"]
+DB_DIALECT_MAP = {
+    "SQLite": "sqlite",
+    "MySQL": "mysql+mysqlconnector",
+    "PostgreSQL": "postgresql+psycopg2"
+}
 
 # ---------------------------------------------------------
 # 2. Hàm tự động trích xuất Schema từ Database của người dùng
@@ -80,14 +85,21 @@ with st.sidebar:
     st.header("⚙️ Cấu hình Kết nối")
     st.caption("Ứng dụng không lưu trữ tài khoản/API Key của bạn.")
 
-    st.subheader("1. MySQL Cloud Database")
-    db_host = st.text_input("Host", placeholder="e.g., mysql-xxx.aivencloud.com")
-    db_port = st.text_input("Port", value="3306")
-    db_user = st.text_input("User", value="root")
-    db_pass = st.text_input("Password", type="password")
-    db_name = st.text_input("Database Name", placeholder="e.g., my_business_db")
+    # Cho phép chọn SQLite / MySQL / PostgreSQL
+    db_type = st.selectbox("Hệ quản trị CSDL", ["SQLite", "MySQL", "PostgreSQL"])
+
+    if db_type == "SQLite":
+        db_name = st.text_input("Path file SQLite", value="database.db")
+        db_host, db_port, db_user, db_pass = "", "", "", ""
+    else:
+        db_host = st.text_input("Host", placeholder="e.g., mysql-xxx.aivencloud.com")
+        db_port = st.text_input("Port", value="3306" if db_type == "MySQL" else "5432")
+        db_user = st.text_input("User", value="root")
+        db_pass = st.text_input("Password", type="password")
+        db_name = st.text_input("Database Name", placeholder="e.g., my_business_db")
 
     st.subheader("2. Gemini API Key")
+    
     api_key = st.text_input("API Key", type="password", help="Lấy key miễn phí tại Google AI Studio")
     model_name = st.selectbox("Model AI", ["gemini-2.5-flash", "gemini-3.6-flash"], index=0)
     
@@ -104,29 +116,37 @@ with st.sidebar:
 # ---------------------------------------------------------
 # 4. Kiểm tra Kết nối & Tự động quét Schema
 # ---------------------------------------------------------
-def try_connect(host, port, user, pw, name):
-    engine = create_engine(
-        f"mysql+mysqlconnector://{user}:{quote_plus(pw)}@{host}:{port}/{name}"
-    )
+def get_db_engine(db_type, host, port, user, pw, name):
+    if db_type == "SQLite":
+        connect_url = f"sqlite:///{name}"
+        engine = create_engine(connect_url)
+    else:
+        driver = DB_DIALECT_MAP.get(db_type, "mysql+mysqlconnector")
+        encoded_pw = quote_plus(pw) if pw else ""
+        connect_url = f"{driver}://{user}:{encoded_pw}@{host}:{port}/{name}"
+        engine = create_engine(connect_url, pool_pre_ping=True)
+        
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
     return engine
 
 if connect_btn:
-    if not (db_host and db_user and db_name and api_key):
-        st.sidebar.error("❌ Vui lòng điền đầy đủ Host, User, Database Name và API Key!")
+    if not api_key:
+        st.sidebar.error("❌ Vui lòng nhập Gemini API Key!")
+    elif db_type != "SQLite" and not (db_host and db_user and db_name):
+        st.sidebar.error("❌ Vui lòng điền đầy đủ thông tin Server Database!")
     else:
         try:
-            engine = try_connect(db_host, db_port, db_user, db_pass, db_name)
+            engine = get_db_engine(db_type, db_host, db_port, db_user, db_pass, db_name)
             client = genai.Client(api_key=api_key)
             
-            # Tự động quét Schema nếu người dùng không tự nhập schema tay
             extracted_schema = auto_extract_schema(engine)
-            final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+            final_schema = schema_context_input.strip() if schema_context_input.strip() else extracted_schema
 
             st.session_state.update({
                 "engine": engine,
                 "client": client,
+                "db_type": db_type,
                 "model_name": model_name,
                 "schema_context": final_schema,
                 "connected": True,
