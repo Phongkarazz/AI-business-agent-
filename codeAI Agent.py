@@ -56,8 +56,8 @@ with st.sidebar:
 
     st.subheader("2. Gemini API Key")
     api_key = st.text_input("API Key", type="password", help="Lấy key miễn phí tại Google AI Studio")
-    model_name = st.selectbox("Model AI", ["gemini-2.5-flash", "gemini-1.5-flash"], index=0)
-
+    model_name = st.selectbox("Model AI", ["gemini-2.5-flash", "gemini-3.6-flash"], index=0)
+    
     # Nơi hiển thị Schema tự động trích xuất
     schema_context_input = st.text_area(
         "Mô tả Schema / Nghiệp vụ (Tự động nạp sau khi bấm Kết nối)", 
