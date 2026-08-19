@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 from google import genai
 from urllib.parse import quote_plus
 
@@ -19,73 +19,93 @@ except ImportError:
 # ---------------------------------------------------------
 # 1. Cấu hình trang
 # ---------------------------------------------------------
-st.set_page_config(page_title="Awesome Chocolates AI Agent", page_icon="🍫", layout="wide")
+st.set_page_config(page_title="Universal AI Business Agent", page_icon="🤖", layout="wide")
 
 FORBIDDEN_KEYWORDS = ["insert", "update", "delete", "drop", "alter", "truncate", "create", "grant", "revoke"]
-FORECAST_KEYWORDS = ["dự báo", "dự đoán", "forecast", "tương lai", "xu hướng"]
-
-DEFAULT_SCHEMA = """Database có 4 bảng:
-1. sales(SPID VARCHAR, GeoID VARCHAR, PID VARCHAR, SaleDate DATETIME, Amount INT, Customers INT, Boxes INT)
-2. people(Salesperson TEXT, SPID VARCHAR PRIMARY KEY, Team TEXT, Location TEXT)
-3. products(PID VARCHAR PRIMARY KEY, Product TEXT, Category TEXT, Size TEXT, Cost_per_box DOUBLE)
-4. geo(GeoID VARCHAR PRIMARY KEY, Geo TEXT, Region TEXT)
-Mối quan hệ:
-- sales.SPID = people.SPID
-- sales.PID = products.PID
-- sales.GeoID = geo.GeoID"""
 
 # ---------------------------------------------------------
-# 2. Sidebar: cấu hình kết nối (KHÔNG hardcode key/mật khẩu)
+# 2. Hàm tự động trích xuất Schema từ Database của người dùng
+# ---------------------------------------------------------
+def auto_extract_schema(engine) -> str:
+    """Tự động đọc danh sách Bảng và Cột từ MySQL để Gemini hiểu Database bất kỳ."""
+    try:
+        inspector = inspect(engine)
+        schema_text = "Cơ sở dữ liệu bao gồm các bảng và cột sau:\n"
+        for table_name in inspector.get_table_names():
+            schema_text += f"- Bảng `{table_name}`: "
+            columns = inspector.get_columns(table_name)
+            col_names = [f"{col['name']} ({str(col['type'])})" for col in columns]
+            schema_text += ", ".join(col_names) + "\n"
+        return schema_text
+    except Exception as e:
+        return f"Không thể tự động đọc schema: {e}"
+
+# ---------------------------------------------------------
+# 3. Sidebar: Cấu hình linh hoạt cho người dùng cá nhân
 # ---------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ Cấu hình")
+    st.header("⚙️ Cấu hình Kết nối")
+    st.caption("Ứng dụng không lưu trữ tài khoản/API Key của bạn.")
 
-    st.subheader("MySQL")
-    db_host = st.text_input("Host", value=os.getenv("DB_HOST", "localhost"))
-    db_user = st.text_input("User", value=os.getenv("DB_USER", "root"))
-    db_pass = st.text_input("Password", type="password", value=os.getenv("DB_PASS", ""))
-    db_name = st.text_input("Database", value=os.getenv("DB_NAME", "awesome chocolates"))
+    st.subheader("1. MySQL Cloud Database")
+    db_host = st.text_input("Host", placeholder="e.g., mysql-xxx.aivencloud.com")
+    db_port = st.text_input("Port", value="3306")
+    db_user = st.text_input("User", value="root")
+    db_pass = st.text_input("Password", type="password")
+    db_name = st.text_input("Database Name", placeholder="e.g., my_business_db")
 
-    st.subheader("Gemini API")
-    api_key = st.text_input("API Key", type="password", value=os.getenv("GEMINI_API_KEY", ""))
-    model_name = st.text_input("Model", value="gemini-3.6-flash")
+    st.subheader("2. Gemini API Key")
+    api_key = st.text_input("API Key", type="password", help="Lấy key miễn phí tại Google AI Studio")
+    model_name = st.selectbox("Model AI", ["gemini-2.5-flash", "gemini-1.5-flash"], index=0)
 
-    with st.expander("Schema context (nâng cao)"):
-        schema_context = st.text_area("Mô tả bảng cho AI", value=DEFAULT_SCHEMA, height=180)
+    # Nơi hiển thị Schema tự động trích xuất
+    schema_context_input = st.text_area(
+        "Mô tả Schema / Nghiệp vụ (Tự động nạp sau khi bấm Kết nối)", 
+        value=st.session_state.get("schema_context", ""), 
+        height=180
+    )
 
-    forecast_periods = st.slider("Số kỳ dự báo", 1, 12, 3)
-    connect_btn = st.button("🔌 Kết nối", width='stretch')
+    forecast_periods = st.slider("Số kỳ dự báo xu hướng", 1, 12, 3)
+    connect_btn = st.button("🔌 Kết nối Database & AI", type="primary", use_container_width=True)
 
 # ---------------------------------------------------------
-# 3. Kết nối — có TEST THẬT, không chỉ tạo Engine
+# 4. Kiểm tra Kết nối & Tự động quét Schema
 # ---------------------------------------------------------
-def try_connect(host, user, pw, name):
+def try_connect(host, port, user, pw, name):
     engine = create_engine(
-        f"mysql+mysqlconnector://{user}:{quote_plus(pw)}@{host}",
-        connect_args={"database": name}
+        f"mysql+mysqlconnector://{user}:{quote_plus(pw)}@{host}:{port}/{name}"
     )
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
     return engine
 
 if connect_btn:
-    try:
-        engine = try_connect(db_host, db_user, db_pass, db_name)
-        client = genai.Client(api_key=api_key)
-        st.session_state.update({
-            "engine": engine,
-            "client": client,
-            "model_name": model_name,
-            "schema_context": schema_context,
-            "connected": True,
-        })
-        st.sidebar.success("✅ Kết nối thành công!")
-    except Exception as e:
-        st.session_state["connected"] = False
-        st.sidebar.error(f"❌ Lỗi kết nối: {e}")
+    if not (db_host and db_user and db_name and api_key):
+        st.sidebar.error("❌ Vui lòng điền đầy đủ Host, User, Database Name và API Key!")
+    else:
+        try:
+            engine = try_connect(db_host, db_port, db_user, db_pass, db_name)
+            client = genai.Client(api_key=api_key)
+            
+            # Tự động quét Schema nếu người dùng không tự nhập schema tay
+            extracted_schema = auto_extract_schema(engine)
+            final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+
+            st.session_state.update({
+                "engine": engine,
+                "client": client,
+                "model_name": model_name,
+                "schema_context": final_schema,
+                "connected": True,
+            })
+            st.sidebar.success("✅ Kết nối thành công!")
+            st.rerun()
+        except Exception as e:
+            st.session_state["connected"] = False
+            st.sidebar.error(f"❌ Lỗi kết nối: {e}")
 
 # ---------------------------------------------------------
-# 4. Hàm lõi Agent
+# 5. Hàm xử lý Core Agent
 # ---------------------------------------------------------
 def is_safe_select(sql: str) -> bool:
     if not sql:
@@ -108,17 +128,15 @@ def call_gemini(prompt: str, max_retries: int = 3):
         except Exception as e:
             err = str(e)
             if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                st.error("🚫 Đã hết quota Gemini API miễn phí hôm nay. Đợi reset hoặc bật billing tại "
-                          "https://aistudio.google.com/apikey")
+                st.error("🚫 Hết quota Gemini API. Vui lòng kiểm tra lại Key hoặc chờ reset quota.")
                 return None
             if "503" in err or "UNAVAILABLE" in err:
                 wait = 3 * (attempt + 1)
-                st.toast(f"⏳ Server bận, thử lại sau {wait}s... ({attempt + 1}/{max_retries})")
+                st.toast(f"⏳ Server bận, thử lại sau {wait}s...")
                 time.sleep(wait)
             else:
                 st.error(f"Lỗi Gemini API: {err}")
                 return None
-    st.error("Model quá tải sau nhiều lần thử. Hãy gửi lại câu hỏi sau ít phút.")
     return None
 
 
@@ -131,18 +149,17 @@ Câu hỏi gốc: "{user_query}"
 SQL: {sql_query}
 5 dòng mẫu: {sample}
 
-Kiểm tra SQL có trả lời ĐẦY ĐỦ câu hỏi không (chú ý cột người dùng nhắc tới nhưng
-SQL không dùng, có thể do không tồn tại và bị âm thầm bỏ qua).
+Kiểm tra SQL có trả lời ĐẦY ĐỦ câu hỏi không.
 Trả về DUY NHẤT JSON: {{"day_du": true/false, "ly_do": "..."}}
 """
     res = call_gemini(prompt)
     if not res:
-        return {"day_du": True, "ly_do": "Bỏ qua self-check (lỗi/quota)."}
+        return {"day_du": True, "ly_do": "Bỏ qua self-check."}
     try:
         cleaned = res.strip().strip("`").replace("json\n", "").strip()
         return json.loads(cleaned)
     except Exception:
-        return {"day_du": True, "ly_do": "Không parse được self-check, bỏ qua."}
+        return {"day_du": True, "ly_do": "Không parse được JSON."}
 
 
 def run_agent(user_query: str):
@@ -150,18 +167,17 @@ def run_agent(user_query: str):
     schema_context = st.session_state["schema_context"]
     engine = st.session_state["engine"]
 
-    prompt = f"Schema:\n{schema_context}\nViết 1 câu MySQL SELECT duy nhất cho câu hỏi: {user_query}. " \
-              f"Chỉ trả về SQL thuần, không markdown."
+    prompt = f"Schema:\n{schema_context}\nViết 1 câu MySQL SELECT duy nhất cho câu hỏi: {user_query}. Chỉ trả về SQL thuần."
     sql_query = call_gemini(prompt)
     if not sql_query:
-        result["error"] = "Không thể tạo SQL (model quá tải/hết quota)."
+        result["error"] = "Không thể tạo SQL từ mô hình AI."
         return result
 
     for attempt in range(1, 4):
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):
-            result["error"] = "Câu lệnh SQL không an toàn (không phải SELECT). Đã hủy."
+            result["error"] = "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT)."
             result["sql"] = sql_query
             return result
 
@@ -170,56 +186,35 @@ def run_agent(user_query: str):
             check = self_check(user_query, sql_query, df)
 
             if check.get("day_du", True):
-                result["logs"].append(f"✅ Self-check OK: {check.get('ly_do', '')}")
+                result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', '')}")
                 result["df"] = df
                 result["sql"] = sql_query
                 return result
 
-            result["logs"].append(f"⚠️ Self-check phát hiện vấn đề: {check.get('ly_do', '')}")
+            result["logs"].append(f"⚠️ Phát hiện vấn đề: {check.get('ly_do', '')}")
             if attempt == 3:
                 result["df"] = df
                 result["sql"] = sql_query
-                result["logs"].append("Đã hết lần thử, trả kết quả hiện tại (có thể chưa đầy đủ).")
                 return result
 
-            fix_prompt = f"""Schema: {schema_context}
-Câu hỏi gốc: "{user_query}"
-SQL trước: {sql_query}
-Reviewer đánh giá CHƯA đầy đủ vì: {check.get('ly_do', '')}
-Viết lại SQL cho đúng và đầy đủ hơn. Chỉ trả về SQL, không markdown."""
-            new_sql = call_gemini(fix_prompt)
-            if not new_sql:
-                result["df"] = df
-                result["sql"] = sql_query
-                result["logs"].append("Không thể sửa thêm (model quá tải). Trả kết quả hiện tại.")
-                return result
-            sql_query = new_sql
+            fix_prompt = f"Schema: {schema_context}\nCâu hỏi: '{user_query}'\nSQL lỗi/chưa đủ: {sql_query}\nLý do: {check.get('ly_do', '')}\nViết lại SQL chuẩn xác."
+            sql_query = call_gemini(fix_prompt) or sql_query
 
         except Exception as e:
             error_msg = str(e)
-            result["logs"].append(f"❌ Lỗi SQL: {error_msg}")
+            result["logs"].append(f"❌ Lỗi thực thi MySQL: {error_msg}")
             if attempt == 3:
-                result["error"] = f"Đã thử sửa 3 lần nhưng vẫn lỗi: {error_msg}"
+                result["error"] = f"Thử sửa 3 lần thất bại: {error_msg}"
                 result["sql"] = sql_query
                 return result
 
-            fix_prompt = f"""Schema: {schema_context}
-SQL bị lỗi: {sql_query}
-Lỗi MySQL: {error_msg}
-Câu hỏi gốc: "{user_query}"
-Sửa lại SQL cho đúng. Chỉ trả về SQL, không markdown."""
-            new_sql = call_gemini(fix_prompt)
-            if not new_sql:
-                result["error"] = "Không thể sửa SQL (model quá tải/hết quota)."
-                result["sql"] = sql_query
-                return result
-            sql_query = new_sql
+            fix_prompt = f"Schema: {schema_context}\nSQL lỗi: {sql_query}\nLỗi MySQL: {error_msg}\nCâu hỏi: '{user_query}'\nSửa lại SQL."
+            sql_query = call_gemini(fix_prompt) or sql_query
 
     return result
 
-
 # ---------------------------------------------------------
-# 5. Trực quan hóa
+# 6. Hiển thị kết quả & Trực quan hóa
 # ---------------------------------------------------------
 def render_smart_chart(df: pd.DataFrame):
     cols = df.columns.tolist()
@@ -234,55 +229,37 @@ def render_smart_chart(df: pd.DataFrame):
     try:
         if time_hint and num_cols:
             x_col = next(c for c in cols if any(k in c.lower() for k in ["date", "month", "thang", "quy", "quarter", "nam", "year"]))
-            y_cols = [c for c in num_cols if c != x_col] or num_cols  # loại x_col khỏi trục Y nếu nó cũng là cột số
+            y_cols = [c for c in num_cols if c != x_col] or num_cols
             fig = px.line(df, x=x_col, y=y_cols, markers=True, title=f"Xu hướng theo {x_col}")
         elif cat_cols and num_cols:
             fig = px.bar(df, x=cat_cols[0], y=num_cols[0], title=f"{num_cols[0]} theo {cat_cols[0]}")
         elif len(num_cols) >= 2:
-            fig = px.scatter(df, x=num_cols[0], y=num_cols[1], title="Biểu đồ phân tích")
+            fig = px.scatter(df, x=num_cols[0], y=num_cols[1], title="Biểu đồ phân tích tương quan")
         else:
-            st.info("Không xác định được dạng biểu đồ phù hợp cho dữ liệu này.")
+            st.info("Không tìm thấy dạng biểu đồ phù hợp.")
             return
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
-        st.info(f"Không thể vẽ biểu đồ tự động: {e}")
+        st.info(f"Chưa thể tự động vẽ biểu đồ: {e}")
 
 
-# ---------------------------------------------------------
-# 6. Dự báo — xử lý cả ngày thật lẫn cột tháng/quý dạng số
-# ---------------------------------------------------------
 def forecast_series(df: pd.DataFrame, periods: int = 3):
     num_cols = df.select_dtypes(include="number").columns.tolist()
     if not num_cols or len(df) < 3:
-        return None, "Cần ít nhất 3 dòng dữ liệu số để dự báo."
+        return None, "Cần tối thiểu 3 dòng dữ liệu dạng số để dự báo."
 
     time_keywords = ["date", "month", "thang", "quy", "quarter", "nam", "year"]
     x_col = next((c for c in df.columns if any(k in c.lower() for k in time_keywords)), None)
     if x_col is None:
         non_numeric = [c for c in df.columns if c not in num_cols]
         x_col = non_numeric[0] if non_numeric else df.columns[0]
-    y_candidates = [c for c in num_cols if c != x_col]  # loại x_col khỏi ứng viên trục Y
+    
+    y_candidates = [c for c in num_cols if c != x_col]
     y_col = y_candidates[0] if y_candidates else num_cols[0]
 
     df_sorted = df.copy()
-    is_real_date = pd.api.types.is_datetime64_any_dtype(df_sorted[x_col]) or "date" in x_col.lower()
-
-    if is_real_date and HAS_STATSMODELS:
-        try:
-            df_sorted[x_col] = pd.to_datetime(df_sorted[x_col], errors="coerce")
-            df_sorted = df_sorted.dropna(subset=[x_col]).sort_values(x_col)
-            ts = df_sorted.set_index(x_col)[y_col]
-            model = ExponentialSmoothing(ts, trend="add", initialization_method="estimated").fit()
-            future_idx = pd.date_range(start=ts.index[-1], periods=periods + 1, freq="ME")[1:]
-            future_vals = model.forecast(periods)
-
-            hist = pd.DataFrame({x_col: ts.index, y_col: ts.values, "Loại": "Thực tế"})
-            fut = pd.DataFrame({x_col: future_idx, y_col: future_vals.values, "Loại": "Dự báo"})
-            combined = pd.concat([hist, fut], ignore_index=True)
-            return combined, "Holt-Winters Exponential Smoothing"
-        except Exception:
-            pass
-
+    
+    # Hồi quy tuyến tính đơn giản cho mọi loại dữ liệu
     df_sorted = df_sorted.reset_index(drop=True)
     y = df_sorted[y_col].values.astype(float)
     x_idx = np.arange(len(y))
@@ -296,12 +273,9 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     hist = pd.DataFrame({x_col: x_labels_hist, y_col: y, "Loại": "Thực tế"})
     fut = pd.DataFrame({x_col: x_labels_future, y_col: future_vals, "Loại": "Dự báo"})
     combined = pd.concat([hist, fut], ignore_index=True)
-    return combined, "Hồi quy tuyến tính (linear regression)"
+    return combined, "Hồi quy tuyến tính (Linear Regression)"
 
 
-# ---------------------------------------------------------
-# 7. Hiển thị 1 lượt hỏi-đáp
-# ---------------------------------------------------------
 def render_result(result: dict):
     for line in result["logs"]:
         st.caption(line)
@@ -321,7 +295,7 @@ def render_result(result: dict):
         st.warning("Không có dữ liệu trả về.")
         return
 
-    st.dataframe(df, width='stretch')
+    st.dataframe(df, use_container_width=True)
 
     tab1, tab2 = st.tabs(["📊 Biểu đồ", "🔮 Dự báo"])
     with tab1:
@@ -333,31 +307,17 @@ def render_result(result: dict):
         else:
             x_col = [c for c in combined.columns if c != "Loại"][0]
             y_col = [c for c in combined.columns if c not in ("Loại", x_col)][0]
-            fig = px.line(combined, x=x_col, y=y_col, color="Loại", markers=True,
-                          title=f"Dự báo ({method})")
-            st.plotly_chart(fig, width='stretch')
-            st.caption(f"Phương pháp: {method}. Đây là ước tính xu hướng, chỉ mang tính tham khảo.")
+            fig = px.line(combined, x=x_col, y=y_col, color="Loại", markers=True, title=f"Dự báo xu hướng ({method})")
+            st.plotly_chart(fig, use_container_width=True)
 
 
 # ---------------------------------------------------------
-# 8. UI chính — có lưu lịch sử chat
+# 7. UI Chính
 # ---------------------------------------------------------
-st.title("🍫 Awesome Chocolates - AI Business Agent")
-st.caption("Trợ lý phân tích dữ liệu: tự động truy vấn SQL, tự sửa lỗi, trực quan hóa & dự báo.")
-
-if not HAS_STATSMODELS:
-    st.info("ℹ️ Chưa cài `statsmodels` — dự báo sẽ dùng hồi quy tuyến tính đơn giản thay vì Holt-Winters. "
-            "Cài thêm bằng `pip install statsmodels` nếu muốn dự báo chính xác hơn cho dữ liệu theo ngày thật.")
+st.title("🤖 Universal AI Business Intelligence Agent")
+st.caption("Kết nối Database MySQL Cloud bất kỳ để truy vấn ngôn ngữ tự nhiên, trực quan hóa và dự báo.")
 
 st.session_state["forecast_periods"] = forecast_periods
-
-with st.sidebar:
-    st.divider()
-    if st.session_state.get("connected"):
-        st.success("Database: Kết nối thành công")
-        st.info(f"Mô hình AI: {st.session_state.get('model_name', '')}")
-    else:
-        st.warning("Chưa kết nối. Nhập thông tin và bấm Kết nối.")
 
 if "history" not in st.session_state:
     st.session_state["history"] = []
@@ -368,13 +328,13 @@ for turn in st.session_state["history"]:
         render_result(turn)
 
 if not st.session_state.get("connected"):
-    st.info("👈 Nhập thông tin kết nối MySQL và Gemini API Key ở sidebar, rồi bấm **Kết nối** để bắt đầu.")
+    st.info("👈 **Hướng dẫn:** Vui lòng nhập thông tin kết nối MySQL Cloud và Gemini API Key ở thanh bên trái để khởi chạy Agent.")
 else:
-    user_input = st.chat_input("Nhập câu hỏi (VD: 'Thống kê doanh số theo tháng và dự báo tháng tới')...")
+    user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu của bạn...")
     if user_input:
         st.chat_message("user").write(user_input)
         with st.chat_message("assistant"):
-            with st.spinner("Đang xử lý..."):
+            with st.spinner("Đang truy vấn & phân tích..."):
                 result = run_agent(user_input)
             render_result(result)
         st.session_state["history"].append(result)
