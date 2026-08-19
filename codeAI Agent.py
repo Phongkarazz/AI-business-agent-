@@ -32,11 +32,7 @@ DEFAULT_SCHEMA = """Database có 4 bảng:
 Mối quan hệ:
 - sales.SPID = people.SPID
 - sales.PID = products.PID
-- sales.GeoID = geo.GeoID
-
-Lưu ý quan trọng: chỉ viết SQL để LẤY dữ liệu thực tế (SELECT thuần, không UNION thêm
-dòng dự báo/giả định). Ứng dụng đã có tab "Dự báo" riêng để tự tính dự báo từ dữ liệu
-trả về — vì vậy KHÔNG tự thêm các dòng dự báo/ước tính tương lai vào kết quả SQL."""
+- sales.GeoID = geo.GeoID"""
 
 # ---------------------------------------------------------
 # 2. Sidebar: cấu hình kết nối (KHÔNG hardcode key/mật khẩu)
@@ -45,9 +41,7 @@ with st.sidebar:
     st.header("⚙️ Cấu hình")
 
     st.subheader("MySQL")
-    db_host = st.text_input("Host", value=os.getenv("DB_HOST", "localhost"),
-                             help="Nếu app đã deploy công khai (Streamlit Cloud), 'localhost' KHÔNG hoạt động "
-                                  "— cần host MySQL truy cập được qua internet (VD: MySQL cloud miễn phí).")
+    db_host = st.text_input("Host", value=os.getenv("DB_HOST", "localhost"))
     db_user = st.text_input("User", value=os.getenv("DB_USER", "root"))
     db_pass = st.text_input("Password", type="password", value=os.getenv("DB_PASS", ""))
     db_name = st.text_input("Database", value=os.getenv("DB_NAME", "awesome chocolates"))
