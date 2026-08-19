@@ -4,5 +4,6 @@ numpy
 plotly
 sqlalchemy
 mysql-connector-python
-google-genai
-statsmodels
+psycopg2-binary
+pyodbc
+google-genai>=0.1.0
