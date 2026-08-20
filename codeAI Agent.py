@@ -246,7 +246,7 @@ Chỉ trả về SQL thuần, không markdown, không giải thích."""
         if not is_safe_select(sql_query):
              result["error"] = "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT đơn, không nhiều câu lệnh)."
              result["sql"] = sql_query
-            return result
+             return result
 
         try:
             df, truncated = read_sql_capped(sql_query, engine, cap=MAX_ROWS_CAP)
