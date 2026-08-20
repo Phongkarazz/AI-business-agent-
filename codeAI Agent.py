@@ -158,7 +158,7 @@ if connect_btn:
             st.rerun()
         except Exception as e:
             st.session_state["connected"] = False
-             st.sidebar.error(f"❌ Lỗi kết nối: {sanitize_error(str(e), db_pass)}")
+            st.sidebar.error(f"❌ Lỗi kết nối: {sanitize_error(str(e), db_pass)}")
 
 # ---------------------------------------------------------
 # 5. Hàm xử lý Core Agent
