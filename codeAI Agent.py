@@ -198,7 +198,7 @@ def call_gemini(prompt: str, max_retries: int = 3):
             else:
                 st.error(f"Lỗi Gemini API: {err}")
                 return None
-   st.error("Model quá tải sau nhiều lần thử. Hãy gửi lại câu hỏi sau ít phút.")
+                st.error("Model quá tải sau nhiều lần thử. Hãy gửi lại câu hỏi sau ít phút.")
     return None
 
 
