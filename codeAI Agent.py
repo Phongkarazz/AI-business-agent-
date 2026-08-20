@@ -321,52 +321,52 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     if not num_cols or len(df) < 3:
         return None, "Cần tối thiểu 3 dòng dữ liệu dạng số để dự báo."
 
-      x_col = next((c for c in df.columns if any(k in c.lower() for k in TIME_KEYWORDS)), None)
-      y_candidates = [c for c in num_cols if c != x_col]
-      y_col = y_candidates[0] if y_candidates else num_cols[0]
+    x_col = next((c for c in df.columns if any(k in c.lower() for k in TIME_KEYWORDS)), None)
+    y_candidates = [c for c in num_cols if c != x_col]
+    y_col = y_candidates[0] if y_candidates else num_cols[0]
 
-     df_sorted = df.copy()
-      try:
+    df_sorted = df.copy()
+    try:
         df_sorted = df_sorted.sort_values(x_col)
       except Exception:
         pass
         df_sorted = df_sorted.reset_index(drop=True)
 
 
-      y = df_sorted[y_col].values.astype(float)
-      n = len(y)
-      x_idx = np.arange(n)
-      coeffs = np.polyfit(x_idx, y, 1)
-      future_idx = np.arange(n, n + periods)
-      future_vals = np.polyval(coeffs, future_idx)
+    y = df_sorted[y_col].values.astype(float)
+    n = len(y)
+    x_idx = np.arange(n)
+    coeffs = np.polyfit(x_idx, y, 1)
+    future_idx = np.arange(n, n + periods)
+    future_vals = np.polyval(coeffs, future_idx)
 
 
-      is_numeric_x = pd.api.types.is_numeric_dtype(df_sorted[x_col])
-      if is_numeric_x:
-          step = 1
-          if n >= 2:
+    is_numeric_x = pd.api.types.is_numeric_dtype(df_sorted[x_col])
+    if is_numeric_x:
+        step = 1
+        if n >= 2:
                step = df_sorted[x_col].iloc[-1] - df_sorted[x_col].iloc[-2]
                if step == 0:
                    step = 1
-          last_x = df_sorted[x_col].iloc[-1]
-          future_x = [last_x + step * (i + 1) for i in range(periods)]
-       else:
-          future_x = [f"Kỳ +{i+1}" for i in range(periods)]
+        last_x = df_sorted[x_col].iloc[-1]
+        future_x = [last_x + step * (i + 1) for i in range(periods)]
+    else:
+        future_x = [f"Kỳ +{i+1}" for i in range(periods)]
 
 
-        hist_x = df_sorted[x_col].tolist()
-        bridge_x = [hist_x[-1]] + future_x
-        bridge_y = [y[-1]] + list(future_vals)
+    hist_x = df_sorted[x_col].tolist()
+    bridge_x = [hist_x[-1]] + future_x
+    bridge_y = [y[-1]] + list(future_vals)
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=hist_x, y=y, mode="lines+markers", name="Thực tế", line=dict(color="#4C9AFF")))
-        fig.add_trace(go.Scatter(x=bridge_x, y=bridge_y, mode="lines+markers", name="Dự báo", line=dict(color="#FF6B6B", dash="dash")))
-        fig.update_layout(
-            title=f"Dự báo xu hướng theo {x_col}",
-            xaxis_title=x_col, yaxis_title=y_col,
-            margin=dict(l=20, r=20, t=50, b=20)
-        )
-        return fig, "Hồi quy tuyến tính (Linear Regression)"
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=hist_x, y=y, mode="lines+markers", name="Thực tế", line=dict(color="#4C9AFF")))
+    fig.add_trace(go.Scatter(x=bridge_x, y=bridge_y, mode="lines+markers", name="Dự báo", line=dict(color="#FF6B6B", dash="dash")))
+    fig.update_layout(
+        title=f"Dự báo xu hướng theo {x_col}",
+        xaxis_title=x_col, yaxis_title=y_col,
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+     return fig, "Hồi quy tuyến tính (Linear Regression)"
 
 
 def render_result(result: dict):
