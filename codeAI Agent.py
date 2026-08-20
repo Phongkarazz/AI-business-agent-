@@ -366,7 +366,7 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
         xaxis_title=x_col, yaxis_title=y_col,
         margin=dict(l=20, r=20, t=50, b=20)
     )
-     return fig, "Hồi quy tuyến tính (Linear Regression)"
+        return fig, "Hồi quy tuyến tính (Linear Regression)"
 
 
 def render_result(result: dict):
