@@ -328,9 +328,9 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     df_sorted = df.copy()
     try:
         df_sorted = df_sorted.sort_values(x_col)
-      except Exception:
+    except Exception:
         pass
-        df_sorted = df_sorted.reset_index(drop=True)
+    df_sorted = df_sorted.reset_index(drop=True)
 
 
     y = df_sorted[y_col].values.astype(float)
