@@ -178,7 +178,7 @@ def is_safe_select(sql: str) -> bool:
 
 def call_gemini(prompt: str, max_retries: int = 3):
     client = st.session_state["client"]
-     model_name = st.session_state.get("model_name", "gemini-3.6-flash")
+    model_name = st.session_state.get("model_name", "gemini-3.6-flash")
     if not client:
         return None
         
