@@ -321,16 +321,16 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     if not num_cols or len(df) < 3:
         return None, "Cần tối thiểu 3 dòng dữ liệu dạng số để dự báo."
 
-     x_col = next((c for c in df.columns if any(k in c.lower() for k in TIME_KEYWORDS)), None)
-     y_candidates = [c for c in num_cols if c != x_col]
-     y_col = y_candidates[0] if y_candidates else num_cols[0]
+      x_col = next((c for c in df.columns if any(k in c.lower() for k in TIME_KEYWORDS)), None)
+      y_candidates = [c for c in num_cols if c != x_col]
+      y_col = y_candidates[0] if y_candidates else num_cols[0]
 
      df_sorted = df.copy()
       try:
         df_sorted = df_sorted.sort_values(x_col)
       except Exception:
         pass
-      df_sorted = df_sorted.reset_index(drop=True)
+        df_sorted = df_sorted.reset_index(drop=True)
 
 
       y = df_sorted[y_col].values.astype(float)
