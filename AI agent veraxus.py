@@ -449,24 +449,30 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
 # ---------------------------------------------------------
 # 8. Dự báo (thuật toán xác định) & Phát hiện bất thường (AI)
 # ---------------------------------------------------------
+DATE_YEAR_PATTERN = re.compile(r"\d{4}")  # chỉ tin là ngày thật nếu có năm 4 chữ số, tránh nhầm "01" là ngày
+
+
 def classify_x_axis(df_sorted: pd.DataFrame, x_col: str):
-    """Phân loại trục X dựa trên GIÁ TRỊ thật, không chỉ tên cột — tránh nhầm giữa
-    ngày tháng thật (VD '2023-01', có thể tính tiếp tương lai) với số nguyên bị giới hạn
-    (VD tháng 1-12, quý 1-4 — không được cộng dồn vượt giới hạn)."""
+    """Phân loại trục X dựa trên GIÁ TRỊ thật (ép kiểu số nếu có thể, kể cả khi cột
+    đang là kiểu chuỗi — trường hợp SQLite strftime() luôn trả về TEXT dù nội dung là số).
+    Trả về (kind, converted_values)."""
     series = df_sorted[x_col]
+    str_series = series.astype(str)
 
-    parsed = pd.to_datetime(series, errors="coerce")
-    if parsed.notna().all():
-        return "date", parsed
+    looks_like_real_date = str_series.str.contains(DATE_YEAR_PATTERN).all()
+    if looks_like_real_date:
+        parsed = pd.to_datetime(series, errors="coerce")
+        if parsed.notna().all():
+            return "date", parsed
 
-    if pd.api.types.is_numeric_dtype(series):
-        vals = series.dropna()
+    numeric_vals = pd.to_numeric(series, errors="coerce")
+    if numeric_vals.notna().all():
         name = x_col.lower()
-        if not vals.empty and vals.min() >= 1 and vals.max() <= 12 and any(k in name for k in ["month", "thang"]):
-            return "bounded_month", None
-        if not vals.empty and vals.min() >= 1 and vals.max() <= 4 and any(k in name for k in ["quy", "quarter"]):
-            return "bounded_quarter", None
-        return "numeric", None
+        if numeric_vals.min() >= 1 and numeric_vals.max() <= 12 and any(k in name for k in ["month", "thang"]):
+            return "bounded_month", numeric_vals
+        if numeric_vals.min() >= 1 and numeric_vals.max() <= 4 and any(k in name for k in ["quy", "quarter"]):
+            return "bounded_quarter", numeric_vals
+        return "numeric", numeric_vals
 
     return "categorical", None
 
@@ -497,40 +503,45 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     future_idx = np.arange(n, n + periods)
     future_vals = np.polyval(coeffs, future_idx)
 
-    kind, parsed_dates = classify_x_axis(df_sorted, x_col)
-    hist_x = df_sorted[x_col].tolist()
+    kind, converted = classify_x_axis(df_sorted, x_col)
+    # force_category = True nghĩa là buộc Plotly coi trục X là danh mục (category) với thứ tự
+    # tường minh — tránh trường hợp Plotly tự đoán sai kiểu trục rồi âm thầm loại bỏ điểm dự báo
+    # (đây chính là nguyên nhân gốc của lỗi "mất đường nét đứt" vừa gặp).
+    force_category = True
 
     if kind == "date":
-        # Giữ đúng định dạng chuỗi gốc (VD "YYYY-MM" hay "YYYY-MM-DD") để trục X nhất quán
         sample = str(df_sorted[x_col].iloc[-1])
         date_fmt = "%Y-%m" if re.match(r"^\d{4}-\d{2}$", sample) else "%Y-%m-%d"
-
-        last_date = parsed_dates.iloc[-1]
-        freq = pd.infer_freq(parsed_dates)
+        last_date = converted.iloc[-1]
+        freq = pd.infer_freq(converted)
         if not freq and n >= 2:
-            diff = parsed_dates.iloc[-1] - parsed_dates.iloc[-2]
+            diff = converted.iloc[-1] - converted.iloc[-2]
             future_dates = [last_date + diff * (i + 1) for i in range(periods)]
         elif freq:
             future_dates = pd.date_range(start=last_date, periods=periods + 1, freq=freq)[1:]
         else:
             future_dates = [last_date] * periods
+        hist_x = converted.dt.strftime(date_fmt).tolist()
         future_x = [d.strftime(date_fmt) for d in future_dates]
 
-    elif kind in ("bounded_month", "bounded_quarter"):
-        # Chu kỳ có giới hạn (tháng 1-12 / quý 1-4) — không được cộng dồn vượt giới hạn,
-        # dùng nhãn tương đối thay vì số vô nghĩa (VD tháng "14")
-        future_x = [f"Kỳ +{i+1}" for i in range(periods)]
-
     elif kind == "numeric":
+        hist_x = [str(int(v)) if float(v).is_integer() else str(v) for v in converted]
         step = 1
         if n >= 2:
-            step = df_sorted[x_col].iloc[-1] - df_sorted[x_col].iloc[-2]
+            step = converted.iloc[-1] - converted.iloc[-2]
             if step == 0:
                 step = 1
-        last_x = df_sorted[x_col].iloc[-1]
-        future_x = [last_x + step * (i + 1) for i in range(periods)]
+        last_x = converted.iloc[-1]
+        future_x = [str(round(last_x + step * (i + 1), 4)) for i in range(periods)]
+
+    elif kind in ("bounded_month", "bounded_quarter"):
+        hist_x = [str(int(v)) for v in converted]
+        # Chu kỳ có giới hạn (tháng 1-12 / quý 1-4) — không cộng dồn vượt giới hạn (VD tháng "14"),
+        # dùng nhãn tương đối rõ ràng thay thế.
+        future_x = [f"Kỳ +{i+1}" for i in range(periods)]
 
     else:  # categorical
+        hist_x = [str(v) for v in df_sorted[x_col].tolist()]
         future_x = [f"Kỳ +{i+1}" for i in range(periods)]
 
     bridge_x = [hist_x[-1]] + future_x
@@ -539,6 +550,13 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=hist_x, y=y, mode="lines+markers", name="Thực tế", line=dict(color="#4C9AFF")))
     fig.add_trace(go.Scatter(x=bridge_x, y=bridge_y, mode="lines+markers", name="Dự báo", line=dict(color="#FF6B6B", dash="dash")))
+
+    if force_category:
+        # Đặt rõ thứ tự danh mục = lịch sử nối tiếp tương lai, tránh Plotly tự sắp xếp
+        # theo alphabet (VD "10" đứng trước "2" nếu sắp theo chữ cái) hoặc loại bỏ điểm lệch kiểu.
+        category_order = hist_x + future_x
+        fig.update_xaxes(type="category", categoryorder="array", categoryarray=category_order)
+
     fig.update_layout(
         title=f"Dự báo xu hướng theo {x_col}",
         xaxis_title=x_col, yaxis_title=y_col,
