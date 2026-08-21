@@ -19,7 +19,6 @@ st.set_page_config(page_title="Universal AI Business Agent", page_icon="🤖", l
 
 FORBIDDEN_KEYWORDS = ["insert", "update", "delete", "drop", "alter", "truncate", "create", "grant", "revoke"]
 TIME_KEYWORDS = ["date", "month", "thang", "quy", "quarter", "nam", "year"]
-BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "quy", "quarter"]  # chu kỳ có giới hạn (1-12, 1-4), không nên nối số thô khi dự báo
 
 MODEL_OPTIONS = ["gemini-3.6-flash", "gemini-2.5-flash"]
 FORECAST_METHOD_NAME = "Hồi quy tuyến tính (Linear Regression)"  # nguồn duy nhất — tránh lệch nhãn với code thực tế
@@ -450,6 +449,28 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
 # ---------------------------------------------------------
 # 8. Dự báo (thuật toán xác định) & Phát hiện bất thường (AI)
 # ---------------------------------------------------------
+def classify_x_axis(df_sorted: pd.DataFrame, x_col: str):
+    """Phân loại trục X dựa trên GIÁ TRỊ thật, không chỉ tên cột — tránh nhầm giữa
+    ngày tháng thật (VD '2023-01', có thể tính tiếp tương lai) với số nguyên bị giới hạn
+    (VD tháng 1-12, quý 1-4 — không được cộng dồn vượt giới hạn)."""
+    series = df_sorted[x_col]
+
+    parsed = pd.to_datetime(series, errors="coerce")
+    if parsed.notna().all():
+        return "date", parsed
+
+    if pd.api.types.is_numeric_dtype(series):
+        vals = series.dropna()
+        name = x_col.lower()
+        if not vals.empty and vals.min() >= 1 and vals.max() <= 12 and any(k in name for k in ["month", "thang"]):
+            return "bounded_month", None
+        if not vals.empty and vals.min() >= 1 and vals.max() <= 4 and any(k in name for k in ["quy", "quarter"]):
+            return "bounded_quarter", None
+        return "numeric", None
+
+    return "categorical", None
+
+
 def forecast_series(df: pd.DataFrame, periods: int = 3):
     if not has_time_dimension(df):
         return None, "Dữ liệu không có yếu tố thời gian (ngày/tháng/quý/năm) nên không thể dự báo xu hướng."
@@ -476,13 +497,31 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     future_idx = np.arange(n, n + periods)
     future_vals = np.polyval(coeffs, future_idx)
 
-    is_bounded_period = any(k in x_col.lower() for k in BOUNDED_PERIOD_KEYWORDS)
-    is_numeric_x = pd.api.types.is_numeric_dtype(df_sorted[x_col])
+    kind, parsed_dates = classify_x_axis(df_sorted, x_col)
+    hist_x = df_sorted[x_col].tolist()
 
-    if is_bounded_period:
-        # Tháng (1-12) / Quý (1-4) là chu kỳ có giới hạn — không nối số thô (VD tháng "14" vô nghĩa)
+    if kind == "date":
+        # Giữ đúng định dạng chuỗi gốc (VD "YYYY-MM" hay "YYYY-MM-DD") để trục X nhất quán
+        sample = str(df_sorted[x_col].iloc[-1])
+        date_fmt = "%Y-%m" if re.match(r"^\d{4}-\d{2}$", sample) else "%Y-%m-%d"
+
+        last_date = parsed_dates.iloc[-1]
+        freq = pd.infer_freq(parsed_dates)
+        if not freq and n >= 2:
+            diff = parsed_dates.iloc[-1] - parsed_dates.iloc[-2]
+            future_dates = [last_date + diff * (i + 1) for i in range(periods)]
+        elif freq:
+            future_dates = pd.date_range(start=last_date, periods=periods + 1, freq=freq)[1:]
+        else:
+            future_dates = [last_date] * periods
+        future_x = [d.strftime(date_fmt) for d in future_dates]
+
+    elif kind in ("bounded_month", "bounded_quarter"):
+        # Chu kỳ có giới hạn (tháng 1-12 / quý 1-4) — không được cộng dồn vượt giới hạn,
+        # dùng nhãn tương đối thay vì số vô nghĩa (VD tháng "14")
         future_x = [f"Kỳ +{i+1}" for i in range(periods)]
-    elif is_numeric_x:
+
+    elif kind == "numeric":
         step = 1
         if n >= 2:
             step = df_sorted[x_col].iloc[-1] - df_sorted[x_col].iloc[-2]
@@ -490,10 +529,10 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
                 step = 1
         last_x = df_sorted[x_col].iloc[-1]
         future_x = [last_x + step * (i + 1) for i in range(periods)]
-    else:
+
+    else:  # categorical
         future_x = [f"Kỳ +{i+1}" for i in range(periods)]
 
-    hist_x = df_sorted[x_col].tolist()
     bridge_x = [hist_x[-1]] + future_x
     bridge_y = [y[-1]] + list(future_vals)
 
