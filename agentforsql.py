@@ -1,0 +1,692 @@
+import os
+import sys
+import re
+import json
+import time
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+from sqlalchemy import create_engine, text, inspect
+from sqlalchemy.pool import StaticPool
+from google import genai
+from urllib.parse import quote_plus
+
+# ---------------------------------------------------------
+# 0. Ép UTF-8 cho toàn bộ môi trường (tránh lỗi 'ascii' codec
+#    với tiếng Việt trên các container có locale mặc định C/POSIX)
+# ---------------------------------------------------------
+os.environ["PYTHONUTF8"] = "1"
+os.environ["PYTHONIOENCODING"] = "utf-8"
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+# ---------------------------------------------------------
+# 1. Cấu hình trang & Hằng số
+# ---------------------------------------------------------
+st.set_page_config(page_title="Universal AI Business Agent", page_icon="🤖", layout="wide")
+
+FORBIDDEN_KEYWORDS = ["insert", "update", "delete", "drop", "alter", "truncate", "create", "grant", "revoke"]
+TIME_KEYWORDS = ["date", "month", "thang", "quy", "quarter", "nam", "year"]
+BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "quy", "quarter"]  # chu kỳ có giới hạn (1-12, 1-4), không nên nối số thô khi dự báo
+
+# Các cột dạng định danh (ID) — dù kiểu số nhưng KHÔNG mang ý nghĩa thống kê/đo lường,
+# nên phải loại khỏi trục giá trị (Y) của biểu đồ và khỏi mô hình dự báo.
+ID_LIKE_REGEX = re.compile(r'(^|_)(id|no|code|key|num|sn)$', re.IGNORECASE)
+
+MODEL_OPTIONS = ["gemini-3.6-flash", "gemini-2.5-flash"]
+FORECAST_METHOD_NAME = "Hồi quy tuyến tính (Linear Regression)"  # nguồn duy nhất — tránh lệch nhãn với code thực tế
+
+MAX_TABLES_SCHEMA = 30
+MAX_ROWS_CAP = 3000
+MAX_HISTORY_TURNS = 15
+
+
+def is_id_like(col_name: str) -> bool:
+    """True nếu tên cột trông giống định danh (emp_no, GeoID, product_code...)."""
+    return bool(ID_LIKE_REGEX.search(col_name.strip()))
+
+
+def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: bool = False):
+    """Hiển thị lỗi/cảnh báo gọn gàng bằng toast góc màn hình thay vì banner đỏ
+    to chiếm giữa khung chat — giữ trải nghiệm UI sạch sẽ."""
+    st.toast(message, icon=icon)
+    if not toast_only:
+        with st.chat_message("assistant") if False else st.container():
+            st.caption(f"{icon} {message}")
+            if detail:
+                with st.expander("Xem chi tiết kỹ thuật", expanded=False):
+                    st.code(detail)
+
+# ---------------------------------------------------------
+# 2. Dữ liệu Demo (cho người dùng chưa có MySQL riêng)
+# ---------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def build_demo_engine():
+    """Tạo 1 SQLite in-memory với dữ liệu mẫu, để bất kỳ ai cũng test được ngay
+    mà không cần tự có MySQL — quan trọng cho việc 'đóng gói cho mọi người xài free'."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    rng = np.random.default_rng(42)
+
+    geo_df = pd.DataFrame({
+        "GeoID": ["G1", "G2", "G3"],
+        "Geo": ["Ha Noi", "Da Nang", "Ho Chi Minh"],
+        "Region": ["North", "Central", "South"],
+    })
+    people_df = pd.DataFrame({
+        "SPID": [f"P{i}" for i in range(1, 7)],
+        "Salesperson": ["An", "Binh", "Chi", "Dung", "Em", "Phong"],
+        "Team": ["Alpha", "Alpha", "Beta", "Beta", "Gamma", "Gamma"],
+        "Location": ["Ha Noi", "Ha Noi", "Da Nang", "Da Nang", "Ho Chi Minh", "Ho Chi Minh"],
+    })
+    products_df = pd.DataFrame({
+        "PID": [f"PR{i}" for i in range(1, 7)],
+        "Product": ["Dark 70%", "Milk Classic", "White Choco", "Hazelnut", "Almond", "Orange Zest"],
+        "Category": ["Dark", "Milk", "White", "Milk", "Dark", "White"],
+        "Size": ["Small", "Medium", "Large", "Medium", "Small", "Medium"],
+        "Cost_per_box": [3.5, 2.8, 3.0, 3.2, 3.8, 3.1],
+    })
+
+    dates = pd.date_range("2023-01-01", "2023-12-31", freq="3D")
+    n = len(dates)
+    sales_df = pd.DataFrame({
+        "SPID": rng.choice(people_df["SPID"], n),
+        "GeoID": rng.choice(geo_df["GeoID"], n),
+        "PID": rng.choice(products_df["PID"], n),
+        "SaleDate": dates,
+        "Amount": rng.integers(2000, 15000, n),
+        "Customers": rng.integers(5, 60, n),
+        "Boxes": rng.integers(10, 200, n),
+    })
+    # tạo 1 điểm bất thường có chủ đích để test tính năng giải thích outlier
+    sales_df.loc[sales_df["SaleDate"].dt.month == 6, "Amount"] *= 3
+
+    geo_df.to_sql("geo", engine, index=False, if_exists="replace")
+    people_df.to_sql("people", engine, index=False, if_exists="replace")
+    products_df.to_sql("products", engine, index=False, if_exists="replace")
+    sales_df.to_sql("sales", engine, index=False, if_exists="replace")
+    return engine
+
+# ---------------------------------------------------------
+# 3. Hàm tự động trích xuất Schema
+# ---------------------------------------------------------
+def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA) -> str:
+    try:
+        inspector = inspect(engine)
+        all_tables = inspector.get_table_names()
+        tables = all_tables[:max_tables]
+        schema_text = "Cơ sở dữ liệu bao gồm các bảng và cột sau:\n"
+        for table_name in tables:
+            schema_text += f"- Bảng `{table_name}`: "
+            columns = inspector.get_columns(table_name)
+            col_names = [f"{col['name']} ({str(col['type'])})" for col in columns]
+            schema_text += ", ".join(col_names) + "\n"
+        if len(all_tables) > max_tables:
+            schema_text += f"\n(Lưu ý: DB có {len(all_tables)} bảng, chỉ hiển thị {max_tables} bảng đầu tiên.)\n"
+        return schema_text
+    except Exception as e:
+        return f"Không thể tự động đọc schema: {e}"
+
+
+def sanitize_error(msg: str, pw: str) -> str:
+    if pw:
+        msg = msg.replace(pw, "***")
+        msg = msg.replace(quote_plus(pw), "***")
+    return msg
+
+
+def read_sql_capped(sql_query: str, engine, cap: int = MAX_ROWS_CAP, chunksize: int = 1000):
+    chunks, total, truncated = [], 0, False
+    with engine.connect() as conn:
+        for chunk in pd.read_sql(text(sql_query), conn, chunksize=chunksize):
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= cap:
+                truncated = True
+                break
+    if not chunks:
+        return pd.DataFrame(), False
+    df = pd.concat(chunks, ignore_index=True)
+    if len(df) > cap:
+        df = df.head(cap)
+        truncated = True
+    return df, truncated
+
+
+def find_time_column(df: pd.DataFrame):
+    """Tìm cột thời gian THẬT SỰ hợp lệ, thay vì chỉ khớp tên theo từ khóa.
+    Ưu tiên: (1) dtype datetime gốc, (2) tên khớp từ khóa thời gian VÀ parse
+    thành công phần lớn giá trị. Luôn loại các cột dạng ID (emp_no, GeoID...)
+    để tránh vẽ/dự báo nhầm trên mã định danh."""
+    # 1. Cột có dtype datetime sẵn
+    dt_cols = df.select_dtypes(include=["datetime64[ns]", "datetime64[ns, UTC]"]).columns.tolist()
+    dt_cols = [c for c in dt_cols if not is_id_like(c)]
+    if dt_cols:
+        return dt_cols[0]
+
+    # 2. Cột tên khớp từ khóa thời gian, không phải ID, và parse được thành ngày
+    candidates = [c for c in df.columns if any(k in c.lower() for k in TIME_KEYWORDS) and not is_id_like(c)]
+    for c in candidates:
+        try:
+            parsed = pd.to_datetime(df[c], errors="coerce")
+            if parsed.notna().mean() >= 0.8:
+                return c
+        except Exception:
+            continue
+    return None
+
+
+def has_time_dimension(df: pd.DataFrame) -> bool:
+    return find_time_column(df) is not None
+
+
+def strip_string_literals(sql: str) -> str:
+    """Bỏ nội dung bên trong chuỗi ký tự trước khi kiểm tra an toàn — tránh chặn nhầm
+    khi giá trị dữ liệu (VD: Product = 'Update Now') chứa từ khóa, hoặc chứa dấu ';' trong literal."""
+    sql = re.sub(r"'[^']*'", "''", sql)
+    sql = re.sub(r'"[^"]*"', '""', sql)
+    return sql
+
+# ---------------------------------------------------------
+# 4. Sidebar: Cấu hình kết nối
+# ---------------------------------------------------------
+with st.sidebar:
+    st.header("⚙️ Cấu hình Kết nối")
+    st.caption("Ứng dụng không lưu trữ tài khoản/API Key của bạn.")
+
+    data_mode = st.radio(
+        "Nguồn dữ liệu",
+        ["🎮 Dùng dữ liệu mẫu (Demo, không cần MySQL)", "🔌 Kết nối MySQL của tôi"],
+        index=0,
+    )
+    use_demo = data_mode.startswith("🎮")
+
+    if not use_demo:
+        st.subheader("1. MySQL Cloud Database")
+        db_host = st.text_input("Host", placeholder="e.g., mysql-xxx.aivencloud.com")
+        db_port = st.text_input("Port", value="3306")
+        db_user = st.text_input("User", value="root")
+        db_pass = st.text_input("Password", type="password")
+        db_name = st.text_input("Database Name", placeholder="e.g., my_business_db")
+        use_ssl = st.checkbox("Dùng SSL (bắt buộc với hầu hết MySQL cloud: Aiven, Railway...)", value=True)
+    else:
+        db_host = db_port = db_user = db_pass = db_name = ""
+        use_ssl = False
+        st.caption("Dữ liệu mẫu: doanh số chocolate theo tháng, nhân viên, khu vực, sản phẩm (năm 2023).")
+
+    st.subheader("2. Gemini API Key")
+    api_key = st.text_input(
+        "API Key", type="password",
+        help="Lấy key miễn phí tại https://aistudio.google.com/apikey — bấm 'Create API key', copy và dán vào đây."
+    )
+    model_name = st.selectbox("Model AI", MODEL_OPTIONS, index=0)
+
+    schema_context_input = st.text_area(
+        "Mô tả Schema / Nghiệp vụ (Tự động nạp sau khi bấm Kết nối)",
+        value=st.session_state.get("schema_context", ""),
+        height=180
+    )
+
+    forecast_periods = st.slider("Số kỳ dự báo xu hướng", 1, 12, 3)
+    connect_btn = st.button("🔌 Kết nối Database & AI", type="primary", use_container_width=True)
+
+# ---------------------------------------------------------
+# 5. Kiểm tra Kết nối & Tự động quét Schema
+# ---------------------------------------------------------
+def try_connect(host, port, user, pw, name, use_ssl):
+    connect_args = {"connection_timeout": 10}
+    if use_ssl:
+        connect_args["ssl_disabled"] = False
+    engine = create_engine(
+        f"mysql+mysqlconnector://{user}:{quote_plus(pw)}@{host}:{port}/{name}",
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    return engine
+
+if connect_btn:
+    if not api_key:
+        st.sidebar.error("❌ Vui lòng nhập Gemini API Key!")
+    elif not use_demo and not (db_host and db_user and db_name):
+        st.sidebar.error("❌ Vui lòng điền đầy đủ Host, User, Database Name!")
+    else:
+        try:
+            if use_demo:
+                engine = build_demo_engine()
+            else:
+                engine = try_connect(db_host, db_port, db_user, db_pass, db_name, use_ssl)
+
+            client = genai.Client(api_key=api_key)
+            extracted_schema = auto_extract_schema(engine)
+            final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+
+            st.session_state.update({
+                "engine": engine,
+                "client": client,
+                "model_name": model_name,
+                "schema_context": final_schema,
+                "connected": True,
+                "_db_pass_for_sanitize": db_pass,
+                "is_demo": use_demo,
+                "db_dialect": "SQLite" if use_demo else "MySQL",
+            })
+            st.sidebar.success("✅ Kết nối thành công!")
+            st.rerun()
+        except Exception as e:
+            st.session_state["connected"] = False
+            err_display = sanitize_error(str(e), db_pass)
+            if "429" in err_display or "RESOURCE_EXHAUSTED" in err_display:
+                st.sidebar.error(
+                    "🚫 API Key hết quota miễn phí hôm nay.\n\n"
+                    "**Cách khắc phục:** vào https://aistudio.google.com/apikey → "
+                    "tạo 1 API key mới (miễn phí, không cần thẻ) → dán lại vào ô trên."
+                )
+            else:
+                st.sidebar.error(f"❌ Lỗi kết nối: {err_display}")
+
+# ---------------------------------------------------------
+# 6. Core Agent Logic
+# ---------------------------------------------------------
+def is_safe_select(sql: str) -> bool:
+    if not sql:
+        return False
+    raw = sql.strip().rstrip(";")
+    lowered = raw.lower()
+    if not (lowered.startswith("select") or lowered.startswith("with")):
+        return False
+
+    no_literals = strip_string_literals(raw)
+    if ";" in no_literals:  # chặn stacked queries thật sự, bỏ qua ';' nằm trong chuỗi ký tự
+        return False
+    no_literals_lower = no_literals.lower()
+    if any(re.search(rf"\b{kw}\b", no_literals_lower) for kw in FORBIDDEN_KEYWORDS):
+        return False
+    return True
+
+
+def call_gemini(prompt: str, max_retries: int = 3):
+    client = st.session_state.get("client")
+    model_name = st.session_state.get("model_name", "gemini-3.6-flash")
+    if not client:
+        return None
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(model=model_name, contents=prompt)
+            return response.text.strip().replace("```sql", "").replace("```", "").strip()
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                notify(
+                    "Hết quota Gemini API miễn phí hôm nay. Tạo API key mới miễn phí tại "
+                    "aistudio.google.com/apikey rồi kết nối lại.",
+                    icon="🚫",
+                )
+                return None
+            if "503" in err or "UNAVAILABLE" in err:
+                wait = 3 * (attempt + 1)
+                st.toast(f"⏳ Server bận, thử lại sau {wait}s...")
+                time.sleep(wait)
+            else:
+                notify("Lỗi khi gọi Gemini API.", detail=err, icon="❌")
+                return None
+    notify("Model quá tải sau nhiều lần thử. Hãy gửi lại câu hỏi sau ít phút.", icon="⏱️")
+    return None
+
+
+def self_check(user_query: str, sql_query: str, df: pd.DataFrame) -> dict:
+    sample = df.head(5).to_string(index=False)
+    prompt = f"""
+Bạn là chuyên gia QA kiểm định SQL.
+Schema: {st.session_state['schema_context']}
+Câu hỏi gốc: "{user_query}"
+SQL: {sql_query}
+5 dòng mẫu: {sample}
+
+Kiểm tra SQL có trả lời ĐẦY ĐỦ câu hỏi không.
+Trả về DUY NHẤT JSON: {{"day_du": true/false, "ly_do": "..."}}
+"""
+    res = call_gemini(prompt)
+    if not res:
+        return {"day_du": True, "ly_do": "Bỏ qua self-check."}
+    try:
+        cleaned = res.strip().strip("`").replace("json\n", "").strip()
+        return json.loads(cleaned)
+    except Exception:
+        return {"day_du": True, "ly_do": "Không parse được JSON."}
+
+
+def run_agent(user_query: str):
+    result = {"query": user_query, "df": None, "sql": None, "logs": [], "error": None}
+    schema_context = st.session_state["schema_context"]
+    engine = st.session_state["engine"]
+    db_pass = st.session_state.get("_db_pass_for_sanitize", "")
+    dialect = st.session_state.get("db_dialect", "SQLite")
+
+    dialect_hint = {
+        "SQLite": "Database đang dùng là SQLite: dùng strftime('%Y', col)/strftime('%m', col) để lấy năm/tháng, KHÔNG dùng MONTH()/YEAR() của MySQL.",
+        "MySQL": "Database đang dùng là MySQL: có thể dùng MONTH()/YEAR()/DATE_FORMAT() bình thường.",
+    }.get(dialect, "")
+
+    sql_suffix = "Chỉ trả về SQL thuần, không markdown, không giải thích."
+
+    prompt = f"""Schema:
+{schema_context}
+Lưu ý: {dialect_hint}
+Viết 1 câu SQL SELECT duy nhất cho câu hỏi: {user_query}
+Nếu không có GROUP BY, bắt buộc thêm LIMIT 1000 để tránh trả về quá nhiều dữ liệu.
+{sql_suffix}"""
+    sql_query = call_gemini(prompt)
+    if not sql_query:
+        result["error"] = "Không thể tạo SQL từ mô hình AI."
+        return result
+
+    for attempt in range(1, 4):
+        result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
+
+        if not is_safe_select(sql_query):
+            result["error"] = "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT/WITH đơn, không nhiều câu lệnh)."
+            result["sql"] = sql_query
+            return result
+
+        try:
+            df, truncated = read_sql_capped(sql_query, engine, cap=MAX_ROWS_CAP)
+            if truncated:
+                result["logs"].append(f"⚠️ Dữ liệu lớn: đã dừng đọc ở {MAX_ROWS_CAP:,} dòng để bảo vệ hệ thống dùng chung.")
+
+            check = self_check(user_query, sql_query, df)
+
+            if check.get("day_du", True):
+                result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', '')}")
+                result["df"] = df
+                result["sql"] = sql_query
+                return result
+
+            result["logs"].append(f"⚠️ Phát hiện vấn đề: {check.get('ly_do', '')}")
+            if attempt == 3:
+                result["df"] = df
+                result["sql"] = sql_query
+                return result
+
+            fix_prompt = f"""Schema: {schema_context}
+Lưu ý: {dialect_hint}
+Câu hỏi: '{user_query}'
+SQL lỗi/chưa đủ: {sql_query}
+Lý do: {check.get('ly_do', '')}
+Viết lại SQL chuẩn xác. {sql_suffix}"""
+            sql_query = call_gemini(fix_prompt) or sql_query
+
+        except Exception as e:
+            error_msg = sanitize_error(str(e), db_pass)
+            result["logs"].append(f"❌ Lỗi thực thi SQL: {error_msg}")
+            if attempt == 3:
+                result["error"] = f"Thử sửa 3 lần thất bại: {error_msg}"
+                result["sql"] = sql_query
+                return result
+
+            fix_prompt = f"""Schema: {schema_context}
+Lưu ý: {dialect_hint}
+SQL lỗi: {sql_query}
+Lỗi: {error_msg}
+Câu hỏi: '{user_query}'
+Sửa lại SQL. {sql_suffix}"""
+            sql_query = call_gemini(fix_prompt) or sql_query
+
+    return result
+
+# ---------------------------------------------------------
+# 7. Trực quan hóa
+# ---------------------------------------------------------
+def get_axis_columns(df: pd.DataFrame):
+    """Trả về:
+    - measure_cols: cột số THỰC SỰ mang ý nghĩa đo lường (đã loại bỏ cột ID như emp_no, GeoID...)
+    - cat_cols: cột phân loại/text (bao gồm cả cột ID, dùng làm nhãn chứ không phải trục giá trị)
+    - time_col: cột thời gian hợp lệ (None nếu không có)
+    """
+    all_num_cols = df.select_dtypes(include="number").columns.tolist()
+    measure_cols = [c for c in all_num_cols if not is_id_like(c)]
+    cat_cols = [c for c in df.columns if c not in measure_cols]
+    time_col = find_time_column(df)
+    # Nếu time_col vô tình lọt vào measure_cols (hiếm khi cột ngày là numeric epoch), loại ra
+    if time_col in measure_cols:
+        measure_cols.remove(time_col)
+    return measure_cols, cat_cols, time_col
+
+
+def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
+    cols = df.columns.tolist()
+    if len(cols) < 2:
+        st.info("Dữ liệu cần tối thiểu 2 cột để vẽ biểu đồ.")
+        return
+
+    measure_cols, cat_cols, time_col = get_axis_columns(df)
+    # cat_cols dùng làm trục danh mục nên loại time_col ra khỏi đó (đã có vai trò riêng)
+    label_cols = [c for c in cat_cols if c != time_col]
+
+    try:
+        if chart_override == "Tự động":
+            if time_col and measure_cols:
+                chosen = "Line"
+            elif label_cols and measure_cols:
+                chosen = "Bar"
+            elif len(measure_cols) >= 2:
+                chosen = "Scatter"
+            else:
+                st.info("Không tìm thấy dạng biểu đồ phù hợp — dữ liệu không có chỉ số đo lường số học rõ ràng (các cột số hiện có đều là mã định danh).")
+                return
+        else:
+            chosen = chart_override
+
+        # Guard: người dùng chọn tay "Line"/"Area" nhưng không có cột thời gian hợp lệ
+        if chosen in ("Line", "Area") and not time_col:
+            if label_cols and measure_cols:
+                st.warning(
+                    "⚠️ Biểu đồ Line/Area cần một cột thời gian hợp lệ, dữ liệu hiện tại không có. "
+                    "Tự động chuyển sang Bar Chart để đảm bảo đúng ý nghĩa thống kê."
+                )
+                chosen = "Bar"
+            else:
+                st.info("Không có cột thời gian hợp lệ và không đủ dữ liệu để vẽ Bar/Scatter thay thế.")
+                return
+
+        if chosen == "Line" and time_col and measure_cols:
+            fig = px.line(df.sort_values(time_col), x=time_col, y=measure_cols, markers=True,
+                          title=f"Xu hướng theo {time_col}")
+        elif chosen == "Area" and time_col and measure_cols:
+            fig = px.area(df.sort_values(time_col), x=time_col, y=measure_cols,
+                         title=f"Xu hướng (Area) theo {time_col}")
+        elif chosen == "Bar" and label_cols and measure_cols:
+            fig = px.bar(df, x=label_cols[0], y=measure_cols[0], title=f"{measure_cols[0]} theo {label_cols[0]}")
+        elif chosen == "Scatter" and len(measure_cols) >= 2:
+            fig = px.scatter(df, x=measure_cols[0], y=measure_cols[1], title="Biểu đồ phân tích tương quan")
+        elif len(measure_cols) >= 2:
+            fig = px.scatter(df, x=measure_cols[0], y=measure_cols[1], title="Biểu đồ phân tích tương quan")
+        else:
+            st.info("Không đủ dữ liệu phù hợp cho loại biểu đồ đã chọn (thiếu chỉ số đo lường số học không phải mã ID).")
+            return
+
+        st.plotly_chart(fig, width='stretch', key=f"chart_{turn_id}")
+    except Exception as e:
+        st.info(f"Chưa thể tự động vẽ biểu đồ: {e}")
+
+# ---------------------------------------------------------
+# 8. Dự báo (thuật toán xác định) & Phát hiện bất thường (AI)
+# ---------------------------------------------------------
+def forecast_series(df: pd.DataFrame, periods: int = 3):
+    x_col = find_time_column(df)
+    if not x_col:
+        return None, "Dữ liệu không có cột thời gian hợp lệ (ngày/tháng/quý/năm) nên không thể dự báo xu hướng cho kết quả này."
+
+    measure_cols, _, _ = get_axis_columns(df)
+    if not measure_cols:
+        return None, "Không tìm thấy chỉ số đo lường số học phù hợp để dự báo (các cột số hiện có là mã định danh, ví dụ ID/mã nhân viên)."
+    if len(df) < 3:
+        return None, "Cần tối thiểu 3 dòng dữ liệu để dự báo."
+
+    y_col = measure_cols[0]
+
+    df_sorted = df.copy()
+    try:
+        df_sorted = df_sorted.sort_values(x_col)
+    except Exception:
+        pass
+    df_sorted = df_sorted.reset_index(drop=True)
+
+    y = df_sorted[y_col].values.astype(float)
+    n = len(y)
+    x_idx = np.arange(n)
+    coeffs = np.polyfit(x_idx, y, 1)
+    future_idx = np.arange(n, n + periods)
+    future_vals = np.polyval(coeffs, future_idx)
+
+    is_bounded_period = any(k in x_col.lower() for k in BOUNDED_PERIOD_KEYWORDS)
+    is_numeric_x = pd.api.types.is_numeric_dtype(df_sorted[x_col])
+
+    if is_bounded_period:
+        # Tháng (1-12) / Quý (1-4) là chu kỳ có giới hạn — không nối số thô (VD tháng "14" vô nghĩa)
+        future_x = [f"Kỳ +{i+1}" for i in range(periods)]
+    elif is_numeric_x:
+        step = 1
+        if n >= 2:
+            step = df_sorted[x_col].iloc[-1] - df_sorted[x_col].iloc[-2]
+            if step == 0:
+                step = 1
+        last_x = df_sorted[x_col].iloc[-1]
+        future_x = [last_x + step * (i + 1) for i in range(periods)]
+    else:
+        future_x = [f"Kỳ +{i+1}" for i in range(periods)]
+
+    hist_x = df_sorted[x_col].tolist()
+    bridge_x = [hist_x[-1]] + future_x
+    bridge_y = [y[-1]] + list(future_vals)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=hist_x, y=y, mode="lines+markers", name="Thực tế", line=dict(color="#4C9AFF")))
+    fig.add_trace(go.Scatter(x=bridge_x, y=bridge_y, mode="lines+markers", name="Dự báo", line=dict(color="#FF6B6B", dash="dash")))
+    fig.update_layout(
+        title=f"Dự báo xu hướng theo {x_col}",
+        xaxis_title=x_col, yaxis_title=y_col,
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+    return fig, FORECAST_METHOD_NAME
+
+
+def detect_outliers(df: pd.DataFrame, y_col: str) -> pd.DataFrame:
+    q1, q3 = df[y_col].quantile([0.25, 0.75])
+    iqr = q3 - q1
+    if iqr == 0:
+        return df.iloc[0:0]
+    lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    return df[(df[y_col] < lower) | (df[y_col] > upper)]
+
+
+def explain_anomalies(user_query: str, x_col: str, y_col: str, outliers_df: pd.DataFrame):
+    points = outliers_df[[x_col, y_col]].to_dict(orient="records")
+    prompt = f"""
+Bạn là chuyên gia phân tích dữ liệu kinh doanh.
+Câu hỏi gốc của người dùng: "{user_query}"
+Các điểm bất thường (outlier, theo phương pháp IQR) phát hiện trên trục {x_col}, giá trị {y_col}: {points}
+Đưa ra 1-2 câu nhận xét/giả thuyết ngắn gọn về nguyên nhân kinh doanh có thể xảy ra (VD: mùa vụ, khuyến mãi, sự kiện...).
+Chỉ trả lời 1 đoạn văn ngắn, không markdown, không liệt kê gạch đầu dòng.
+"""
+    return call_gemini(prompt)
+
+# ---------------------------------------------------------
+# 9. Hiển thị kết quả (mỗi lượt có turn_id riêng để widget không trùng key)
+# ---------------------------------------------------------
+def render_result(result: dict, turn_id: str):
+    for line in result["logs"]:
+        st.caption(line)
+
+    if result.get("error"):
+        st.error(result["error"])
+        if result.get("sql"):
+            st.code(result["sql"], language="sql")
+        return
+
+    df = result["df"]
+    sql_query = result["sql"]
+    if sql_query:
+        st.code(sql_query, language="sql")
+
+    if df is None or df.empty:
+        st.warning("Không có dữ liệu trả về.")
+        return
+
+    st.dataframe(df, width='stretch')
+    st.download_button("⬇️ Tải CSV", df.to_csv(index=False).encode("utf-8-sig"),
+                       file_name=f"ket_qua_{turn_id}.csv", mime="text/csv", key=f"csv_{turn_id}")
+
+    tab1, tab2 = st.tabs(["📊 Biểu đồ", "🔮 Dự báo"])
+
+    with tab1:
+        chart_override = st.selectbox(
+            "Loại biểu đồ", ["Tự động", "Line", "Bar", "Area", "Scatter"],
+            key=f"charttype_{turn_id}"
+        )
+        render_smart_chart(df, chart_override, turn_id)
+
+        measure_cols, _, time_col = get_axis_columns(df)
+        if time_col and measure_cols:
+            y_col = measure_cols[0]
+            outliers = detect_outliers(df, y_col)
+            if not outliers.empty:
+                if st.button(f"🔍 AI giải thích {len(outliers)} điểm bất thường", key=f"outlier_{turn_id}"):
+                    with st.spinner("AI đang phân tích..."):
+                        explanation = explain_anomalies(result["query"], time_col, y_col, outliers)
+                    if explanation:
+                        st.info(f"🤖 **Nhận xét AI:** {explanation}")
+
+    with tab2:
+        st.caption(
+            "🧮 Dự báo dùng thuật toán hồi quy tuyến tính xác định (deterministic) — không phải AI 'đoán' số. "
+            "Lựa chọn này đảm bảo kết quả nhất quán, có thể kiểm chứng bằng toán học. "
+            "AI (Gemini) chỉ đảm nhiệm việc sinh SQL, tự sửa lỗi, kiểm định QA, và giải thích bất thường (tab Biểu đồ). "
+            "Dự báo chỉ khả dụng khi kết quả có cột thời gian hợp lệ và ít nhất một chỉ số đo lường số học (không phải mã ID)."
+        )
+        fig, method = forecast_series(df, periods=st.session_state.get("forecast_periods", 3))
+        if fig is None:
+            st.info(method)
+        else:
+            st.plotly_chart(fig, width='stretch', key=f"forecast_{turn_id}")
+            st.caption(f"Phương pháp: {method}")
+
+
+# ---------------------------------------------------------
+# 10. UI Chính
+# ---------------------------------------------------------
+st.title("🤖 AI Business Agent for SQL")
+st.caption("Kết nối Database MySQL Cloud bất kỳ (hoặc dùng dữ liệu mẫu) để truy vấn ngôn ngữ tự nhiên, trực quan hóa và dự báo.")
+
+st.session_state["forecast_periods"] = forecast_periods
+
+if "history" not in st.session_state:
+    st.session_state["history"] = []
+
+if len(st.session_state["history"]) > MAX_HISTORY_TURNS:
+    st.session_state["history"] = st.session_state["history"][-MAX_HISTORY_TURNS:]
+
+for i, turn in enumerate(st.session_state["history"]):
+    st.chat_message("user").write(turn["query"])
+    with st.chat_message("assistant"):
+        render_result(turn, turn_id=f"hist{i}")
+
+if not st.session_state.get("connected"):
+    st.info("👈 **Hướng dẫn:** Chọn nguồn dữ liệu (demo hoặc MySQL riêng), nhập Gemini API Key, rồi bấm Kết nối.")
+else:
+    if st.session_state.get("is_demo"):
+        st.caption("🎮 Đang dùng dữ liệu mẫu — thử hỏi: *\"Doanh số theo từng tháng năm 2023\"*")
+    user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu của bạn...")
+    if user_input:
+        st.chat_message("user").write(user_input)
+        with st.chat_message("assistant"):
+            with st.spinner("Đang truy vấn & phân tích..."):
+                result = run_agent(user_input)
+            render_result(result, turn_id=f"new{len(st.session_state['history'])}")
+        st.session_state["history"].append(result)
