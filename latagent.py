@@ -210,11 +210,21 @@ with st.sidebar:
     if not use_demo:
         st.subheader("1. MySQL Cloud Database")
         db_host = st.text_input("Host", placeholder="e.g., mysql-xxx.aivencloud.com")
-        db_port = st.text_input("Port", value="3306")
+        db_port_raw = st.text_input("Port", value="3306")
         db_user = st.text_input("User", value="root")
         db_pass = st.text_input("Password", type="password")
         db_name = st.text_input("Database Name", placeholder="e.g., my_business_db")
         use_ssl = st.checkbox("Dùng SSL (bắt buộc với hầu hết MySQL cloud: Aiven, Railway...)", value=True)
+
+        # Làm sạch input: loại khoảng trắng thừa và ký tự lạ hay bị dán nhầm
+        # (VD: copy nguyên dòng log "Host | Port: 3306" khiến Port dính thêm dấu '|')
+        db_host = db_host.strip()
+        db_user = db_user.strip()
+        db_name = db_name.strip()
+        db_port_digits = "".join(ch for ch in db_port_raw if ch.isdigit())
+        if db_port_raw.strip() and db_port_digits != db_port_raw.strip():
+            st.caption(f"ℹ️ Đã tự động làm sạch Port thành `{db_port_digits}` (loại bỏ ký tự thừa khỏi `{db_port_raw.strip()}`).")
+        db_port = db_port_digits or "3306"
     else:
         db_host = db_port = db_user = db_pass = db_name = ""
         use_ssl = False
@@ -257,11 +267,17 @@ st.session_state["enable_cache"] = enable_cache
 # 5. Kiểm tra Kết nối & Tự động quét Schema
 # ---------------------------------------------------------
 def try_connect(host, port, user, pw, name, use_ssl):
+    host = (host or "").strip()
+    port_str = "".join(ch for ch in str(port) if ch.isdigit())
+    if not port_str:
+        raise ValueError(f"Port không hợp lệ: '{port}'. Vui lòng chỉ nhập số (VD: 3306), không dán kèm ký tự khác.")
+    port_int = int(port_str)
+
     connect_args = {"connection_timeout": 10}
     if use_ssl:
         connect_args["ssl_disabled"] = False
     engine = create_engine(
-        f"mysql+mysqlconnector://{user}:{quote_plus(pw)}@{host}:{port}/{name}",
+        f"mysql+mysqlconnector://{user}:{quote_plus(pw)}@{host}:{port_int}/{name}",
         connect_args=connect_args,
         pool_pre_ping=True,
         pool_recycle=3600,
@@ -357,6 +373,7 @@ def call_gemini(prompt: str, max_retries: int = 3):
     client = st.session_state.get("client")
     model_name = st.session_state.get("model_name", "gemini-3.6-flash")
     if not client:
+        st.session_state["_last_gemini_error"] = "Chưa kết nối tới Gemini AI — vui lòng bấm 'Kết nối Database & AI' ở sidebar."
         return None
 
     for attempt in range(max_retries):
@@ -366,19 +383,19 @@ def call_gemini(prompt: str, max_retries: int = 3):
         except Exception as e:
             err = str(e)
             if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                notify(
-                    "Hết quota Gemini API miễn phí hôm nay. Tạo API key mới miễn phí tại "
-                    "aistudio.google.com/apikey rồi kết nối lại.",
-                    icon="🚫",
-                )
+                msg = "Hết quota Gemini API miễn phí hôm nay. Tạo API key mới tại aistudio.google.com/apikey rồi kết nối lại."
+                st.session_state["_last_gemini_error"] = msg
+                notify(msg, icon="🚫")
                 return None
             if "503" in err or "UNAVAILABLE" in err:
                 wait = 3 * (attempt + 1)
                 st.toast(f"⏳ Server bận, thử lại sau {wait}s...")
                 time.sleep(wait)
             else:
+                st.session_state["_last_gemini_error"] = err
                 notify("Lỗi khi gọi Gemini API.", detail=err, icon="❌")
                 return None
+    st.session_state["_last_gemini_error"] = "Server Gemini quá tải sau nhiều lần thử."
     notify("Model quá tải sau nhiều lần thử. Hãy gửi lại câu hỏi sau ít phút.", icon="⏱️")
     return None
 
@@ -443,7 +460,8 @@ Nếu không có GROUP BY, bắt buộc thêm LIMIT 1000 để tránh trả về
 {sql_suffix}"""
     sql_query = call_gemini(prompt)
     if not sql_query:
-        result["error"] = "Không thể tạo SQL từ mô hình AI."
+        reason = st.session_state.get("_last_gemini_error", "")
+        result["error"] = f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + reason if reason else ''}"
         return result
 
     for attempt in range(1, 4):
@@ -559,6 +577,17 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
     cols = df.columns.tolist()
     if len(cols) < 2:
         st.info("Dữ liệu cần tối thiểu 2 cột để vẽ biểu đồ.")
+        return
+
+    if len(df) <= 1:
+        # Chỉ 1 dòng dữ liệu: vẽ chart (đặc biệt Scatter 1 điểm) không mang ý nghĩa trực quan,
+        # hiển thị thẳng giá trị dạng text cho dễ đọc thay vì ép vẽ biểu đồ.
+        if len(df) == 1:
+            row = df.iloc[0]
+            summary = " · ".join(f"**{c}**: {row[c]}" for c in df.columns)
+            st.info(f"📌 Chỉ có 1 dòng kết quả, không cần biểu đồ: {summary}")
+        else:
+            st.info("Không có dữ liệu để vẽ biểu đồ.")
         return
 
     measure_cols, cat_cols, time_col = get_axis_columns(df)
