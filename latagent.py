@@ -227,6 +227,19 @@ with st.sidebar:
     )
     model_name = st.selectbox("Model AI", MODEL_OPTIONS, index=0)
 
+    with st.expander("⚡ Tối ưu Quota API", expanded=False):
+        enable_self_check = st.checkbox(
+            "Bật kiểm định SQL bằng AI (self-check)",
+            value=True,
+            help="Mỗi câu hỏi tốn thêm 1 lượt gọi Gemini để AI tự kiểm tra lại SQL. "
+                 "Tắt đi để tiết kiệm ~50% quota mỗi câu hỏi (SQL vẫn được kiểm tra an toàn bằng code, chỉ bỏ bước AI double-check)."
+        )
+        enable_cache = st.checkbox(
+            "Dùng lại kết quả cho câu hỏi trùng lặp (cache)",
+            value=True,
+            help="Nếu hỏi lại y hệt câu đã hỏi thành công trước đó trong phiên này, dùng lại kết quả cũ thay vì gọi AI lại."
+        )
+
     schema_context_input = st.text_area(
         "Mô tả Schema / Nghiệp vụ (Tự động nạp sau khi bấm Kết nối)",
         value=st.session_state.get("schema_context", ""),
@@ -235,6 +248,10 @@ with st.sidebar:
 
     forecast_periods = st.slider("Số kỳ dự báo xu hướng", 1, 12, 3)
     connect_btn = st.button("🔌 Kết nối Database & AI", type="primary", use_container_width=True)
+
+# Đồng bộ toggle tối ưu quota ngay cả khi không bấm nút Kết nối lại
+st.session_state["enable_self_check"] = enable_self_check
+st.session_state["enable_cache"] = enable_cache
 
 # ---------------------------------------------------------
 # 5. Kiểm tra Kết nối & Tự động quét Schema
@@ -278,6 +295,8 @@ if connect_btn:
                 "_db_pass_for_sanitize": db_pass,
                 "is_demo": use_demo,
                 "db_dialect": "SQLite" if use_demo else "MySQL",
+                "enable_self_check": enable_self_check,
+                "enable_cache": enable_cache,
             })
             st.sidebar.success("✅ Kết nối thành công!")
             st.rerun()
@@ -404,9 +423,13 @@ def run_agent(user_query: str):
 
     history_hint = (
         "Nếu có bảng lưu lịch sử theo thời gian (chứa cột from_date/to_date, ví dụ: salaries, "
-        "titles, dept_emp...) và câu hỏi KHÔNG yêu cầu xem lịch sử, chỉ lấy bản ghi đang hiệu lực "
-        "hiện tại (thường là to_date = '9999-01-01', hoặc dùng subquery lấy bản ghi có MAX(from_date) "
-        "theo từng khóa chính) để tránh JOIN sinh ra nhiều dòng trùng lặp cho cùng 1 thực thể."
+        "titles, dept_emp...) và câu hỏi hỏi về giá trị/trạng thái HIỆN TẠI (VD: 'lương hiện tại', "
+        "'phòng ban hiện tại', 'top N hiện nay'), chỉ lấy bản ghi đang hiệu lực (thường là "
+        "to_date = '9999-01-01', hoặc dùng subquery lấy bản ghi có MAX(from_date) theo từng khóa "
+        "chính) để tránh JOIN sinh ra nhiều dòng trùng lặp cho cùng 1 thực thể. "
+        "NGƯỢC LẠI, nếu câu hỏi cần đếm/liệt kê SỐ LẦN THAY ĐỔI, LỊCH SỬ, hoặc 'đã từng' (VD: "
+        "'đã từng đổi chức danh bao nhiêu lần', 'lịch sử lương'), TUYỆT ĐỐI KHÔNG lọc to_date — "
+        "phải giữ nguyên toàn bộ các dòng lịch sử để đếm chính xác."
     )
 
     sql_suffix = "Chỉ trả về SQL thuần, không markdown, không giải thích."
@@ -440,7 +463,10 @@ Nếu không có GROUP BY, bắt buộc thêm LIMIT 1000 để tránh trả về
             if dup_warning:
                 result["logs"].append(dup_warning)
 
-            check = self_check(user_query, sql_query, df)
+            if st.session_state.get("enable_self_check", True):
+                check = self_check(user_query, sql_query, df)
+            else:
+                check = {"day_du": True, "ly_do": "Đã tắt self-check để tiết kiệm quota."}
 
             if check.get("day_du", True):
                 result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', '')}")
@@ -774,7 +800,17 @@ else:
     if user_input:
         st.chat_message("user").write(user_input)
         with st.chat_message("assistant"):
-            with st.spinner("Đang truy vấn & phân tích..."):
-                result = run_agent(user_input)
-            render_result(result, turn_id=f"new{len(st.session_state['history'])}")
+            cache_key = user_input.strip().lower()
+            cached = st.session_state.get("query_cache", {}).get(cache_key)
+
+            if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
+                st.caption("♻️ Dùng lại kết quả đã hỏi trước đó trong phiên này (tiết kiệm quota, không gọi lại AI).")
+                result = cached
+                render_result(result, turn_id=f"new{len(st.session_state['history'])}")
+            else:
+                with st.spinner("Đang truy vấn & phân tích..."):
+                    result = run_agent(user_input)
+                render_result(result, turn_id=f"new{len(st.session_state['history'])}")
+                if not result.get("error"):
+                    st.session_state.setdefault("query_cache", {})[cache_key] = result
         st.session_state["history"].append(result)
