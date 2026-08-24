@@ -286,6 +286,20 @@ with st.sidebar:
     st.caption(f"💡 {provider_cfg['free_tier_note']}")
     model_name = st.selectbox("Model AI", provider_cfg["models"], index=0)
 
+    qwen_base_url = DASHSCOPE_BASE_URL
+    if provider == "Qwen (Alibaba Cloud)":
+        with st.expander("🔧 Base URL nâng cao (Qwen)", expanded=False):
+            st.caption(
+                "Một số tài khoản Alibaba Cloud mới (gói Token Plan) yêu cầu dùng **domain riêng theo "
+                "workspace** thay vì domain chung. Nếu gặp lỗi `AccessDenied.Unpurchased`, vào Model Studio "
+                "Console → API Key → copy URL cạnh nhãn 'OpenAI compatible' và dán vào đây."
+            )
+            qwen_base_url = st.text_input(
+                "Base URL", value=DASHSCOPE_BASE_URL,
+                help="Mặc định là domain chung dashscope-intl. Dán domain riêng (dạng "
+                     "https://ws-xxxx.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1) nếu domain chung bị từ chối."
+            ).strip() or DASHSCOPE_BASE_URL
+
     with st.expander("⚡ Tối ưu Quota API", expanded=False):
         enable_self_check = st.checkbox(
             "Bật kiểm định SQL bằng AI (self-check)",
@@ -370,7 +384,7 @@ if connect_btn:
             if provider == "Gemini (Google)":
                 client = genai.Client(api_key=api_key)
             else:
-                client = _OpenAIClient(api_key=api_key, base_url=DASHSCOPE_BASE_URL)
+                client = _OpenAIClient(api_key=api_key, base_url=qwen_base_url)
 
             extracted_schema = auto_extract_schema(engine)
             final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
