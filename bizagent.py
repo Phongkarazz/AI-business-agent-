@@ -532,14 +532,25 @@ Kiểm tra SQL có trả lời ĐẦY ĐỦ câu hỏi không.
 salaries, titles, dept_emp...) mà KHÔNG lọc bản ghi hiện tại (to_date = '9999-01-01' hoặc
 MAX(from_date) theo từng khóa chính), kết quả sẽ bị nhân bản dòng cho cùng 1 thực thể — hãy
 coi đây là "day_du": false và nêu rõ trong "ly_do".
-Trả về DUY NHẤT JSON: {{"day_du": true/false, "ly_do": "..."}}
+
+QUAN TRỌNG: "ly_do" PHẢI ngắn gọn, TỐI ĐA 20 từ, đi thẳng vào vấn đề — không lý luận dài dòng,
+không liệt kê nhiều tình huống giả định, không giải thích ngữ nghĩa. Nếu SQL đã đúng, chỉ cần
+ghi "SQL hợp lệ" hoặc tương đương.
+Trả về DUY NHẤT JSON, không markdown, không giải thích thêm: {{"day_du": true/false, "ly_do": "..."}}
 """
     res = call_gemini(prompt)
     if not res:
         return {"day_du": True, "ly_do": "Bỏ qua self-check."}
     try:
         cleaned = res.strip().strip("`").replace("json\n", "").strip()
-        return json.loads(cleaned)
+        parsed = json.loads(cleaned)
+        # Phòng vệ tầng code: dù đã dặn AI ngắn gọn, vẫn cắt cứng "ly_do" quá dài để
+        # đảm bảo UI không bao giờ bị vỡ layout bởi phản hồi dài dòng bất thường từ model.
+        ly_do = str(parsed.get("ly_do", ""))
+        if len(ly_do) > 200:
+            ly_do = ly_do[:200].rsplit(" ", 1)[0] + "..."
+        parsed["ly_do"] = ly_do
+        return parsed
     except Exception:
         return {"day_du": True, "ly_do": "Không parse được JSON."}
 
@@ -884,10 +895,21 @@ Chỉ trả lời 1 đoạn văn ngắn, không markdown, không liệt kê gạ
 # ---------------------------------------------------------
 # 9. Hiển thị kết quả (mỗi lượt có turn_id riêng để widget không trùng key)
 # ---------------------------------------------------------
+LOG_INLINE_MAX_CHARS = 220  # log dài hơn ngưỡng này sẽ thu gọn vào expander, tránh vỡ layout chat
+
+
 def render_result(result: dict, turn_id: str):
-    for line in result["logs"]:
+    for i, line in enumerate(result["logs"]):
         if line.startswith("⚠️ Cảnh báo tự động"):
             st.warning(line)
+        elif len(line) > LOG_INLINE_MAX_CHARS:
+            # Bảo vệ UI độc lập với AI: dù đã dặn model trả lời ngắn gọn, một số model
+            # (đặc biệt qua proxy như OpenRouter) vẫn có thể "nói nhiều" — luôn thu gọn
+            # ở tầng code để chat không bao giờ bị tràn bởi 1 đoạn lý luận dài.
+            short = line[:LOG_INLINE_MAX_CHARS].rsplit(" ", 1)[0] + "..."
+            st.caption(short)
+            with st.expander("Xem đầy đủ", expanded=False):
+                st.write(line)
         else:
             st.caption(line)
 
