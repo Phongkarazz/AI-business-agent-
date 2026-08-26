@@ -765,39 +765,63 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             plot_df = df.copy()
             plot_df[label_name] = label_series.values
 
-            # Giới hạn số cột hiển thị — Bar chart với hàng trăm/nghìn category (VD: kết quả
-            # không GROUP BY, chạm LIMIT 1000) sẽ vẽ thành "bức tường vạch" dày đặc, nhãn trục X
-            # chồng lấn hoàn toàn không đọc được. Cắt về top N đầu tiên (giữ nguyên thứ tự đã
-            # ORDER BY từ SQL) và báo rõ cho người dùng biết đang xem một phần.
+            n_unique_labels = plot_df[label_name].nunique(dropna=True)
             total_rows = len(plot_df)
-            was_truncated = total_rows > MAX_BAR_CATEGORIES
-            if was_truncated:
-                plot_df = plot_df.head(MAX_BAR_CATEGORIES)
 
-            category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
+            # Phát hiện nhãn bị TRÙNG LẶP NHIỀU (VD: gender chỉ có 2 giá trị cho 30 dòng dữ liệu
+            # thô, chưa GROUP BY). Nếu vẽ thẳng, Plotly sẽ CHỒNG (stack) toàn bộ giá trị thô vào
+            # cùng 1 cột — tạo hình khối đặc bị vằn ngang, không mang ý nghĩa thống kê và dễ gây
+            # hiểu lầm. Ngưỡng: số nhãn duy nhất nhỏ hơn hẳn (< 70%) tổng số dòng → coi là dữ liệu
+            # thô cần tổng hợp trước khi vẽ, thay vì vẽ 1-cột-1-dòng như bình thường.
+            needs_aggregation = n_unique_labels < total_rows * 0.7 and n_unique_labels < MAX_BAR_CATEGORIES
 
-            # Tự động tìm cột phân loại còn lại (VD: đánh giá hiệu suất, phòng ban...) để tô màu,
-            # giúp biểu đồ mang thêm insight thay vì chỉ 1 màu đơn điệu. Chỉ áp dụng nếu số lượng
-            # nhóm màu đủ nhỏ để còn dễ đọc (<= 8 nhóm).
-            color_col = None
-            candidate_color_cols = [c for c in label_cols if c not in consumed_cols and c in plot_df.columns]
-            for c in candidate_color_cols:
-                if not is_id_like(c) and df[c].nunique(dropna=True) <= 8:
-                    color_col = c
-                    break
-
-            fig = px.bar(
-                plot_df, x=label_name, y=measure_cols[0], color=color_col,
-                title=f"{measure_cols[0]} theo {label_name}",
-                category_orders={label_name: category_order},
-            )
-            fig.update_xaxes(type="category")
-            if was_truncated:
-                st.caption(
-                    f"📊 Đang hiển thị {MAX_BAR_CATEGORIES}/{total_rows} dòng đầu tiên để biểu đồ dễ đọc — "
-                    f"xem đầy đủ {total_rows} dòng trong bảng dữ liệu phía trên, hoặc thu hẹp câu hỏi "
-                    f"(VD: thêm 'Top 20', 'theo từng phòng ban') để có biểu đồ tổng hợp gọn hơn."
+            if needs_aggregation:
+                agg_df = plot_df.groupby(label_name, as_index=False)[measure_cols[0]].mean()
+                category_order = list(dict.fromkeys(agg_df[label_name].tolist()))
+                fig = px.bar(
+                    agg_df, x=label_name, y=measure_cols[0],
+                    title=f"{measure_cols[0]} trung bình theo {label_name}",
+                    category_orders={label_name: category_order},
                 )
+                fig.update_xaxes(type="category")
+                st.caption(
+                    f"📊 Dữ liệu có nhiều dòng trùng nhãn `{label_name}` ({n_unique_labels} nhãn / "
+                    f"{total_rows} dòng) — biểu đồ hiển thị **giá trị trung bình** theo từng nhãn thay vì "
+                    f"chồng toàn bộ dòng thô, để tránh gây hiểu lầm. Xem dữ liệu chi tiết trong bảng phía trên."
+                )
+            else:
+                # Giới hạn số cột hiển thị — Bar chart với hàng trăm/nghìn category (VD: kết quả
+                # không GROUP BY, chạm LIMIT 1000) sẽ vẽ thành "bức tường vạch" dày đặc, nhãn trục X
+                # chồng lấn hoàn toàn không đọc được. Cắt về top N đầu tiên (giữ nguyên thứ tự đã
+                # ORDER BY từ SQL) và báo rõ cho người dùng biết đang xem một phần.
+                was_truncated = total_rows > MAX_BAR_CATEGORIES
+                if was_truncated:
+                    plot_df = plot_df.head(MAX_BAR_CATEGORIES)
+
+                category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
+
+                # Tự động tìm cột phân loại còn lại (VD: đánh giá hiệu suất, phòng ban...) để tô màu,
+                # giúp biểu đồ mang thêm insight thay vì chỉ 1 màu đơn điệu. Chỉ áp dụng nếu số lượng
+                # nhóm màu đủ nhỏ để còn dễ đọc (<= 8 nhóm).
+                color_col = None
+                candidate_color_cols = [c for c in label_cols if c not in consumed_cols and c in plot_df.columns]
+                for c in candidate_color_cols:
+                    if not is_id_like(c) and df[c].nunique(dropna=True) <= 8:
+                        color_col = c
+                        break
+
+                fig = px.bar(
+                    plot_df, x=label_name, y=measure_cols[0], color=color_col,
+                    title=f"{measure_cols[0]} theo {label_name}",
+                    category_orders={label_name: category_order},
+                )
+                fig.update_xaxes(type="category")
+                if was_truncated:
+                    st.caption(
+                        f"📊 Đang hiển thị {MAX_BAR_CATEGORIES}/{total_rows} dòng đầu tiên để biểu đồ dễ đọc — "
+                        f"xem đầy đủ {total_rows} dòng trong bảng dữ liệu phía trên, hoặc thu hẹp câu hỏi "
+                        f"(VD: thêm 'Top 20', 'theo từng phòng ban') để có biểu đồ tổng hợp gọn hơn."
+                    )
         elif chosen == "Scatter" and len(measure_cols) >= 2:
             fig = px.scatter(df, x=measure_cols[0], y=measure_cols[1], title="Biểu đồ phân tích tương quan")
         elif len(measure_cols) >= 2:
