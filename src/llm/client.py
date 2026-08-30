@@ -1,5 +1,6 @@
 """
-Multi-provider LLM client supporting Google Gemini, OpenRouter, and Alibaba Qwen (OpenAI-compatible).
+Multi-provider LLM client supporting Google Gemini, OpenRouter, and Alibaba Qwen (OpenAI-compatible)
+with intelligent key detection and automatic model routing.
 """
 
 import re
@@ -31,14 +32,48 @@ def extract_clean_content(raw: str) -> str:
     return extracted
 
 
+def normalize_model_for_openrouter(model_name: str) -> str:
+    """Tự động chuẩn hóa tên model cho OpenRouter nếu người dùng chỉ nhập tên ngắn."""
+    model_name = (model_name or "").strip()
+    if not model_name:
+        return "deepseek/deepseek-chat"
+
+    # Nếu chưa có tiền tố vendor/ (ví dụ: qwen-plus, qwen-turbo, gpt-4o)
+    if "/" not in model_name:
+        lowered = model_name.lower()
+        if lowered.startswith("qwen"):
+            return f"qwen/{model_name}"
+        elif lowered.startswith("gpt") or lowered.startswith("o1") or lowered.startswith("o3"):
+            return f"openai/{model_name}"
+        elif lowered.startswith("claude"):
+            return f"anthropic/{model_name}"
+        elif lowered.startswith("gemini"):
+            return f"google/{model_name}"
+        elif lowered.startswith("deepseek"):
+            return f"deepseek/{model_name}"
+        elif lowered.startswith("llama"):
+            return f"meta-llama/{model_name}"
+    return model_name
+
+
 def get_llm_client(provider: str, api_key: str, base_url: str = None):
-    """Tạo client AI tương ứng với provider được chọn (Gemini, OpenRouter, Qwen)."""
+    """Tạo client AI tương ứng với provider được chọn với tính năng tự động nhận diện OpenRouter."""
+    api_key = (api_key or "").strip()
     if not api_key:
         raise ValueError("API Key không được để trống.")
 
-    if provider == "Gemini (Google)":
+    base_url_str = (base_url or "").strip().lower()
+
+    # Tự động phát hiện OpenRouter nếu key bắt đầu bằng sk-or-v1- hoặc base_url chứa openrouter.ai
+    is_openrouter = (
+        provider == "OpenRouter"
+        or api_key.startswith("sk-or-v1-")
+        or "openrouter.ai" in base_url_str
+    )
+
+    if provider == "Gemini (Google)" and not is_openrouter:
         return genai.Client(api_key=api_key)
-    elif provider == "OpenRouter":
+    elif is_openrouter:
         if _OpenAIClient is None:
             raise ImportError("Thiếu thư viện `openai`. Vui lòng cài đặt: pip install openai")
         target_url = (base_url or "").strip() or OPENROUTER_BASE_URL
@@ -73,11 +108,20 @@ def _call_openai_compatible_impl(client, model_name: str, prompt: str) -> str:
 
 
 def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: int = 3) -> tuple[str | None, str | None]:
-    """Gọi LLM với cơ chế retry và trả về (kết_quả, thông_báo_lỗi)."""
+    """Gọi LLM với cơ chế retry, tự chuẩn hóa model OpenRouter và trả về (kết_quả, thông_báo_lỗi)."""
     if not client:
         return None, "Chưa khởi tạo client AI."
 
-    impl = _call_gemini_impl if provider == "Gemini (Google)" else _call_openai_compatible_impl
+    # Kiểm tra xem client có đang trỏ tới OpenRouter không
+    is_openrouter = (
+        provider == "OpenRouter"
+        or ("openrouter.ai" in str(getattr(client, "base_url", "")).lower())
+    )
+
+    if is_openrouter:
+        model_name = normalize_model_for_openrouter(model_name)
+
+    impl = _call_gemini_impl if (provider == "Gemini (Google)" and not is_openrouter) else _call_openai_compatible_impl
 
     last_error = None
     for attempt in range(max_retries):
@@ -89,11 +133,13 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
             err = str(e)
             last_error = err
             if "429" in err or "RESOURCE_EXHAUSTED" in err or "RateLimit" in err or "Throttling" in err or "insufficient_quota" in err:
-                return None, f"Hết quota {provider} hoặc đạt giới hạn gọi. Vui lòng kiểm tra lại tài khoản hoặc đổi Provider."
+                return None, f"Hết quota hoặc đạt giới hạn gọi ({provider} - {model_name}). Vui lòng kiểm tra lại số dư hoặc đổi model."
+            if "401" in err or "invalid_api_key" in err or "Incorrect API key" in err:
+                return None, f"API Key không hợp lệ cho {provider}. (Nếu dùng OpenRouter, hãy đảm bảo chọn đúng Provider: OpenRouter hoặc dán key dạng sk-or-v1-...)."
             if "503" in err or "UNAVAILABLE" in err:
                 wait = 2 * (attempt + 1)
                 time.sleep(wait)
             else:
-                return None, f"Lỗi {provider}: {err}"
+                return None, f"Lỗi {provider} ({model_name}): {err}"
 
     return None, f"Server {provider} quá tải sau {max_retries} lần thử: {last_error}"

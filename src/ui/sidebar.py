@@ -1,5 +1,5 @@
 """
-Sidebar UI component for Database and AI configuration with automatic persistence.
+Sidebar UI component for Database and AI configuration with automatic persistence and key auto-detection.
 """
 
 import streamlit as st
@@ -14,7 +14,7 @@ from src.database.connection import try_connect
 from src.database.demo_data import build_demo_engine
 from src.database.schema import auto_extract_schema
 from src.database.query_runner import sanitize_error
-from src.llm.client import get_llm_client
+from src.llm.client import get_llm_client, normalize_model_for_openrouter
 
 
 def render_sidebar():
@@ -104,6 +104,13 @@ def render_sidebar():
         )
         st.caption(f"💡 {provider_cfg['free_tier_note']}")
 
+        # Nhận diện thông minh API Key
+        clean_api_key = api_key.strip()
+        is_openrouter_key = clean_api_key.startswith("sk-or-v1-")
+
+        if is_openrouter_key and provider != "OpenRouter":
+            st.info("💡 Phát hiện API Key của **OpenRouter**. Hệ thống sẽ tự động định tuyến qua OpenRouter Base URL (`https://openrouter.ai/api/v1`).")
+
         model_options = provider_cfg["models"]
         saved_model = saved.get("model_name", "")
         model_idx = model_options.index(saved_model) if saved_model in model_options else 0
@@ -112,7 +119,7 @@ def render_sidebar():
         # Base URL và tuỳ chọn nâng cao
         custom_base_url = ""
         custom_model_input = ""
-        if provider == "OpenRouter":
+        if provider == "OpenRouter" or is_openrouter_key:
             custom_base_url = saved.get("openrouter_base_url", OPENROUTER_BASE_URL)
             with st.expander("🔧 Cấu hình nâng cao OpenRouter", expanded=False):
                 st.caption("Base URL mặc định cho OpenRouter là `https://openrouter.ai/api/v1`.")
@@ -183,8 +190,9 @@ def render_sidebar():
     st.session_state["forecast_periods"] = forecast_periods
 
     if connect_btn:
-        if not api_key:
-            st.sidebar.error(f"❌ Vui lòng nhập API Key cho {provider}!")
+        effective_provider = "OpenRouter" if is_openrouter_key else provider
+        if not clean_api_key:
+            st.sidebar.error(f"❌ Vui lòng nhập API Key cho {effective_provider}!")
         elif not use_demo and not (db_host and db_user and db_name):
             st.sidebar.error("❌ Vui lòng điền đầy đủ Host, User, Database Name!")
         else:
@@ -196,9 +204,13 @@ def render_sidebar():
                         db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
                     )
 
-                client = get_llm_client(provider, api_key, custom_base_url)
+                client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
                 extracted_schema = auto_extract_schema(engine)
                 final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+
+                final_model_name = selected_model
+                if effective_provider == "OpenRouter":
+                    final_model_name = normalize_model_for_openrouter(selected_model)
 
                 # Lưu cấu hình nếu người dùng chọn ghi nhớ
                 if remember_config:
@@ -212,21 +224,21 @@ def render_sidebar():
                         "db_pass": db_pass,
                         "db_name": db_name,
                         "use_ssl": use_ssl,
-                        "provider": provider,
-                        "model_name": selected_model,
+                        "provider": effective_provider,
+                        "model_name": final_model_name,
                         "enable_self_check": enable_self_check,
                         "enable_cache": enable_cache,
                         "forecast_periods": forecast_periods,
                         "remember_config": True,
                     })
-                    if provider == "OpenRouter":
-                        config_to_save["api_key_openrouter"] = api_key
+                    if effective_provider == "OpenRouter":
+                        config_to_save["api_key_openrouter"] = clean_api_key
                         config_to_save["openrouter_base_url"] = custom_base_url
                         config_to_save["custom_openrouter_model"] = custom_model_input
-                    elif provider == "Gemini (Google)":
-                        config_to_save["api_key_gemini"] = api_key
-                    elif provider == "Qwen (Alibaba Cloud)":
-                        config_to_save["api_key_qwen"] = api_key
+                    elif effective_provider == "Gemini (Google)":
+                        config_to_save["api_key_gemini"] = clean_api_key
+                    elif effective_provider == "Qwen (Alibaba Cloud)":
+                        config_to_save["api_key_qwen"] = clean_api_key
                         config_to_save["qwen_base_url"] = custom_base_url
 
                     save_user_config(config_to_save)
@@ -234,22 +246,22 @@ def render_sidebar():
                 st.session_state.update({
                     "engine": engine,
                     "client": client,
-                    "provider": provider,
-                    "model_name": selected_model,
+                    "provider": effective_provider,
+                    "model_name": final_model_name,
                     "schema_context": final_schema,
                     "connected": True,
                     "_db_pass_for_sanitize": db_pass,
                     "is_demo": use_demo,
                     "db_dialect": "SQLite" if use_demo else "MySQL",
                 })
-                st.sidebar.success(f"✅ Kết nối thành công! (AI: {provider} — {selected_model})")
+                st.sidebar.success(f"✅ Kết nối thành công! (AI: {effective_provider} — {final_model_name})")
                 st.rerun()
             except Exception as e:
                 st.session_state["connected"] = False
                 err_display = sanitize_error(str(e), db_pass)
                 if "429" in err_display or "RESOURCE_EXHAUSTED" in err_display:
                     st.sidebar.error(
-                        f"🚫 API Key {provider} hết quota hôm nay. Vui lòng tạo key mới hoặc đổi Provider."
+                        f"🚫 API Key {effective_provider} hết quota hôm nay. Vui lòng tạo key mới hoặc đổi Provider."
                     )
                 elif not use_demo and run_local:
                     st.sidebar.error(
