@@ -1,8 +1,9 @@
-streamlit
-sqlalchemy
-mysql-connector-python
-pandas
-numpy
-plotly
-google-genai
-openai
+streamlit>=1.30.0
+sqlalchemy>=2.0.0
+mysql-connector-python>=8.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.18.0
+google-genai>=0.1.0
+openai>=1.10.0
+python-dotenv>=1.0.0
