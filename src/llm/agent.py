@@ -1,6 +1,7 @@
 """
 SQL Generation and Execution Agent with safety validation, parenthesis checking,
-self-healing loop, conversational explanation detection, and automatic business insight discovery.
+self-healing loop (including 0-row empty result recovery), conversational explanation detection,
+and automatic business insight discovery.
 """
 
 import json
@@ -153,7 +154,7 @@ def run_agent(
     enable_self_check: bool = True,
     enable_auto_insights: bool = True
 ) -> dict:
-    """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi âm thầm (Silent Fix) và tự động khám phá Insight."""
+    """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi âm thầm (bao gồm cứu kết quả 0 dòng) và tự động khám phá Insight."""
     result = {
         "query": user_query,
         "df": None,
@@ -224,6 +225,21 @@ def run_agent(
             df, truncated = read_sql_capped(sql_query, engine, cap=MAX_ROWS_CAP)
             if truncated:
                 result["logs"].append(f"⚠️ Dữ liệu lớn: đã dừng đọc ở {MAX_ROWS_CAP:,} dòng để bảo vệ hệ thống.")
+
+            # Tự động phát hiện & sửa nếu kết quả trả về 0 dòng (0-Row Empty Result Recovery)
+            if df is not None and df.empty and attempt < 3:
+                result["logs"].append(f"⚠️ Kết quả trả về 0 dòng dữ liệu (dấu hiệu lọc WHERE quá chặt hoặc sai giá trị chuỗi). Đang tự động nới lỏng điều kiện và thử lại...")
+                empty_fix_reason = (
+                    "Câu lệnh SQL đã thực thi thành công nhưng trả về 0 DÒNG DỮ LIỆU. "
+                    "Nguyên nhân thường do điều kiện WHERE lọc quá chặt hoặc lọc sai giá trị chuỗi (ví dụ lọc `Category = 'Chocolate'` khi toàn bộ sản phẩm là chocolate, hoặc lọc sai tên). "
+                    "Hãy phân tích lại Schema, loại bỏ hoặc nới lỏng các điều kiện WHERE không cần thiết để trả về đúng dữ liệu thực tế!"
+                )
+                fix_prompt = build_fix_prompt(
+                    schema_context, dialect, user_query, sql_query, empty_fix_reason
+                )
+                fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+                sql_query = fixed_sql or sql_query
+                continue
 
             dup_warning = detect_duplicate_entity_warning(df)
             if dup_warning:

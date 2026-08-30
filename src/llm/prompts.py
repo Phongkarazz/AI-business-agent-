@@ -1,6 +1,6 @@
 """
 Prompt templates and builders for SQL generation, validation, anomaly explanation, and automatic business insights.
-Strictly grounded in provided database schema to prevent hallucination.
+Strictly grounded in provided database schema to prevent hallucination and over-filtering.
 """
 
 
@@ -29,15 +29,18 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Tuyệt đối KHÔNG tự ý suy đoán hoặc bịa ra các bảng không có trong Schema (như `employees`, `salaries`, `titles`, `dept_emp`).
    - Nếu trong Schema có bảng `people` hoặc `salespersons`, hãy dùng bảng đó cho nhân viên/người bán.
    - Nếu trong Schema có bảng `products`, hãy dùng bảng đó cho sản phẩm.
-   - Nếu trong Schema có bảng `sales`, hãy dùng bảng đó cho doanh số/giao dịch.
-2. CÚ PHÁP CHUẨN XÁC:
+   - Nếu trong Schema có bảng `sales`, hãy dùng bảng đó cho doanh số/giao dịch/hộp bán.
+2. TRÁNH LỌC CỨNG THỪA THÃI (OVER-FILTERING):
+   - Khi người dùng hỏi từ ngữ chung của ngành hàng (VD: 'hộp chocolate', 'sản phẩm chocolate', 'bán chocolate'): Toàn bộ các bản ghi trong DB là chocolate, hãy tính `SUM(Boxes)` hoặc `SUM(Amount)` cho toàn bộ sản phẩm. TUYỆT ĐỐI KHÔNG thêm `WHERE Category = 'Chocolate'` hoặc `WHERE Product LIKE '%chocolate%'` trừ khi người dùng chỉ định rõ 1 danh mục cụ thể có trong Schema.
+   - Khi hỏi về 'số hộp' / 'hộp': dùng `SUM(Boxes)`. Khi hỏi về 'doanh thu' / 'tiền': dùng `SUM(Amount)`.
+3. CÚ PHÁP CHUẨN XÁC:
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-3. NẾU BẢNG CÓ CỘT HIỆU LỰC (from_date / to_date):
-   - Nếu câu hỏi hỏi về GIÁ TRỊ HIỆN TẠI (VD: 'lương hiện tại', 'trạng thái hiện nay'): lọc bản ghi đang hiệu lực (`to_date = '9999-01-01'` hoặc `MAX(from_date)`).
-   - Nếu câu hỏi hỏi về LỊCH SỬ / BIẾN ĐỘNG / MỐC NĂM CŨ (VD: 'năm 2021', 'biến động'): KHÔNG lọc `to_date = '9999-01-01'`, hãy lọc theo đúng mốc thời gian của câu hỏi.
-4. ĐỊNH DẠNG ĐẦU RA:
+4. NẾU BẢNG CÓ CỘT HIỆU LỰC (from_date / to_date):
+   - Nếu câu hỏi hỏi về GIÁ TRỊ HIỆN TẠI: lọc `to_date = '9999-01-01'` hoặc `MAX(from_date)`.
+   - Nếu câu hỏi hỏi về LỊCH SỬ / NĂM CŨ (VD: 'năm 2021'): KHÔNG lọc `to_date = '9999-01-01'`.
+5. ĐỊNH DẠNG ĐẦU RA:
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích hay markdown code block bên ngoài.
 
@@ -46,9 +49,9 @@ Câu lệnh SQL:"""
 
 
 def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str) -> str:
-    """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi hoặc không qua bước self-check."""
+    """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi, kết quả rỗng (0 dòng) hoặc không qua self-check."""
     dialect_hint = get_dialect_hints(dialect)
-    return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra ĐÃ BỊ LỖI THỰC THI trên {dialect}.
+    return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra CẦN ĐƯỢC ĐIỀU CHỈNH LẠI trên {dialect}.
 
 === SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ===
 {schema_context}
@@ -57,16 +60,17 @@ Lưu ý Dialect: {dialect_hint}
 
 Câu hỏi gốc: "{user_query}"
 
-Câu SQL bị lỗi:
+Câu SQL trước đó:
 {sql_query}
 
-THÔNG BÁO LỖI TỪ HỆ THỐNG:
+THÔNG BÁO TỪ HỆ THỐNG:
 {reason_or_error}
 
-HƯỚNG DẪN SỬA LỖI:
-1. Nếu lỗi 'Table doesn't exist' (Bảng không tồn tại): Hãy nhìn kỹ SCHEMA ở trên và chỉ dùng đúng các bảng có thật trong danh sách! Tuyệt đối không dùng các bảng ảo không có trong Schema.
-2. Nếu lỗi cú pháp: Kiểm tra lại `COUNT(*)` (thay vì `COUNT()`), kiểm tra cân đối dấu ngoặc đơn () trong các hàm tổng hợp và ngày tháng.
-3. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
+HƯỚNG DẪN ĐIỀU CHỈNH:
+1. Nếu kết quả trả về 0 dòng dữ liệu: Hãy kiểm tra và LOẠI BỎ các điều kiện lọc WHERE quá chặt (ví dụ: bỏ `Category = 'Chocolate'` vì toàn bộ sản phẩm trong DB là chocolate).
+2. Nếu lỗi 'Table doesn't exist': Hãy nhìn kỹ SCHEMA ở trên và chỉ dùng đúng các bảng có thật trong danh sách.
+3. Nếu lỗi cú pháp: Dùng `COUNT(*)`, kiểm tra cân đối dấu ngoặc đơn ().
+4. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str) -> str:
