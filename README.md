@@ -6,37 +6,45 @@
 
 ## ✨ Trải nghiệm Người dùng & Tính năng Nổi bật
 
-1. **Màn hình Cấu hình Onboarding Chuyên biệt & Nút ⚙️ Cài đặt Góc Phải *(Mới)***:
-   - **Màn hình Setup Wizard rộng rãi**: Tách riêng form cấu hình khỏi Sidebar, trình bày dạng Card trực quan giúp dễ dàng chọn nguồn dữ liệu (SQLite Demo hoặc MySQL) và AI Provider.
-   - **Tự động Bỏ qua (Auto-Skip)**: Khi đã có cấu hình lưu sẵn trên máy và bật tự động kết nối, app sẽ tự động kết nối và **vào thẳng màn hình Chat & Phân tích ngay lập tức**.
-   - **Nút ⚙️ Cài đặt ở góc trên bên phải**: Luôn có sẵn ở màn hình Chat để bạn mở lại form cấu hình bất cứ lúc nào (đổi DB, đổi AI Provider, API Key, Model) và quay lại phiên chat dễ dàng.
+1. **Sidebar Đa năng: Tra cứu Bảng CSDL & Quản lý Lịch sử Chat *(Mới)***:
+   - **Top Sidebar**: Nút **`⚙️ Cấu hình`** (mở màn hình đổi kết nối) & nút **`➕ Chat Mới`** (tạo phiên hội thoại mới).
+   - **Khám phá Bảng Database (Table Explorer)**: Xem danh sách toàn bộ các bảng trong CSDL đang kết nối, tra cứu cấu trúc cột, kiểu dữ liệu và **xem trước 5 dòng dữ liệu mẫu (*Sample Preview*)** của bảng đó.
+   - **Lịch sử các cuộc trò chuyện (Chat History)**: Danh sách các câu hỏi đã hỏi trong phiên kèm nút **`🗑️ Xóa lịch sử`**.
 
-2. **Tự động Tìm Insight Kinh doanh & Phát hiện Bất thường (Automated Insights)**:
+2. **Giao diện Silent Fix (Tự sửa âm thầm) & Ẩn Log Kỹ thuật *(Mới)***:
+   - Tự động sửa lỗi và kiểm định QA âm thầm trong nền, không xả log rác ra màn hình.
+   - Toàn bộ câu lệnh SQL thuần và nhật ký thực thi được gom gọn gàng vào mục **`🛠️ Chi tiết Kỹ thuật`** (mặc định đóng).
+
+3. **Màn hình Cấu hình Onboarding Chuyên biệt & Tự động Bỏ qua (Auto-Skip)**:
+   - Màn hình Setup Wizard rộng rãi dạng Card trực quan.
+   - Tự động kết nối và vào thẳng màn hình Chat nếu đã có cấu hình lưu sẵn trên máy.
+
+4. **Tự động Tìm Insight Kinh doanh & Phát hiện Bất thường (Automated Insights)**:
    - **Outlier Thống kê (IQR)**: Nhận diện điểm dữ liệu bất thường vượt ngoài biên kỳ vọng.
    - **Đột biến & Sụt giảm Tốc độ**: Tự động phát hiện các kỳ tăng trưởng vọt ($> +100\%$) hoặc sụt giảm nghiêm trọng ($< -50\%$) trên chuỗi thời gian.
    - **Rủi ro Tập trung**: Cảnh báo khi 1 đối tượng chiếm $> 50\%$ tổng số liệu toàn bộ danh sách.
    - **Báo cáo Chiến lược từ AI (Chief BI Officer)**: Tự động phân tích nguyên nhân và đưa ra gợi ý hành động (Action Plan).
 
-3. **Hỗ trợ Đa Nhà cung cấp AI (Multi-Provider)**:
+5. **Hỗ trợ Đa Nhà cung cấp AI (Multi-Provider)**:
    - **OpenRouter**: Tích hợp sẵn Base URL `https://openrouter.ai/api/v1`, hỗ trợ `deepseek/deepseek-chat`, `deepseek/deepseek-r1`, `anthropic/claude-3.5-sonnet`, `openai/gpt-4o`, `openai/gpt-4o-mini`,...
    - **Google Gemini**: Hỗ trợ `gemini-2.5-flash`, `gemini-1.5-pro`, `gemini-1.5-flash` qua SDK chính thức `google-genai`.
    - **Alibaba Qwen (DashScope)**: Hỗ trợ `qwen-plus`, `qwen-turbo`, `qwen2.5-72b-instruct`, `qwen-max` qua API tương thích OpenAI.
 
-4. **Text-to-SQL Thông minh, Kiểm tra Cú pháp & Tự sửa lỗi (Self-Healing Loop)**:
+6. **Text-to-SQL Thông minh, Kiểm tra Cú pháp & Tự sửa lỗi (Self-Healing Loop)**:
    - Tự động trích xuất Schema (bảng, cột, kiểu dữ liệu).
    - Bộ kiểm tra cân đối dấu ngoặc đơn (`check_parentheses_balance`) ngăn chặn lỗi cú pháp MySQL 1064.
    - Kiểm tra an toàn SQL (chỉ cho phép `SELECT`/`WITH`, chặn truy vấn phá hủy/ghi đè).
    - Cơ chế **Self-Check (QA)** tự động kiểm định kết quả và thử sửa tối đa 3 lần nếu phát hiện lỗi logic hoặc cú pháp.
    - Cảnh báo tự động khi phát hiện dữ liệu bị nhân bản do JOIN bảng lịch sử.
 
-5. **Trực quan hóa Dữ liệu Thông minh (Smart Charting)**:
+7. **Trực quan hóa Dữ liệu Thông minh (Smart Charting)**:
    - Tự động phát hiện kiểu dữ liệu để chọn biểu đồ tối ưu (**Line**, **Bar**, **Area**, **Scatter**).
    - Thanh trượt điều chỉnh số lượng đối tượng hiển thị linh hoạt (hỗ trợ hiển thị đầy đủ 100+ đối tượng).
 
-6. **Dự báo Xác định (Deterministic Forecasting)**:
+8. **Dự báo Xác định (Deterministic Forecasting)**:
    - Sử dụng thuật toán Hồi quy tuyến tính xác định (*Linear Regression*) với đường cầu nối thực tế và tương lai.
 
-7. **Tối ưu Quota & Trải nghiệm**:
+9. **Tối ưu Quota & Trải nghiệm**:
    - Tích hợp sẵn cơ sở dữ liệu mẫu **SQLite Demo** (kinh doanh chocolate 2023) để trải nghiệm ngay.
    - Bộ nhớ tạm (**Cache**) tránh gọi lại AI khi người dùng hỏi các câu hỏi trùng lặp trong cùng phiên.
    - Hỗ trợ kết nối MySQL Local (`localhost`, `127.0.0.1`, `host.docker.internal`) và MySQL Cloud (Aiven, Railway,...).
@@ -63,7 +71,7 @@ AI-business-agent-/
     │   ├── __init__.py
     │   ├── connection.py          # Kết nối MySQL & xử lý alias
     │   ├── demo_data.py           # Sinh dữ liệu mẫu SQLite in-memory
-    │   ├── schema.py              # Tự động đọc Schema DB
+    │   ├── schema.py              # Tự động đọc Schema DB & Table Inspector
     │   └── query_runner.py        # Đọc dữ liệu giới hạn dòng & làm sạch lỗi
     ├── llm/                       # Tương tác với AI
     │   ├── __init__.py
@@ -82,7 +90,8 @@ AI-business-agent-/
         ├── __init__.py
         ├── state.py               # Quản lý Session State
         ├── onboarding.py          # Màn hình Onboarding / Cài đặt độc lập
-        ├── sidebar.py             # Logic kết nối Database & AI
+        ├── sidebar.py             # Sidebar tra cứu bảng DB & Lịch sử chat
+        ├── connection_dialog.py   # Dialog Loading & Auto-connect error view
         └── components.py          # Components hiển thị kết quả, tabs, logs
 ```
 
@@ -93,6 +102,7 @@ AI-business-agent-/
 ```bash
 streamlit run app.py
 ```
-- **Lần đầu mở**: Trình duyệt sẽ hiển thị màn hình Onboarding rộng rãi để bạn chọn nguồn dữ liệu và dán API Key.
-- **Từ các lần sau**: Hệ thống sẽ tự động bỏ qua onboarding và mở thẳng giao diện Chat sẵn sàng làm việc!
-- **Đổi cấu hình**: Bấm nút **`⚙️ Cài đặt`** ở góc trên bên phải bất cứ lúc nào.
+- **Lần đầu mở**: Trình duyệt hiển thị màn hình Onboarding rộng rãi để chọn nguồn dữ liệu và dán API Key.
+- **Từ các lần sau**: Hệ thống tự động bỏ qua onboarding và mở thẳng giao diện Chat sẵn sàng làm việc!
+- **Sidebar bên trái**: Tra cứu danh sách các bảng trong DB, xem 5 dòng mẫu và quản lý lịch sử hội thoại.
+- **Đổi cấu hình**: Bấm nút **`⚙️ Cấu hình`** ở Top Sidebar hoặc Top Header bất cứ lúc nào.

@@ -1,6 +1,6 @@
 """
 Universal AI Business Agent - Streamlit Application Entry Point.
-Featuring standalone Onboarding screen, top-right Settings navigation, and multi-turn chat analysis.
+Featuring standalone Onboarding, interactive Explorer Sidebar, and multi-turn chat analysis.
 """
 
 import streamlit as st
@@ -14,7 +14,7 @@ except ImportError:
 from src.config_store import load_saved_config
 from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
-from src.ui.sidebar import perform_connection
+from src.ui.sidebar import perform_connection, render_main_sidebar
 from src.ui.connection_dialog import render_auto_connect_failed_view
 from src.ui.components import render_result
 from src.llm.agent import run_agent
@@ -26,7 +26,7 @@ st.set_page_config(
     page_title="Universal AI Business Agent",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # ---------------------------------------------------------
@@ -102,9 +102,12 @@ if st.session_state.get("_auto_connect_error") and not st.session_state.get("con
 elif not st.session_state.get("connected") or st.session_state.get("view_mode") == "settings":
     render_onboarding()
 
-# Nếu đã kết nối: Hiển thị Màn hình Chat & Phân tích chính
+# Nếu đã kết nối: Hiển thị Sidebar Mới & Màn hình Chat Phân tích chính
 else:
-    # Top Header Bar với nút Cài đặt ở góc trên bên phải
+    # 4.1 Hiển thị Sidebar tra cứu bảng và lịch sử chat
+    render_main_sidebar()
+
+    # 4.2 Top Header Bar với nút Cài đặt ở góc trên bên phải
     col_header, col_settings = st.columns([5, 1])
 
     with col_header:
