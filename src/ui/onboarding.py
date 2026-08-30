@@ -1,5 +1,5 @@
 """
-Dedicated full-screen Onboarding and Settings Wizard UI component.
+Dedicated full-screen Onboarding and Settings Wizard UI component with Loading Dialog.
 """
 
 import streamlit as st
@@ -7,14 +7,9 @@ from src.config import (
     PROVIDER_CONFIGS,
     DASHSCOPE_BASE_URL,
     OPENROUTER_BASE_URL,
-    LOCAL_HOST_ALIASES,
 )
 from src.config_store import load_saved_config, save_user_config, clear_saved_config
-from src.database.connection import try_connect
-from src.database.demo_data import build_demo_engine
-from src.database.schema import auto_extract_schema
-from src.database.query_runner import sanitize_error
-from src.llm.client import get_llm_client, normalize_model_for_openrouter
+from src.ui.connection_dialog import show_connecting_dialog
 
 
 def render_onboarding():
@@ -242,81 +237,52 @@ def render_onboarding():
         elif not use_demo and not (db_host and db_user and db_name):
             st.error("❌ Vui lòng điền đầy đủ Host, User, Database Name!")
         else:
-            with st.spinner("Đang kết nối Database & trích xuất Schema..."):
-                try:
-                    if use_demo:
-                        engine = build_demo_engine()
-                    else:
-                        engine = try_connect(
-                            db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
-                        )
-
-                    client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
-                    extracted_schema = auto_extract_schema(engine)
-                    final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
-
-                    final_model_name = selected_model
-                    if effective_provider == "OpenRouter":
-                        final_model_name = normalize_model_for_openrouter(selected_model)
-
-                    # Lưu cấu hình nếu người dùng chọn ghi nhớ
-                    if remember_config:
-                        config_to_save = saved.copy()
-                        config_to_save.update({
-                            "data_mode_index": 0 if use_demo else 1,
-                            "run_local": run_local,
-                            "db_host": db_host,
-                            "db_port": db_port,
-                            "db_user": db_user,
-                            "db_pass": db_pass,
-                            "db_name": db_name,
-                            "use_ssl": use_ssl,
-                            "provider": effective_provider,
-                            "model_name": final_model_name,
-                            "enable_auto_insights": enable_auto_insights,
-                            "enable_self_check": enable_self_check,
-                            "enable_cache": enable_cache,
-                            "forecast_periods": forecast_periods,
-                            "remember_config": True,
-                            "auto_connect": auto_connect,
-                        })
-                        if effective_provider == "OpenRouter":
-                            config_to_save["api_key_openrouter"] = clean_api_key
-                            config_to_save["openrouter_base_url"] = custom_base_url
-                            config_to_save["custom_openrouter_model"] = custom_model_input
-                        elif effective_provider == "Gemini (Google)":
-                            config_to_save["api_key_gemini"] = clean_api_key
-                        elif effective_provider == "Qwen (Alibaba Cloud)":
-                            config_to_save["api_key_qwen"] = clean_api_key
-                            config_to_save["qwen_base_url"] = custom_base_url
-
-                        save_user_config(config_to_save)
-
-                    st.session_state.update({
-                        "engine": engine,
-                        "client": client,
+            def on_success(model_used):
+                if remember_config:
+                    config_to_save = saved.copy()
+                    config_to_save.update({
+                        "data_mode_index": 0 if use_demo else 1,
+                        "run_local": run_local,
+                        "db_host": db_host,
+                        "db_port": db_port,
+                        "db_user": db_user,
+                        "db_pass": db_pass,
+                        "db_name": db_name,
+                        "use_ssl": use_ssl,
                         "provider": effective_provider,
-                        "model_name": final_model_name,
-                        "schema_context": final_schema,
-                        "connected": True,
-                        "_db_pass_for_sanitize": db_pass,
-                        "is_demo": use_demo,
-                        "db_dialect": "SQLite" if use_demo else "MySQL",
-                        "view_mode": "chat",
+                        "model_name": model_used,
+                        "enable_auto_insights": enable_auto_insights,
+                        "enable_self_check": enable_self_check,
+                        "enable_cache": enable_cache,
+                        "forecast_periods": forecast_periods,
+                        "remember_config": True,
+                        "auto_connect": auto_connect,
                     })
-                    st.toast(f"✅ Kết nối thành công! (AI: {effective_provider} — {final_model_name})", icon="🚀")
-                    st.rerun()
-                except Exception as e:
-                    st.session_state["connected"] = False
-                    err_display = sanitize_error(str(e), db_pass)
-                    if "429" in err_display or "RESOURCE_EXHAUSTED" in err_display:
-                        st.error(
-                            f"🚫 API Key {effective_provider} hết quota hôm nay. Vui lòng tạo key mới hoặc đổi Provider."
-                        )
-                    elif not use_demo and run_local:
-                        st.error(
-                            f"❌ Không kết nối được tới MySQL local (đã thử: {', '.join(LOCAL_HOST_ALIASES)}).\n\n"
-                            f"Lỗi: {err_display}"
-                        )
-                    else:
-                        st.error(f"❌ Lỗi kết nối: {err_display}")
+                    if effective_provider == "OpenRouter":
+                        config_to_save["api_key_openrouter"] = clean_api_key
+                        config_to_save["openrouter_base_url"] = custom_base_url
+                        config_to_save["custom_openrouter_model"] = custom_model_input
+                    elif effective_provider == "Gemini (Google)":
+                        config_to_save["api_key_gemini"] = clean_api_key
+                    elif effective_provider == "Qwen (Alibaba Cloud)":
+                        config_to_save["api_key_qwen"] = clean_api_key
+                        config_to_save["qwen_base_url"] = custom_base_url
+
+                    save_user_config(config_to_save)
+
+            show_connecting_dialog(
+                use_demo=use_demo,
+                db_host=db_host,
+                db_port=db_port,
+                db_user=db_user,
+                db_pass=db_pass,
+                db_name=db_name,
+                use_ssl=use_ssl,
+                run_local=run_local,
+                effective_provider=effective_provider,
+                clean_api_key=clean_api_key,
+                custom_base_url=custom_base_url,
+                selected_model=selected_model,
+                schema_context_input=schema_context_input,
+                on_success_callback=on_success,
+            )

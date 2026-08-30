@@ -15,6 +15,7 @@ from src.config_store import load_saved_config
 from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
 from src.ui.sidebar import perform_connection
+from src.ui.connection_dialog import render_auto_connect_failed_view
 from src.ui.components import render_result
 from src.llm.agent import run_agent
 
@@ -36,7 +37,11 @@ init_session_state()
 # ---------------------------------------------------------
 # 3. Tự động Kết nối (Auto-Connect on Startup)
 # ---------------------------------------------------------
-if not st.session_state.get("connected") and not st.session_state.get("_auto_connect_attempted", False):
+if (
+    not st.session_state.get("connected")
+    and not st.session_state.get("_auto_connect_attempted", False)
+    and not st.session_state.get("_auto_connect_error")
+):
     st.session_state["_auto_connect_attempted"] = True
     saved = load_saved_config()
 
@@ -62,31 +67,39 @@ if not st.session_state.get("connected") and not st.session_state.get("_auto_con
 
         if can_connect:
             custom_base_url = saved.get("openrouter_base_url" if effective_provider == "OpenRouter" else "qwen_base_url", "")
-            success, detail = perform_connection(
-                use_demo=use_demo,
-                db_host=db_host,
-                db_port=saved.get("db_port", "3306"),
-                db_user=db_user,
-                db_pass=saved.get("db_pass", ""),
-                db_name=db_name,
-                use_ssl=saved.get("use_ssl", False),
-                run_local=saved.get("run_local", False),
-                effective_provider=effective_provider,
-                clean_api_key=clean_api_key,
-                custom_base_url=custom_base_url,
-                selected_model=saved.get("model_name", "deepseek/deepseek-chat"),
-                schema_context_input="",
-            )
-            if success:
-                st.session_state["view_mode"] = "chat"
-                st.toast(f"⚡ Đã tự động kết nối {effective_provider} & {'SQLite Demo' if use_demo else 'MySQL'}!", icon="⚡")
-                st.rerun()
+            with st.spinner(f"⚡ Đang tự động kết nối lại {effective_provider} & {'SQLite Demo' if use_demo else 'MySQL'}..."):
+                success, detail = perform_connection(
+                    use_demo=use_demo,
+                    db_host=db_host,
+                    db_port=saved.get("db_port", "3306"),
+                    db_user=db_user,
+                    db_pass=saved.get("db_pass", ""),
+                    db_name=db_name,
+                    use_ssl=saved.get("use_ssl", False),
+                    run_local=saved.get("run_local", False),
+                    effective_provider=effective_provider,
+                    clean_api_key=clean_api_key,
+                    custom_base_url=custom_base_url,
+                    selected_model=saved.get("model_name", "deepseek/deepseek-chat"),
+                    schema_context_input="",
+                )
+                if success:
+                    st.session_state["view_mode"] = "chat"
+                    st.toast(f"⚡ Đã tự động kết nối {effective_provider} & {'SQLite Demo' if use_demo else 'MySQL'}!", icon="⚡")
+                    st.rerun()
+                else:
+                    st.session_state["_auto_connect_error"] = detail
+                    st.rerun()
 
 # ---------------------------------------------------------
 # 4. Điều hướng Giao diện (Routing)
 # ---------------------------------------------------------
+# Nếu có lỗi Auto-Connect: Hiển thị màn hình báo lỗi + Nút Thử lại & Mở Cấu hình
+if st.session_state.get("_auto_connect_error") and not st.session_state.get("connected"):
+    render_auto_connect_failed_view(st.session_state["_auto_connect_error"])
+
 # Nếu chưa kết nối hoặc người dùng bấm "Cài đặt": Hiển thị màn hình Onboarding / Settings
-if not st.session_state.get("connected") or st.session_state.get("view_mode") == "settings":
+elif not st.session_state.get("connected") or st.session_state.get("view_mode") == "settings":
     render_onboarding()
 
 # Nếu đã kết nối: Hiển thị Màn hình Chat & Phân tích chính
