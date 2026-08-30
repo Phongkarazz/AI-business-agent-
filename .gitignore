@@ -26,9 +26,11 @@ venv/
 ENV/
 env/
 
-# Environment Variables
+# Environment Variables & Saved User Credentials
 .env
 .env.local
+.saved_config.json
+.user_config.json
 
 # IDE & Editors
 .vscode/
