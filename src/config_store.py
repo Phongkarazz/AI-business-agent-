@@ -33,6 +33,7 @@ def load_saved_config() -> Dict[str, Any]:
         "enable_auto_insights": True,
         "forecast_periods": 3,
         "remember_config": True,
+        "auto_connect": True,
     }
 
     if os.path.exists(CONFIG_FILE_PATH):

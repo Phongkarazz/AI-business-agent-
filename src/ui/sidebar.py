@@ -1,5 +1,6 @@
 """
-Sidebar UI component for Database and AI configuration with automatic persistence and key auto-detection.
+Sidebar UI component for Database and AI configuration with automatic persistence,
+key auto-detection, and auto-connection on startup.
 """
 
 import streamlit as st
@@ -17,13 +18,68 @@ from src.database.query_runner import sanitize_error
 from src.llm.client import get_llm_client, normalize_model_for_openrouter
 
 
+def perform_connection(
+    use_demo: bool,
+    db_host: str,
+    db_port: str,
+    db_user: str,
+    db_pass: str,
+    db_name: str,
+    use_ssl: bool,
+    run_local: bool,
+    effective_provider: str,
+    clean_api_key: str,
+    custom_base_url: str,
+    selected_model: str,
+    schema_context_input: str,
+) -> tuple[bool, str]:
+    """Thực hiện kết nối tới Database và AI Provider, trích xuất schema và cập nhật session state."""
+    try:
+        if use_demo:
+            engine = build_demo_engine()
+        else:
+            engine = try_connect(
+                db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
+            )
+
+        client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
+        extracted_schema = auto_extract_schema(engine)
+        final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+
+        final_model_name = selected_model
+        if effective_provider == "OpenRouter":
+            final_model_name = normalize_model_for_openrouter(selected_model)
+
+        st.session_state.update({
+            "engine": engine,
+            "client": client,
+            "provider": effective_provider,
+            "model_name": final_model_name,
+            "schema_context": final_schema,
+            "connected": True,
+            "_db_pass_for_sanitize": db_pass,
+            "is_demo": use_demo,
+            "db_dialect": "SQLite" if use_demo else "MySQL",
+        })
+        return True, final_model_name
+    except Exception as e:
+        st.session_state["connected"] = False
+        err_display = sanitize_error(str(e), db_pass)
+        return False, err_display
+
+
 def render_sidebar():
-    """Hiển thị toàn bộ Sidebar cấu hình kết nối DB và AI với tính năng lưu tự động."""
+    """Hiển thị toàn bộ Sidebar cấu hình kết nối DB và AI với tính năng lưu và tự động kết nối."""
     saved = load_saved_config()
 
     with st.sidebar:
         st.header("⚙️ Cấu hình Kết nối")
         st.caption("Cấu hình được lưu an toàn trên máy của bạn (không commit vào Git).")
+
+        # Hiển thị trạng thái kết nối nếu đã thành công
+        if st.session_state.get("connected"):
+            db_type = "🎮 SQLite Demo" if st.session_state.get("is_demo") else "🔌 MySQL"
+            st.success(f"🟢 **Đã kết nối:** {db_type}\n\n🤖 **AI:** {st.session_state.get('provider')} — `{st.session_state.get('model_name')}`")
 
         data_mode_options = ["🎮 Dùng dữ liệu mẫu (Demo, không cần MySQL)", "🔌 Kết nối MySQL của tôi"]
         saved_mode_idx = saved.get("data_mode_index", 0)
@@ -173,11 +229,17 @@ def render_sidebar():
 
         forecast_periods = st.slider("Số kỳ dự báo xu hướng", 1, 12, saved.get("forecast_periods", 3))
 
-        # Checkbox lưu thông tin
+        # Checkbox lưu thông tin & Tự động kết nối
         remember_config = st.checkbox(
             "💾 Tự động lưu cấu hình cho lần sau",
             value=saved.get("remember_config", True),
             help="Lưu thông tin đăng nhập và cài đặt vào file cục bộ để không cần nhập lại khi mở lại app."
+        )
+
+        auto_connect = st.checkbox(
+            "⚡ Tự động kết nối khi mở trang",
+            value=saved.get("auto_connect", True),
+            help="Tự động kết nối Database & AI ngay khi mở web nếu thông tin cấu hình hợp lệ."
         )
 
         connect_btn = st.button("🔌 Kết nối Database & AI", type="primary", use_container_width=True)
@@ -186,6 +248,7 @@ def render_sidebar():
         with st.expander("⚙️ Quản lý Cấu hình Lưu trữ", expanded=False):
             if st.button("🗑️ Xóa toàn bộ cấu hình đã lưu", use_container_width=True):
                 clear_saved_config()
+                st.session_state["_auto_connect_attempted"] = True
                 st.success("✅ Đã xóa cấu hình đã lưu. Hãy làm mới lại trang!")
                 st.rerun()
 
@@ -195,29 +258,57 @@ def render_sidebar():
     st.session_state["enable_cache"] = enable_cache
     st.session_state["forecast_periods"] = forecast_periods
 
+    effective_provider = "OpenRouter" if is_openrouter_key else provider
+
+    # --- TỰ ĐỘNG KẾT NỐI KHI MỞ TRANG (AUTO-CONNECT) ---
+    if not st.session_state.get("connected") and not st.session_state.get("_auto_connect_attempted", False):
+        st.session_state["_auto_connect_attempted"] = True
+        if auto_connect and clean_api_key:
+            can_auto_connect = use_demo or bool(db_host and db_user and db_name)
+            if can_auto_connect:
+                success, detail = perform_connection(
+                    use_demo=use_demo,
+                    db_host=db_host,
+                    db_port=db_port,
+                    db_user=db_user,
+                    db_pass=db_pass,
+                    db_name=db_name,
+                    use_ssl=use_ssl,
+                    run_local=run_local,
+                    effective_provider=effective_provider,
+                    clean_api_key=clean_api_key,
+                    custom_base_url=custom_base_url,
+                    selected_model=selected_model,
+                    schema_context_input=schema_context_input,
+                )
+                if success:
+                    st.toast(f"⚡ Đã tự động kết nối {effective_provider} ({detail}) & {'SQLite Demo' if use_demo else 'MySQL'}!", icon="⚡")
+                    st.rerun()
+
+    # --- XỬ LÝ KHI BẤM NÚT KẾT NỐI THỦ CÔNG ---
     if connect_btn:
-        effective_provider = "OpenRouter" if is_openrouter_key else provider
         if not clean_api_key:
             st.sidebar.error(f"❌ Vui lòng nhập API Key cho {effective_provider}!")
         elif not use_demo and not (db_host and db_user and db_name):
             st.sidebar.error("❌ Vui lòng điền đầy đủ Host, User, Database Name!")
         else:
-            try:
-                if use_demo:
-                    engine = build_demo_engine()
-                else:
-                    engine = try_connect(
-                        db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
-                    )
+            success, detail = perform_connection(
+                use_demo=use_demo,
+                db_host=db_host,
+                db_port=db_port,
+                db_user=db_user,
+                db_pass=db_pass,
+                db_name=db_name,
+                use_ssl=use_ssl,
+                run_local=run_local,
+                effective_provider=effective_provider,
+                clean_api_key=clean_api_key,
+                custom_base_url=custom_base_url,
+                selected_model=selected_model,
+                schema_context_input=schema_context_input,
+            )
 
-                client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
-                extracted_schema = auto_extract_schema(engine)
-                final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
-
-                final_model_name = selected_model
-                if effective_provider == "OpenRouter":
-                    final_model_name = normalize_model_for_openrouter(selected_model)
-
+            if success:
                 # Lưu cấu hình nếu người dùng chọn ghi nhớ
                 if remember_config:
                     config_to_save = saved.copy()
@@ -231,12 +322,13 @@ def render_sidebar():
                         "db_name": db_name,
                         "use_ssl": use_ssl,
                         "provider": effective_provider,
-                        "model_name": final_model_name,
+                        "model_name": detail,
                         "enable_auto_insights": enable_auto_insights,
                         "enable_self_check": enable_self_check,
                         "enable_cache": enable_cache,
                         "forecast_periods": forecast_periods,
                         "remember_config": True,
+                        "auto_connect": auto_connect,
                     })
                     if effective_provider == "OpenRouter":
                         config_to_save["api_key_openrouter"] = clean_api_key
@@ -250,30 +342,17 @@ def render_sidebar():
 
                     save_user_config(config_to_save)
 
-                st.session_state.update({
-                    "engine": engine,
-                    "client": client,
-                    "provider": effective_provider,
-                    "model_name": final_model_name,
-                    "schema_context": final_schema,
-                    "connected": True,
-                    "_db_pass_for_sanitize": db_pass,
-                    "is_demo": use_demo,
-                    "db_dialect": "SQLite" if use_demo else "MySQL",
-                })
-                st.sidebar.success(f"✅ Kết nối thành công! (AI: {effective_provider} — {final_model_name})")
+                st.sidebar.success(f"✅ Kết nối thành công! (AI: {effective_provider} — {detail})")
                 st.rerun()
-            except Exception as e:
-                st.session_state["connected"] = False
-                err_display = sanitize_error(str(e), db_pass)
-                if "429" in err_display or "RESOURCE_EXHAUSTED" in err_display:
+            else:
+                if "429" in detail or "RESOURCE_EXHAUSTED" in detail:
                     st.sidebar.error(
                         f"🚫 API Key {effective_provider} hết quota hôm nay. Vui lòng tạo key mới hoặc đổi Provider."
                     )
                 elif not use_demo and run_local:
                     st.sidebar.error(
                         f"❌ Không kết nối được tới MySQL local (đã thử: {', '.join(LOCAL_HOST_ALIASES)}).\n\n"
-                        f"Lỗi: {err_display}"
+                        f"Lỗi: {detail}"
                     )
                 else:
-                    st.sidebar.error(f"❌ Lỗi kết nối: {err_display}")
+                    st.sidebar.error(f"❌ Lỗi kết nối: {detail}")
