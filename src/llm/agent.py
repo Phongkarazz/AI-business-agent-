@@ -1,5 +1,5 @@
 """
-SQL Generation and Execution Agent with safety validation and self-healing loop.
+SQL Generation and Execution Agent with safety validation, parenthesis checking, and self-healing loop.
 """
 
 import json
@@ -19,7 +19,7 @@ from .prompts import (
 
 
 def strip_comments_and_literals(sql: str) -> str:
-    """Loại bỏ comment SQL và chuỗi ký tự trước khi kiểm tra an toàn."""
+    """Loại bỏ comment SQL và chuỗi ký tự trước khi kiểm tra an toàn và cú pháp."""
     # Bỏ comment dạng block /* ... */
     sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
     # Bỏ comment dạng dòng -- ...
@@ -28,6 +28,16 @@ def strip_comments_and_literals(sql: str) -> str:
     sql = re.sub(r"'[^']*'", "''", sql)
     sql = re.sub(r'"[^"]*"', '""', sql)
     return sql
+
+
+def check_parentheses_balance(sql: str) -> tuple[bool, str]:
+    """Kiểm tra số lượng dấu mở ngoặc '(' và đóng ngoặc ')' trong SQL."""
+    cleaned = strip_comments_and_literals(sql)
+    open_count = cleaned.count("(")
+    close_count = cleaned.count(")")
+    if open_count != close_count:
+        return False, f"Lỗi cú pháp SQL: Thừa hoặc thiếu dấu ngoặc đơn () (Có {open_count} dấu '(' nhưng có {close_count} dấu ')')."
+    return True, ""
 
 
 def is_safe_select(sql: str) -> bool:
@@ -112,7 +122,7 @@ def run_agent(
     db_pass: str = "",
     enable_self_check: bool = True
 ) -> dict:
-    """Điều phối toàn bộ chu trình Text-to-SQL với cơ chế tự sửa lỗi tối đa 3 lần."""
+    """Điều phối toàn bộ chu trình Text-to-SQL với kiểm tra cú pháp và cơ chế tự sửa lỗi tối đa 3 lần."""
     result = {"query": user_query, "df": None, "sql": None, "logs": [], "error": None}
 
     # 1. Sinh SQL ban đầu
@@ -132,6 +142,23 @@ def run_agent(
             result["sql"] = sql_query
             return result
 
+        # 2.1 Kiểm tra cân đối dấu ngoặc trước khi thực thi
+        is_balanced, paren_err = check_parentheses_balance(sql_query)
+        if not is_balanced:
+            result["logs"].append(f"❌ Phát hiện lỗi cú pháp dấu ngoặc: {paren_err}")
+            if attempt == 3:
+                result["error"] = f"Thử sửa 3 lần thất bại: {paren_err}"
+                result["sql"] = sql_query
+                return result
+
+            fix_prompt = build_fix_prompt(
+                schema_context, dialect, user_query, sql_query, paren_err
+            )
+            fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+            sql_query = fixed_sql or sql_query
+            continue
+
+        # 2.2 Thực thi SQL trên Database Engine
         try:
             df, truncated = read_sql_capped(sql_query, engine, cap=MAX_ROWS_CAP)
             if truncated:

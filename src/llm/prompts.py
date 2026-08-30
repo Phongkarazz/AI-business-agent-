@@ -8,7 +8,7 @@ def get_dialect_hints(dialect: str) -> str:
     if dialect == "SQLite":
         return "Database đang dùng là SQLite: dùng strftime('%Y', col)/strftime('%m', col) để lấy năm/tháng, KHÔNG dùng MONTH()/YEAR() của MySQL."
     elif dialect == "MySQL":
-        return "Database đang dùng là MySQL: có thể dùng MONTH()/YEAR()/DATE_FORMAT() bình thường."
+        return "Database đang dùng là MySQL: có thể dùng MONTH()/YEAR()/DATE_FORMAT(), DATEDIFF(), LEAST(), GREATEST() bình thường."
     return ""
 
 
@@ -27,25 +27,43 @@ HISTORY_HINT = (
 def build_sql_prompt(schema_context: str, dialect: str, user_query: str) -> str:
     """Xây dựng prompt tạo câu lệnh SQL từ ngôn ngữ tự nhiên."""
     dialect_hint = get_dialect_hints(dialect)
-    return f"""Schema:
+    return f"""Bạn là chuyên gia SQL hàng đầu thế giới.
+Schema Database:
 {schema_context}
-Lưu ý dialect: {dialect_hint}
-Lưu ý dữ liệu lịch sử: {HISTORY_HINT}
-Viết 1 câu SQL SELECT duy nhất cho câu hỏi: {user_query}
-Nếu không có GROUP BY, bắt buộc thêm LIMIT 1000 để tránh trả về quá nhiều dữ liệu.
-Chỉ trả về SQL thuần, không markdown, không giải thích."""
+
+Lưu ý Dialect: {dialect_hint}
+Lưu ý Bảng Lịch sử & Dữ liệu thời gian: {HISTORY_HINT}
+
+YÊU CẦU QUAN TRỌNG:
+1. Viết 1 câu lệnh SQL SELECT duy nhất trả lời chính xác câu hỏi: "{user_query}"
+2. Kiểm tra kỹ CÚ PHÁP: Mọi dấu ngoặc mở '(' và đóng ')' phải tuyệt đối cân đối, không được thừa hoặc thiếu dấu ngoặc.
+3. Nếu tính toán phức tạp (nhân chia, DATEDIFF, LEAST, GREATEST,...), hãy gom nhóm dấu ngoặc chuẩn xác: ví dụ `SUM(s.salary * (DATEDIFF(LEAST(s.to_date, '2021-12-31'), GREATEST(s.from_date, '2021-01-01')) + 1) / 365.25)`.
+4. Nếu không có GROUP BY, bắt buộc thêm LIMIT 1000 để tránh trả về quá nhiều dữ liệu.
+5. CHỈ TRẢ VỀ DUY NHẤT CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH), không giải thích, không markdown bên ngoài."""
 
 
 def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str) -> str:
     """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi hoặc không qua bước self-check."""
     dialect_hint = get_dialect_hints(dialect)
-    return f"""Schema: {schema_context}
-Lưu ý dialect: {dialect_hint}
-Lưu ý dữ liệu lịch sử: {HISTORY_HINT}
-Câu hỏi: '{user_query}'
-SQL lỗi/chưa đủ: {sql_query}
-Vấn đề phát hiện: {reason_or_error}
-Viết lại câu SQL chuẩn xác. Chỉ trả về SQL thuần, không markdown, không giải thích."""
+    return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra ĐÃ BỊ LỖI THỰC THI trên {dialect}.
+
+Schema Database:
+{schema_context}
+Lưu ý Dialect: {dialect_hint}
+Lưu ý Bảng Lịch sử: {HISTORY_HINT}
+
+Câu hỏi gốc: "{user_query}"
+
+Câu SQL bị lỗi:
+{sql_query}
+
+THÔNG BÁO LỖI TỪ DATABASE / HỆ THỐNG:
+{reason_or_error}
+
+HƯỚNG DẪN SỬA LỖI:
+- Nếu lỗi Syntax Error gần dấu ngoặc ')': Hãy đếm và kiểm tra lại từng cặp dấu ngoặc '(' và ')' trong các hàm toán học, hàm tổng hợp (SUM, AVG) và hàm ngày tháng (DATEDIFF, LEAST, GREATEST) để đảm bảo không bị thừa/thiếu dấu ngoặc.
+- Nếu lỗi tên bảng / tên cột: Kiểm tra lại chính xác tên bảng và tên cột trong Schema ở trên.
+- Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ CÂU SQL, không giải thích."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str) -> str:

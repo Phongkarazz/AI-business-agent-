@@ -2,6 +2,7 @@
 Multi-provider LLM client supporting Google Gemini and Alibaba Qwen (OpenAI-compatible).
 """
 
+import re
 import time
 from google import genai
 
@@ -11,6 +12,23 @@ except ImportError:
     _OpenAIClient = None
 
 from src.config import DASHSCOPE_BASE_URL
+
+
+def extract_clean_content(raw: str) -> str:
+    """Trích xuất nội dung sạch từ phản hồi của mô hình (bóc tách code block nếu có)."""
+    if not raw:
+        return ""
+
+    # Nếu có markdown code block ```sql ... ``` hoặc ```json ... ``` hoặc ``` ... ```
+    match = re.search(r"```(?:sql|json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
+    if match:
+        extracted = match.group(1).strip()
+    else:
+        extracted = raw.strip()
+
+    # Loại bỏ prefix sql\n hoặc json\n nếu sót lại ở đầu chuỗi
+    extracted = re.sub(r"^(?:sql\s*\n|json\s*\n)", "", extracted, flags=re.IGNORECASE).strip()
+    return extracted
 
 
 def get_llm_client(provider: str, api_key: str, base_url: str = DASHSCOPE_BASE_URL):
@@ -52,7 +70,7 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
     for attempt in range(max_retries):
         try:
             raw = impl(client, model_name, prompt)
-            cleaned = raw.strip().replace("```sql", "").replace("```json", "").replace("```", "").strip()
+            cleaned = extract_clean_content(raw)
             return cleaned, None
         except Exception as e:
             err = str(e)
