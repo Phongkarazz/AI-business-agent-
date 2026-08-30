@@ -1,6 +1,6 @@
-# 🤖 Universal AI Business Agent for SQL
+# 🗄️ Veraxus for SQL
 
-Ứng dụng trợ lý ảo phân tích kinh doanh thông minh dựa trên AI, cho phép bạn kết nối trực tiếp với Database (MySQL Cloud/Local hoặc SQLite Demo), đặt câu hỏi bằng ngôn ngữ tự nhiên, tự động chuyển đổi thành SQL an toàn, vẽ biểu đồ tương tác, tự động tìm Insight kinh doanh, dự báo xu hướng và phát hiện điểm bất thường.
+Ứng dụng trợ lý ảo phân tích kinh doanh và trích xuất dữ liệu thông minh dựa trên AI, cho phép bạn kết nối trực tiếp với Database (MySQL Cloud/Local hoặc SQLite Demo), đặt câu hỏi bằng ngôn ngữ tự nhiên, tự động chuyển đổi thành SQL an toàn, vẽ biểu đồ tương tác, tự động tìm Insight kinh doanh, dự báo xu hướng và phát hiện điểm bất thường.
 
 ---
 

@@ -36,7 +36,7 @@ def render_result(result: dict, turn_id: str):
         logs = result.get("logs", [])
         logs_str = "\n".join(f"  • {l}" for l in logs) if logs else "  • Không có nhật ký thử lại."
         debug_copy_text = (
-            f"=== THÔNG TIN LỖI TRUY VẤN AI BUSINESS AGENT ===\n"
+            f"=== THÔNG TIN LỖI TRUY VẤN VERAXUS FOR SQL ===\n"
             f"• Câu hỏi gốc: {result.get('query', '')}\n"
             f"• Thông báo lỗi: {result.get('error', '')}\n\n"
             f"• Câu lệnh SQL / Phản hồi cuối cùng:\n{result.get('sql', 'N/A')}\n\n"

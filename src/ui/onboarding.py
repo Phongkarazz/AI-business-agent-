@@ -24,7 +24,7 @@ def render_onboarding():
             st.title("⚙️ Cài đặt & Cấu hình Kết nối")
             st.caption("Thay đổi nguồn dữ liệu, nhà cung cấp AI hoặc tùy chỉnh các tham số phân tích.")
         else:
-            st.title("🚀 Chào mừng đến với AI Business Agent!")
+            st.title("🗄️ Chào mừng đến với Veraxus for SQL!")
             st.caption("Hãy thiết lập nguồn dữ liệu và nhà cung cấp AI để bắt đầu truy vấn và phân tích dữ liệu kinh doanh.")
 
     with col_back:

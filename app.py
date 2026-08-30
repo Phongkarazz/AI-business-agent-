@@ -1,5 +1,5 @@
 """
-Universal AI Business Agent - Streamlit Application Entry Point.
+Veraxus for SQL - Streamlit Application Entry Point.
 Featuring standalone Onboarding, interactive Explorer Sidebar, and direct History Inspection.
 """
 
@@ -23,8 +23,8 @@ from src.llm.agent import run_agent
 # 1. Cấu hình Trang Streamlit
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Universal AI Business Agent",
-    page_icon="🤖",
+    page_title="Veraxus for SQL",
+    page_icon="🗄️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -136,7 +136,7 @@ else:
         if st.session_state.get("is_demo"):
             st.info("💡 **Gợi ý câu hỏi mẫu:** *\"Doanh số theo từng tháng năm 2023\"*, *\"Top 5 nhân viên bán chạy nhất\"*, *\"Sản phẩm nào mang lại doanh thu cao nhất?\"*")
         else:
-            st.info("💡 **Chào bạn!** Hãy đặt câu hỏi bất kỳ bằng ngôn ngữ tự nhiên về cơ sở dữ liệu của bạn để AI Agent tự động truy vấn, vẽ biểu đồ và phân tích.")
+            st.info("💡 **Chào bạn!** Hãy đặt câu hỏi bất kỳ bằng ngôn ngữ tự nhiên về cơ sở dữ liệu của bạn để Veraxus for SQL tự động truy vấn, vẽ biểu đồ và phân tích.")
 
     # Khung nhập câu hỏi
     user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
