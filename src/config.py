@@ -40,6 +40,11 @@ NAME_LIKE_REGEX = re.compile(
 )
 
 # ---------------------------------------------------------
+# Localhost Aliases for Fallback Connection
+# ---------------------------------------------------------
+LOCAL_HOST_ALIASES = ["localhost", "127.0.0.1", "host.docker.internal"]
+
+# ---------------------------------------------------------
 # AI Providers Configuration
 # ---------------------------------------------------------
 PROVIDER_CONFIGS = {
