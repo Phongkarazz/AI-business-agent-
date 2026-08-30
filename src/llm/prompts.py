@@ -1,16 +1,16 @@
 """
 Prompt templates and builders for SQL generation, validation, anomaly explanation,
 automatic business insights, and intelligent follow-up question suggestions.
-Strictly grounded in provided database schema to prevent hallucination and over-filtering.
+Strictly grounded in provided database schema with relative historical time-handling to prevent 0-row results.
 """
 
 
 def get_dialect_hints(dialect: str) -> str:
     """Trả về hướng dẫn cú pháp SQL theo từng hệ quản trị cơ sở dữ liệu."""
     if dialect == "SQLite":
-        return "Database đang dùng là SQLite: dùng strftime('%Y', col)/strftime('%m', col) để lấy năm/tháng, KHÔNG dùng MONTH()/YEAR() của MySQL."
+        return "Database đang dùng là SQLite: dùng strftime('%Y', col)/strftime('%m', col) để lấy năm/tháng, date((SELECT MAX(col) FROM tbl), '-1 year') cho thời gian tương đối. KHÔNG dùng MONTH()/YEAR()/CURRENT_DATE() của MySQL."
     elif dialect == "MySQL":
-        return "Database đang dùng là MySQL: có thể dùng MONTH()/YEAR()/DATE_FORMAT(), DATEDIFF(), LEAST(), GREATEST() bình thường."
+        return "Database đang dùng là MySQL: có thể dùng MONTH()/YEAR()/DATE_FORMAT(), DATE_SUB((SELECT MAX(col) FROM tbl), INTERVAL 1 YEAR) cho thời gian tương đối."
     return ""
 
 
@@ -31,16 +31,21 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Nếu trong Schema có bảng `people` hoặc `salespersons`, hãy dùng bảng đó cho nhân viên/người bán.
    - Nếu trong Schema có bảng `products`, hãy dùng bảng đó cho sản phẩm.
    - Nếu trong Schema có bảng `sales`, hãy dùng bảng đó cho doanh số/giao dịch/hộp bán.
-2. TRÁNH LỌC CỨNG THỪA THÃI (OVER-FILTERING):
+   - Nếu trong Schema có bảng `geo`, hãy dùng bảng đó cho quốc gia/khu vực.
+2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
+   - CSDL doanh nghiệp chứa dữ liệu các năm lịch sử (không phải realtime hôm nay).
+   - Khi người dùng hỏi các mốc thời gian tương đối ('trong năm qua', 'gần đây', '12 tháng gần nhất', 'năm gần nhất'):
+     + TUYỆT ĐỐI KHÔNG dùng `CURRENT_DATE()`, `CURDATE()`, `NOW()` vì sẽ bị 0 dòng dữ liệu!
+     + BẮT BUỘC dùng mốc ngày lớn nhất trong dữ liệu:
+       * Trên MySQL: `WHERE date_col >= DATE_SUB((SELECT MAX(date_col) FROM table_name), INTERVAL 1 YEAR)`
+       * Trên SQLite: `WHERE date_col >= date((SELECT MAX(date_col) FROM table_name), '-1 year')`
+3. TRÁNH LỌC CỨNG THỪA THÃI (OVER-FILTERING):
    - Khi người dùng hỏi từ ngữ chung của ngành hàng (VD: 'hộp chocolate', 'sản phẩm chocolate', 'bán chocolate'): Toàn bộ các bản ghi trong DB là chocolate, hãy tính `SUM(Boxes)` hoặc `SUM(Amount)` cho toàn bộ sản phẩm. TUYỆT ĐỐI KHÔNG thêm `WHERE Category = 'Chocolate'` hoặc `WHERE Product LIKE '%chocolate%'` trừ khi người dùng chỉ định rõ 1 danh mục cụ thể có trong Schema.
    - Khi hỏi về 'số hộp' / 'hộp': dùng `SUM(Boxes)`. Khi hỏi về 'doanh thu' / 'tiền': dùng `SUM(Amount)`.
-3. CÚ PHÁP CHUẨN XÁC:
+4. CÚ PHÁP CHUẨN XÁC:
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-4. NẾU BẢNG CÓ CỘT HIỆU LỰC (from_date / to_date):
-   - Nếu câu hỏi hỏi về GIÁ TRỊ HIỆN TẠI: lọc `to_date = '9999-01-01'` hoặc `MAX(from_date)`.
-   - Nếu câu hỏi hỏi về LỊCH SỬ / NĂM CŨ (VD: 'năm 2021'): KHÔNG lọc `to_date = '9999-01-01'`.
 5. ĐỊNH DẠNG ĐẦU RA:
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích hay markdown code block bên ngoài.
@@ -68,10 +73,11 @@ THÔNG BÁO TỪ HỆ THỐNG:
 {reason_or_error}
 
 HƯỚNG DẪN ĐIỀU CHỈNH:
-1. Nếu kết quả trả về 0 dòng dữ liệu: Hãy kiểm tra và LOẠI BỎ các điều kiện lọc WHERE quá chặt (ví dụ: bỏ `Category = 'Chocolate'` vì toàn bộ sản phẩm trong DB là chocolate).
-2. Nếu lỗi 'Table doesn't exist': Hãy nhìn kỹ SCHEMA ở trên và chỉ dùng đúng các bảng có thật trong danh sách.
-3. Nếu lỗi cú pháp: Dùng `COUNT(*)`, kiểm tra cân đối dấu ngoặc đơn ().
-4. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
+1. Nếu kết quả trả về 0 dòng dữ liệu do dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc thời gian quá chặt: Hãy thay thế bằng `(SELECT MAX(date_col) FROM table_name)` làm mốc ngày gần nhất hoặc bỏ điều kiện lọc thời gian để lấy dữ liệu thực tế!
+2. Nếu kết quả trả về 0 dòng do lọc `Category = 'Chocolate'`: Hãy bỏ lọc vì toàn bộ sản phẩm trong DB là chocolate.
+3. Nếu lỗi 'Table doesn't exist': Hãy nhìn kỹ SCHEMA ở trên và chỉ dùng đúng các bảng có thật trong danh sách.
+4. Nếu lỗi cú pháp: Dùng `COUNT(*)`, kiểm tra cân đối dấu ngoặc đơn ().
+5. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str) -> str:
@@ -153,6 +159,7 @@ Schema CSDL hiện có:
 {schema_context}
 
 Nhiệm vụ: Đề xuất 2 đến 3 câu hỏi phân tích tiếp nối (Follow-up questions) có tính đào sâu thông minh và thiết thực nhất cho người dùng (ví dụ: phân tích theo thời gian, theo nhân viên xuất sắc, theo thị trường, hoặc so sánh).
+LƯU Ý: Không dùng các từ chỉ thời gian thực tế 'gần đây', 'năm qua' dễ gây lỗi CURDATE() — hãy đặt câu hỏi rõ ràng về năm cụ thể hoặc xu hướng theo tháng/quý.
 Câu hỏi phải viết bằng tiếng Việt ngắn gọn, súc tích, tự nhiên và CÓ THỂ TRUY VẤN ĐƯỢC từ Schema ở trên.
 
 Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:

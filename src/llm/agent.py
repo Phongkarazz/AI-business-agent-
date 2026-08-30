@@ -249,11 +249,11 @@ def run_agent(
 
             # Tự động phát hiện & sửa nếu kết quả trả về 0 dòng (0-Row Empty Result Recovery)
             if df is not None and df.empty and attempt < 3:
-                result["logs"].append(f"⚠️ Kết quả trả về 0 dòng dữ liệu (dấu hiệu lọc WHERE quá chặt hoặc sai giá trị chuỗi). Đang tự động nới lỏng điều kiện và thử lại...")
+                result["logs"].append(f"⚠️ Kết quả trả về 0 dòng dữ liệu (dấu hiệu dùng CURRENT_DATE() hoặc lọc WHERE quá chặt). Đang tự động nới lỏng điều kiện và thử lại...")
                 empty_fix_reason = (
-                    "Câu lệnh SQL đã thực thi thành công nhưng trả về 0 DÒNG DỮ LIỆU. "
-                    "Nguyên nhân thường do điều kiện WHERE lọc quá chặt hoặc lọc sai giá trị chuỗi (ví dụ lọc `Category = 'Chocolate'` khi toàn bộ sản phẩm là chocolate, hoặc lọc sai tên). "
-                    "Hãy phân tích lại Schema, loại bỏ hoặc nới lỏng các điều kiện WHERE không cần thiết để trả về đúng dữ liệu thực tế!"
+                    "Câu lệnh SQL đã thực thi thành công nhưng trả về 0 DÒNG DỮ LIỆU.\n"
+                    "- Nếu câu lệnh có dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc mốc năm cứng: CSDL này chứa dữ liệu lịch sử. Hãy thay thế bằng (SELECT MAX(date_col) FROM table_name) làm mốc ngày gần nhất hoặc bỏ lọc ngày để lấy dữ liệu thực tế.\n"
+                    "- Nếu câu lệnh lọc Category/Product/Tên chuỗi: Hãy loại bỏ hoặc nới lỏng các điều kiện WHERE không cần thiết để trả về đúng dữ liệu thực tế cho người dùng!"
                 )
                 fix_prompt = build_fix_prompt(
                     schema_context, dialect, user_query, sql_query, empty_fix_reason
