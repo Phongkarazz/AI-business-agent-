@@ -7,11 +7,18 @@
 ## ✨ Tính năng Nổi bật
 
 1. **Hỗ trợ Đa Nhà cung cấp AI (Multi-Provider)**:
-   - **Google Gemini**: Hỗ trợ các model như `gemini-2.5-flash`, `gemini-1.5-pro`, `gemini-1.5-flash`.
+   - **OpenRouter** *(Mới)*: Tích hợp sẵn Base URL `https://openrouter.ai/api/v1`, hỗ trợ hàng loạt mô hình hàng đầu thế giới:
+     - `deepseek/deepseek-chat`, `deepseek/deepseek-r1`
+     - `anthropic/claude-3.5-sonnet`
+     - `openai/gpt-4o`, `openai/gpt-4o-mini`
+     - `google/gemini-2.0-flash-001`
+     - `meta-llama/llama-3.3-70b-instruct`, `qwen/qwen-2.5-coder-32b-instruct`
+   - **Google Gemini**: Hỗ trợ `gemini-2.5-flash`, `gemini-1.5-pro`, `gemini-1.5-flash` qua SDK chính thức `google-genai`.
    - **Alibaba Qwen (DashScope)**: Hỗ trợ `qwen-plus`, `qwen-turbo`, `qwen2.5-72b-instruct`, `qwen-max` qua API tương thích OpenAI.
 
-2. **Text-to-SQL Thông minh & Tự sửa lỗi (Self-Healing Loop)**:
+2. **Text-to-SQL Thông minh, Kiểm tra Cú pháp & Tự sửa lỗi (Self-Healing Loop)**:
    - Tự động trích xuất Schema (bảng, cột, kiểu dữ liệu).
+   - Bộ kiểm tra cân đối dấu ngoặc đơn (`check_parentheses_balance`) ngăn chặn lỗi cú pháp MySQL 1064.
    - Kiểm tra an toàn SQL (chỉ cho phép `SELECT`/`WITH`, chặn truy vấn phá hủy/ghi đè).
    - Cơ chế **Self-Check (QA)** tự động kiểm định kết quả và thử sửa tối đa 3 lần nếu phát hiện lỗi logic hoặc cú pháp.
    - Cảnh báo tự động khi phát hiện dữ liệu bị nhân bản do JOIN bảng lịch sử.
@@ -54,7 +61,7 @@ AI-business-agent-/
     │   └── query_runner.py        # Đọc dữ liệu giới hạn dòng & làm sạch lỗi
     ├── llm/                       # Tương tác với AI
     │   ├── __init__.py
-    │   ├── client.py              # Wrapper cho Gemini và Qwen (OpenAI-compatible)
+    │   ├── client.py              # Wrapper cho Gemini, OpenRouter và Qwen
     │   ├── prompts.py             # Quản lý toàn bộ prompt templates
     │   └── agent.py               # SQL Agent, QA self-check & vòng lặp tự sửa lỗi
     ├── analytics/                 # Thống kê & Phân tích
@@ -81,47 +88,24 @@ AI-business-agent-/
 - **Git**
 
 ### 2. Cài đặt Thư viện
-Tạo môi trường ảo (khuyến nghị) và cài đặt các thư viện phụ thuộc:
-
 ```bash
-# Tạo môi trường ảo
-python3 -m venv venv
-source venv/bin/activate  # Trên macOS/Linux
-# venv\Scripts\activate   # Trên Windows
-
-# Cài đặt thư viện
 pip install -r requirements.txt
 ```
 
 ### 3. Chạy Ứng dụng
 Khởi chạy giao diện Streamlit:
-
 ```bash
 streamlit run app.py
 ```
-
 Trình duyệt sẽ tự động mở tại địa chỉ: `http://localhost:8501`.
 
 ---
 
-## 💡 Hướng dẫn Sử dụng
+## 💡 Hướng dẫn Sử dụng với OpenRouter
 
-1. **Khởi động**:
-   - Ở thanh công cụ bên trái (**Sidebar**), chọn **🎮 Dùng dữ liệu mẫu (Demo)** để thử nghiệm ngay lập tức.
-   - Chọn Provider AI (**Gemini** hoặc **Qwen**) và nhập API Key của bạn.
-   - Nhấn **🔌 Kết nối Database & AI**.
-2. **Đặt câu hỏi**:
-   - Nhập câu hỏi vào khung chat ở dưới cùng (VD: *"Tổng doanh số theo từng tháng năm 2023"* hoặc *"Top 3 nhân viên có số khách hàng cao nhất"*).
-   - Agent sẽ tự động sinh SQL, thực thi và trả về bảng kết quả.
-3. **Phân tích nâng cao**:
-   - Xem biểu đồ tương tác tại tab **📊 Biểu đồ** hoặc bấm nút **🔍 AI giải thích điểm bất thường** nếu phát hiện outlier.
-   - Chuyển sang tab **🔮 Dự báo** để xem xu hướng cho các kỳ tương lai.
-   - Bấm **⬇️ Tải CSV** để xuất dữ liệu về máy.
-
----
-
-## 🛡️ Bảo mật & Tối ưu Quota
-- Ứng dụng không lưu trữ mật khẩu hay API Key vào bất kỳ file nào trên ổ đĩa.
-- Thông báo lỗi kết nối tự động che mật khẩu (`***`).
-- Các câu lệnh SQL bị cấm: `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`,... chỉ cho phép `SELECT`/`WITH`.
-- Giới hạn đọc tối đa `3000` dòng/lần truy vấn để bảo vệ bộ nhớ và tốc độ ứng dụng.
+1. Ở thanh bên trái (**Sidebar**), tại mục **2. Nhà cung cấp AI (Provider)**:
+   - Chọn **OpenRouter**.
+   - Dán **API Key** của bạn (bắt đầu bằng `sk-or-v1-...`).
+   - Mặc định Base URL đã được thiết lập sẵn là `https://openrouter.ai/api/v1`.
+   - Chọn model bạn muốn (ví dụ `deepseek/deepseek-chat`, `anthropic/claude-3.5-sonnet`, `openai/gpt-4o`,...).
+2. Nhấn **🔌 Kết nối Database & AI** và bắt đầu đặt câu hỏi!

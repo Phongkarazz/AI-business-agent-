@@ -40,6 +40,21 @@ NAME_LIKE_REGEX = re.compile(r'(name|ten|title|category|product|team|region|depa
 # AI Providers Configuration
 # ---------------------------------------------------------
 PROVIDER_CONFIGS = {
+    "OpenRouter": {
+        "models": [
+            "deepseek/deepseek-chat",
+            "openai/gpt-4o-mini",
+            "openai/gpt-4o",
+            "anthropic/claude-3.5-sonnet",
+            "google/gemini-2.0-flash-001",
+            "meta-llama/llama-3.3-70b-instruct",
+            "qwen/qwen-2.5-coder-32b-instruct",
+            "deepseek/deepseek-r1",
+        ],
+        "key_help": "Lấy API key tại openrouter.ai/keys.",
+        "key_placeholder": "sk-or-v1-...",
+        "free_tier_note": "Tích hợp sẵn Base URL https://openrouter.ai/api/v1 — truy cập hàng trăm model AI hàng đầu.",
+    },
     "Gemini (Google)": {
         "models": ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
         "key_help": "Lấy API key miễn phí tại aistudio.google.com/apikey.",
@@ -54,6 +69,7 @@ PROVIDER_CONFIGS = {
     },
 }
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 # ---------------------------------------------------------

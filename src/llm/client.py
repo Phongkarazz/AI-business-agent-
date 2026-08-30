@@ -1,5 +1,5 @@
 """
-Multi-provider LLM client supporting Google Gemini and Alibaba Qwen (OpenAI-compatible).
+Multi-provider LLM client supporting Google Gemini, OpenRouter, and Alibaba Qwen (OpenAI-compatible).
 """
 
 import re
@@ -11,7 +11,7 @@ try:
 except ImportError:
     _OpenAIClient = None
 
-from src.config import DASHSCOPE_BASE_URL
+from src.config import DASHSCOPE_BASE_URL, OPENROUTER_BASE_URL
 
 
 def extract_clean_content(raw: str) -> str:
@@ -31,17 +31,30 @@ def extract_clean_content(raw: str) -> str:
     return extracted
 
 
-def get_llm_client(provider: str, api_key: str, base_url: str = DASHSCOPE_BASE_URL):
-    """Tạo client AI tương ứng với provider được chọn."""
+def get_llm_client(provider: str, api_key: str, base_url: str = None):
+    """Tạo client AI tương ứng với provider được chọn (Gemini, OpenRouter, Qwen)."""
     if not api_key:
         raise ValueError("API Key không được để trống.")
 
     if provider == "Gemini (Google)":
         return genai.Client(api_key=api_key)
+    elif provider == "OpenRouter":
+        if _OpenAIClient is None:
+            raise ImportError("Thiếu thư viện `openai`. Vui lòng cài đặt: pip install openai")
+        target_url = (base_url or "").strip() or OPENROUTER_BASE_URL
+        return _OpenAIClient(
+            api_key=api_key,
+            base_url=target_url,
+            default_headers={
+                "HTTP-Referer": "https://localhost:8501",
+                "X-Title": "AI Business Agent",
+            }
+        )
     elif provider == "Qwen (Alibaba Cloud)":
         if _OpenAIClient is None:
             raise ImportError("Thiếu thư viện `openai`. Vui lòng cài đặt: pip install openai")
-        return _OpenAIClient(api_key=api_key, base_url=base_url or DASHSCOPE_BASE_URL)
+        target_url = (base_url or "").strip() or DASHSCOPE_BASE_URL
+        return _OpenAIClient(api_key=api_key, base_url=target_url)
     else:
         raise ValueError(f"Provider không được hỗ trợ: {provider}")
 
@@ -51,7 +64,7 @@ def _call_gemini_impl(client, model_name: str, prompt: str) -> str:
     return response.text
 
 
-def _call_qwen_impl(client, model_name: str, prompt: str) -> str:
+def _call_openai_compatible_impl(client, model_name: str, prompt: str) -> str:
     completion = client.chat.completions.create(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
@@ -64,7 +77,7 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
     if not client:
         return None, "Chưa khởi tạo client AI."
 
-    impl = _call_gemini_impl if provider == "Gemini (Google)" else _call_qwen_impl
+    impl = _call_gemini_impl if provider == "Gemini (Google)" else _call_openai_compatible_impl
 
     last_error = None
     for attempt in range(max_retries):
@@ -75,8 +88,8 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
         except Exception as e:
             err = str(e)
             last_error = err
-            if "429" in err or "RESOURCE_EXHAUSTED" in err or "RateLimit" in err or "Throttling" in err:
-                return None, f"Hết quota {provider} hôm nay. Vui lòng tạo key mới hoặc đổi Provider."
+            if "429" in err or "RESOURCE_EXHAUSTED" in err or "RateLimit" in err or "Throttling" in err or "insufficient_quota" in err:
+                return None, f"Hết quota {provider} hoặc đạt giới hạn gọi. Vui lòng kiểm tra lại tài khoản hoặc đổi Provider."
             if "503" in err or "UNAVAILABLE" in err:
                 wait = 2 * (attempt + 1)
                 time.sleep(wait)

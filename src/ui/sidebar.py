@@ -6,6 +6,7 @@ import streamlit as st
 from src.config import (
     PROVIDER_CONFIGS,
     DASHSCOPE_BASE_URL,
+    OPENROUTER_BASE_URL,
     LOCAL_HOST_ALIASES,
 )
 from src.database.connection import try_connect
@@ -78,16 +79,37 @@ def render_sidebar():
             placeholder=provider_cfg["key_placeholder"],
         )
         st.caption(f"💡 {provider_cfg['free_tier_note']}")
-        model_name = st.selectbox("Model AI", provider_cfg["models"], index=0)
 
-        qwen_base_url = DASHSCOPE_BASE_URL
-        if provider == "Qwen (Alibaba Cloud)":
+        model_options = provider_cfg["models"]
+        selected_model = st.selectbox("Model AI", model_options, index=0)
+
+        # Base URL và tuỳ chọn nâng cao
+        custom_base_url = ""
+        if provider == "OpenRouter":
+            custom_base_url = OPENROUTER_BASE_URL
+            with st.expander("🔧 Cấu hình nâng cao OpenRouter", expanded=False):
+                st.caption("Base URL mặc định cho OpenRouter là `https://openrouter.ai/api/v1`.")
+                custom_base_url = st.text_input(
+                    "Base URL (OpenRouter)",
+                    value=OPENROUTER_BASE_URL,
+                    help="Mặc định là https://openrouter.ai/api/v1"
+                ).strip() or OPENROUTER_BASE_URL
+                custom_model_input = st.text_input(
+                    "Hoặc nhập Model ID tùy chỉnh (VD: deepseek/deepseek-r1)",
+                    value="",
+                    help="Để trống nếu dùng model đã chọn trong danh sách ở trên."
+                ).strip()
+                if custom_model_input:
+                    selected_model = custom_model_input
+
+        elif provider == "Qwen (Alibaba Cloud)":
+            custom_base_url = DASHSCOPE_BASE_URL
             with st.expander("🔧 Base URL nâng cao (Qwen)", expanded=False):
                 st.caption(
                     "Một số tài khoản Alibaba Cloud mới yêu cầu dùng domain riêng theo workspace. "
                     "Dán URL OpenAI-compatible tại đây nếu cần."
                 )
-                qwen_base_url = st.text_input(
+                custom_base_url = st.text_input(
                     "Base URL", value=DASHSCOPE_BASE_URL,
                     help="Mặc định là domain chung dashscope-intl."
                 ).strip() or DASHSCOPE_BASE_URL
@@ -132,7 +154,7 @@ def render_sidebar():
                         db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
                     )
 
-                client = get_llm_client(provider, api_key, qwen_base_url)
+                client = get_llm_client(provider, api_key, custom_base_url)
                 extracted_schema = auto_extract_schema(engine)
                 final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
 
@@ -140,14 +162,14 @@ def render_sidebar():
                     "engine": engine,
                     "client": client,
                     "provider": provider,
-                    "model_name": model_name,
+                    "model_name": selected_model,
                     "schema_context": final_schema,
                     "connected": True,
                     "_db_pass_for_sanitize": db_pass,
                     "is_demo": use_demo,
                     "db_dialect": "SQLite" if use_demo else "MySQL",
                 })
-                st.sidebar.success(f"✅ Kết nối thành công! (AI: {provider} — {model_name})")
+                st.sidebar.success(f"✅ Kết nối thành công! (AI: {provider} — {selected_model})")
                 st.rerun()
             except Exception as e:
                 st.session_state["connected"] = False
