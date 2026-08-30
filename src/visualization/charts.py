@@ -1,5 +1,6 @@
 """
-Smart Plotly charting module with automatic visualization selection, dynamic limit slider, and edge-case guards.
+Smart Plotly charting module with automatic visualization selection, multi-series grouping,
+dynamic limit slider, and edge-case guards.
 """
 
 import pandas as pd
@@ -16,7 +17,7 @@ from src.analytics.heuristics import (
 
 
 def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
-    """Vẽ biểu đồ thông minh dựa trên đặc tính dữ liệu với thanh trượt tùy chỉnh số lượng cột."""
+    """Vẽ biểu đồ thông minh dựa trên đặc tính dữ liệu với hỗ trợ phân nhóm đa tuyến (multi-series)."""
     if df is None or df.empty:
         st.info("Không có dữ liệu để vẽ biểu đồ.")
         return
@@ -65,28 +66,58 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 st.info("Không có cột thời gian hợp lệ và không đủ dữ liệu để vẽ Bar/Scatter thay thế.")
                 return
 
+        # Xác định cột phân nhóm màu sắc cho Line/Area (ví dụ: phân loại theo Region, Product...)
+        time_color_col = None
+        if chosen in ("Line", "Area") and len(measure_cols) == 1 and label_cols:
+            candidate_col, _, _ = pick_label_column(df, label_cols)
+            if candidate_col and df[candidate_col].nunique(dropna=True) <= 20:
+                time_color_col = candidate_col
+
         if chosen == "Line" and time_col and measure_cols:
-            fig = px.line(
-                df.sort_values(time_col),
-                x=time_col,
-                y=measure_cols,
-                markers=True,
-                title=f"Xu hướng theo {time_col}",
-                template="plotly_white"
-            )
+            sorted_df = df.sort_values(time_col)
+            if time_color_col:
+                fig = px.line(
+                    sorted_df,
+                    x=time_col,
+                    y=measure_cols[0],
+                    color=time_color_col,
+                    markers=True,
+                    title=f"Xu hướng {measure_cols[0]} theo {time_col} (Phân nhóm theo {time_color_col})",
+                    template="plotly_white"
+                )
+            else:
+                fig = px.line(
+                    sorted_df,
+                    x=time_col,
+                    y=measure_cols if len(measure_cols) > 1 else measure_cols[0],
+                    markers=True,
+                    title=f"Xu hướng theo {time_col}",
+                    template="plotly_white"
+                )
             fig.update_layout(
                 xaxis=dict(tickangle=-45, automargin=True),
                 margin=dict(l=20, r=20, t=50, b=50)
             )
 
         elif chosen == "Area" and time_col and measure_cols:
-            fig = px.area(
-                df.sort_values(time_col),
-                x=time_col,
-                y=measure_cols,
-                title=f"Xu hướng (Area) theo {time_col}",
-                template="plotly_white"
-            )
+            sorted_df = df.sort_values(time_col)
+            if time_color_col:
+                fig = px.area(
+                    sorted_df,
+                    x=time_col,
+                    y=measure_cols[0],
+                    color=time_color_col,
+                    title=f"Xu hướng (Area) {measure_cols[0]} theo {time_col} (Phân nhóm theo {time_color_col})",
+                    template="plotly_white"
+                )
+            else:
+                fig = px.area(
+                    sorted_df,
+                    x=time_col,
+                    y=measure_cols if len(measure_cols) > 1 else measure_cols[0],
+                    title=f"Xu hướng (Area) theo {time_col}",
+                    template="plotly_white"
+                )
             fig.update_layout(
                 xaxis=dict(tickangle=-45, automargin=True),
                 margin=dict(l=20, r=20, t=50, b=50)
@@ -158,40 +189,39 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
 
                 color_col = None
                 candidate_color_cols = [c for c in label_cols if c not in consumed_cols and c in plot_df.columns]
-                for c in candidate_color_cols:
-                    if not is_id_like(c) and df[c].nunique(dropna=True) <= 8:
-                        color_col = c
-                        break
+                if candidate_color_cols:
+                    cand = candidate_color_cols[0]
+                    if plot_df[cand].nunique(dropna=True) <= 20:
+                        color_col = cand
 
                 fig = px.bar(
-                    plot_df, x=label_name, y=measure_cols[0], color=color_col,
-                    title=f"{measure_cols[0]} theo {label_name} (Hiển thị {len(plot_df)}/{total_rows} đối tượng)",
+                    plot_df, x=label_name, y=measure_cols[0],
+                    color=color_col,
+                    title=f"{measure_cols[0]} theo {label_name}" + (f" (Phân loại theo {color_col})" if color_col else ""),
                     category_orders={label_name: category_order},
                     template="plotly_white"
                 )
                 fig.update_layout(
                     xaxis=dict(type="category", tickangle=-45, automargin=True),
-                    margin=dict(l=20, r=20, t=50, b=100)
+                    margin=dict(l=20, r=20, t=50, b=80)
                 )
 
         elif chosen == "Scatter" and len(measure_cols) >= 2:
+            x_m = measure_cols[0]
+            y_m = measure_cols[1]
+            hover_name = label_cols[0] if label_cols else None
             fig = px.scatter(
-                df, x=measure_cols[0], y=measure_cols[1],
-                title="Biểu đồ phân tích tương quan",
-                template="plotly_white"
-            )
-            fig.update_layout(margin=dict(l=20, r=20, t=50, b=50))
-        elif len(measure_cols) >= 2:
-            fig = px.scatter(
-                df, x=measure_cols[0], y=measure_cols[1],
-                title="Biểu đồ phân tích tương quan",
+                df, x=x_m, y=y_m,
+                hover_name=hover_name,
+                title=f"Tương quan giữa {x_m} và {y_m}",
                 template="plotly_white"
             )
             fig.update_layout(margin=dict(l=20, r=20, t=50, b=50))
         else:
-            st.info("Không đủ dữ liệu phù hợp cho loại biểu đồ đã chọn (thiếu chỉ số đo lường số học).")
+            st.info("Không thể vẽ biểu đồ với các cột hiện có.")
             return
 
         st.plotly_chart(fig, width='stretch', key=f"chart_{turn_id}")
+
     except Exception as e:
-        st.info(f"Chưa thể tự động vẽ biểu đồ: {e}")
+        st.info(f"Chưa thể tự động vẽ biểu đồ: {str(e)}")
