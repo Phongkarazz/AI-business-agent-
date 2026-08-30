@@ -1,5 +1,6 @@
 """
 Sidebar UI component for Session Management, Database Table Explorer, and Chat History.
+Includes 'All Tables (Entire Database)' inspection and multi-table sample preview.
 """
 
 import streamlit as st
@@ -66,7 +67,7 @@ def perform_connection(
 
 
 def render_main_sidebar():
-    """Hiển thị Sidebar mới với nút Cài đặt, Tra cứu bảng Database và Lịch sử trò chuyện."""
+    """Hiển thị Sidebar mới với nút Cài đặt, Tra cứu bảng Database (kèm tùy chọn Tất cả các bảng) và Lịch sử trò chuyện."""
     engine = st.session_state.get("engine")
     is_demo = st.session_state.get("is_demo", True)
     provider = st.session_state.get("provider", "OpenRouter")
@@ -98,24 +99,47 @@ def render_main_sidebar():
         if engine:
             tables = get_table_names(engine)
             if tables:
-                selected_table = st.selectbox(
+                all_tables_option = "🌟 Tất cả các bảng (Toàn bộ CSDL)"
+                table_options = [all_tables_option, *tables]
+
+                selected_option = st.selectbox(
                     "Chọn bảng dữ liệu để xem",
-                    tables,
+                    table_options,
                     key="sidebar_selected_table",
-                    help="Xem danh sách cột, kiểu dữ liệu và xem trước 5 dòng mẫu của bảng được chọn."
+                    help="Xem cấu trúc cột và dữ liệu mẫu của bảng được chọn hoặc toàn bộ CSDL."
                 )
 
-                if selected_table:
+                if selected_option == all_tables_option:
+                    st.markdown(f"**Tổng quan CSDL**: Có **{len(tables)}** bảng")
+
+                    # Danh sách cấu trúc tất cả các bảng
+                    with st.expander("📋 Xem cấu trúc Schema tất cả các bảng", expanded=False):
+                        for t in tables:
+                            c_info = get_table_columns_info(engine, t)
+                            col_str = ", ".join(f"`{c['name']}` ({c['type']})" for c in c_info)
+                            st.markdown(f"**• Bảng `{t}`** ({len(c_info)} cột): {col_str}")
+
+                    # Xem mẫu dữ liệu tất cả các bảng qua Tabs
+                    with st.expander("👁️ Xem trước mẫu dữ liệu tất cả các bảng", expanded=True):
+                        sample_tabs = st.tabs([f"`{t}`" for t in tables])
+                        for tab, t in zip(sample_tabs, tables):
+                            with tab:
+                                df_sample = get_table_sample_df(engine, t, limit=5)
+                                if not df_sample.empty:
+                                    st.dataframe(df_sample, use_container_width=True)
+                                else:
+                                    st.caption("Bảng chưa có dữ liệu.")
+                else:
+                    selected_table = selected_option
                     cols_info = get_table_columns_info(engine, selected_table)
                     st.markdown(f"**Cấu trúc bảng `{selected_table}`** ({len(cols_info)} cột):")
 
-                    # Danh sách cột dạng tóm tắt
                     col_summary = ", ".join(f"`{c['name']}` ({c['type']})" for c in cols_info[:8])
                     if len(cols_info) > 8:
                         col_summary += f", ... (+{len(cols_info)-8} cột)"
                     st.caption(col_summary)
 
-                    with st.expander(f"👁️ Xem 5 dòng mẫu bảng `{selected_table}`", expanded=False):
+                    with st.expander(f"👁️ Xem 5 dòng mẫu bảng `{selected_table}`", expanded=True):
                         sample_df = get_table_sample_df(engine, selected_table, limit=5)
                         if not sample_df.empty:
                             st.dataframe(sample_df, use_container_width=True)
