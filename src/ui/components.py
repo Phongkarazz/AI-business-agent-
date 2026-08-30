@@ -1,5 +1,6 @@
 """
-Reusable UI components for rendering query results, charts, forecasts, automated insights, and notifications.
+Reusable UI components for rendering query results, charts, forecasts, automated insights,
+follow-up question suggestions, and notifications.
 Features clean Silent Fix interface, 1-Click Copy Error button, and conversational AI explanation handling.
 """
 
@@ -22,7 +23,7 @@ def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: b
 
 
 def render_result(result: dict, turn_id: str):
-    """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với bảng, biểu đồ, insight và log kỹ thuật thu gọn."""
+    """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với bảng, biểu đồ, insight, dự báo và câu hỏi tiếp nối."""
     # 1. Hiển thị giải thích tự nhiên từ AI nếu câu hỏi nằm ngoài phạm vi Schema
     if result.get("explanation"):
         st.info(f"💡 **Thông báo từ Trợ lý AI:**\n\n{result['explanation']}")
@@ -152,7 +153,19 @@ def render_result(result: dict, turn_id: str):
             st.plotly_chart(fig, width='stretch', key=f"forecast_{turn_id}")
             st.caption(f"Phương pháp: {method}")
 
-    # 5. Chi tiết Kỹ thuật & SQL (Expander thu gọn ở cuối cùng)
+    # 5. Gợi ý Câu hỏi Phân tích Tiếp nối (Follow-up Question Suggestions)
+    followups = result.get("followups", [])
+    if followups:
+        st.markdown("---")
+        st.markdown("##### 💡 Gợi ý câu hỏi phân tích tiếp nối (Nhấp để chạy ngay):")
+        cols = st.columns(len(followups))
+        for col_f, q_text in zip(cols, followups):
+            with col_f:
+                if st.button(f"👉 {q_text}", key=f"btn_fup_{turn_id}_{abs(hash(q_text))}", use_container_width=True, help=f"Chạy tiếp câu hỏi: {q_text}"):
+                    st.session_state["pending_prompt"] = q_text
+                    st.rerun()
+
+    # 6. Chi tiết Kỹ thuật & SQL (Expander thu gọn ở cuối cùng)
     with st.expander("🛠️ Chi tiết Kỹ thuật & Câu lệnh SQL (Debug)", expanded=False):
         if sql_query:
             st.markdown("**Câu lệnh SQL đã thực thi:**")

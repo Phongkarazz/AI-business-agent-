@@ -1,6 +1,7 @@
 """
 Veraxus for SQL - Streamlit Application Entry Point.
-Featuring standalone Onboarding, interactive Explorer Sidebar, and direct History Inspection.
+Featuring standalone Onboarding, interactive Explorer Sidebar, direct History Inspection,
+Smart Starter Cards (1-Click), and Follow-up Question Suggestions.
 """
 
 import streamlit as st
@@ -12,6 +13,8 @@ except ImportError:
     pass
 
 from src.config_store import load_saved_config
+from src.database.schema import get_table_names
+from src.analytics.heuristics import generate_starter_prompts
 from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
 from src.ui.sidebar import perform_connection, render_main_sidebar
@@ -102,7 +105,7 @@ if st.session_state.get("_auto_connect_error") and not st.session_state.get("con
 elif not st.session_state.get("connected") or st.session_state.get("view_mode") == "settings":
     render_onboarding()
 
-# Nếu đã kết nối: Hiển thị Sidebar Mới & Màn hình Chat Phân tích chính
+# Nếu đã kết nối: Hiển thị Sidebar & Màn hình Chat Phân tích chính
 else:
     # 4.1 Hiển thị Sidebar tra cứu bảng và lịch sử chat
     render_main_sidebar()
@@ -131,22 +134,41 @@ else:
             with st.chat_message("assistant"):
                 render_result(turn, turn_id=f"hist{i}")
 
-    # Gợi ý câu hỏi khi mới bắt đầu phiên
-    if not history:
-        if st.session_state.get("is_demo"):
-            st.info("💡 **Gợi ý câu hỏi mẫu:** *\"Doanh số theo từng tháng năm 2023\"*, *\"Top 5 nhân viên bán chạy nhất\"*, *\"Sản phẩm nào mang lại doanh thu cao nhất?\"*")
-        else:
-            st.info("💡 **Chào bạn!** Hãy đặt câu hỏi bất kỳ bằng ngôn ngữ tự nhiên về cơ sở dữ liệu của bạn để Veraxus for SQL tự động truy vấn, vẽ biểu đồ và phân tích.")
+    # 4.3 Hiển thị Thẻ Gợi ý Câu hỏi Nhanh (Starter Cards) khi chưa có tin nhắn nào
+    if not history and focused_turn_idx is None:
+        st.markdown("### 🚀 Chào mừng bạn đến với Veraxus for SQL!")
+        st.caption("Khám phá dữ liệu kinh doanh của bạn bằng cách nhấp vào một câu hỏi gợi ý nhanh dưới đây hoặc gõ câu hỏi của riêng bạn:")
+        st.markdown("###")
 
-    # Khung nhập câu hỏi
+        engine = st.session_state.get("engine")
+        tables = get_table_names(engine)
+        starter_cards = generate_starter_prompts(tables)
+
+        col_s1, col_s2 = st.columns(2, gap="medium")
+        for idx, card in enumerate(starter_cards):
+            target_col = col_s1 if idx % 2 == 0 else col_s2
+            with target_col:
+                with st.container(border=True):
+                    st.markdown(f"**{card['icon']} {card['title']}**")
+                    st.caption(card["desc"])
+                    if st.button(f"🔍 \"{card['prompt']}\"", key=f"btn_starter_card_{idx}", use_container_width=True):
+                        st.session_state["pending_prompt"] = card["prompt"]
+                        st.rerun()
+
+    # 4.4 Xử lý gửi câu hỏi (từ Chat Input hoặc từ nút bấm Starter / Follow-up)
+    pending_prompt = st.session_state.get("pending_prompt")
     user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
-    if user_input:
-        # Khi nhập câu hỏi mới, tự động thoát chế độ xem tập trung để xem kết quả mới nhất
+
+    prompt_to_run = pending_prompt or user_input
+
+    if prompt_to_run:
+        # Xóa pending prompt và reset focus view
+        st.session_state["pending_prompt"] = None
         st.session_state["focused_turn_idx"] = None
 
-        st.chat_message("user").write(user_input)
+        st.chat_message("user").write(prompt_to_run)
         with st.chat_message("assistant"):
-            cache_key = user_input.strip().lower()
+            cache_key = prompt_to_run.strip().lower()
             cached = st.session_state.get("query_cache", {}).get(cache_key)
 
             if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
@@ -156,7 +178,7 @@ else:
             else:
                 with st.spinner("Đang truy vấn & phân tích..."):
                     result = run_agent(
-                        user_query=user_input,
+                        user_query=prompt_to_run,
                         client=st.session_state.get("client"),
                         provider=st.session_state.get("provider"),
                         model_name=st.session_state.get("model_name"),
@@ -172,3 +194,4 @@ else:
                     st.session_state.setdefault("query_cache", {})[cache_key] = result
 
         st.session_state["history"].append(result)
+        st.rerun()

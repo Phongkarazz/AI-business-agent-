@@ -1,5 +1,6 @@
 """
-Prompt templates and builders for SQL generation, validation, anomaly explanation, and automatic business insights.
+Prompt templates and builders for SQL generation, validation, anomaly explanation,
+automatic business insights, and intelligent follow-up question suggestions.
 Strictly grounded in provided database schema to prevent hallucination and over-filtering.
 """
 
@@ -138,3 +139,21 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ch
 (Đưa ra 2-3 hành động cụ thể, thiết thực cho nhà quản lý / ban lãnh đạo).
 
 Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, không dùng từ ngữ sáo rỗng."""
+
+
+def build_followup_prompt(user_query: str, schema_context: str, df_sample_str: str) -> str:
+    """Xây dựng prompt đề xuất 2-3 câu hỏi phân tích tiếp nối có tính đào sâu (Drill-down Analytics)."""
+    return f"""Bạn là chuyên gia phân tích dữ liệu kinh doanh.
+Người dùng vừa hỏi: "{user_query}"
+
+Kết quả dữ liệu mẫu thu được:
+{df_sample_str}
+
+Schema CSDL hiện có:
+{schema_context}
+
+Nhiệm vụ: Đề xuất 2 đến 3 câu hỏi phân tích tiếp nối (Follow-up questions) có tính đào sâu thông minh và thiết thực nhất cho người dùng (ví dụ: phân tích theo thời gian, theo nhân viên xuất sắc, theo thị trường, hoặc so sánh).
+Câu hỏi phải viết bằng tiếng Việt ngắn gọn, súc tích, tự nhiên và CÓ THỂ TRUY VẤN ĐƯỢC từ Schema ở trên.
+
+Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:
+["Câu hỏi 1", "Câu hỏi 2", "Câu hỏi 3"]"""

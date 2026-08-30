@@ -1,5 +1,5 @@
 """
-Column classification and heuristic utilities for business datasets.
+Column classification, starter prompts generator, and heuristic utilities for business datasets.
 """
 
 import re
@@ -72,29 +72,93 @@ def get_row_identity_column(df: pd.DataFrame):
     return None
 
 
-def pick_label_column(df: pd.DataFrame, label_cols: list):
-    """Chọn cột nhãn tốt nhất cho trục X:
-    1) Gộp first_name + last_name nếu có
-    2) Cột có tên nghiệp vụ gợi ý (name, product,...)
-    3) Cột text thông thường
-    4) Cột ID
-    """
-    if not label_cols:
-        return None, None, []
+def get_best_name_column(df: pd.DataFrame, exclude_cols: list = None):
+    """Tìm cột tên người/sản phẩm/danh mục để làm nhãn hiển thị trực quan."""
+    exclude = set(exclude_cols or [])
+    for c in df.columns:
+        if c not in exclude and NAME_LIKE_REGEX.search(str(c)):
+            return c
+    return None
 
-    cols_lower = {str(c).lower(): c for c in label_cols}
-    if "first_name" in cols_lower and "last_name" in cols_lower:
-        fn, ln = cols_lower["first_name"], cols_lower["last_name"]
-        merged = (df[fn].astype(str) + " " + df[ln].astype(str))
-        return "Họ và tên", merged, [fn, ln]
 
-    text_like = [c for c in label_cols if not is_id_like(c)]
-    name_hint = [c for c in text_like if NAME_LIKE_REGEX.search(str(c))]
-    rest_text = [c for c in text_like if c not in name_hint]
-    id_like_cols = [c for c in label_cols if c not in text_like]
+def pick_label_column(cat_cols: list, df: pd.DataFrame) -> str | None:
+    """Chọn cột text tốt nhất làm nhãn trục X."""
+    if not cat_cols:
+        return None
+    best = get_best_name_column(df, exclude_cols=[])
+    if best and best in cat_cols:
+        return best
+    return cat_cols[0]
 
-    ordered_candidates = name_hint + rest_text + id_like_cols
-    if not ordered_candidates:
-        return None, None, []
-    chosen = ordered_candidates[0]
-    return chosen, df[chosen].astype(str), [chosen]
+
+def generate_starter_prompts(tables: list[str]) -> list[dict]:
+    """Tự động sinh 4 thẻ gợi ý câu hỏi thông minh 1-chạm dựa trên cấu trúc bảng của CSDL."""
+    tables_lower = [t.lower() for t in tables]
+
+    cards = []
+
+    # 1. Nếu có bảng sản phẩm & doanh số
+    if any(t in tables_lower for t in ["products", "product", "items"]):
+        cards.append({
+            "icon": "🍫",
+            "title": "Top Sản Phẩm Doanh Thu Cao Nhất",
+            "prompt": "Top 5 sản phẩm mang lại doanh thu cao nhất",
+            "desc": "Xếp hạng sản phẩm theo tổng số tiền bán được"
+        })
+    else:
+        cards.append({
+            "icon": "📊",
+            "title": "Tổng Quan Doanh Số",
+            "prompt": "Tổng doanh số và số lượng giao dịch",
+            "desc": "Thống kê tổng thể toàn bộ dữ liệu kinh doanh"
+        })
+
+    # 2. Nếu có chiều thời gian hoặc sales
+    if any(t in tables_lower for t in ["sales", "orders", "transactions", "invoices"]):
+        cards.append({
+            "icon": "📈",
+            "title": "Xu Hướng Doanh Số Theo Tháng",
+            "prompt": "Doanh số tổng theo từng tháng trong năm 2021",
+            "desc": "Phân tích biến động doanh thu và dự báo xu hướng"
+        })
+    else:
+        cards.append({
+            "icon": "📈",
+            "title": "Phân Tích Theo Thời Gian",
+            "prompt": "Thống kê số lượng dữ liệu theo từng tháng",
+            "desc": "Xem biểu đồ biến động theo các mốc thời gian"
+        })
+
+    # 3. Nếu có bảng nhân viên
+    if any(t in tables_lower for t in ["people", "salespersons", "employees", "staff", "users"]):
+        cards.append({
+            "icon": "👥",
+            "title": "Xếp Hạng Nhân Viên Bán Chạy Nhất",
+            "prompt": "Top 10 nhân viên bán được nhiều hộp chocolate nhất",
+            "desc": "Đánh giá hiệu suất kinh doanh của từng nhân sự"
+        })
+    else:
+        cards.append({
+            "icon": "🏆",
+            "title": "Top Đối Tượng Nổi Bật",
+            "prompt": "Top 10 đối tượng có chỉ số cao nhất",
+            "desc": "Xếp hạng các mục dữ liệu quan trọng nhất"
+        })
+
+    # 4. Nếu có bảng địa lý / thị trường
+    if any(t in tables_lower for t in ["geo", "regions", "countries", "locations", "stores"]):
+        cards.append({
+            "icon": "🌍",
+            "title": "Phân Bổ Doanh Thu Theo Thị Trường",
+            "prompt": "Tổng doanh thu theo từng quốc gia và khu vực",
+            "desc": "Biểu đồ so sánh doanh số giữa các thị trường địa lý"
+        })
+    else:
+        cards.append({
+            "icon": "🔍",
+            "title": "Khám Phá Dữ Liệu Chi Tiết",
+            "prompt": "Thống kê số lượng bản ghi và giá trị trung bình",
+            "desc": "Phân tích tổng hợp số liệu trên toàn bộ các bảng"
+        })
+
+    return cards[:4]

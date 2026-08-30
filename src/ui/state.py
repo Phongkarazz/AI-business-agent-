@@ -12,6 +12,7 @@ def init_session_state():
         "history": [],
         "query_cache": {},
         "focused_turn_idx": None,
+        "pending_prompt": None,
         "connected": False,
         "view_mode": "chat",
         "engine": None,

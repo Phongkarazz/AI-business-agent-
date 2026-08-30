@@ -1,7 +1,7 @@
 """
 SQL Generation and Execution Agent with safety validation, parenthesis checking,
 self-healing loop (including 0-row empty result recovery), conversational explanation detection,
-and automatic business insight discovery.
+automatic business insight discovery, and follow-up question suggestions.
 """
 
 import json
@@ -20,6 +20,7 @@ from .prompts import (
     build_self_check_prompt,
     build_anomaly_prompt,
     build_auto_insight_prompt,
+    build_followup_prompt,
 )
 
 
@@ -142,6 +143,25 @@ def generate_auto_insights(client, provider: str, model_name: str, user_query: s
     return insight
 
 
+def generate_followup_questions(client, provider: str, model_name: str, user_query: str, schema_context: str, df: pd.DataFrame) -> list[str]:
+    """Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up suggestions) dựa trên kết quả hiện tại."""
+    if df is None or df.empty:
+        return []
+    try:
+        sample_str = df.head(5).to_string(index=False)
+        prompt = build_followup_prompt(user_query, schema_context, sample_str)
+        res, _ = call_llm(client, provider, model_name, prompt)
+        if not res:
+            return []
+        cleaned = res.strip().strip("`").replace("json\n", "").strip()
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, list):
+            return [str(q).strip() for q in parsed if str(q).strip()][:3]
+        return []
+    except Exception:
+        return []
+
+
 def run_agent(
     user_query: str,
     client,
@@ -165,6 +185,7 @@ def run_agent(
         "explanation": None,
         "anomalies_info": None,
         "insights": None,
+        "followups": [],
     }
 
     # 1. Sinh SQL ban đầu
@@ -269,6 +290,12 @@ def run_agent(
                             client, provider, model_name, user_query, df, anomalies_info
                         )
                         result["insights"] = insights
+
+                    # 4. Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up Questions)
+                    followups = generate_followup_questions(
+                        client, provider, model_name, user_query, schema_context, df
+                    )
+                    result["followups"] = followups
 
                 return result
 
