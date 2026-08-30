@@ -4,13 +4,14 @@
 
 ---
 
-## ✨ Tính năng Nổi bật
+## ✨ Trải nghiệm Người dùng & Tính năng Nổi bật
 
-1. **Tự động Kết nối Ngay khi Mở Trang (Auto-Connect on Startup) *(Mới)***:
-   - Tự động nạp thông tin đăng nhập và thiết lập kết nối Database & AI ngay khi mở web nếu cấu hình hợp lệ.
-   - Sẵn sàng truy vấn ngay lập tức mà không cần bấm nút kết nối thủ công mỗi lần mở lại app.
+1. **Màn hình Cấu hình Onboarding Chuyên biệt & Nút ⚙️ Cài đặt Góc Phải *(Mới)***:
+   - **Màn hình Setup Wizard rộng rãi**: Tách riêng form cấu hình khỏi Sidebar, trình bày dạng Card trực quan giúp dễ dàng chọn nguồn dữ liệu (SQLite Demo hoặc MySQL) và AI Provider.
+   - **Tự động Bỏ qua (Auto-Skip)**: Khi đã có cấu hình lưu sẵn trên máy và bật tự động kết nối, app sẽ tự động kết nối và **vào thẳng màn hình Chat & Phân tích ngay lập tức**.
+   - **Nút ⚙️ Cài đặt ở góc trên bên phải**: Luôn có sẵn ở màn hình Chat để bạn mở lại form cấu hình bất cứ lúc nào (đổi DB, đổi AI Provider, API Key, Model) và quay lại phiên chat dễ dàng.
 
-2. **Tự động Tìm Insight Kinh doanh & Phát hiện Bất thường (Automated Insights) *(Mới)***:
+2. **Tự động Tìm Insight Kinh doanh & Phát hiện Bất thường (Automated Insights)**:
    - **Outlier Thống kê (IQR)**: Nhận diện điểm dữ liệu bất thường vượt ngoài biên kỳ vọng.
    - **Đột biến & Sụt giảm Tốc độ**: Tự động phát hiện các kỳ tăng trưởng vọt ($> +100\%$) hoặc sụt giảm nghiêm trọng ($< -50\%$) trên chuỗi thời gian.
    - **Rủi ro Tập trung**: Cảnh báo khi 1 đối tượng chiếm $> 50\%$ tổng số liệu toàn bộ danh sách.
@@ -52,7 +53,7 @@ AI-business-agent-/
 ├── .gitignore                     # Cấu hình bỏ qua file rác và cache
 ├── README.md                      # Tài liệu hướng dẫn sử dụng
 ├── requirements.txt               # Danh sách thư viện cần thiết
-├── app.py                         # Điểm khởi chạy chính của ứng dụng Streamlit
+├── app.py                         # Điểm khởi chạy chính & Điều hướng View
 ├── legacy/                        # Lưu trữ các file code nháp / phiên bản cũ
 └── src/                           # Toàn bộ mã nguồn module hóa
     ├── __init__.py
@@ -80,27 +81,18 @@ AI-business-agent-/
     └── ui/                        # Giao diện người dùng Streamlit
         ├── __init__.py
         ├── state.py               # Quản lý Session State
-        ├── sidebar.py             # Sidebar cấu hình kết nối DB & AI
+        ├── onboarding.py          # Màn hình Onboarding / Cài đặt độc lập
+        ├── sidebar.py             # Logic kết nối Database & AI
         └── components.py          # Components hiển thị kết quả, tabs, logs
 ```
 
 ---
 
-## 🚀 Hướng dẫn Cài đặt & Khởi chạy
+## 🚀 Hướng dẫn Khởi chạy Ứng dụng
 
-### 1. Yêu cầu Hệ thống
-- **Python**: 3.10 trở lên
-- **Git**
-
-### 2. Cài đặt Thư viện
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Chạy Ứng dụng
-Khởi chạy giao diện Streamlit:
 ```bash
 streamlit run app.py
 ```
-Trình duyệt sẽ tự động mở tại địa chỉ: `http://localhost:8501`.
-Lần đầu bạn nhập thông tin cấu hình và bấm Kết nối, hệ thống sẽ tự động lưu lại. Từ các lần mở sau, hệ thống sẽ tự động kết nối sẵn sàng cho bạn!
+- **Lần đầu mở**: Trình duyệt sẽ hiển thị màn hình Onboarding rộng rãi để bạn chọn nguồn dữ liệu và dán API Key.
+- **Từ các lần sau**: Hệ thống sẽ tự động bỏ qua onboarding và mở thẳng giao diện Chat sẵn sàng làm việc!
+- **Đổi cấu hình**: Bấm nút **`⚙️ Cài đặt`** ở góc trên bên phải bất cứ lúc nào.

@@ -12,17 +12,20 @@ def init_session_state():
         "history": [],
         "query_cache": {},
         "connected": False,
+        "view_mode": "chat",
         "engine": None,
         "client": None,
-        "provider": "Gemini (Google)",
-        "model_name": "gemini-2.5-flash",
+        "provider": "OpenRouter",
+        "model_name": "deepseek/deepseek-chat",
         "schema_context": "",
         "is_demo": True,
         "db_dialect": "SQLite",
+        "enable_auto_insights": True,
         "enable_self_check": True,
         "enable_cache": True,
         "forecast_periods": 3,
         "_db_pass_for_sanitize": "",
+        "_auto_connect_attempted": False,
     }
 
     for key, val in defaults.items():

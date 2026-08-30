@@ -1,0 +1,322 @@
+"""
+Dedicated full-screen Onboarding and Settings Wizard UI component.
+"""
+
+import streamlit as st
+from src.config import (
+    PROVIDER_CONFIGS,
+    DASHSCOPE_BASE_URL,
+    OPENROUTER_BASE_URL,
+    LOCAL_HOST_ALIASES,
+)
+from src.config_store import load_saved_config, save_user_config, clear_saved_config
+from src.database.connection import try_connect
+from src.database.demo_data import build_demo_engine
+from src.database.schema import auto_extract_schema
+from src.database.query_runner import sanitize_error
+from src.llm.client import get_llm_client, normalize_model_for_openrouter
+
+
+def render_onboarding():
+    """Hiển thị màn hình Onboarding / Cài đặt cấu hình độc lập toàn trang."""
+    saved = load_saved_config()
+    is_already_connected = st.session_state.get("connected", False)
+
+    # Header điều hướng
+    col_title, col_back = st.columns([3, 1])
+    with col_title:
+        if is_already_connected:
+            st.title("⚙️ Cài đặt & Cấu hình Kết nối")
+            st.caption("Thay đổi nguồn dữ liệu, nhà cung cấp AI hoặc tùy chỉnh các tham số phân tích.")
+        else:
+            st.title("🚀 Chào mừng đến với AI Business Agent!")
+            st.caption("Hãy thiết lập nguồn dữ liệu và nhà cung cấp AI để bắt đầu truy vấn và phân tích dữ liệu kinh doanh.")
+
+    with col_back:
+        if is_already_connected:
+            st.write("")
+            if st.button("← Quay lại Chat", type="secondary", use_container_width=True):
+                st.session_state["view_mode"] = "chat"
+                st.rerun()
+
+    st.markdown("---")
+
+    # Form nhập liệu 2 cột trực quan
+    col_left, col_right = st.columns(2, gap="large")
+
+    with col_left:
+        st.subheader("1. 🗄️ Nguồn Dữ liệu Database")
+
+        data_mode_options = [
+            "🎮 Dùng dữ liệu mẫu (SQLite Demo, không cần MySQL)",
+            "🔌 Kết nối MySQL Database của tôi"
+        ]
+        saved_mode_idx = saved.get("data_mode_index", 0)
+        if saved_mode_idx >= len(data_mode_options):
+            saved_mode_idx = 0
+
+        data_mode = st.radio(
+            "Chọn kiểu dữ liệu",
+            data_mode_options,
+            index=saved_mode_idx,
+            help="Dữ liệu mẫu chứa 1,000+ giao dịch kinh doanh chocolate 2023 với nhân viên, sản phẩm, doanh số."
+        )
+        use_demo = data_mode.startswith("🎮")
+
+        if use_demo:
+            st.info("💡 **Dữ liệu mẫu (In-Memory SQLite)**: Đã tích hợp sẵn các bảng `sales`, `products`, `salespersons`, `regions` với dữ liệu doanh số thực tế 2023. Không cần cấu hình gì thêm!")
+            db_host = db_port = db_user = db_pass = db_name = ""
+            use_ssl = False
+            run_local = False
+        else:
+            run_local = st.checkbox(
+                "🖥️ Database chạy trên máy Local (localhost)",
+                value=saved.get("run_local", False),
+                help="Tự động điền Host = localhost và thử các alias (127.0.0.1, host.docker.internal)."
+            )
+
+            if run_local:
+                st.caption("ℹ️ **Lưu ý:** `localhost` chỉ hoạt động khi bạn đang chạy app trên cùng máy tính với MySQL.")
+                db_host = st.text_input("Host", value=saved.get("db_host", "localhost") or "localhost")
+            else:
+                default_host = saved.get("db_host", "")
+                if default_host in ("localhost", "127.0.0.1"):
+                    default_host = ""
+                db_host = st.text_input("Host", value=default_host, placeholder="VD: mysql-xxx.aivencloud.com")
+
+            c_p1, c_p2 = st.columns([1, 2])
+            with c_p1:
+                db_port_raw = st.text_input("Port", value=saved.get("db_port", "3306"))
+            with c_p2:
+                db_user = st.text_input("User", value=saved.get("db_user", "root"))
+
+            db_pass = st.text_input("Password", value=saved.get("db_pass", ""), type="password")
+            db_name = st.text_input("Database Name", value=saved.get("db_name", ""), placeholder="VD: my_company_db")
+            use_ssl = st.checkbox(
+                "Dùng SSL (Bắt buộc với hầu hết MySQL Cloud: Aiven, Railway...)",
+                value=saved.get("use_ssl", not run_local)
+            )
+
+            db_host = db_host.strip()
+            db_user = db_user.strip()
+            db_name = db_name.strip()
+            db_port_digits = "".join(ch for ch in db_port_raw if ch.isdigit())
+            db_port = db_port_digits or "3306"
+
+    with col_right:
+        st.subheader("2. 🤖 Nhà cung cấp AI (Provider)")
+
+        provider_list = list(PROVIDER_CONFIGS.keys())
+        saved_provider = saved.get("provider", "OpenRouter")
+        provider_idx = provider_list.index(saved_provider) if saved_provider in provider_list else 0
+
+        provider = st.selectbox("Chọn Provider AI", provider_list, index=provider_idx)
+        provider_cfg = PROVIDER_CONFIGS[provider]
+
+        # Lấy API Key đã lưu
+        if provider == "OpenRouter":
+            default_key = saved.get("api_key_openrouter", "")
+        elif provider == "Gemini (Google)":
+            default_key = saved.get("api_key_gemini", "")
+        else:
+            default_key = saved.get("api_key_qwen", "")
+
+        api_key = st.text_input(
+            f"API Key cho {provider}",
+            value=default_key,
+            type="password",
+            help=provider_cfg["key_help"],
+            placeholder=provider_cfg["key_placeholder"],
+        )
+
+        clean_api_key = api_key.strip()
+        is_openrouter_key = clean_api_key.startswith("sk-or-v1-")
+
+        if is_openrouter_key and provider != "OpenRouter":
+            st.info("💡 Phát hiện API Key của **OpenRouter**. Hệ thống sẽ tự động định tuyến qua OpenRouter Base URL (`https://openrouter.ai/api/v1`).")
+
+        model_options = provider_cfg["models"]
+        saved_model = saved.get("model_name", "")
+        model_idx = model_options.index(saved_model) if saved_model in model_options else 0
+        selected_model = st.selectbox("Chọn Model AI", model_options, index=model_idx)
+
+        custom_base_url = ""
+        custom_model_input = ""
+        if provider == "OpenRouter" or is_openrouter_key:
+            with st.expander("🔧 Cấu hình nâng cao OpenRouter", expanded=False):
+                custom_base_url = st.text_input(
+                    "Base URL",
+                    value=saved.get("openrouter_base_url", OPENROUTER_BASE_URL),
+                    help="Mặc định là https://openrouter.ai/api/v1"
+                ).strip() or OPENROUTER_BASE_URL
+                custom_model_input = st.text_input(
+                    "Nhập Model ID tùy chỉnh (VD: deepseek/deepseek-r1)",
+                    value=saved.get("custom_openrouter_model", ""),
+                    help="Để trống nếu dùng model đã chọn trong danh sách ở trên."
+                ).strip()
+                if custom_model_input:
+                    selected_model = custom_model_input
+
+        elif provider == "Qwen (Alibaba Cloud)":
+            with st.expander("🔧 Base URL nâng cao (Qwen)", expanded=False):
+                custom_base_url = st.text_input(
+                    "Base URL",
+                    value=saved.get("qwen_base_url", DASHSCOPE_BASE_URL)
+                ).strip() or DASHSCOPE_BASE_URL
+
+    st.markdown("---")
+
+    # 3. Tùy chọn nâng cao & Lưu trữ
+    st.subheader("3. ⚡ Tùy chọn Phân tích & Lưu trữ Cấu hình")
+    c_opt1, c_opt2 = st.columns(2, gap="large")
+
+    with c_opt1:
+        remember_config = st.checkbox(
+            "💾 Tự động lưu cấu hình trên máy này (không cần nhập lại)",
+            value=saved.get("remember_config", True),
+            help="Lưu vào file cục bộ an toàn, không đẩy lên Git."
+        )
+        auto_connect = st.checkbox(
+            "⚡ Tự động kết nối & bỏ qua màn hình này ở các lần mở app sau",
+            value=saved.get("auto_connect", True),
+            help="Mở app là vào thẳng màn hình Chat phân tích dữ liệu ngay."
+        )
+        enable_auto_insights = st.checkbox(
+            "💡 Tự động tìm Insight & Bất thường (AI)",
+            value=saved.get("enable_auto_insights", True),
+            help="Tự động phân tích sâu và đề xuất kế hoạch hành động khi có xu hướng bất thường."
+        )
+
+    with c_opt2:
+        enable_self_check = st.checkbox(
+            "🛡️ Bật kiểm định SQL bằng AI (self-check)",
+            value=saved.get("enable_self_check", True),
+            help="Tự kiểm tra độ chính xác của SQL trước khi trả về kết quả."
+        )
+        enable_cache = st.checkbox(
+            "♻️ Dùng lại kết quả cho câu hỏi trùng lặp (cache)",
+            value=saved.get("enable_cache", True),
+            help="Tiết kiệm quota API khi hỏi lại các câu hỏi cũ trong phiên."
+        )
+        forecast_periods = st.slider("Số kỳ dự báo xu hướng tương lai", 1, 12, saved.get("forecast_periods", 3))
+
+    with st.expander("📝 Mô tả Schema / Quy tắc Nghiệp vụ Bổ sung (Tùy chọn)", expanded=False):
+        schema_context_input = st.text_area(
+            "Mô tả nghiệp vụ hoặc chú thích thêm về cấu trúc bảng (Hệ thống sẽ tự trích xuất nếu để trống)",
+            value=st.session_state.get("schema_context", ""),
+            height=120
+        )
+
+    # Nút hành động chính
+    st.markdown("###")
+    col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+
+    with col_btn1:
+        connect_btn = st.button("🚀 Bắt đầu Sử dụng & Kết nối", type="primary", use_container_width=True)
+
+    with col_btn2:
+        if is_already_connected:
+            if st.button("← Quay lại Chat", use_container_width=True):
+                st.session_state["view_mode"] = "chat"
+                st.rerun()
+
+    with col_btn3:
+        if st.button("🗑️ Xóa cấu hình đã lưu", use_container_width=True):
+            clear_saved_config()
+            st.session_state["_auto_connect_attempted"] = True
+            st.session_state["connected"] = False
+            st.success("✅ Đã xóa toàn bộ cấu hình đã lưu!")
+            st.rerun()
+
+    # Đồng bộ session state
+    st.session_state["enable_auto_insights"] = enable_auto_insights
+    st.session_state["enable_self_check"] = enable_self_check
+    st.session_state["enable_cache"] = enable_cache
+    st.session_state["forecast_periods"] = forecast_periods
+
+    effective_provider = "OpenRouter" if is_openrouter_key else provider
+
+    if connect_btn:
+        if not clean_api_key:
+            st.error(f"❌ Vui lòng nhập API Key cho {effective_provider}!")
+        elif not use_demo and not (db_host and db_user and db_name):
+            st.error("❌ Vui lòng điền đầy đủ Host, User, Database Name!")
+        else:
+            with st.spinner("Đang kết nối Database & trích xuất Schema..."):
+                try:
+                    if use_demo:
+                        engine = build_demo_engine()
+                    else:
+                        engine = try_connect(
+                            db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
+                        )
+
+                    client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
+                    extracted_schema = auto_extract_schema(engine)
+                    final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+
+                    final_model_name = selected_model
+                    if effective_provider == "OpenRouter":
+                        final_model_name = normalize_model_for_openrouter(selected_model)
+
+                    # Lưu cấu hình nếu người dùng chọn ghi nhớ
+                    if remember_config:
+                        config_to_save = saved.copy()
+                        config_to_save.update({
+                            "data_mode_index": 0 if use_demo else 1,
+                            "run_local": run_local,
+                            "db_host": db_host,
+                            "db_port": db_port,
+                            "db_user": db_user,
+                            "db_pass": db_pass,
+                            "db_name": db_name,
+                            "use_ssl": use_ssl,
+                            "provider": effective_provider,
+                            "model_name": final_model_name,
+                            "enable_auto_insights": enable_auto_insights,
+                            "enable_self_check": enable_self_check,
+                            "enable_cache": enable_cache,
+                            "forecast_periods": forecast_periods,
+                            "remember_config": True,
+                            "auto_connect": auto_connect,
+                        })
+                        if effective_provider == "OpenRouter":
+                            config_to_save["api_key_openrouter"] = clean_api_key
+                            config_to_save["openrouter_base_url"] = custom_base_url
+                            config_to_save["custom_openrouter_model"] = custom_model_input
+                        elif effective_provider == "Gemini (Google)":
+                            config_to_save["api_key_gemini"] = clean_api_key
+                        elif effective_provider == "Qwen (Alibaba Cloud)":
+                            config_to_save["api_key_qwen"] = clean_api_key
+                            config_to_save["qwen_base_url"] = custom_base_url
+
+                        save_user_config(config_to_save)
+
+                    st.session_state.update({
+                        "engine": engine,
+                        "client": client,
+                        "provider": effective_provider,
+                        "model_name": final_model_name,
+                        "schema_context": final_schema,
+                        "connected": True,
+                        "_db_pass_for_sanitize": db_pass,
+                        "is_demo": use_demo,
+                        "db_dialect": "SQLite" if use_demo else "MySQL",
+                        "view_mode": "chat",
+                    })
+                    st.toast(f"✅ Kết nối thành công! (AI: {effective_provider} — {final_model_name})", icon="🚀")
+                    st.rerun()
+                except Exception as e:
+                    st.session_state["connected"] = False
+                    err_display = sanitize_error(str(e), db_pass)
+                    if "429" in err_display or "RESOURCE_EXHAUSTED" in err_display:
+                        st.error(
+                            f"🚫 API Key {effective_provider} hết quota hôm nay. Vui lòng tạo key mới hoặc đổi Provider."
+                        )
+                    elif not use_demo and run_local:
+                        st.error(
+                            f"❌ Không kết nối được tới MySQL local (đã thử: {', '.join(LOCAL_HOST_ALIASES)}).\n\n"
+                            f"Lỗi: {err_display}"
+                        )
+                    else:
+                        st.error(f"❌ Lỗi kết nối: {err_display}")
