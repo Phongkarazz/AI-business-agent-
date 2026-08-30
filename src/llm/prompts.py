@@ -1,5 +1,6 @@
 """
 Prompt templates and builders for SQL generation, validation, anomaly explanation, and automatic business insights.
+Strictly grounded in provided database schema to prevent hallucination.
 """
 
 
@@ -12,34 +13,36 @@ def get_dialect_hints(dialect: str) -> str:
     return ""
 
 
-HISTORY_HINT = (
-    "Nếu có bảng lưu lịch sử theo thời gian (chứa cột from_date/to_date, ví dụ: salaries, "
-    "titles, dept_emp...) và câu hỏi hỏi về giá trị/trạng thái HIỆN TẠI (VD: 'lương hiện tại', "
-    "'phòng ban hiện tại', 'top N hiện nay'), chỉ lấy bản ghi đang hiệu lực (thường là "
-    "to_date = '9999-01-01', hoặc dùng subquery lấy bản ghi có MAX(from_date) theo từng khóa "
-    "chính) để tránh JOIN sinh ra nhiều dòng trùng lặp cho cùng 1 thực thể. "
-    "NGƯỢC LẠI, nếu câu hỏi cần đếm/liệt kê SỐ LẦN THAY ĐỔI, LỊCH SỬ, BIẾN ĐỘNG, hoặc 'đã từng' (VD: "
-    "'biến động salary năm 2021', 'đã từng đổi chức danh bao nhiêu lần', 'lịch sử lương'), TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01' — "
-    "phải giữ nguyên toàn bộ các dòng lịch sử trong khoảng thời gian được hỏi để tính toán chính xác."
-)
-
-
 def build_sql_prompt(schema_context: str, dialect: str, user_query: str) -> str:
-    """Xây dựng prompt tạo câu lệnh SQL từ ngôn ngữ tự nhiên."""
+    """Xây dựng prompt tạo câu lệnh SQL từ ngôn ngữ tự nhiên với Schema Grounding nghiêm ngặt."""
     dialect_hint = get_dialect_hints(dialect)
     return f"""Bạn là chuyên gia SQL hàng đầu thế giới.
-Schema Database:
+
+=== SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ===
 {schema_context}
+====================================
 
 Lưu ý Dialect: {dialect_hint}
-Lưu ý Bảng Lịch sử & Dữ liệu thời gian: {HISTORY_HINT}
 
-YÊU CẦU QUAN TRỌNG:
-1. Viết 1 câu lệnh SQL SELECT duy nhất trả lời chính xác câu hỏi: "{user_query}"
-2. Kiểm tra kỹ CÚ PHÁP: Mọi dấu ngoặc mở '(' và đóng ')' phải tuyệt đối cân đối, không được thừa hoặc thiếu dấu ngoặc.
-3. Nếu tính toán phức tạp (nhân chia, DATEDIFF, LEAST, GREATEST,...), hãy gom nhóm dấu ngoặc chuẩn xác.
-4. Nếu không có GROUP BY, bắt buộc thêm LIMIT 1000 để tránh trả về quá nhiều dữ liệu.
-5. CHỈ TRẢ VỀ DUY NHẤT CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH), TUYỆT ĐỐI không thêm comment #, -- hay lời dẫn mở đầu."""
+QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
+1. SCHEMA GROUNDING: CHỈ ĐƯỢC PHÉP SỬ DỤNG CÁC BẢNG VÀ CỘT XUẤT HIỆN TRONG SCHEMA Ở TRÊN.
+   - Tuyệt đối KHÔNG tự ý suy đoán hoặc bịa ra các bảng không có trong Schema (như `employees`, `salaries`, `titles`, `dept_emp`).
+   - Nếu trong Schema có bảng `people` hoặc `salespersons`, hãy dùng bảng đó cho nhân viên/người bán.
+   - Nếu trong Schema có bảng `products`, hãy dùng bảng đó cho sản phẩm.
+   - Nếu trong Schema có bảng `sales`, hãy dùng bảng đó cho doanh số/giao dịch.
+2. CÚ PHÁP CHUẨN XÁC:
+   - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
+   - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
+   - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
+3. NẾU BẢNG CÓ CỘT HIỆU LỰC (from_date / to_date):
+   - Nếu câu hỏi hỏi về GIÁ TRỊ HIỆN TẠI (VD: 'lương hiện tại', 'trạng thái hiện nay'): lọc bản ghi đang hiệu lực (`to_date = '9999-01-01'` hoặc `MAX(from_date)`).
+   - Nếu câu hỏi hỏi về LỊCH SỬ / BIẾN ĐỘNG / MỐC NĂM CŨ (VD: 'năm 2021', 'biến động'): KHÔNG lọc `to_date = '9999-01-01'`, hãy lọc theo đúng mốc thời gian của câu hỏi.
+4. ĐỊNH DẠNG ĐẦU RA:
+   - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH).
+   - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích hay markdown code block bên ngoài.
+
+Câu hỏi của người dùng: "{user_query}"
+Câu lệnh SQL:"""
 
 
 def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str) -> str:
@@ -47,23 +50,23 @@ def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_que
     dialect_hint = get_dialect_hints(dialect)
     return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra ĐÃ BỊ LỖI THỰC THI trên {dialect}.
 
-Schema Database:
+=== SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ===
 {schema_context}
+====================================
 Lưu ý Dialect: {dialect_hint}
-Lưu ý Bảng Lịch sử: {HISTORY_HINT}
 
 Câu hỏi gốc: "{user_query}"
 
 Câu SQL bị lỗi:
 {sql_query}
 
-THÔNG BÁO LỖI TỪ DATABASE / HỆ THỐNG:
+THÔNG BÁO LỖI TỪ HỆ THỐNG:
 {reason_or_error}
 
 HƯỚNG DẪN SỬA LỖI:
-- Nếu lỗi Syntax Error gần dấu ngoặc ')': Hãy đếm và kiểm tra lại từng cặp dấu ngoặc '(' và ')' trong các hàm toán học, hàm tổng hợp (SUM, AVG) và hàm ngày tháng.
-- Nếu lỗi tên bảng / tên cột: Kiểm tra lại chính xác tên bảng và tên cột trong Schema ở trên.
-- Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ CÂU SQL THUẦN (SELECT hoặc WITH), TUYỆT ĐỐI không thêm comment #, -- hay lời giải thích."""
+1. Nếu lỗi 'Table doesn't exist' (Bảng không tồn tại): Hãy nhìn kỹ SCHEMA ở trên và chỉ dùng đúng các bảng có thật trong danh sách! Tuyệt đối không dùng các bảng ảo không có trong Schema.
+2. Nếu lỗi cú pháp: Kiểm tra lại `COUNT(*)` (thay vì `COUNT()`), kiểm tra cân đối dấu ngoặc đơn () trong các hàm tổng hợp và ngày tháng.
+3. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str) -> str:
@@ -74,10 +77,9 @@ Câu hỏi gốc: "{user_query}"
 SQL: {sql_query}
 5 dòng mẫu: {sample_str}
 
-Kiểm tra SQL có trả lời ĐÚNG và ĐẦY ĐỦ câu hỏi không.
-QUY TẮC BẢNG LỊCH SỬ (salaries, titles, dept_emp...):
-- Nếu câu hỏi hỏi về GIÁ TRỊ HIỆN TẠI (VD: 'lương hiện tại', 'phòng ban hiện tại', 'top N hiện nay'): Bắt buộc lọc bản ghi đang hiệu lực (to_date = '9999-01-01' hoặc MAX(from_date)).
-- Nếu câu hỏi hỏi về LỊCH SỬ / BIẾN ĐỘNG / ĐẾM SỐ LẦN ĐỔI / MỐC NĂM CŨ (VD: 'biến động salary năm 2021', 'đã từng đổi chức danh bao nhiêu lần'): TUYỆT ĐỐI KHÔNG bắt lọc to_date = '9999-01-01', vì cần giữ các bản ghi lịch sử trong khoảng thời gian đó để tính toán chính xác.
+Kiểm tra SQL có trả lời ĐÚNG và ĐẦY ĐỦ câu hỏi không:
+1. SQL có dùng đúng các bảng và cột thực tế có trong Schema không?
+2. SQL có tính toán đúng yêu cầu của câu hỏi không?
 
 QUAN TRỌNG: "ly_do" PHẢI ngắn gọn, TỐI ĐA 20 từ.
 Nếu SQL đã đúng, chỉ cần ghi "SQL hợp lệ" hoặc tương đương.

@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP
 from src.database.query_runner import read_sql_capped, sanitize_error
+from src.database.schema import get_table_names
 from src.analytics.heuristics import is_id_like
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
@@ -244,8 +245,23 @@ def run_agent(
                 result["sql"] = sql_query
                 return result
 
+            # Bắt lỗi 1146 / Table doesn't exist để tự động bơm danh sách bảng thực tế
+            augmented_error = error_msg
+            lowered_err = error_msg.lower()
+            if "doesn't exist" in lowered_err or "1146" in lowered_err or "no such table" in lowered_err:
+                try:
+                    valid_tables = get_table_names(engine)
+                    if valid_tables:
+                        augmented_error += (
+                            f"\n\nLƯU Ý ĐẶC BIỆT: Bảng bạn vừa gọi không tồn tại trong database này! "
+                            f"Database này CHỈ CÓ CÁC BẢNG SAU: {', '.join(valid_tables)}. "
+                            f"Hãy nhìn kỹ danh sách trên và viết lại SQL dùng đúng các bảng này!"
+                        )
+                except Exception:
+                    pass
+
             fix_prompt = build_fix_prompt(
-                schema_context, dialect, user_query, sql_query, error_msg
+                schema_context, dialect, user_query, sql_query, augmented_error
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
             sql_query = fixed_sql or sql_query
