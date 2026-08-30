@@ -1,6 +1,6 @@
 """
 Reusable UI components for rendering query results, charts, forecasts, automated insights, and notifications.
-Features clean Silent Fix interface and tidy collapsed technical logs.
+Features clean Silent Fix interface, 1-Click Copy Error button, and conversational AI explanation handling.
 """
 
 import streamlit as st
@@ -23,15 +23,36 @@ def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: b
 
 def render_result(result: dict, turn_id: str):
     """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với bảng, biểu đồ, insight và log kỹ thuật thu gọn."""
-    # 1. Hiển thị lỗi nếu có
+    # 1. Hiển thị giải thích tự nhiên từ AI nếu câu hỏi nằm ngoài phạm vi Schema
+    if result.get("explanation"):
+        st.info(f"💡 **Thông báo từ Trợ lý AI:**\n\n{result['explanation']}")
+        return
+
+    # 2. Hiển thị lỗi nếu có kèm Khung Sao chép Lỗi 1-Click (Copy to Clipboard)
     if result.get("error"):
         st.error(f"❌ {result['error']}")
+
+        # Chuẩn bị văn bản báo lỗi chuẩn chỉnh để 1-click copy
+        logs = result.get("logs", [])
+        logs_str = "\n".join(f"  • {l}" for l in logs) if logs else "  • Không có nhật ký thử lại."
+        debug_copy_text = (
+            f"=== THÔNG TIN LỖI TRUY VẤN AI BUSINESS AGENT ===\n"
+            f"• Câu hỏi gốc: {result.get('query', '')}\n"
+            f"• Thông báo lỗi: {result.get('error', '')}\n\n"
+            f"• Câu lệnh SQL / Phản hồi cuối cùng:\n{result.get('sql', 'N/A')}\n\n"
+            f"• Nhật ký các lần tự sửa lỗi:\n{logs_str}\n"
+            f"================================================"
+        )
+
+        st.caption("📋 **Sao chép toàn bộ thông tin lỗi** *(Di chuột vào khung bên dưới và bấm biểu tượng 📋 Copy ở góc trên bên phải)*:")
+        st.code(debug_copy_text, language="markdown")
+
         with st.expander("🛠️ Chi tiết Kỹ thuật & Lịch sử lỗi (Debug Logs)", expanded=False):
             if result.get("sql"):
                 st.markdown("**Câu lệnh SQL cuối cùng:**")
                 st.code(result["sql"], language="sql")
             st.markdown("**Nhật ký các lần thử:**")
-            for log in result.get("logs", []):
+            for log in logs:
                 st.text(f"• {log}")
         return
 
@@ -45,7 +66,7 @@ def render_result(result: dict, turn_id: str):
                 st.code(sql_query, language="sql")
         return
 
-    # 2. Hiển thị Bảng dữ liệu & Nút Tải CSV
+    # 3. Hiển thị Bảng dữ liệu & Nút Tải CSV
     st.dataframe(df, width='stretch')
     c_csv, _ = st.columns([2, 5])
     with c_csv:
@@ -57,7 +78,7 @@ def render_result(result: dict, turn_id: str):
             key=f"csv_{turn_id}"
         )
 
-    # 3. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
+    # 4. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
     anomalies_info = result.get("anomalies_info") or analyze_data_anomalies(df)
     has_anomaly = anomalies_info.get("has_anomaly", False)
 
@@ -131,7 +152,7 @@ def render_result(result: dict, turn_id: str):
             st.plotly_chart(fig, width='stretch', key=f"forecast_{turn_id}")
             st.caption(f"Phương pháp: {method}")
 
-    # 4. Chi tiết Kỹ thuật & SQL (Expander thu gọn ở cuối cùng)
+    # 5. Chi tiết Kỹ thuật & SQL (Expander thu gọn ở cuối cùng)
     with st.expander("🛠️ Chi tiết Kỹ thuật & Câu lệnh SQL (Debug)", expanded=False):
         if sql_query:
             st.markdown("**Câu lệnh SQL đã thực thi:**")

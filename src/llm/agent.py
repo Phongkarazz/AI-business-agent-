@@ -1,6 +1,6 @@
 """
 SQL Generation and Execution Agent with safety validation, parenthesis checking,
-self-healing loop, and automatic business insight discovery.
+self-healing loop, conversational explanation detection, and automatic business insight discovery.
 """
 
 import json
@@ -65,6 +65,21 @@ def is_safe_select(sql: str) -> bool:
         if re.search(rf"\b{kw}\b", lowered):
             return False
     return True
+
+
+def is_conversational_explanation(text_response: str) -> bool:
+    """Nhận diện khi mô hình AI trả về câu giải thích tự nhiên (ví dụ: schema không có bảng phù hợp) thay vì SQL."""
+    if not text_response:
+        return False
+
+    cleaned = text_response.strip().lower()
+    explanation_indicators = [
+        "tôi xin lỗi", "xin lỗi", "tôi xin nhận lỗi", "không có bảng", "không tìm thấy bảng",
+        "schema không có", "schema không chứa", "không chứa thông tin", "không thể cung cấp câu sql",
+        "câu hỏi yêu cầu dữ liệu từ các bảng không tồn tại", "cơ sở dữ liệu không có",
+        "sorry", "i apologize", "no table found", "schema does not contain", "cannot write a query"
+    ]
+    return any(indicator in cleaned for indicator in explanation_indicators)
 
 
 def detect_duplicate_entity_warning(df: pd.DataFrame) -> str | None:
@@ -146,6 +161,7 @@ def run_agent(
         "logs": [],
         "attempts": 0,
         "error": None,
+        "explanation": None,
         "anomalies_info": None,
         "insights": None,
     }
@@ -158,10 +174,20 @@ def run_agent(
         result["error"] = f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
         return result
 
+    # 1.1 Kiểm tra nếu AI trả về câu giải thích (ví dụ: schema không có dữ liệu này)
+    if is_conversational_explanation(sql_query):
+        result["explanation"] = sql_query
+        return result
+
     # 2. Vòng lặp thực thi, kiểm định và tự sửa lỗi âm thầm (Silent Self-Healing)
     for attempt in range(1, 4):
         result["attempts"] = attempt
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
+
+        # Kiểm tra nếu ở các lần thử AI nhận ra không có bảng phù hợp
+        if is_conversational_explanation(sql_query):
+            result["explanation"] = sql_query
+            return result
 
         if not is_safe_select(sql_query):
             result["logs"].append(f"❌ Kiểm tra an toàn thất bại: Không phải lệnh SELECT/WITH an toàn.")
