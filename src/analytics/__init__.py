@@ -1,5 +1,5 @@
 """
-Analytics package for column heuristics, statistical forecasting, anomaly detection, and starter prompts.
+Analytics package for column heuristics, statistical forecasting, anomaly detection, language detection, and starter prompts.
 """
 
 from .heuristics import (
@@ -11,6 +11,7 @@ from .heuristics import (
     get_best_name_column,
     pick_label_column,
     generate_starter_prompts,
+    detect_query_language,
 )
 from .forecasting import forecast_series
 from .anomaly import detect_outliers, analyze_data_anomalies
@@ -24,6 +25,7 @@ __all__ = [
     "get_best_name_column",
     "pick_label_column",
     "generate_starter_prompts",
+    "detect_query_language",
     "forecast_series",
     "detect_outliers",
     "analyze_data_anomalies",

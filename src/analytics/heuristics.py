@@ -1,10 +1,46 @@
 """
-Column classification, starter prompts generator, and heuristic utilities for business datasets.
+Column classification, language detection, starter prompts generator, and heuristic utilities for business datasets.
 """
 
 import re
 import pandas as pd
 from src.config import ID_LIKE_REGEX, NAME_LIKE_REGEX, TIME_KEYWORDS
+
+VI_CHAR_REGEX = re.compile(r'[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]', re.IGNORECASE)
+EN_MARKERS = {
+    "what", "which", "how", "many", "much", "best", "selling", "revenue", "sales",
+    "product", "products", "rep", "reps", "salesperson", "salespersons", "employee",
+    "employees", "by", "per", "in", "of", "and", "the", "for", "year", "years",
+    "month", "months", "trend", "trends", "change", "over", "time", "highest",
+    "lowest", "average", "total", "count", "country", "countries", "region", "regions",
+    "show", "list", "give", "me", "find", "get", "who", "where", "when"
+}
+VI_MARKERS = {
+    "la", "gi", "nao", "bao", "nhieu", "nhan", "vien", "san", "pham", "doanh",
+    "thu", "ban", "hang", "thang", "nam", "quy", "khu", "vuc", "quoc", "gia",
+    "tong", "nhat", "hop", "moi", "theo", "cac", "nhung", "co", "hay", "khong",
+    "cho", "toi", "xem", "liet", "ke"
+}
+
+
+def detect_query_language(query: str) -> str:
+    """Tự động phát hiện ngôn ngữ của câu hỏi: 'vi' (Tiếng Việt) hoặc 'en' (Tiếng Anh)."""
+    if not query or not query.strip():
+        return "vi"
+
+    text = query.strip()
+    # 1. Nếu có ký tự có dấu tiếng Việt
+    if VI_CHAR_REGEX.search(text):
+        return "vi"
+
+    words = set(re.findall(r'\b[a-zA-Z]+\b', text.lower()))
+    en_matches = len(words.intersection(EN_MARKERS))
+    vi_matches = len(words.intersection(VI_MARKERS))
+
+    if en_matches > vi_matches:
+        return "en"
+
+    return "vi"
 
 
 def is_id_like(col_name: str) -> bool:

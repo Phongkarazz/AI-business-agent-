@@ -1,7 +1,7 @@
 """
 SQL Generation and Execution Agent with safety validation, parenthesis checking,
 self-healing loop (including 0-row empty result recovery), conversational explanation detection,
-automatic business insight discovery, and follow-up question suggestions.
+automatic business insight discovery with Priority Tagging, bilingual support, and follow-up question suggestions.
 """
 
 import json
@@ -11,7 +11,7 @@ import pandas as pd
 from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP
 from src.database.query_runner import read_sql_capped, sanitize_error
 from src.database.schema import get_table_names
-from src.analytics.heuristics import is_id_like
+from src.analytics.heuristics import is_id_like, detect_query_language
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
 from .prompts import (
@@ -103,10 +103,10 @@ def detect_duplicate_entity_warning(df: pd.DataFrame) -> str | None:
     return None
 
 
-def self_check_sql(client, provider: str, model_name: str, schema_context: str, user_query: str, sql_query: str, df: pd.DataFrame) -> dict:
+def self_check_sql(client, provider: str, model_name: str, schema_context: str, user_query: str, sql_query: str, df: pd.DataFrame, lang: str = "vi") -> dict:
     """Thực hiện bước AI QA self-check để kiểm định kết quả SQL."""
     sample = df.head(5).to_string(index=False)
-    prompt = build_self_check_prompt(schema_context, user_query, sql_query, sample)
+    prompt = build_self_check_prompt(schema_context, user_query, sql_query, sample, lang=lang)
     res, err = call_llm(client, provider, model_name, prompt)
 
     if not res:
@@ -124,32 +124,32 @@ def self_check_sql(client, provider: str, model_name: str, schema_context: str, 
         return {"day_du": True, "ly_do": "Không parse được JSON self-check."}
 
 
-def explain_anomalies_agent(client, provider: str, model_name: str, user_query: str, x_col: str, y_col: str, outliers_df: pd.DataFrame) -> str | None:
+def explain_anomalies_agent(client, provider: str, model_name: str, user_query: str, x_col: str, y_col: str, outliers_df: pd.DataFrame, lang: str = "vi") -> str | None:
     """Gọi LLM giải thích nguyên nhân kinh doanh của các điểm bất thường."""
     points = outliers_df[[x_col, y_col]].to_dict(orient="records")
-    prompt = build_anomaly_prompt(user_query, x_col, y_col, points)
+    prompt = build_anomaly_prompt(user_query, x_col, y_col, points, lang=lang)
     res, _ = call_llm(client, provider, model_name, prompt)
     return res
 
 
-def generate_auto_insights(client, provider: str, model_name: str, user_query: str, df: pd.DataFrame, anomalies_info: dict) -> str | None:
-    """Tự động phân tích và sinh báo cáo Insight Kinh doanh khi phát hiện xu hướng hoặc bất thường."""
+def generate_auto_insights(client, provider: str, model_name: str, user_query: str, df: pd.DataFrame, anomalies_info: dict, lang: str = "vi") -> str | None:
+    """Tự động phân tích và sinh báo cáo Insight Kinh doanh với Gắn Nhãn Mức Độ Ưu Tiên (Priority Tagging)."""
     if df is None or df.empty:
         return None
 
     sample_str = df.head(10).to_string(index=False)
-    prompt = build_auto_insight_prompt(user_query, sample_str, anomalies_info)
+    prompt = build_auto_insight_prompt(user_query, sample_str, anomalies_info, lang=lang)
     insight, _ = call_llm(client, provider, model_name, prompt)
     return insight
 
 
-def generate_followup_questions(client, provider: str, model_name: str, user_query: str, schema_context: str, df: pd.DataFrame) -> list[str]:
+def generate_followup_questions(client, provider: str, model_name: str, user_query: str, schema_context: str, df: pd.DataFrame, lang: str = "vi") -> list[str]:
     """Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up suggestions) dựa trên kết quả hiện tại."""
     if df is None or df.empty:
         return []
     try:
         sample_str = df.head(5).to_string(index=False)
-        prompt = build_followup_prompt(user_query, schema_context, sample_str)
+        prompt = build_followup_prompt(user_query, schema_context, sample_str, lang=lang)
         res, _ = call_llm(client, provider, model_name, prompt)
         if not res:
             return []
@@ -175,8 +175,12 @@ def run_agent(
     enable_auto_insights: bool = True
 ) -> dict:
     """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi âm thầm (bao gồm cứu kết quả 0 dòng) và tự động khám phá Insight."""
+    # 0. Tự động nhận diện ngôn ngữ của câu hỏi (vi / en)
+    lang = detect_query_language(user_query)
+
     result = {
         "query": user_query,
+        "lang": lang,
         "df": None,
         "sql": None,
         "logs": [],
@@ -189,11 +193,11 @@ def run_agent(
     }
 
     # 1. Sinh SQL ban đầu
-    initial_prompt = build_sql_prompt(schema_context, dialect, user_query)
+    initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt)
 
     if not sql_query:
-        result["error"] = f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
+        result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
         return result
 
     # 1.1 Kiểm tra nếu AI trả về câu giải thích (ví dụ: schema không có dữ liệu này)
@@ -212,14 +216,16 @@ def run_agent(
             return result
 
         if not is_safe_select(sql_query):
-            result["logs"].append(f"❌ Kiểm tra an toàn thất bại: Không phải lệnh SELECT/WITH an toàn.")
+            result["logs"].append("❌ Kiểm tra an toàn thất bại: Không phải lệnh SELECT/WITH an toàn.")
             if attempt == 3:
-                result["error"] = "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT/WITH đơn, không nhiều câu lệnh)."
+                result["error"] = "Unsafe SQL query (Only single SELECT/WITH statements allowed)." if lang == "en" else "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT/WITH đơn, không nhiều câu lệnh)."
                 result["sql"] = sql_query
                 return result
 
             fix_prompt = build_fix_prompt(
-                schema_context, dialect, user_query, sql_query, "Câu lệnh SQL phải bắt đầu bằng SELECT hoặc WITH, không chứa ký tự cấm."
+                schema_context, dialect, user_query, sql_query,
+                "Query must start with SELECT or WITH and contain no forbidden keywords.",
+                lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
             sql_query = fixed_sql or sql_query
@@ -235,7 +241,7 @@ def run_agent(
                 return result
 
             fix_prompt = build_fix_prompt(
-                schema_context, dialect, user_query, sql_query, paren_err
+                schema_context, dialect, user_query, sql_query, paren_err, lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
             sql_query = fixed_sql or sql_query
@@ -249,14 +255,18 @@ def run_agent(
 
             # Tự động phát hiện & sửa nếu kết quả trả về 0 dòng (0-Row Empty Result Recovery)
             if df is not None and df.empty and attempt < 3:
-                result["logs"].append(f"⚠️ Kết quả trả về 0 dòng dữ liệu (dấu hiệu dùng CURRENT_DATE() hoặc lọc WHERE quá chặt). Đang tự động nới lỏng điều kiện và thử lại...")
+                result["logs"].append("⚠️ Kết quả trả về 0 dòng dữ liệu (dấu hiệu dùng CURRENT_DATE() hoặc lọc WHERE quá chặt). Đang tự động nới lỏng điều kiện và thử lại...")
                 empty_fix_reason = (
+                    "SQL executed successfully but returned 0 ROWS OF DATA.\n"
+                    "- If query uses CURRENT_DATE(), NOW(), CURDATE() or hardcoded recent years: This DB contains historical data. Use (SELECT MAX(date_col) FROM table_name) or remove strict date filters.\n"
+                    "- If query filters Category/Product string: Relax or remove unnecessary WHERE conditions to fetch real data!"
+                    if lang == "en" else
                     "Câu lệnh SQL đã thực thi thành công nhưng trả về 0 DÒNG DỮ LIỆU.\n"
                     "- Nếu câu lệnh có dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc mốc năm cứng: CSDL này chứa dữ liệu lịch sử. Hãy thay thế bằng (SELECT MAX(date_col) FROM table_name) làm mốc ngày gần nhất hoặc bỏ lọc ngày để lấy dữ liệu thực tế.\n"
                     "- Nếu câu lệnh lọc Category/Product/Tên chuỗi: Hãy loại bỏ hoặc nới lỏng các điều kiện WHERE không cần thiết để trả về đúng dữ liệu thực tế cho người dùng!"
                 )
                 fix_prompt = build_fix_prompt(
-                    schema_context, dialect, user_query, sql_query, empty_fix_reason
+                    schema_context, dialect, user_query, sql_query, empty_fix_reason, lang=lang
                 )
                 fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
                 sql_query = fixed_sql or sql_query
@@ -267,9 +277,9 @@ def run_agent(
                 result["logs"].append(f"⚠️ Cảnh báo: {dup_warning}")
 
             if enable_self_check:
-                check = self_check_sql(client, provider, model_name, schema_context, user_query, sql_query, df)
+                check = self_check_sql(client, provider, model_name, schema_context, user_query, sql_query, df, lang=lang)
             else:
-                check = {"day_du": True, "ly_do": "Bỏ qua self-check (đã tắt trong cài đặt)."}
+                check = {"day_du": True, "ly_do": "Skipped self-check." if lang == "en" else "Bỏ qua self-check (đã tắt trong cài đặt)."}
 
             if check.get("day_du", True) or attempt == 3:
                 if check.get("day_du", True):
@@ -280,20 +290,20 @@ def run_agent(
                 result["df"] = df
                 result["sql"] = sql_query
 
-                # 3. Tự động phát hiện bất thường & sinh Insight Kinh doanh
+                # 3. Tự động phát hiện bất thường & sinh Insight Kinh doanh với Priority Tagging
                 if df is not None and not df.empty:
                     anomalies_info = analyze_data_anomalies(df)
                     result["anomalies_info"] = anomalies_info
 
                     if enable_auto_insights:
                         insights = generate_auto_insights(
-                            client, provider, model_name, user_query, df, anomalies_info
+                            client, provider, model_name, user_query, df, anomalies_info, lang=lang
                         )
                         result["insights"] = insights
 
                     # 4. Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up Questions)
                     followups = generate_followup_questions(
-                        client, provider, model_name, user_query, schema_context, df
+                        client, provider, model_name, user_query, schema_context, df, lang=lang
                     )
                     result["followups"] = followups
 
@@ -301,7 +311,7 @@ def run_agent(
 
             result["logs"].append(f"⚠️ QA Self-check phát hiện vấn đề: {check.get('ly_do', '')}")
             fix_prompt = build_fix_prompt(
-                schema_context, dialect, user_query, sql_query, check.get("ly_do", "")
+                schema_context, dialect, user_query, sql_query, check.get("ly_do", ""), lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
             sql_query = fixed_sql or sql_query
@@ -322,6 +332,10 @@ def run_agent(
                     valid_tables = get_table_names(engine)
                     if valid_tables:
                         augmented_error += (
+                            f"\n\nNOTE: The table you referenced does not exist! "
+                            f"Valid tables in this database are ONLY: {', '.join(valid_tables)}. "
+                            f"Please strictly write SQL using ONLY these tables!"
+                            if lang == "en" else
                             f"\n\nLƯU Ý ĐẶC BIỆT: Bảng bạn vừa gọi không tồn tại trong database này! "
                             f"Database này CHỈ CÓ CÁC BẢNG SAU: {', '.join(valid_tables)}. "
                             f"Hãy nhìn kỹ danh sách trên và viết lại SQL dùng đúng các bảng này!"
@@ -330,7 +344,7 @@ def run_agent(
                     pass
 
             fix_prompt = build_fix_prompt(
-                schema_context, dialect, user_query, sql_query, augmented_error
+                schema_context, dialect, user_query, sql_query, augmented_error, lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
             sql_query = fixed_sql or sql_query

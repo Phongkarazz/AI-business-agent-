@@ -1,12 +1,19 @@
 """
 Prompt templates and builders for SQL generation, validation, anomaly explanation,
-automatic business insights, and intelligent follow-up question suggestions.
+automatic business insights with Executive Priority Tagging, and intelligent bilingual follow-up question suggestions.
 Strictly grounded in provided database schema with relative historical time-handling to prevent 0-row results.
 """
 
 
-def get_dialect_hints(dialect: str) -> str:
-    """Trả về hướng dẫn cú pháp SQL theo từng hệ quản trị cơ sở dữ liệu."""
+def get_dialect_hints(dialect: str, lang: str = "vi") -> str:
+    """Trả về hướng dẫn cú pháp SQL theo từng hệ quản trị cơ sở dữ liệu và ngôn ngữ."""
+    if lang == "en":
+        if dialect == "SQLite":
+            return "Database engine is SQLite: use strftime('%Y', col)/strftime('%m', col) for year/month, date((SELECT MAX(col) FROM tbl), '-1 year') for relative time. DO NOT use MySQL MONTH()/YEAR()/CURRENT_DATE()."
+        elif dialect == "MySQL":
+            return "Database engine is MySQL: you can use MONTH()/YEAR()/DATE_FORMAT(), DATE_SUB((SELECT MAX(col) FROM tbl), INTERVAL 1 YEAR) for relative time."
+        return ""
+
     if dialect == "SQLite":
         return "Database đang dùng là SQLite: dùng strftime('%Y', col)/strftime('%m', col) để lấy năm/tháng, date((SELECT MAX(col) FROM tbl), '-1 year') cho thời gian tương đối. KHÔNG dùng MONTH()/YEAR()/CURRENT_DATE() của MySQL."
     elif dialect == "MySQL":
@@ -14,9 +21,46 @@ def get_dialect_hints(dialect: str) -> str:
     return ""
 
 
-def build_sql_prompt(schema_context: str, dialect: str, user_query: str) -> str:
+def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: str = "vi") -> str:
     """Xây dựng prompt tạo câu lệnh SQL từ ngôn ngữ tự nhiên với Schema Grounding nghiêm ngặt."""
-    dialect_hint = get_dialect_hints(dialect)
+    dialect_hint = get_dialect_hints(dialect, lang=lang)
+    if lang == "en":
+        return f"""You are a world-class senior SQL expert.
+
+=== ACTUAL DATABASE SCHEMA ===
+{schema_context}
+==============================
+
+Dialect Notice: {dialect_hint}
+
+MANDATORY RULES (STRICT COMPLIANCE):
+1. SCHEMA GROUNDING: ONLY use tables and columns that explicitly appear in the Schema above.
+   - NEVER hallucinate or assume tables not in the schema (such as `employees`, `salaries`, `titles`, `dept_emp`).
+   - If the schema has `people` or `salespersons`, use that for staff/sales reps.
+   - If the schema has `products`, use that for items/goods.
+   - If the schema has `sales`, use that for transactions/revenue/boxes.
+   - If the schema has `geo`, use that for countries/regions.
+2. HISTORICAL RELATIVE TIME HANDLING:
+   - Business databases contain historical data (not real-time today).
+   - When the user asks relative time ('last year', 'past year', 'recent', 'past 12 months'):
+     + NEVER use `CURRENT_DATE()`, `CURDATE()`, `NOW()` as it will return 0 rows!
+     + MUST anchor to the MAX date in the database:
+       * MySQL: `WHERE date_col >= DATE_SUB((SELECT MAX(date_col) FROM table_name), INTERVAL 1 YEAR)`
+       * SQLite: `WHERE date_col >= date((SELECT MAX(date_col) FROM table_name), '-1 year')`
+3. AVOID OVER-FILTERING:
+   - When the user mentions general domain terms (e.g., 'boxes of chocolate', 'chocolate sales'): All records represent chocolate, calculate `SUM(Boxes)` or `SUM(Amount)`. DO NOT add `WHERE Category = 'Chocolate'` unless a specific category is requested.
+   - For 'boxes'/'quantity': use `SUM(Boxes)`. For 'revenue'/'money': use `SUM(Amount)`.
+4. PRECISE SYNTAX:
+   - Use `COUNT(*)` or `COUNT(col)`, NEVER `COUNT()`.
+   - Perfectly balance all parentheses '(' and ')'.
+   - Wrap table/column names in backticks ` if they contain special characters or spaces.
+5. OUTPUT FORMAT:
+   - Return ONLY the raw SQL query (starting with SELECT or WITH).
+   - NO markdown code block, NO explanations, NO comments (#, --).
+
+User Query: "{user_query}"
+SQL Query:"""
+
     return f"""Bạn là chuyên gia SQL hàng đầu thế giới.
 
 === SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ===
@@ -54,9 +98,32 @@ Câu hỏi của người dùng: "{user_query}"
 Câu lệnh SQL:"""
 
 
-def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str) -> str:
+def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str, lang: str = "vi") -> str:
     """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi, kết quả rỗng (0 dòng) hoặc không qua self-check."""
-    dialect_hint = get_dialect_hints(dialect)
+    dialect_hint = get_dialect_hints(dialect, lang=lang)
+    if lang == "en":
+        return f"""You are a senior SQL expert. The SQL query you generated needs adjustments on {dialect}.
+
+=== ACTUAL DATABASE SCHEMA ===
+{schema_context}
+==============================
+Dialect Notice: {dialect_hint}
+
+Original Query: "{user_query}"
+
+Previous SQL:
+{sql_query}
+
+SYSTEM FEEDBACK:
+{reason_or_error}
+
+FIX INSTRUCTIONS:
+1. If result returned 0 rows due to CURRENT_DATE(), NOW(), CURDATE() or overly strict date filtering: Anchor to `(SELECT MAX(date_col) FROM table_name)` or remove restrictive date filters to fetch real data!
+2. If result returned 0 rows due to filtering `Category = 'Chocolate'`: Remove it because all products in the DB are chocolate.
+3. If 'Table doesn't exist': Strictly use only existing tables listed in the Schema.
+4. If syntax error: Use `COUNT(*)`, ensure balanced parentheses ().
+5. Return ONLY the single corrected raw SQL query (SELECT or WITH). No markdown, no comments, no explanations."""
+
     return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra CẦN ĐƯỢC ĐIỀU CHỈNH LẠI trên {dialect}.
 
 === SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ===
@@ -80,8 +147,23 @@ HƯỚNG DẪN ĐIỀU CHỈNH:
 5. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
 
 
-def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str) -> str:
+def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str, lang: str = "vi") -> str:
     """Xây dựng prompt cho bước AI QA self-check."""
+    if lang == "en":
+        return f"""You are a QA SQL Validator.
+Schema: {schema_context}
+Original Query: "{user_query}"
+SQL: {sql_query}
+5 sample rows: {sample_str}
+
+Check if the SQL accurately and fully answers the question:
+1. Does SQL strictly use actual existing tables and columns from the Schema?
+2. Does SQL compute the requested metrics properly?
+
+IMPORTANT: "ly_do" (reason) MUST be concise, MAX 20 words.
+If SQL is valid, simply state "SQL is valid" or equivalent.
+Return ONLY JSON, no markdown: {{"day_du": true/false, "ly_do": "..."}}"""
+
     return f"""Bạn là chuyên gia QA kiểm định SQL.
 Schema: {schema_context}
 Câu hỏi gốc: "{user_query}"
@@ -97,8 +179,15 @@ Nếu SQL đã đúng, chỉ cần ghi "SQL hợp lệ" hoặc tương đương.
 Trả về DUY NHẤT JSON, không markdown, không giải thích thêm: {{"day_du": true/false, "ly_do": "..."}}"""
 
 
-def build_anomaly_prompt(user_query: str, x_col: str, y_col: str, points: list) -> str:
+def build_anomaly_prompt(user_query: str, x_col: str, y_col: str, points: list, lang: str = "vi") -> str:
     """Xây dựng prompt giải thích các điểm bất thường dữ liệu."""
+    if lang == "en":
+        return f"""You are a Senior Business Data Analyst.
+User Query: "{user_query}"
+Statistical outliers detected on axis {x_col}, values {y_col}: {points}
+Provide a 1-2 sentence concise hypothesis on potential business causes (e.g., seasonality, promotions, campaigns).
+Output ONLY 1 short paragraph, no bullet points, no markdown headers."""
+
     return f"""Bạn là chuyên gia phân tích dữ liệu kinh doanh.
 Câu hỏi gốc của người dùng: "{user_query}"
 Các điểm bất thường (outlier, theo phương pháp IQR) phát hiện trên trục {x_col}, giá trị {y_col}: {points}
@@ -106,14 +195,49 @@ Các điểm bất thường (outlier, theo phương pháp IQR) phát hiện tr�
 Chỉ trả lời 1 đoạn văn ngắn, không markdown, không liệt kê gạch đầu dòng."""
 
 
-def build_auto_insight_prompt(user_query: str, df_summary_str: str, anomalies_info: dict) -> str:
-    """Xây dựng prompt cho việc tự động phát hiện Insight kinh doanh và phân tích xu hướng bất thường."""
+def build_auto_insight_prompt(user_query: str, df_summary_str: str, anomalies_info: dict, lang: str = "vi") -> str:
+    """Xây dựng prompt cho Báo cáo Insight Kinh doanh với Gắn Nhãn Mức Độ Ưu Tiên (Priority Tagging) và Khung Thời Gian."""
     findings = anomalies_info.get("findings", [])
     anomaly_types = anomalies_info.get("anomaly_types", [])
     stats = anomalies_info.get("summary_stats", {})
 
-    findings_text = "\n".join(f"- {f.get('message')}" for f in findings) if findings else "Không có dấu hiệu bất thường rõ rệt."
-    types_text = ", ".join(anomaly_types) if anomaly_types else "Bình thường"
+    findings_text = "\n".join(f"- {f.get('message')}" for f in findings) if findings else ("No significant anomalies detected." if lang == "en" else "Không có dấu hiệu bất thường rõ rệt.")
+    types_text = ", ".join(anomaly_types) if anomaly_types else ("Normal" if lang == "en" else "Bình thường")
+
+    if lang == "en":
+        return f"""You are a Chief BI & Analytics Officer (Executive Data Analyst).
+
+User Query: "{user_query}"
+Statistical Summary:
+- Record Count: {stats.get('count', 0)}
+- Mean: {stats.get('mean', 0):,.2f} | Median: {stats.get('median', 0):,.2f}
+- Min: {stats.get('min', 0):,.2f} | Max: {stats.get('max', 0):,.2f} | Total: {stats.get('total', 0):,.2f}
+
+Sample Query Results:
+{df_summary_str}
+
+Statistical Anomaly Findings:
+- Types: {types_text}
+- Findings:
+{findings_text}
+
+REQUIREMENTS:
+Generate an Executive Business Insight Report in English with exact Markdown format:
+
+### 1. 🚨 Key Discoveries & Trend Anomalies
+(Highlight significant spikes, sharp increases/decreases, or concentration risks with exact numbers).
+
+### 2. 🔍 Potential Root Causes & Hypotheses
+(Provide 2-3 realistic business hypotheses: seasonality, marketing campaigns, supply chain, VIP accounts, pricing,...).
+
+### 3. 🎯 Executive Action Plan & Priority Recommendations
+(Provide 2-3 actionable, high-impact recommendations. MUST tag each action with Urgency and Execution Timeframe:
+- 🔴 **[High Priority - Immediate Action]**: Urgent issue or immediate high-yield opportunity.
+- 🟡 **[Medium Priority - Next Quarter]**: Mid-term operational or tactical optimization.
+- 🟢 **[Low Priority / Long-term]**: Sustainable long-term strategic initiative.
+Each recommendation must specify an expected measurable KPI/metric).
+
+Style: Executive, concise, data-driven, professional tone."""
 
     return f"""Bạn là Giám đốc Phân tích Dữ liệu Kinh doanh (Chief BI & Analytics Officer).
 
@@ -133,7 +257,7 @@ Các điểm bất thường đã được thuật toán thống kê phát hiệ
 {findings_text}
 
 YÊU CẦU:
-Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và chuyên nghiệp (định dạng Markdown):
+Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và mang tính điều hành thực chiến cao (định dạng Markdown):
 
 ### 1. 🚨 Phát hiện Bất thường & Xu hướng Chính
 (Nêu rõ các điểm đột biến, kỳ tăng/giảm mạnh hoặc rủi ro tập trung nếu có. Đưa ra con số cụ thể).
@@ -142,13 +266,33 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ch
 (Đưa ra 2-3 giả thuyết kinh doanh sát thực tế: mùa vụ, chiến dịch marketing, đứt gãy vận hành, khách hàng VIP, chính sách giá,...).
 
 ### 3. 🎯 Đề xuất Hành động (Action Plan)
-(Đưa ra 2-3 hành động cụ thể, thiết thực cho nhà quản lý / ban lãnh đạo).
+(Đưa ra 2-3 hành động cụ thể, thiết thực cho nhà quản lý / ban lãnh đạo. BẮT BUỘC gắn nhãn mức độ ưu tiên và khung thời gian thực thi cho từng hành động:
+- 🔴 **[Ưu tiên Cao - Thực hiện Ngay / Immediate]**: Hành động khắc phục sự cố hoặc nắm bắt cơ hội cấp bách.
+- 🟡 **[Ưu tiên Trung bình - Quý tiếp theo / Next Quarter]**: Chiến lược tối ưu hóa hoạt động trung hạn.
+- 🟢 **[Ưu tiên Thấp / Dài hạn - Long-term]**: Định hướng chiến lược bền vững dài hạn.
+Mỗi hành động phải nêu rõ chỉ số KPI / kết quả đo lường kỳ vọng).
 
 Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, không dùng từ ngữ sáo rỗng."""
 
 
-def build_followup_prompt(user_query: str, schema_context: str, df_sample_str: str) -> str:
+def build_followup_prompt(user_query: str, schema_context: str, df_sample_str: str, lang: str = "vi") -> str:
     """Xây dựng prompt đề xuất 2-3 câu hỏi phân tích tiếp nối có tính đào sâu (Drill-down Analytics)."""
+    if lang == "en":
+        return f"""You are a senior business data analyst.
+The user just asked: "{user_query}"
+
+Sample query results:
+{df_sample_str}
+
+Available Database Schema:
+{schema_context}
+
+Task: Propose 2 to 3 smart, high-value follow-up questions for deeper analytical drill-down (e.g., trend over time, top performing reps, regional breakdown, product comparison).
+Questions must be written in concise, natural English and MUST be fully answerable using the schema above.
+
+Return ONLY a JSON array of strings:
+["Question 1", "Question 2", "Question 3"]"""
+
     return f"""Bạn là chuyên gia phân tích dữ liệu kinh doanh.
 Người dùng vừa hỏi: "{user_query}"
 
