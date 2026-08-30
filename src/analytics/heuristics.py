@@ -81,14 +81,28 @@ def get_best_name_column(df: pd.DataFrame, exclude_cols: list = None):
     return None
 
 
-def pick_label_column(cat_cols: list, df: pd.DataFrame) -> str | None:
-    """Chọn cột text tốt nhất làm nhãn trục X."""
-    if not cat_cols:
-        return None
-    best = get_best_name_column(df, exclude_cols=[])
-    if best and best in cat_cols:
-        return best
-    return cat_cols[0]
+def pick_label_column(df: pd.DataFrame, label_cols: list) -> tuple:
+    """Chọn cột nhãn tốt nhất cho trục X:
+    - Nếu có cột name-like (Product, Country, Quốc gia, etc.), ưu tiên chọn.
+    - Nếu có nhiều cột text, ưu tiên cột có độ phân biệt (unique) cao hơn làm trục X.
+    - Trả về (label_name, label_series, consumed_cols).
+    """
+    if df is None or df.empty or not label_cols:
+        return None, None, []
+
+    # 1. Tìm cột khớp pattern name-like
+    best_name = get_best_name_column(df, exclude_cols=[])
+    if best_name and best_name in label_cols:
+        return best_name, df[best_name].astype(str), [best_name]
+
+    # 2. Sắp xếp theo số lượng giá trị duy nhất giảm dần (cột chi tiết hơn làm trục X)
+    try:
+        sorted_by_unique = sorted(label_cols, key=lambda c: df[c].nunique(dropna=True), reverse=True)
+        chosen_col = sorted_by_unique[0]
+    except Exception:
+        chosen_col = label_cols[0]
+
+    return chosen_col, df[chosen_col].astype(str), [chosen_col]
 
 
 def generate_starter_prompts(tables: list[str]) -> list[dict]:

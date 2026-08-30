@@ -1,5 +1,5 @@
 """
-Configuration and Constants for AI Business Agent.
+Configuration and Constants for Veraxus for SQL.
 """
 
 import os
@@ -34,7 +34,10 @@ BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "quy", "quarter"]
 ID_LIKE_REGEX = re.compile(r'(^|_)(id|no|code|key|num|sn)$', re.IGNORECASE)
 
 # Business name-like column pattern (prioritized for X-axis labels)
-NAME_LIKE_REGEX = re.compile(r'(name|ten|title|category|product|team|region|department|dept)', re.IGNORECASE)
+NAME_LIKE_REGEX = re.compile(
+    r'(name|ten|title|category|product|team|region|department|dept|quoc_gia|quoc gia|country|geo|khu_vuc|khu vuc|tinh|thanh_pho|thanh pho|city)',
+    re.IGNORECASE
+)
 
 # ---------------------------------------------------------
 # AI Providers Configuration
@@ -58,27 +61,26 @@ PROVIDER_CONFIGS = {
     "Gemini (Google)": {
         "models": ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
         "key_help": "Lấy API key miễn phí tại aistudio.google.com/apikey.",
-        "key_placeholder": "AIza...",
-        "free_tier_note": "Free tier: giới hạn theo phút/ngày, dễ hết quota nếu dùng nhiều.",
+        "key_placeholder": "AIzaSy...",
+        "free_tier_note": "15 RPM miễn phí, dùng tốt nhất với gemini-2.5-flash.",
     },
     "Qwen (Alibaba Cloud)": {
         "models": ["qwen-plus", "qwen-turbo", "qwen2.5-72b-instruct", "qwen-max"],
-        "key_help": "Lấy API key miễn phí tại bailian.console.alibabacloud.com (gói dùng thử ~1 triệu token miễn phí).",
+        "key_help": "Lấy API key tại alibabacloud.com (DashScope console).",
         "key_placeholder": "sk-...",
-        "free_tier_note": "Free tier hào phóng hơn Gemini — phù hợp để tránh hết quota khi test nhiều.",
+        "free_tier_note": "Model Qwen của Alibaba Cloud, tương thích OpenAI SDK.",
     },
 }
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+# ---------------------------------------------------------
+# Base URLs & Method Names
+# ---------------------------------------------------------
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-# ---------------------------------------------------------
-# Database & Network Constants
-# ---------------------------------------------------------
-LOCAL_HOST_ALIASES = ["localhost", "127.0.0.1", "host.docker.internal"]
-MAX_TABLES_SCHEMA = 30
-MAX_ROWS_CAP = 3000
+MAX_ROWS_CAP = 5000
+MAX_TABLES_SCHEMA = 50
+MAX_HISTORY_TURNS = 20
 MAX_BAR_CATEGORIES = 100
-MAX_HISTORY_TURNS = 15
-LOG_INLINE_MAX_CHARS = 220
+
 FORECAST_METHOD_NAME = "Hồi quy tuyến tính (Linear Regression)"
