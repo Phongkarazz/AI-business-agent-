@@ -1,6 +1,6 @@
 """
 Universal AI Business Agent - Streamlit Application Entry Point.
-Featuring standalone Onboarding, interactive Explorer Sidebar, and multi-turn chat analysis.
+Featuring standalone Onboarding, interactive Explorer Sidebar, and clean multi-turn chat analysis.
 """
 
 import streamlit as st
@@ -104,25 +104,8 @@ elif not st.session_state.get("connected") or st.session_state.get("view_mode") 
 
 # Nếu đã kết nối: Hiển thị Sidebar Mới & Màn hình Chat Phân tích chính
 else:
-    # 4.1 Hiển thị Sidebar tra cứu bảng và lịch sử chat
+    # Hiển thị Sidebar tra cứu bảng và lịch sử chat
     render_main_sidebar()
-
-    # 4.2 Top Header Bar với nút Cài đặt ở góc trên bên phải
-    col_header, col_settings = st.columns([5, 1])
-
-    with col_header:
-        db_badge = "🎮 SQLite Demo (Chocolate 2023)" if st.session_state.get("is_demo") else "🔌 MySQL Database"
-        ai_badge = f"🤖 {st.session_state.get('provider')} ({st.session_state.get('model_name')})"
-        st.markdown(f"### 🤖 AI Business Agent for SQL &nbsp; <small style='font-size:14px; color:#22c55e;'>🟢 {db_badge} &nbsp;|&nbsp; {ai_badge}</small>", unsafe_allow_html=True)
-        st.caption("Trò chuyện bằng ngôn ngữ tự nhiên để truy vấn SQL, tự phát hiện Insight kinh doanh, vẽ biểu đồ và dự báo xu hướng.")
-
-    with col_settings:
-        st.write("")
-        if st.button("⚙️ Cài đặt", type="secondary", use_container_width=True, key="header_btn_settings", help="Thay đổi kết nối Database, AI Provider hoặc tùy chỉnh tham số"):
-            st.session_state["view_mode"] = "settings"
-            st.rerun()
-
-    st.markdown("---")
 
     # Hiển thị lịch sử hội thoại
     for i, turn in enumerate(st.session_state["history"]):
@@ -130,9 +113,12 @@ else:
         with st.chat_message("assistant"):
             render_result(turn, turn_id=f"hist{i}")
 
-    # Gợi ý câu hỏi khi dùng demo
-    if st.session_state.get("is_demo") and not st.session_state["history"]:
-        st.info("💡 **Gợi ý câu hỏi:** *\"Doanh số theo từng tháng năm 2023\"*, *\"Top 5 nhân viên bán chạy nhất\"*, *\"Sản phẩm nào mang lại doanh thu cao nhất?\"*")
+    # Gợi ý câu hỏi khi mới bắt đầu phiên
+    if not st.session_state["history"]:
+        if st.session_state.get("is_demo"):
+            st.info("💡 **Gợi ý câu hỏi mẫu:** *\"Doanh số theo từng tháng năm 2023\"*, *\"Top 5 nhân viên bán chạy nhất\"*, *\"Sản phẩm nào mang lại doanh thu cao nhất?\"*")
+        else:
+            st.info("💡 **Chào bạn!** Hãy đặt câu hỏi bất kỳ bằng ngôn ngữ tự nhiên về cơ sở dữ liệu của bạn để AI Agent tự động truy vấn, vẽ biểu đồ và phân tích.")
 
     # Khung nhập câu hỏi
     user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
