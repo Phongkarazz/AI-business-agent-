@@ -18,9 +18,9 @@ HISTORY_HINT = (
     "'phòng ban hiện tại', 'top N hiện nay'), chỉ lấy bản ghi đang hiệu lực (thường là "
     "to_date = '9999-01-01', hoặc dùng subquery lấy bản ghi có MAX(from_date) theo từng khóa "
     "chính) để tránh JOIN sinh ra nhiều dòng trùng lặp cho cùng 1 thực thể. "
-    "NGƯỢC LẠI, nếu câu hỏi cần đếm/liệt kê SỐ LẦN THAY ĐỔI, LỊCH SỬ, hoặc 'đã từng' (VD: "
-    "'đã từng đổi chức danh bao nhiêu lần', 'lịch sử lương'), TUYỆT ĐỐI KHÔNG lọc to_date — "
-    "phải giữ nguyên toàn bộ các dòng lịch sử để đếm chính xác."
+    "NGƯỢC LẠI, nếu câu hỏi cần đếm/liệt kê SỐ LẦN THAY ĐỔI, LỊCH SỬ, BIẾN ĐỘNG, hoặc 'đã từng' (VD: "
+    "'biến động salary năm 2021', 'đã từng đổi chức danh bao nhiêu lần', 'lịch sử lương'), TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01' — "
+    "phải giữ nguyên toàn bộ các dòng lịch sử trong khoảng thời gian được hỏi để tính toán chính xác."
 )
 
 
@@ -37,9 +37,9 @@ Lưu ý Bảng Lịch sử & Dữ liệu thời gian: {HISTORY_HINT}
 YÊU CẦU QUAN TRỌNG:
 1. Viết 1 câu lệnh SQL SELECT duy nhất trả lời chính xác câu hỏi: "{user_query}"
 2. Kiểm tra kỹ CÚ PHÁP: Mọi dấu ngoặc mở '(' và đóng ')' phải tuyệt đối cân đối, không được thừa hoặc thiếu dấu ngoặc.
-3. Nếu tính toán phức tạp (nhân chia, DATEDIFF, LEAST, GREATEST,...), hãy gom nhóm dấu ngoặc chuẩn xác: ví dụ `SUM(s.salary * (DATEDIFF(LEAST(s.to_date, '2021-12-31'), GREATEST(s.from_date, '2021-01-01')) + 1) / 365.25)`.
+3. Nếu tính toán phức tạp (nhân chia, DATEDIFF, LEAST, GREATEST,...), hãy gom nhóm dấu ngoặc chuẩn xác.
 4. Nếu không có GROUP BY, bắt buộc thêm LIMIT 1000 để tránh trả về quá nhiều dữ liệu.
-5. CHỈ TRẢ VỀ DUY NHẤT CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH), không giải thích, không markdown bên ngoài."""
+5. CHỈ TRẢ VỀ DUY NHẤT CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH), TUYỆT ĐỐI không thêm comment #, -- hay lời dẫn mở đầu."""
 
 
 def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str) -> str:
@@ -61,9 +61,9 @@ THÔNG BÁO LỖI TỪ DATABASE / HỆ THỐNG:
 {reason_or_error}
 
 HƯỚNG DẪN SỬA LỖI:
-- Nếu lỗi Syntax Error gần dấu ngoặc ')': Hãy đếm và kiểm tra lại từng cặp dấu ngoặc '(' và ')' trong các hàm toán học, hàm tổng hợp (SUM, AVG) và hàm ngày tháng (DATEDIFF, LEAST, GREATEST) để đảm bảo không bị thừa/thiếu dấu ngoặc.
+- Nếu lỗi Syntax Error gần dấu ngoặc ')': Hãy đếm và kiểm tra lại từng cặp dấu ngoặc '(' và ')' trong các hàm toán học, hàm tổng hợp (SUM, AVG) và hàm ngày tháng.
 - Nếu lỗi tên bảng / tên cột: Kiểm tra lại chính xác tên bảng và tên cột trong Schema ở trên.
-- Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ CÂU SQL, không giải thích."""
+- Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ CÂU SQL THUẦN (SELECT hoặc WITH), TUYỆT ĐỐI không thêm comment #, -- hay lời giải thích."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str) -> str:
@@ -74,13 +74,12 @@ Câu hỏi gốc: "{user_query}"
 SQL: {sql_query}
 5 dòng mẫu: {sample_str}
 
-Kiểm tra SQL có trả lời ĐẦY ĐỦ câu hỏi không.
-Đặc biệt: nếu SQL JOIN với bảng lưu lịch sử theo thời gian (có cột from_date/to_date, ví dụ
-salaries, titles, dept_emp...) mà KHÔNG lọc bản ghi hiện tại (to_date = '9999-01-01' hoặc
-MAX(from_date) theo từng khóa chính), kết quả sẽ bị nhân bản dòng cho cùng 1 thực thể — hãy
-coi đây là "day_du": false và nêu rõ trong "ly_do".
+Kiểm tra SQL có trả lời ĐÚNG và ĐẦY ĐỦ câu hỏi không.
+QUY TẮC BẢNG LỊCH SỬ (salaries, titles, dept_emp...):
+- Nếu câu hỏi hỏi về GIÁ TRỊ HIỆN TẠI (VD: 'lương hiện tại', 'phòng ban hiện tại', 'top N hiện nay'): Bắt buộc lọc bản ghi đang hiệu lực (to_date = '9999-01-01' hoặc MAX(from_date)).
+- Nếu câu hỏi hỏi về LỊCH SỬ / BIẾN ĐỘNG / ĐẾM SỐ LẦN ĐỔI / MỐC NĂM CŨ (VD: 'biến động salary năm 2021', 'đã từng đổi chức danh bao nhiêu lần'): TUYỆT ĐỐI KHÔNG bắt lọc to_date = '9999-01-01', vì cần giữ các bản ghi lịch sử trong khoảng thời gian đó để tính toán chính xác.
 
-QUAN TRỌNG: "ly_do" PHẢI ngắn gọn, TỐI ĐA 20 từ, đi thẳng vào vấn đề — không lý luận dài dòng.
+QUAN TRỌNG: "ly_do" PHẢI ngắn gọn, TỐI ĐA 20 từ.
 Nếu SQL đã đúng, chỉ cần ghi "SQL hợp lệ" hoặc tương đương.
 Trả về DUY NHẤT JSON, không markdown, không giải thích thêm: {{"day_du": true/false, "ly_do": "..."}}"""
 

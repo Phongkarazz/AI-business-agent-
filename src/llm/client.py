@@ -1,6 +1,6 @@
 """
 Multi-provider LLM client supporting Google Gemini, OpenRouter, and Alibaba Qwen (OpenAI-compatible)
-with intelligent key detection and automatic model routing.
+with intelligent key detection, automatic model routing, and robust SQL extraction.
 """
 
 import re
@@ -16,19 +16,37 @@ from src.config import DASHSCOPE_BASE_URL, OPENROUTER_BASE_URL
 
 
 def extract_clean_content(raw: str) -> str:
-    """Trích xuất nội dung sạch từ phản hồi của mô hình (bóc tách code block nếu có)."""
+    """Trích xuất nội dung sạch từ phản hồi của mô hình (bóc tách code block, loại bỏ comment mở đầu)."""
     if not raw:
         return ""
 
-    # Nếu có markdown code block ```sql ... ``` hoặc ```json ... ``` hoặc ``` ... ```
+    # 1. Nếu có markdown code block ```sql ... ``` hoặc ```json ... ``` hoặc ``` ... ```
     match = re.search(r"```(?:sql|json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
     if match:
         extracted = match.group(1).strip()
     else:
         extracted = raw.strip()
 
-    # Loại bỏ prefix sql\n hoặc json\n nếu sót lại ở đầu chuỗi
-    extracted = re.sub(r"^(?:sql\s*\n|json\s*\n)", "", extracted, flags=re.IGNORECASE).strip()
+    # 2. Loại bỏ các tiền tố giải thích hoặc comment mở đầu (#, --, /* */) trước câu lệnh chính
+    # Bỏ comment dạng block /* ... */ ở đầu
+    extracted = re.sub(r"^\s*/\*.*?\*/\s*", "", extracted, flags=re.DOTALL)
+    # Bỏ các dòng comment # ... hoặc -- ... ở đầu chuỗi
+    lines = extracted.splitlines()
+    cleaned_lines = []
+    found_sql_start = False
+    for line in lines:
+        stripped_line = line.strip()
+        if not found_sql_start:
+            # Nếu là dòng trống hoặc dòng comment (#, --)
+            if not stripped_line or stripped_line.startswith("#") or stripped_line.startswith("--") or stripped_line.startswith("//"):
+                continue
+            # Nếu là dòng tiền tố sql\n hoặc json\n
+            if stripped_line.lower() in ("sql", "json"):
+                continue
+            found_sql_start = True
+        cleaned_lines.append(line)
+
+    extracted = "\n".join(cleaned_lines).strip()
     return extracted
 
 

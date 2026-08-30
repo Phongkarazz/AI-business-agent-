@@ -1,11 +1,11 @@
 """
 Reusable UI components for rendering query results, charts, forecasts, automated insights, and notifications.
+Features clean Silent Fix interface and tidy collapsed technical logs.
 """
 
 import streamlit as st
-from src.config import LOG_INLINE_MAX_CHARS
 from src.analytics.heuristics import get_axis_columns
-from src.analytics.anomaly import detect_outliers, analyze_data_anomalies
+from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
 from src.visualization.charts import render_smart_chart
 from src.llm.agent import generate_auto_insights
@@ -22,46 +22,42 @@ def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: b
 
 
 def render_result(result: dict, turn_id: str):
-    """Hiển thị kết quả truy vấn gồm Log, SQL, Bảng dữ liệu, Biểu đồ, Insight Bất thường và Dự báo."""
-    # 1. Hiển thị Logs
-    for line in result.get("logs", []):
-        if line.startswith("⚠️ Cảnh báo tự động"):
-            st.warning(line)
-        elif len(line) > LOG_INLINE_MAX_CHARS:
-            short = line[:LOG_INLINE_MAX_CHARS].rsplit(" ", 1)[0] + "..."
-            st.caption(short)
-            with st.expander("Xem đầy đủ", expanded=False):
-                st.write(line)
-        else:
-            st.caption(line)
-
-    # 2. Hiển thị lỗi nếu có
+    """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với bảng, biểu đồ, insight và log kỹ thuật thu gọn."""
+    # 1. Hiển thị lỗi nếu có
     if result.get("error"):
-        st.error(result["error"])
-        if result.get("sql"):
-            st.code(result["sql"], language="sql")
+        st.error(f"❌ {result['error']}")
+        with st.expander("🛠️ Chi tiết Kỹ thuật & Lịch sử lỗi (Debug Logs)", expanded=False):
+            if result.get("sql"):
+                st.markdown("**Câu lệnh SQL cuối cùng:**")
+                st.code(result["sql"], language="sql")
+            st.markdown("**Nhật ký các lần thử:**")
+            for log in result.get("logs", []):
+                st.text(f"• {log}")
         return
 
     df = result.get("df")
     sql_query = result.get("sql")
-    if sql_query:
-        st.code(sql_query, language="sql")
 
     if df is None or df.empty:
-        st.warning("Không có dữ liệu trả về.")
+        st.warning("⚠️ Không có dữ liệu nào trả về cho câu hỏi này.")
+        if sql_query:
+            with st.expander("🛠️ Chi tiết Câu lệnh SQL", expanded=False):
+                st.code(sql_query, language="sql")
         return
 
-    # 3. Hiển thị DataFrame và nút Tải CSV
+    # 2. Hiển thị Bảng dữ liệu & Nút Tải CSV
     st.dataframe(df, width='stretch')
-    st.download_button(
-        "⬇️ Tải CSV",
-        df.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"ket_qua_{turn_id}.csv",
-        mime="text/csv",
-        key=f"csv_{turn_id}"
-    )
+    c_csv, _ = st.columns([2, 5])
+    with c_csv:
+        st.download_button(
+            "⬇️ Tải file CSV",
+            df.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"ket_qua_{turn_id}.csv",
+            mime="text/csv",
+            key=f"csv_{turn_id}"
+        )
 
-    # 4. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
+    # 3. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
     anomalies_info = result.get("anomalies_info") or analyze_data_anomalies(df)
     has_anomaly = anomalies_info.get("has_anomaly", False)
 
@@ -78,7 +74,7 @@ def render_result(result: dict, turn_id: str):
 
         if has_anomaly:
             n_findings = len(anomalies_info.get("findings", []))
-            st.caption(f"🚨 **Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Chuyển sang tab **'{tab_insight_label}'** để xem báo cáo chi tiết.")
+            st.caption(f"🚨 **Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Xem phân tích chi tiết tại tab **'{tab_insight_label}'**.")
 
     with tab2:
         st.subheader("💡 Báo cáo Phân tích Insight & Phát hiện Bất thường")
@@ -134,3 +130,19 @@ def render_result(result: dict, turn_id: str):
         else:
             st.plotly_chart(fig, width='stretch', key=f"forecast_{turn_id}")
             st.caption(f"Phương pháp: {method}")
+
+    # 4. Chi tiết Kỹ thuật & SQL (Expander thu gọn ở cuối cùng)
+    with st.expander("🛠️ Chi tiết Kỹ thuật & Câu lệnh SQL (Debug)", expanded=False):
+        if sql_query:
+            st.markdown("**Câu lệnh SQL đã thực thi:**")
+            st.code(sql_query, language="sql")
+
+        attempts = result.get("attempts", 1)
+        if attempts > 1:
+            st.info(f"ℹ️ AI Agent đã tự động sửa lỗi và hoàn thiện câu lệnh sau **{attempts} lần thử trong nền (Silent Self-Healing)**.")
+
+        logs = result.get("logs", [])
+        if logs:
+            st.markdown("**Nhật ký các bước thực thi:**")
+            for log in logs:
+                st.text(f"• {log}")

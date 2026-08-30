@@ -22,11 +22,13 @@ from .prompts import (
 
 
 def strip_comments_and_literals(sql: str) -> str:
-    """Loại bỏ comment SQL và chuỗi ký tự trước khi kiểm tra an toàn và cú pháp."""
+    """Loại bỏ comment SQL (#, --, /* */) và chuỗi ký tự trước khi kiểm tra an toàn và cú pháp."""
     # Bỏ comment dạng block /* ... */
     sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
     # Bỏ comment dạng dòng -- ...
     sql = re.sub(r'--[^\n]*', '', sql)
+    # Bỏ comment dạng dòng # ...
+    sql = re.sub(r'#[^\n]*', '', sql)
     # Bỏ chuỗi ký tự '...' và "..."
     sql = re.sub(r"'[^']*'", "''", sql)
     sql = re.sub(r'"[^"]*"', '""', sql)
@@ -77,10 +79,8 @@ def detect_duplicate_entity_warning(df: pd.DataFrame) -> str | None:
             continue
         if 0 < n_unique < len(df):
             return (
-                f"⚠️ Cảnh báo tự động: cột `{c}` chỉ có {n_unique} giá trị duy nhất nhưng kết quả trả về "
-                f"{len(df)} dòng. Đây thường là dấu hiệu dữ liệu bị nhân bản do JOIN với bảng lưu lịch sử "
-                f"theo thời gian (VD: salaries, titles, dept_emp) mà chưa lọc bản ghi hiện tại. "
-                f"Hãy diễn đạt lại câu hỏi rõ hơn (VD: 'lương hiện tại') hoặc kiểm tra SQL bên dưới."
+                f"Cột `{c}` chỉ có {n_unique} giá trị duy nhất nhưng kết quả trả về "
+                f"{len(df)} dòng (dấu hiệu JOIN với bảng lịch sử chưa lọc bản ghi hiện tại)."
             )
     return None
 
@@ -137,12 +137,13 @@ def run_agent(
     enable_self_check: bool = True,
     enable_auto_insights: bool = True
 ) -> dict:
-    """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi và tự động khám phá Insight kinh doanh."""
+    """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi âm thầm (Silent Fix) và tự động khám phá Insight."""
     result = {
         "query": user_query,
         "df": None,
         "sql": None,
         "logs": [],
+        "attempts": 0,
         "error": None,
         "anomalies_info": None,
         "insights": None,
@@ -156,14 +157,24 @@ def run_agent(
         result["error"] = f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
         return result
 
-    # 2. Vòng lặp thực thi, kiểm định và tự sửa lỗi
+    # 2. Vòng lặp thực thi, kiểm định và tự sửa lỗi âm thầm (Silent Self-Healing)
     for attempt in range(1, 4):
+        result["attempts"] = attempt
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):
-            result["error"] = "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT/WITH đơn, không nhiều câu lệnh)."
-            result["sql"] = sql_query
-            return result
+            result["logs"].append(f"❌ Kiểm tra an toàn thất bại: Không phải lệnh SELECT/WITH an toàn.")
+            if attempt == 3:
+                result["error"] = "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT/WITH đơn, không nhiều câu lệnh)."
+                result["sql"] = sql_query
+                return result
+
+            fix_prompt = build_fix_prompt(
+                schema_context, dialect, user_query, sql_query, "Câu lệnh SQL phải bắt đầu bằng SELECT hoặc WITH, không chứa ký tự cấm."
+            )
+            fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+            sql_query = fixed_sql or sql_query
+            continue
 
         # 2.1 Kiểm tra cân đối dấu ngoặc trước khi thực thi
         is_balanced, paren_err = check_parentheses_balance(sql_query)
@@ -189,18 +200,18 @@ def run_agent(
 
             dup_warning = detect_duplicate_entity_warning(df)
             if dup_warning:
-                result["logs"].append(dup_warning)
+                result["logs"].append(f"⚠️ Cảnh báo: {dup_warning}")
 
             if enable_self_check:
                 check = self_check_sql(client, provider, model_name, schema_context, user_query, sql_query, df)
             else:
-                check = {"day_du": True, "ly_do": "Đã tắt self-check để tiết kiệm quota."}
+                check = {"day_du": True, "ly_do": "Bỏ qua self-check (đã tắt trong cài đặt)."}
 
             if check.get("day_du", True) or attempt == 3:
                 if check.get("day_du", True):
-                    result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', '')}")
+                    result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', 'SQL hợp lệ')}")
                 else:
-                    result["logs"].append(f"⚠️ Kết quả sau 3 lần thử: {check.get('ly_do', '')}")
+                    result["logs"].append(f"⚠️ Chấp nhận kết quả sau {attempt} lần thử: {check.get('ly_do', '')}")
 
                 result["df"] = df
                 result["sql"] = sql_query
@@ -218,7 +229,7 @@ def run_agent(
 
                 return result
 
-            result["logs"].append(f"⚠️ Phát hiện vấn đề: {check.get('ly_do', '')}")
+            result["logs"].append(f"⚠️ QA Self-check phát hiện vấn đề: {check.get('ly_do', '')}")
             fix_prompt = build_fix_prompt(
                 schema_context, dialect, user_query, sql_query, check.get("ly_do", "")
             )
