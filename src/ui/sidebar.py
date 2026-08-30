@@ -1,6 +1,6 @@
 """
-Sidebar UI component for Session Management, Database Table Explorer, and Chat History.
-Includes 'All Tables (Entire Database)' inspection and multi-table sample preview.
+Sidebar UI component for Session Management, Database Table Explorer, and Interactive Chat History Navigation.
+Allows clicking on any historical question to view its result directly.
 """
 
 import streamlit as st
@@ -67,7 +67,7 @@ def perform_connection(
 
 
 def render_main_sidebar():
-    """Hiển thị Sidebar mới với nút Cài đặt, Tra cứu bảng Database (kèm tùy chọn Tất cả các bảng) và Lịch sử trò chuyện."""
+    """Hiển thị Sidebar với nút Cài đặt, Khám phá Bảng DB và Danh sách Lịch sử Chat tương tác (Click to View)."""
     engine = st.session_state.get("engine")
     is_demo = st.session_state.get("is_demo", True)
     provider = st.session_state.get("provider", "OpenRouter")
@@ -89,6 +89,7 @@ def render_main_sidebar():
             if st.button("➕ Chat Mới", type="primary", use_container_width=True, key="sidebar_btn_new_chat", help="Bắt đầu một phiên hội thoại mới"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
+                st.session_state["focused_turn_idx"] = None
                 st.rerun()
 
         st.markdown("---")
@@ -152,20 +153,44 @@ def render_main_sidebar():
 
         st.markdown("---")
 
-        # --- PHẦN 3: LỊCH SỬ CÁC CUỘC TRÒ CHUYỆN (CHAT HISTORY) ---
+        # --- PHẦN 3: LỊCH SỬ CÁC CUỘC TRÒ CHUYỆN (INTERACTIVE CHAT HISTORY) ---
         st.subheader("💬 Lịch sử Trò chuyện")
 
         history = st.session_state.get("history", [])
+        focused_turn_idx = st.session_state.get("focused_turn_idx", None)
+
         if history:
+            # Nút quay về xem toàn bộ nếu đang ở chế độ xem tập trung 1 câu
+            if focused_turn_idx is not None:
+                if st.button("🌐 Xem toàn bộ hội thoại", use_container_width=True, key="sidebar_btn_show_all_chat", type="secondary"):
+                    st.session_state["focused_turn_idx"] = None
+                    st.rerun()
+
+            st.caption("💡 *Nhấp vào câu hỏi bất kỳ để xem trực tiếp:*")
+
             for i, turn in enumerate(history):
                 query_text = turn.get("query", "")
-                short_q = query_text if len(query_text) <= 45 else query_text[:42] + "..."
-                st.caption(f"**{i+1}.** {short_q}")
+                short_q = query_text if len(query_text) <= 32 else query_text[:29] + "..."
+                is_active = (focused_turn_idx == i)
+
+                btn_label = f"👉 {i+1}. {short_q}" if is_active else f"💬 {i+1}. {short_q}"
+                btn_type = "primary" if is_active else "secondary"
+
+                if st.button(
+                    btn_label,
+                    key=f"sidebar_hist_btn_{i}",
+                    use_container_width=True,
+                    type=btn_type,
+                    help=f"Xem trực tiếp câu hỏi: {query_text}"
+                ):
+                    st.session_state["focused_turn_idx"] = i
+                    st.rerun()
 
             st.markdown("###")
             if st.button("🗑️ Xóa lịch sử chat", use_container_width=True, key="sidebar_btn_clear_history"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
+                st.session_state["focused_turn_idx"] = None
                 st.toast("🧹 Đã xóa toàn bộ lịch sử trò chuyện!", icon="🗑️")
                 st.rerun()
         else:

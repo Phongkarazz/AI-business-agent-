@@ -11,6 +11,7 @@ def init_session_state():
     defaults = {
         "history": [],
         "query_cache": {},
+        "focused_turn_idx": None,
         "connected": False,
         "view_mode": "chat",
         "engine": None,

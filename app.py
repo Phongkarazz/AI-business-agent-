@@ -1,6 +1,6 @@
 """
 Universal AI Business Agent - Streamlit Application Entry Point.
-Featuring standalone Onboarding, interactive Explorer Sidebar, and clean multi-turn chat analysis.
+Featuring standalone Onboarding, interactive Explorer Sidebar, and direct History Inspection.
 """
 
 import streamlit as st
@@ -104,17 +104,35 @@ elif not st.session_state.get("connected") or st.session_state.get("view_mode") 
 
 # Nếu đã kết nối: Hiển thị Sidebar Mới & Màn hình Chat Phân tích chính
 else:
-    # Hiển thị Sidebar tra cứu bảng và lịch sử chat
+    # 4.1 Hiển thị Sidebar tra cứu bảng và lịch sử chat
     render_main_sidebar()
 
-    # Hiển thị lịch sử hội thoại
-    for i, turn in enumerate(st.session_state["history"]):
+    history = st.session_state.get("history", [])
+    focused_turn_idx = st.session_state.get("focused_turn_idx", None)
+
+    # 4.2 Hiển thị câu hỏi được chọn trực tiếp (Direct Focus View) hoặc toàn bộ hội thoại
+    if focused_turn_idx is not None and 0 <= focused_turn_idx < len(history):
+        turn = history[focused_turn_idx]
+        col_focus1, col_focus2 = st.columns([5, 1])
+        with col_focus1:
+            st.info(f"📌 **Đang xem câu hỏi số {focused_turn_idx + 1}**: *\"{turn['query']}\"*")
+        with col_focus2:
+            if st.button("🌐 Xem tất cả", use_container_width=True, key="btn_exit_focus_top", type="secondary", help="Quay lại xem toàn bộ đoạn hội thoại"):
+                st.session_state["focused_turn_idx"] = None
+                st.rerun()
+
         st.chat_message("user").write(turn["query"])
         with st.chat_message("assistant"):
-            render_result(turn, turn_id=f"hist{i}")
+            render_result(turn, turn_id=f"focused_{focused_turn_idx}")
+    else:
+        # Hiển thị toàn bộ lịch sử hội thoại
+        for i, turn in enumerate(history):
+            st.chat_message("user").write(turn["query"])
+            with st.chat_message("assistant"):
+                render_result(turn, turn_id=f"hist{i}")
 
     # Gợi ý câu hỏi khi mới bắt đầu phiên
-    if not st.session_state["history"]:
+    if not history:
         if st.session_state.get("is_demo"):
             st.info("💡 **Gợi ý câu hỏi mẫu:** *\"Doanh số theo từng tháng năm 2023\"*, *\"Top 5 nhân viên bán chạy nhất\"*, *\"Sản phẩm nào mang lại doanh thu cao nhất?\"*")
         else:
@@ -123,6 +141,9 @@ else:
     # Khung nhập câu hỏi
     user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
     if user_input:
+        # Khi nhập câu hỏi mới, tự động thoát chế độ xem tập trung để xem kết quả mới nhất
+        st.session_state["focused_turn_idx"] = None
+
         st.chat_message("user").write(user_input)
         with st.chat_message("assistant"):
             cache_key = user_input.strip().lower()
