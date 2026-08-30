@@ -1,5 +1,5 @@
 """
-Prompt templates and builders for SQL generation, validation, and anomaly explanation.
+Prompt templates and builders for SQL generation, validation, anomaly explanation, and automatic business insights.
 """
 
 
@@ -92,3 +92,44 @@ Câu hỏi gốc của người dùng: "{user_query}"
 Các điểm bất thường (outlier, theo phương pháp IQR) phát hiện trên trục {x_col}, giá trị {y_col}: {points}
 Đưa ra 1-2 câu nhận xét/giả thuyết ngắn gọn về nguyên nhân kinh doanh có thể xảy ra (VD: mùa vụ, khuyến mãi, sự kiện...).
 Chỉ trả lời 1 đoạn văn ngắn, không markdown, không liệt kê gạch đầu dòng."""
+
+
+def build_auto_insight_prompt(user_query: str, df_summary_str: str, anomalies_info: dict) -> str:
+    """Xây dựng prompt cho việc tự động phát hiện Insight kinh doanh và phân tích xu hướng bất thường."""
+    findings = anomalies_info.get("findings", [])
+    anomaly_types = anomalies_info.get("anomaly_types", [])
+    stats = anomalies_info.get("summary_stats", {})
+
+    findings_text = "\n".join(f"- {f.get('message')}" for f in findings) if findings else "Không có dấu hiệu bất thường rõ rệt."
+    types_text = ", ".join(anomaly_types) if anomaly_types else "Bình thường"
+
+    return f"""Bạn là Giám đốc Phân tích Dữ liệu Kinh doanh (Chief BI & Analytics Officer).
+
+Câu hỏi phân tích của người dùng: "{user_query}"
+Tổng quan thống kê dữ liệu:
+- Số bản ghi: {stats.get('count', 0)}
+- Giá trị trung bình (Mean): {stats.get('mean', 0):,.2f}
+- Giá trị trung vị (Median): {stats.get('median', 0):,.2f}
+- Giá trị nhỏ nhất (Min): {stats.get('min', 0):,.2f} | Lớn nhất (Max): {stats.get('max', 0):,.2f} | Tổng (Sum): {stats.get('total', 0):,.2f}
+
+Dữ liệu mẫu từ kết quả truy vấn:
+{df_summary_str}
+
+Các điểm bất thường đã được thuật toán thống kê phát hiện:
+- Loại bất thường: {types_text}
+- Chi tiết phát hiện:
+{findings_text}
+
+YÊU CẦU:
+Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và chuyên nghiệp (định dạng Markdown):
+
+### 1. 🚨 Phát hiện Bất thường & Xu hướng Chính
+(Nêu rõ các điểm đột biến, kỳ tăng/giảm mạnh hoặc rủi ro tập trung nếu có. Đưa ra con số cụ thể).
+
+### 2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
+(Đưa ra 2-3 giả thuyết kinh doanh sát thực tế: mùa vụ, chiến dịch marketing, đứt gãy vận hành, khách hàng VIP, chính sách giá,...).
+
+### 3. 🎯 Đề xuất Hành động (Action Plan)
+(Đưa ra 2-3 hành động cụ thể, thiết thực cho nhà quản lý / ban lãnh đạo).
+
+Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, không dùng từ ngữ sáo rỗng."""

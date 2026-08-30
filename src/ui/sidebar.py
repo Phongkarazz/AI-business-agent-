@@ -148,7 +148,12 @@ def render_sidebar():
                     help="Mặc định là domain chung dashscope-intl."
                 ).strip() or DASHSCOPE_BASE_URL
 
-        with st.expander("⚡ Tối ưu Quota API", expanded=False):
+        with st.expander("⚡ Tối ưu Phân tích & Quota", expanded=False):
+            enable_auto_insights = st.checkbox(
+                "Tự động tìm Insight & Bất thường (AI)",
+                value=saved.get("enable_auto_insights", True),
+                help="Tự động phân tích sâu và đưa ra nhận định kinh doanh khi phát hiện xu hướng hoặc điểm bất thường."
+            )
             enable_self_check = st.checkbox(
                 "Bật kiểm định SQL bằng AI (self-check)",
                 value=saved.get("enable_self_check", True),
@@ -185,6 +190,7 @@ def render_sidebar():
                 st.rerun()
 
     # Đồng bộ session state
+    st.session_state["enable_auto_insights"] = enable_auto_insights
     st.session_state["enable_self_check"] = enable_self_check
     st.session_state["enable_cache"] = enable_cache
     st.session_state["forecast_periods"] = forecast_periods
@@ -226,6 +232,7 @@ def render_sidebar():
                         "use_ssl": use_ssl,
                         "provider": effective_provider,
                         "model_name": final_model_name,
+                        "enable_auto_insights": enable_auto_insights,
                         "enable_self_check": enable_self_check,
                         "enable_cache": enable_cache,
                         "forecast_periods": forecast_periods,

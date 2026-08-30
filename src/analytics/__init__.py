@@ -11,7 +11,7 @@ from .heuristics import (
     pick_label_column,
 )
 from .forecasting import forecast_series
-from .anomaly import detect_outliers
+from .anomaly import detect_outliers, analyze_data_anomalies
 
 __all__ = [
     "is_id_like",
@@ -22,4 +22,5 @@ __all__ = [
     "pick_label_column",
     "forecast_series",
     "detect_outliers",
+    "analyze_data_anomalies",
 ]

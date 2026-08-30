@@ -30,6 +30,7 @@ def load_saved_config() -> Dict[str, Any]:
         "qwen_base_url": os.getenv("DASHSCOPE_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
         "enable_self_check": True,
         "enable_cache": True,
+        "enable_auto_insights": True,
         "forecast_periods": 3,
         "remember_config": True,
     }

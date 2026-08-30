@@ -1,5 +1,6 @@
 """
-SQL Generation and Execution Agent with safety validation, parenthesis checking, and self-healing loop.
+SQL Generation and Execution Agent with safety validation, parenthesis checking,
+self-healing loop, and automatic business insight discovery.
 """
 
 import json
@@ -9,12 +10,14 @@ import pandas as pd
 from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP
 from src.database.query_runner import read_sql_capped, sanitize_error
 from src.analytics.heuristics import is_id_like
+from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
 from .prompts import (
     build_sql_prompt,
     build_fix_prompt,
     build_self_check_prompt,
     build_anomaly_prompt,
+    build_auto_insight_prompt,
 )
 
 
@@ -111,6 +114,17 @@ def explain_anomalies_agent(client, provider: str, model_name: str, user_query: 
     return res
 
 
+def generate_auto_insights(client, provider: str, model_name: str, user_query: str, df: pd.DataFrame, anomalies_info: dict) -> str | None:
+    """Tự động phân tích và sinh báo cáo Insight Kinh doanh khi phát hiện xu hướng hoặc bất thường."""
+    if df is None or df.empty:
+        return None
+
+    sample_str = df.head(10).to_string(index=False)
+    prompt = build_auto_insight_prompt(user_query, sample_str, anomalies_info)
+    insight, _ = call_llm(client, provider, model_name, prompt)
+    return insight
+
+
 def run_agent(
     user_query: str,
     client,
@@ -120,10 +134,19 @@ def run_agent(
     schema_context: str,
     dialect: str = "SQLite",
     db_pass: str = "",
-    enable_self_check: bool = True
+    enable_self_check: bool = True,
+    enable_auto_insights: bool = True
 ) -> dict:
-    """Điều phối toàn bộ chu trình Text-to-SQL với kiểm tra cú pháp và cơ chế tự sửa lỗi tối đa 3 lần."""
-    result = {"query": user_query, "df": None, "sql": None, "logs": [], "error": None}
+    """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi và tự động khám phá Insight kinh doanh."""
+    result = {
+        "query": user_query,
+        "df": None,
+        "sql": None,
+        "logs": [],
+        "error": None,
+        "anomalies_info": None,
+        "insights": None,
+    }
 
     # 1. Sinh SQL ban đầu
     initial_prompt = build_sql_prompt(schema_context, dialect, user_query)
@@ -173,18 +196,29 @@ def run_agent(
             else:
                 check = {"day_du": True, "ly_do": "Đã tắt self-check để tiết kiệm quota."}
 
-            if check.get("day_du", True):
-                result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', '')}")
+            if check.get("day_du", True) or attempt == 3:
+                if check.get("day_du", True):
+                    result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', '')}")
+                else:
+                    result["logs"].append(f"⚠️ Kết quả sau 3 lần thử: {check.get('ly_do', '')}")
+
                 result["df"] = df
                 result["sql"] = sql_query
+
+                # 3. Tự động phát hiện bất thường & sinh Insight Kinh doanh
+                if df is not None and not df.empty:
+                    anomalies_info = analyze_data_anomalies(df)
+                    result["anomalies_info"] = anomalies_info
+
+                    if enable_auto_insights:
+                        insights = generate_auto_insights(
+                            client, provider, model_name, user_query, df, anomalies_info
+                        )
+                        result["insights"] = insights
+
                 return result
 
             result["logs"].append(f"⚠️ Phát hiện vấn đề: {check.get('ly_do', '')}")
-            if attempt == 3:
-                result["df"] = df
-                result["sql"] = sql_query
-                return result
-
             fix_prompt = build_fix_prompt(
                 schema_context, dialect, user_query, sql_query, check.get("ly_do", "")
             )

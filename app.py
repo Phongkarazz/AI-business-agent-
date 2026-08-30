@@ -34,7 +34,7 @@ render_sidebar()
 # 3. Giao diện Chính (Main Chat Area)
 # ---------------------------------------------------------
 st.title("🤖 AI Business Agent for SQL")
-st.caption("Truy vấn cơ sở dữ liệu bằng ngôn ngữ tự nhiên, tự động trực quan hóa và dự báo xu hướng.")
+st.caption("Truy vấn cơ sở dữ liệu bằng ngôn ngữ tự nhiên, tự động phát hiện Insight bất thường, trực quan hóa và dự báo xu hướng.")
 
 # Hiển thị lịch sử hội thoại
 for i, turn in enumerate(st.session_state["history"]):
@@ -71,7 +71,8 @@ else:
                         schema_context=st.session_state.get("schema_context"),
                         dialect=st.session_state.get("db_dialect", "SQLite"),
                         db_pass=st.session_state.get("_db_pass_for_sanitize", ""),
-                        enable_self_check=st.session_state.get("enable_self_check", True)
+                        enable_self_check=st.session_state.get("enable_self_check", True),
+                        enable_auto_insights=st.session_state.get("enable_auto_insights", True)
                     )
                 render_result(result, turn_id=f"new{len(st.session_state['history'])}")
                 if not result.get("error"):

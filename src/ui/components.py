@@ -1,14 +1,14 @@
 """
-Reusable UI components for rendering query results, charts, forecasts, and notifications.
+Reusable UI components for rendering query results, charts, forecasts, automated insights, and notifications.
 """
 
 import streamlit as st
 from src.config import LOG_INLINE_MAX_CHARS
 from src.analytics.heuristics import get_axis_columns
-from src.analytics.anomaly import detect_outliers
+from src.analytics.anomaly import detect_outliers, analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
 from src.visualization.charts import render_smart_chart
-from src.llm.agent import explain_anomalies_agent
+from src.llm.agent import generate_auto_insights
 
 
 def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: bool = False):
@@ -22,7 +22,7 @@ def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: b
 
 
 def render_result(result: dict, turn_id: str):
-    """Hiển thị kết quả truy vấn gồm Log, SQL, Bảng dữ liệu, Biểu đồ và Dự báo."""
+    """Hiển thị kết quả truy vấn gồm Log, SQL, Bảng dữ liệu, Biểu đồ, Insight Bất thường và Dự báo."""
     # 1. Hiển thị Logs
     for line in result.get("logs", []):
         if line.startswith("⚠️ Cảnh báo tự động"):
@@ -61,8 +61,12 @@ def render_result(result: dict, turn_id: str):
         key=f"csv_{turn_id}"
     )
 
-    # 4. Tabs: Biểu đồ & Dự báo
-    tab1, tab2 = st.tabs(["📊 Biểu đồ", "🔮 Dự báo"])
+    # 4. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
+    anomalies_info = result.get("anomalies_info") or analyze_data_anomalies(df)
+    has_anomaly = anomalies_info.get("has_anomaly", False)
+
+    tab_insight_label = "💡 Insight & Bất thường 🚨" if has_anomaly else "💡 Insight & Phân tích"
+    tab1, tab2, tab3 = st.tabs(["📊 Biểu đồ", tab_insight_label, "🔮 Dự báo"])
 
     with tab1:
         chart_override = st.selectbox(
@@ -72,23 +76,52 @@ def render_result(result: dict, turn_id: str):
         )
         render_smart_chart(df, chart_override, turn_id)
 
-        measure_cols, _, time_col = get_axis_columns(df)
-        if time_col and measure_cols:
-            y_col = measure_cols[0]
-            outliers = detect_outliers(df, y_col)
-            if not outliers.empty:
-                if st.button(f"🔍 AI giải thích {len(outliers)} điểm bất thường", key=f"outlier_{turn_id}"):
-                    client = st.session_state.get("client")
-                    provider = st.session_state.get("provider")
-                    model_name = st.session_state.get("model_name")
-                    with st.spinner("AI đang phân tích bất thường..."):
-                        explanation = explain_anomalies_agent(
-                            client, provider, model_name, result["query"], time_col, y_col, outliers
-                        )
-                    if explanation:
-                        st.info(f"🤖 **Nhận xét AI:** {explanation}")
+        if has_anomaly:
+            n_findings = len(anomalies_info.get("findings", []))
+            st.caption(f"🚨 **Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Chuyển sang tab **'{tab_insight_label}'** để xem báo cáo chi tiết.")
 
     with tab2:
+        st.subheader("💡 Báo cáo Phân tích Insight & Phát hiện Bất thường")
+
+        # Thống kê nhanh
+        stats = anomalies_info.get("summary_stats", {})
+        if stats:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Tổng số dòng", f"{stats.get('count', 0):,}")
+            c2.metric("Trung bình (Mean)", f"{stats.get('mean', 0):,.2f}")
+            c3.metric("Lớn nhất (Max)", f"{stats.get('max', 0):,.2f}")
+            c4.metric("Nhỏ nhất (Min)", f"{stats.get('min', 0):,.2f}")
+
+        # Danh sách điểm bất thường phát hiện theo thuật toán
+        if has_anomaly:
+            st.markdown("#### 🚨 Các phát hiện bất thường từ thuật toán:")
+            for f in anomalies_info.get("findings", []):
+                st.warning(f"• {f.get('message')}")
+        else:
+            st.success("✅ Thuật toán không phát hiện điểm đột biến hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
+
+        # Báo cáo phân tích chuyên sâu từ AI
+        insights = result.get("insights")
+        if insights:
+            st.markdown("---")
+            st.markdown("#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
+            st.markdown(insights)
+        else:
+            if st.button("🔍 Yêu cầu AI phân tích Insight & Đề xuất hành động", key=f"gen_insight_{turn_id}"):
+                client = st.session_state.get("client")
+                provider = st.session_state.get("provider")
+                model_name = st.session_state.get("model_name")
+                with st.spinner("AI đang tổng hợp và phân tích dữ liệu chuyên sâu..."):
+                    generated = generate_auto_insights(
+                        client, provider, model_name, result["query"], df, anomalies_info
+                    )
+                    if generated:
+                        result["insights"] = generated
+                        st.markdown("---")
+                        st.markdown("#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
+                        st.markdown(generated)
+
+    with tab3:
         st.caption(
             "🧮 Dự báo dùng thuật toán hồi quy tuyến tính xác định (deterministic) — không phải AI 'đoán' số. "
             "Lựa chọn này đảm bảo kết quả nhất quán, có thể kiểm chứng bằng toán học. "
