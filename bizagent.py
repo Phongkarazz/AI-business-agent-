@@ -674,6 +674,25 @@ def get_axis_columns(df: pd.DataFrame):
     return measure_cols, cat_cols, time_col
 
 
+def get_row_identity_column(df: pd.DataFrame):
+    """Tìm cột ID có độ duy nhất BẰNG ĐÚNG số dòng của kết quả — nghĩa là mỗi
+    dòng trong df đã đại diện cho ĐÚNG 1 thực thể riêng biệt (VD: SQL đã
+    GROUP BY emp_no, mỗi dòng = 1 nhân viên).
+
+    Đây là điều kiện SỐNG CÒN để tránh bug: nếu 2 nhân viên KHÁC NHAU (khác ID)
+    tình cờ TRÙNG TÊN hiển thị, hệ thống vẫn phải hiểu đây là 2 thực thể khác
+    nhau — tuyệt đối không được gộp (aggregate) chúng lại chỉ vì trùng nhãn text.
+    """
+    for c in df.columns:
+        if is_id_like(c):
+            try:
+                if df[c].nunique(dropna=True) == len(df):
+                    return c
+            except Exception:
+                continue
+    return None
+
+
 def pick_label_column(df: pd.DataFrame, label_cols: list):
     """Chọn cột nhãn TỐT NHẤT cho trục danh mục (X), ưu tiên theo thứ tự:
     1) Gộp first_name + last_name thành 1 cột 'Họ và tên' nếu cả hai đều có mặt.
@@ -724,6 +743,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
     measure_cols, cat_cols, time_col = get_axis_columns(df)
     # cat_cols dùng làm trục danh mục nên loại time_col ra khỏi đó (đã có vai trò riêng)
     label_cols = [c for c in cat_cols if c != time_col]
+    # Cột định danh duy nhất từng dòng (nếu có) — dùng để BẢO VỆ khỏi việc gộp
+    # nhầm các thực thể khác nhau trùng tên hiển thị (xem get_row_identity_column).
+    row_identity_col = get_row_identity_column(df)
 
     try:
         if chart_override == "Tự động":
@@ -773,7 +795,17 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             # cùng 1 cột — tạo hình khối đặc bị vằn ngang, không mang ý nghĩa thống kê và dễ gây
             # hiểu lầm. Ngưỡng: số nhãn duy nhất nhỏ hơn hẳn (< 70%) tổng số dòng → coi là dữ liệu
             # thô cần tổng hợp trước khi vẽ, thay vì vẽ 1-cột-1-dòng như bình thường.
-            needs_aggregation = n_unique_labels < total_rows * 0.7 and n_unique_labels < MAX_BAR_CATEGORIES
+            #
+            # QUAN TRỌNG (fix bug "Top 100 chỉ hiện 15 người"): điều kiện này CHỈ được áp dụng
+            # khi KHÔNG có cột định danh (row_identity_col) chứng minh mỗi dòng đã là 1 thực thể
+            # riêng biệt. Nếu có (VD: emp_no, SQL đã GROUP BY sẵn theo từng nhân viên), thì dù
+            # nhiều người trùng tên hiển thị, đây VẪN LÀ CÁC NGƯỜI KHÁC NHAU — tuyệt đối không
+            # được lấy trung bình (mean) gộp họ lại, vì sẽ phá vỡ ý nghĩa "Top N theo từng người".
+            needs_aggregation = (
+                row_identity_col is None
+                and n_unique_labels < total_rows * 0.7
+                and n_unique_labels < MAX_BAR_CATEGORIES
+            )
 
             if needs_aggregation:
                 agg_df = plot_df.groupby(label_name, as_index=False)[measure_cols[0]].mean()
@@ -790,6 +822,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     f"chồng toàn bộ dòng thô, để tránh gây hiểu lầm. Xem dữ liệu chi tiết trong bảng phía trên."
                 )
             else:
+                # Nếu nhãn hiển thị bị trùng (VD 2 nhân viên khác nhau cùng tên "John Smith")
+                # nhưng đã xác định mỗi dòng là 1 thực thể riêng biệt (có row_identity_col),
+                # gắn thêm ID vào nhãn để phân biệt trên biểu đồ — KHÔNG gộp lại làm một.
+                if row_identity_col and plot_df[label_name].duplicated().any():
+                    plot_df[label_name] = (
+                        plot_df[label_name] + " (#" + plot_df[row_identity_col].astype(str) + ")"
+                    )
+                    st.caption(
+                        f"ℹ️ Một số dòng trùng nhãn `{label_name}` nhưng là các thực thể khác nhau "
+                        f"(khác `{row_identity_col}`) — đã gắn thêm mã `{row_identity_col}` vào nhãn "
+                        f"trên biểu đồ để không bị nhầm lẫn hoặc gộp sai."
+                    )
+
                 # Giới hạn số cột hiển thị — Bar chart với hàng trăm/nghìn category (VD: kết quả
                 # không GROUP BY, chạm LIMIT 1000) sẽ vẽ thành "bức tường vạch" dày đặc, nhãn trục X
                 # chồng lấn hoàn toàn không đọc được. Cắt về top N đầu tiên (giữ nguyên thứ tự đã
