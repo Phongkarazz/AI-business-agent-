@@ -1,5 +1,5 @@
 """
-Smart Plotly charting module with automatic visualization selection and edge-case guards.
+Smart Plotly charting module with automatic visualization selection, dynamic limit slider, and edge-case guards.
 """
 
 import pandas as pd
@@ -16,7 +16,7 @@ from src.analytics.heuristics import (
 
 
 def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
-    """Vẽ biểu đồ thông minh dựa trên đặc tính dữ liệu với các lớp bảo vệ chống nhầm lẫn."""
+    """Vẽ biểu đồ thông minh dựa trên đặc tính dữ liệu với thanh trượt tùy chỉnh số lượng cột."""
     if df is None or df.empty:
         st.info("Không có dữ liệu để vẽ biểu đồ.")
         return
@@ -74,6 +74,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 title=f"Xu hướng theo {time_col}",
                 template="plotly_white"
             )
+            fig.update_layout(
+                xaxis=dict(tickangle=-45, automargin=True),
+                margin=dict(l=20, r=20, t=50, b=50)
+            )
+
         elif chosen == "Area" and time_col and measure_cols:
             fig = px.area(
                 df.sort_values(time_col),
@@ -82,6 +87,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 title=f"Xu hướng (Area) theo {time_col}",
                 template="plotly_white"
             )
+            fig.update_layout(
+                xaxis=dict(tickangle=-45, automargin=True),
+                margin=dict(l=20, r=20, t=50, b=50)
+            )
+
         elif chosen == "Bar" and label_cols and measure_cols:
             label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
             if label_name is None:
@@ -98,7 +108,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             needs_aggregation = (
                 row_identity_col is None
                 and n_unique_labels < total_rows * 0.7
-                and n_unique_labels < MAX_BAR_CATEGORIES
+                and n_unique_labels < 30
             )
 
             if needs_aggregation:
@@ -110,7 +120,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     category_orders={label_name: category_order},
                     template="plotly_white"
                 )
-                fig.update_xaxes(type="category")
+                fig.update_layout(
+                    xaxis=dict(type="category", tickangle=-45, automargin=True),
+                    margin=dict(l=20, r=20, t=50, b=80)
+                )
                 st.caption(
                     f"📊 Dữ liệu có nhiều dòng trùng nhãn `{label_name}` ({n_unique_labels} nhãn / "
                     f"{total_rows} dòng) — biểu đồ hiển thị **giá trị trung bình** theo từng nhãn thay vì "
@@ -127,9 +140,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         f"(khác `{row_identity_col}`) — đã gắn thêm mã `{row_identity_col}` vào nhãn để phân biệt rõ."
                     )
 
-                was_truncated = total_rows > MAX_BAR_CATEGORIES
-                if was_truncated:
-                    plot_df = plot_df.head(MAX_BAR_CATEGORIES)
+                # Cho phép người dùng tùy chọn số lượng cột hiển thị nếu kết quả lớn hơn 30 dòng
+                if total_rows > 30:
+                    max_display = st.slider(
+                        f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
+                        min_value=min(10, total_rows),
+                        max_value=total_rows,
+                        value=min(total_rows, MAX_BAR_CATEGORIES),
+                        step=5 if total_rows <= 100 else 10,
+                        key=f"bar_limit_{turn_id}"
+                    )
+                    plot_df = plot_df.head(max_display)
+                else:
+                    max_display = total_rows
 
                 category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
 
@@ -142,28 +165,29 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
 
                 fig = px.bar(
                     plot_df, x=label_name, y=measure_cols[0], color=color_col,
-                    title=f"{measure_cols[0]} theo {label_name}",
+                    title=f"{measure_cols[0]} theo {label_name} (Hiển thị {len(plot_df)}/{total_rows} đối tượng)",
                     category_orders={label_name: category_order},
                     template="plotly_white"
                 )
-                fig.update_xaxes(type="category")
-                if was_truncated:
-                    st.caption(
-                        f"📊 Đang hiển thị {MAX_BAR_CATEGORIES}/{total_rows} dòng đầu tiên để biểu đồ dễ đọc — "
-                        f"xem đầy đủ {total_rows} dòng trong bảng dữ liệu phía trên."
-                    )
+                fig.update_layout(
+                    xaxis=dict(type="category", tickangle=-45, automargin=True),
+                    margin=dict(l=20, r=20, t=50, b=100)
+                )
+
         elif chosen == "Scatter" and len(measure_cols) >= 2:
             fig = px.scatter(
                 df, x=measure_cols[0], y=measure_cols[1],
                 title="Biểu đồ phân tích tương quan",
                 template="plotly_white"
             )
+            fig.update_layout(margin=dict(l=20, r=20, t=50, b=50))
         elif len(measure_cols) >= 2:
             fig = px.scatter(
                 df, x=measure_cols[0], y=measure_cols[1],
                 title="Biểu đồ phân tích tương quan",
                 template="plotly_white"
             )
+            fig.update_layout(margin=dict(l=20, r=20, t=50, b=50))
         else:
             st.info("Không đủ dữ liệu phù hợp cho loại biểu đồ đã chọn (thiếu chỉ số đo lường số học).")
             return
