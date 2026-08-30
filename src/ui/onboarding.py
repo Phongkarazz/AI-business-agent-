@@ -30,7 +30,7 @@ def render_onboarding():
     with col_back:
         if is_already_connected:
             st.write("")
-            if st.button("← Quay lại Chat", type="secondary", use_container_width=True):
+            if st.button("← Quay lại Chat", type="secondary", use_container_width=True, key="btn_back_to_chat_top"):
                 st.session_state["view_mode"] = "chat"
                 st.rerun()
 
@@ -54,6 +54,7 @@ def render_onboarding():
             "Chọn kiểu dữ liệu",
             data_mode_options,
             index=saved_mode_idx,
+            key="onboarding_data_mode",
             help="Dữ liệu mẫu chứa 1,000+ giao dịch kinh doanh chocolate 2023 với nhân viên, sản phẩm, doanh số."
         )
         use_demo = data_mode.startswith("🎮")
@@ -67,29 +68,31 @@ def render_onboarding():
             run_local = st.checkbox(
                 "🖥️ Database chạy trên máy Local (localhost)",
                 value=saved.get("run_local", False),
+                key="onboarding_run_local",
                 help="Tự động điền Host = localhost và thử các alias (127.0.0.1, host.docker.internal)."
             )
 
             if run_local:
                 st.caption("ℹ️ **Lưu ý:** `localhost` chỉ hoạt động khi bạn đang chạy app trên cùng máy tính với MySQL.")
-                db_host = st.text_input("Host", value=saved.get("db_host", "localhost") or "localhost")
+                db_host = st.text_input("Host", value=saved.get("db_host", "localhost") or "localhost", key="onboarding_db_host")
             else:
                 default_host = saved.get("db_host", "")
                 if default_host in ("localhost", "127.0.0.1"):
                     default_host = ""
-                db_host = st.text_input("Host", value=default_host, placeholder="VD: mysql-xxx.aivencloud.com")
+                db_host = st.text_input("Host", value=default_host, placeholder="VD: mysql-xxx.aivencloud.com", key="onboarding_db_host")
 
             c_p1, c_p2 = st.columns([1, 2])
             with c_p1:
-                db_port_raw = st.text_input("Port", value=saved.get("db_port", "3306"))
+                db_port_raw = st.text_input("Port", value=saved.get("db_port", "3306"), key="onboarding_db_port")
             with c_p2:
-                db_user = st.text_input("User", value=saved.get("db_user", "root"))
+                db_user = st.text_input("User", value=saved.get("db_user", "root"), key="onboarding_db_user")
 
-            db_pass = st.text_input("Password", value=saved.get("db_pass", ""), type="password")
-            db_name = st.text_input("Database Name", value=saved.get("db_name", ""), placeholder="VD: my_company_db")
+            db_pass = st.text_input("Password", value=saved.get("db_pass", ""), type="password", key="onboarding_db_pass")
+            db_name = st.text_input("Database Name", value=saved.get("db_name", ""), placeholder="VD: my_company_db", key="onboarding_db_name")
             use_ssl = st.checkbox(
                 "Dùng SSL (Bắt buộc với hầu hết MySQL Cloud: Aiven, Railway...)",
-                value=saved.get("use_ssl", not run_local)
+                value=saved.get("use_ssl", not run_local),
+                key="onboarding_use_ssl"
             )
 
             db_host = db_host.strip()
@@ -105,7 +108,7 @@ def render_onboarding():
         saved_provider = saved.get("provider", "OpenRouter")
         provider_idx = provider_list.index(saved_provider) if saved_provider in provider_list else 0
 
-        provider = st.selectbox("Chọn Provider AI", provider_list, index=provider_idx)
+        provider = st.selectbox("Chọn Provider AI", provider_list, index=provider_idx, key="onboarding_provider")
         provider_cfg = PROVIDER_CONFIGS[provider]
 
         # Lấy API Key đã lưu
@@ -122,6 +125,7 @@ def render_onboarding():
             type="password",
             help=provider_cfg["key_help"],
             placeholder=provider_cfg["key_placeholder"],
+            key="onboarding_api_key"
         )
 
         clean_api_key = api_key.strip()
@@ -133,7 +137,7 @@ def render_onboarding():
         model_options = provider_cfg["models"]
         saved_model = saved.get("model_name", "")
         model_idx = model_options.index(saved_model) if saved_model in model_options else 0
-        selected_model = st.selectbox("Chọn Model AI", model_options, index=model_idx)
+        selected_model = st.selectbox("Chọn Model AI", model_options, index=model_idx, key="onboarding_model")
 
         custom_base_url = ""
         custom_model_input = ""
@@ -142,12 +146,14 @@ def render_onboarding():
                 custom_base_url = st.text_input(
                     "Base URL",
                     value=saved.get("openrouter_base_url", OPENROUTER_BASE_URL),
-                    help="Mặc định là https://openrouter.ai/api/v1"
+                    help="Mặc định là https://openrouter.ai/api/v1",
+                    key="onboarding_openrouter_base_url"
                 ).strip() or OPENROUTER_BASE_URL
                 custom_model_input = st.text_input(
                     "Nhập Model ID tùy chỉnh (VD: deepseek/deepseek-r1)",
                     value=saved.get("custom_openrouter_model", ""),
-                    help="Để trống nếu dùng model đã chọn trong danh sách ở trên."
+                    help="Để trống nếu dùng model đã chọn trong danh sách ở trên.",
+                    key="onboarding_custom_openrouter_model"
                 ).strip()
                 if custom_model_input:
                     selected_model = custom_model_input
@@ -156,7 +162,8 @@ def render_onboarding():
             with st.expander("🔧 Base URL nâng cao (Qwen)", expanded=False):
                 custom_base_url = st.text_input(
                     "Base URL",
-                    value=saved.get("qwen_base_url", DASHSCOPE_BASE_URL)
+                    value=saved.get("qwen_base_url", DASHSCOPE_BASE_URL),
+                    key="onboarding_qwen_base_url"
                 ).strip() or DASHSCOPE_BASE_URL
 
     st.markdown("---")
@@ -169,37 +176,46 @@ def render_onboarding():
         remember_config = st.checkbox(
             "💾 Tự động lưu cấu hình trên máy này (không cần nhập lại)",
             value=saved.get("remember_config", True),
-            help="Lưu vào file cục bộ an toàn, không đẩy lên Git."
+            help="Lưu vào file cục bộ an toàn, không đẩy lên Git.",
+            key="onboarding_remember_config"
         )
         auto_connect = st.checkbox(
             "⚡ Tự động kết nối & bỏ qua màn hình này ở các lần mở app sau",
             value=saved.get("auto_connect", True),
-            help="Mở app là vào thẳng màn hình Chat phân tích dữ liệu ngay."
+            help="Mở app là vào thẳng màn hình Chat phân tích dữ liệu ngay.",
+            key="onboarding_auto_connect"
         )
         enable_auto_insights = st.checkbox(
             "💡 Tự động tìm Insight & Bất thường (AI)",
             value=saved.get("enable_auto_insights", True),
-            help="Tự động phân tích sâu và đề xuất kế hoạch hành động khi có xu hướng bất thường."
+            help="Tự động phân tích sâu và đề xuất kế hoạch hành động khi có xu hướng bất thường.",
+            key="onboarding_enable_auto_insights"
         )
 
     with c_opt2:
         enable_self_check = st.checkbox(
             "🛡️ Bật kiểm định SQL bằng AI (self-check)",
             value=saved.get("enable_self_check", True),
-            help="Tự kiểm tra độ chính xác của SQL trước khi trả về kết quả."
+            help="Tự kiểm tra độ chính xác của SQL trước khi trả về kết quả.",
+            key="onboarding_enable_self_check"
         )
         enable_cache = st.checkbox(
             "♻️ Dùng lại kết quả cho câu hỏi trùng lặp (cache)",
             value=saved.get("enable_cache", True),
-            help="Tiết kiệm quota API khi hỏi lại các câu hỏi cũ trong phiên."
+            help="Tiết kiệm quota API khi hỏi lại các câu hỏi cũ trong phiên.",
+            key="onboarding_enable_cache"
         )
-        forecast_periods = st.slider("Số kỳ dự báo xu hướng tương lai", 1, 12, saved.get("forecast_periods", 3))
+        forecast_periods = st.slider(
+            "Số kỳ dự báo xu hướng tương lai", 1, 12, saved.get("forecast_periods", 3),
+            key="onboarding_forecast_periods"
+        )
 
     with st.expander("📝 Mô tả Schema / Quy tắc Nghiệp vụ Bổ sung (Tùy chọn)", expanded=False):
         schema_context_input = st.text_area(
             "Mô tả nghiệp vụ hoặc chú thích thêm về cấu trúc bảng (Hệ thống sẽ tự trích xuất nếu để trống)",
             value=st.session_state.get("schema_context", ""),
-            height=120
+            height=120,
+            key="onboarding_schema_context_input"
         )
 
     # Nút hành động chính
@@ -207,16 +223,21 @@ def render_onboarding():
     col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
 
     with col_btn1:
-        connect_btn = st.button("🚀 Bắt đầu Sử dụng & Kết nối", type="primary", use_container_width=True)
+        connect_btn = st.button(
+            "🚀 Bắt đầu Sử dụng & Kết nối",
+            type="primary",
+            use_container_width=True,
+            key="btn_onboarding_connect"
+        )
 
     with col_btn2:
         if is_already_connected:
-            if st.button("← Quay lại Chat", use_container_width=True):
+            if st.button("← Quay lại Chat", use_container_width=True, key="btn_back_to_chat_bottom"):
                 st.session_state["view_mode"] = "chat"
                 st.rerun()
 
     with col_btn3:
-        if st.button("🗑️ Xóa cấu hình đã lưu", use_container_width=True):
+        if st.button("🗑️ Xóa cấu hình đã lưu", use_container_width=True, key="btn_onboarding_clear_config"):
             clear_saved_config()
             st.session_state["_auto_connect_attempted"] = True
             st.session_state["connected"] = False

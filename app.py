@@ -118,7 +118,7 @@ else:
 
     with col_settings:
         st.write("")
-        if st.button("⚙️ Cài đặt", type="secondary", use_container_width=True, help="Thay đổi kết nối Database, AI Provider hoặc tùy chỉnh tham số"):
+        if st.button("⚙️ Cài đặt", type="secondary", use_container_width=True, key="header_btn_settings", help="Thay đổi kết nối Database, AI Provider hoặc tùy chỉnh tham số"):
             st.session_state["view_mode"] = "settings"
             st.rerun()
 

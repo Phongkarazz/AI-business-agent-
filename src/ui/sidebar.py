@@ -80,12 +80,12 @@ def render_main_sidebar():
 
         c_top1, c_top2 = st.columns(2)
         with c_top1:
-            if st.button("⚙️ Cấu hình", use_container_width=True, help="Mở màn hình cài đặt để đổi Database hoặc AI Provider"):
+            if st.button("⚙️ Cấu hình", use_container_width=True, key="sidebar_btn_settings", help="Mở màn hình cài đặt để đổi Database hoặc AI Provider"):
                 st.session_state["view_mode"] = "settings"
                 st.rerun()
 
         with c_top2:
-            if st.button("➕ Chat Mới", type="primary", use_container_width=True, help="Bắt đầu một phiên hội thoại mới"):
+            if st.button("➕ Chat Mới", type="primary", use_container_width=True, key="sidebar_btn_new_chat", help="Bắt đầu một phiên hội thoại mới"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
                 st.rerun()
@@ -139,7 +139,7 @@ def render_main_sidebar():
                 st.caption(f"**{i+1}.** {short_q}")
 
             st.markdown("###")
-            if st.button("🗑️ Xóa lịch sử chat", use_container_width=True):
+            if st.button("🗑️ Xóa lịch sử chat", use_container_width=True, key="sidebar_btn_clear_history"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
                 st.toast("🧹 Đã xóa toàn bộ lịch sử trò chuyện!", icon="🗑️")
