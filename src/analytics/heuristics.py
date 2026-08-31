@@ -216,75 +216,113 @@ def generate_starter_prompts(tables: list[str]) -> list[dict]:
 
 def sanitize_insight_markdown(text: str) -> str:
     """Tự động làm sạch hoàn toàn các lỗi định dạng markdown của AI:
-    - Xóa khoảng trắng thừa bên trong thẻ in đậm: ** text ** hoặc **text ** -> **text**
-    - Sửa dính thẻ: ]-** -> ] - **
-    - Thay thế ký tự lạ 。・ thành ↳ cho dòng KPI
+    - CẤM TỰ Ý IN ĐẬM TRONG CÂU: Chỉ in đậm duy nhất Tiêu đề ở đầu gạch đầu dòng trước dấu hai chấm.
+    - Xóa toàn bộ dấu ** thừa, mồ côi hoặc chèn lung tung trong thân câu.
+    - Tách toàn bộ chữ dính với %, số, và tên riêng (Jucies để, đạt 28,490,175, 11.0% so).
     - Khôi phục và chuẩn hóa tiêu đề ### 2.1. 🚨, ### 2.2. 🔍, ### 2.3. 🎯
     """
     if not text:
         return ""
 
-    text = str(text)
+    # 0. Chuẩn hóa tiêu đề 2.1, 2.2, 2.3 thành ### trước khi xử lý
+    text = re.sub(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?(Phát hiện Bất thường.*)", r"### 2.1. 🚨 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
 
-    # 1. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề ↳
-    text = re.sub(r"^[。・]\s*", "   ↳ ", text, flags=re.MULTILINE)
-    text = re.sub(r"^\s*[。・]\s*", "   ↳ ", text, flags=re.MULTILINE)
+    # 1. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề chuẩn
+    text = re.sub(r"^[。・]\s*", "   - ", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[。・]\s*", "   - ", text, flags=re.MULTILINE)
 
-    # 2. Gộp các dấu sao bị chèn khoảng trắng: * *, ** *, * ** -> **
-    text = re.sub(r"\*\s+\*", r"**", text)
+    # 2. Xóa các tiền tố #### trước nhãn ưu tiên
+    text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\g<1>", text)
 
-    # 3. Xóa khoảng trắng thừa bên trong thẻ in đậm/nghiêng: ** 123 ** hoặc **123 ** -> **123**
-    for _ in range(2):
-        text = re.sub(r"\*\*\s*([^\*\n]+?)\s*\*\*", r"**\1**", text)
-        text = re.sub(r"\*\s*([^\*\n]+?)\s*\*", r"*\1*", text)
+    # 3. Sửa lỗi chính tả phổ biến
+    text = text.replace("đư ợc", "được").replace("đư ọc", "được")
 
-    # 4. Sửa dính thẻ sau nhãn ưu tiên: ]-** -> ] - **
-    text = re.sub(r"\]\s*-\s*\*\*\s*", r"] - **", text)
-    text = re.sub(r"\]\s*-\s*", r"] - ", text)
+    lines = text.splitlines()
+    cleaned_lines = []
 
-    # 5. Sửa khoảng trắng trước dấu hai chấm sau in đậm: **Text** : -> **Text**:
-    text = re.sub(r"\*\*\s*:\s*", r"**: ", text)
+    for line in lines:
+        l = line.strip()
+        if not l:
+            cleaned_lines.append("")
+            continue
 
-    # 6. Sửa lỗi số phân tách hàng nghìn bị chèn dấu cách: 1, 299, 998 -> 1,299,998
-    for _ in range(4):
-        text = re.sub(r"(\d+),\s+(\d{3})", r"\1,\2", text)
+        # Giữ nguyên các tiêu đề Markdown lớn
+        if l.startswith("#"):
+            cleaned_lines.append(l)
+            continue
 
-    # 7. Xóa số thứ tự lặp lại sau bullet: • 1. -> •
-    text = re.sub(r"^[•\-\*]\s*\d+[\.\)]\s*", "• ", text, flags=re.MULTILINE)
+        # A. Sửa lỗi dính từ tiếng Anh/Tên riêng với các từ nối tiếng Việt: Juciesđể -> Jucies để, Delishvà -> Delish và
+        l = re.sub(r"([a-zA-Z]{3,})(để|và|với|chiếm|trong|của|cho|tại|theo|đạt|có)", r"\g<1> \g<2>", l)
 
-    # 8. Sửa dính chữ quanh thẻ in đậm (VD: **KHÔNG**Phát hiện -> **KHÔNG** Phát hiện, **USA**có -> **USA** có)
-    text = re.sub(r"\*\*([^\*\n]+?)\*\*([a-zA-Zà-ỹÀ-Ỹ0-9])", r"**\1** \2", text)
-    text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ0-9])\*\*([^\*\n]+?)\*\*", r"\1 **\2**", text)
+        # B. Sửa lỗi dính từ với số: đạt28,490,175 -> đạt 28,490,175, thiểu9,000,000 -> thiểu 9,000,000
+        l = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ])(\d{1,3}(?:,\d{3})+|\d+)", r"\g<1> \g<2>", l)
+        l = re.sub(r"(\d{1,3}(?:,\d{3})+|\d+)([a-zA-Zà-ỹÀ-Ỹ])", r"\g<1> \g<2>", l)
 
-    # 9. Tách từ viết hoa viết tắt dính liền với từ thường (VD: APACchiếm -> APAC chiếm, USACó -> USA Có)
-    text = re.sub(r"([A-ZÀ-Ỹ]{2,})([A-ZÀ-Ỹ][a-zà-ỹ])", r"\1 \2", text)
-    text = re.sub(r"([A-Z]{2,})([a-zà-ỹ])", r"\1 \2", text)
+        # C. Sửa dính % với từ: 11.0%so -> 11.0% so
+        l = re.sub(r"(\d+(?:\.\d+)?%)([a-zA-Zà-ỹÀ-Ỹ])", r"\g<1> \g<2>", l)
+        l = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ])(\d+(?:\.\d+)?%)", r"\g<1> \g<2>", l)
 
-    # 10. Chuẩn hóa khoảng trắng sau dấu hai chấm
-    text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ]):(\d)", r"\1: \2", text)
-    text = re.sub(r":([A-ZÀ-Ỹa-zà-ỹ])", r": \1", text)
-    text = re.sub(r"\bthấphơn\b", "thấp hơn", text)
-    text = re.sub(r"\bcaohơn\b", "cao hơn", text)
-    text = re.sub(r"\blớnhơn\b", "lớn hơn", text)
-    text = re.sub(r"\bnhỏhơn\b", "nhỏ hơn", text)
-    text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\1", text)
+        # D. Sửa lỗi khoảng trắng quanh dấu câu: 175 , với -> 175, với; ( 9,708,972 ) -> (9,708,972)
+        l = re.sub(r"\s+([,\.:;])", r"\g<1>", l)
+        l = re.sub(r"\(\s+", "(", l)
+        l = re.sub(r"\s+\)", ")", l)
 
-    # 11. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
+        # E. Xóa số thứ tự lặp lại sau bullet: • 1. -> •
+        l = re.sub(r"^[•\-\*]\s*\d+[\.\)]\s*", "• ", l)
+
+        # F. QUY TẮC: KHÔNG ĐƯỢC TỰ Ý IN ĐẬM Ở TRONG CÂU
+        # Chỉ giữ in đậm ở tiêu đề trước dấu hai chấm: • **Tiêu đề**: hoặc • [Ưu tiên...]:
+        if ":" in l:
+            prefix, rest = l.split(":", 1)
+            clean_p = prefix.replace("**", "").replace("*", "").strip()
+
+            bullet_char = "•"
+            if clean_p.startswith("-") or clean_p.startswith("*"):
+                bullet_char = clean_p[0]
+
+            clean_tag = clean_p.lstrip("•-* ").strip()
+
+            if "[" in clean_tag and "]" in clean_tag:
+                prefix_out = f"{bullet_char} {clean_tag}"
+            elif clean_tag.lower().startswith("kpi") or "kpi" in clean_tag.lower():
+                prefix_out = f"  - {clean_tag}"
+            else:
+                if len(clean_tag.split()) > 6 or clean_tag.lower().startswith("tổng doanh số") or clean_tag.lower().startswith("nhóm"):
+                    prefix_out = f"• {clean_tag}"
+                else:
+                    prefix_out = f"• **{clean_tag}**"
+
+            # XÓA SẠCH TOÀN BỘ DẤU ** TRONG THÂN CÂU (rest)
+            clean_rest = rest.replace("**", "").replace("*", "").strip()
+            l = f"{prefix_out}: {clean_rest}"
+        else:
+            # Dòng không có dấu hai chấm: Xóa TOÀN BỘ **
+            clean_l = l.replace("**", "").replace("*", "").strip()
+            if not clean_l.startswith("•") and not clean_l.startswith("-"):
+                clean_l = f"• {clean_l}"
+            l = clean_l
+
+        # Dọn dẹp khoảng trắng thừa
+        l = re.sub(r"[ \t]+", " ", l)
+        cleaned_lines.append(l)
+
+    text = "\n".join(cleaned_lines)
+
+    # 4. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
     has_head_21 = bool(re.search(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?Phát hiện Bất thường", text, flags=re.IGNORECASE | re.MULTILINE))
     if not has_head_21:
         text = "### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n\n" + text
 
-    text = re.sub(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?(Phát hiện Bất thường.*)", r"### 2.1. 🚨 \1", text, flags=re.IGNORECASE | re.MULTILINE)
-    text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \1", text, flags=re.IGNORECASE | re.MULTILINE)
-    text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \1", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?(Phát hiện Bất thường.*)", r"### 2.1. 🚨 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
 
     # Dọn dẹp các tiền tố bị nhân đôi do regex
-    text = re.sub(r"###\s*2\.(\d)\.\s*[🚨🔍🎯]\s*(?:2\.\d\.?\s*)?(?:[🚨🔍🎯]\s*)?", r"### 2.\1. ", text)
+    text = re.sub(r"###\s*2\.(\d)\.\s*[🚨🔍🎯]\s*(?:2\.\d\.?\s*)?", r"### 2.\g<1>. ", text)
     text = text.replace("### 2.1. ", "### 2.1. 🚨 ")
     text = text.replace("### 2.2. ", "### 2.2. 🔍 ")
     text = text.replace("### 2.3. ", "### 2.3. 🎯 ")
-
-    # 12. Dọn dẹp các dấu sao thừa liên tiếp
-    text = re.sub(r"\*{3,}", r"**", text)
 
     return text.strip()

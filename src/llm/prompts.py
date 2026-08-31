@@ -291,9 +291,10 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ma
 Mỗi hành động phải nêu rõ chỉ số KPI / kết quả đo lường kỳ vọng).
 
 QUY TẮC ĐỊNH DẠNG VĂN BẢN (BẮT BUỘC):
-- Viết hoa, dấu câu và chính tả tiếng Việt chuẩn xác 100%. Tách từ chuẩn (viết "thấp hơn", "cao hơn", "lớn hơn", TUYỆT ĐỐI KHÔNG viết dính liền "thấphơn").
-- Định dạng số và chữ in đậm: Viết liền không khoảng cách bên trong dấu sao, ví dụ: **1,299,998** (TUYỆT ĐỐI KHÔNG viết ** 1, 299, 998 ** hoặc * *).
-- Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, không dùng từ ngữ sáo rỗng."""
+- TUYỆT ĐỐI KHÔNG TỰ Ý IN ĐẬM Ở TRONG THÂN CÂU (CẤM dùng ** bên trong câu).
+- CHỈ IN ĐẬM DUY NHẤT TIÊU ĐỀ Ở ĐẦU GẠCH ĐẦU DÒNG TRƯỚC DẤU HAI CHẤM (Ví dụ: `• **Tiêu đề phân tích**: Toàn bộ nội dung phân tích phía sau là chữ thường bình thường, không có bất kỳ dấu sao ** nào`).
+- Tách từ và số chuẩn xác (viết "thấp hơn", "cao hơn", "lớn hơn", "đạt 28,490,175", "11.0% so với", TUYỆT ĐỐI KHÔNG viết dính liền).
+- Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, văn phong giám đốc điều hành."""
 
 
 def build_followup_prompt(user_query: str, schema_context: str, df_sample_str: str, lang: str = "vi") -> str:

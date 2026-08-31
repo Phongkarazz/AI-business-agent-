@@ -60,11 +60,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 return None
 
         # Xác định cột phân nhóm màu sắc cho Line/Area (ví dụ: phân loại theo Region, Product...)
+        # CHÚ Ý QUAN TRỌNG: time_color_col TUYỆT ĐỐI KHÔNG ĐƯỢC TRÙNG VỚI time_col
         time_color_col = None
         if chosen in ("Line", "Area") and len(measure_cols) == 1 and label_cols:
-            candidate_col, _, _ = pick_label_column(df, label_cols)
-            if candidate_col and df[candidate_col].nunique(dropna=True) <= 20:
-                time_color_col = candidate_col
+            other_labels = [c for c in label_cols if c != time_col]
+            if other_labels:
+                candidate_col, _, _ = pick_label_column(df, other_labels)
+                if candidate_col and candidate_col != time_col and 1 < df[candidate_col].nunique(dropna=True) <= 20:
+                    time_color_col = candidate_col
 
         if chosen == "Line" and time_col and measure_cols:
             sorted_df = df.sort_values(time_col)
@@ -81,14 +84,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     title=f"Xu hướng {measure_cols[0]} theo {time_col} (Phân nhóm theo {time_color_col})",
                     template="plotly_white"
                 )
+                fig.update_traces(line=dict(width=2.5), marker=dict(size=7))
             else:
                 fig = px.line(
                     sorted_df,
                     x=time_col,
                     y=measure_cols if len(measure_cols) > 1 else measure_cols[0],
                     markers=True,
-                    title=f"Xu hướng theo {time_col}",
+                    title=f"Xu hướng {measure_cols[0]} theo {time_col}" if len(measure_cols) == 1 else f"Xu hướng theo {time_col}",
                     template="plotly_white"
+                )
+                fig.update_traces(
+                    line=dict(width=3, color="#1F4E78"),
+                    marker=dict(size=8, color="#1F4E78")
                 )
             fig.update_layout(
                 xaxis=dict(
