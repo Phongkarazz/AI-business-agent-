@@ -64,10 +64,10 @@ PROVIDER_CONFIGS = {
         "free_tier_note": "Tích hợp sẵn Base URL https://openrouter.ai/api/v1 — truy cập hàng trăm model AI hàng đầu.",
     },
     "Gemini (Google)": {
-        "models": ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+        "models": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
         "key_help": "Lấy API key miễn phí tại aistudio.google.com/apikey.",
         "key_placeholder": "AIzaSy...",
-        "free_tier_note": "15 RPM miễn phí, dùng tốt nhất với gemini-2.5-flash.",
+        "free_tier_note": "15 RPM miễn phí, dùng tốt nhất với gemini-2.0-flash.",
     },
     "Qwen (Alibaba Cloud)": {
         "models": ["qwen-plus", "qwen-turbo", "qwen2.5-72b-instruct", "qwen-max"],

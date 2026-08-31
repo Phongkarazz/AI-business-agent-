@@ -108,8 +108,32 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
 
 
 def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
-    response = client.models.generate_content(model=model_name, contents=prompt)
-    return response.text
+    # Chuẩn hóa tên model Gemini và tự động chuyển tiếp nếu gặp model cũ bị 404
+    clean_model = (model_name or "").strip().lower()
+    if clean_model in ("gemini-2.5-flash", "gemini-flash", "gemini-pro", ""):
+        clean_model = "gemini-2.0-flash"
+
+    target_models = [clean_model]
+    for fallback in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
+        if fallback not in target_models:
+            target_models.append(fallback)
+
+    last_exc = None
+    for m in target_models:
+        try:
+            response = client.models.generate_content(model=m, contents=prompt)
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            last_exc = e
+            err_str = str(e).lower()
+            if "404" in err_str or "not_found" in err_str or "no longer available" in err_str:
+                continue
+            raise e
+
+    if last_exc:
+        raise last_exc
+    return ""
 
 
 def _call_openai_compatible_impl(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
