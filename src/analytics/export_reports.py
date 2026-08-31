@@ -245,10 +245,20 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             fontName=font_name_bold,
             fontSize=8.5,
             leading=12.5,
-            textColor=colors.HexColor("#0F766E"),
+            textColor=colors.HexColor("#1E3A8A"),
             leftIndent=8,
-            spaceBefore=5,
+            spaceBefore=6,
             spaceAfter=2
+        )
+        kpi_style = ParagraphStyle(
+            "KPIStyle",
+            parent=styles["Normal"],
+            fontName=font_name,
+            fontSize=8.0,
+            leading=12.0,
+            textColor=colors.HexColor("#4B5563"),
+            leftIndent=20,
+            spaceAfter=4
         )
         table_cell_style = ParagraphStyle(
             "TableCell",
@@ -339,44 +349,68 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             sec_num = "3" if chart_png_bytes else "2"
             story.append(Paragraph(f"{sec_num}. PHÂN TÍCH INSIGHT CHIẾN LƯỢC & KẾ HOẠCH HÀNH ĐỘNG", section_style))
 
+            # Phân tách Insight thành 3 khối nội dung rõ ràng
+            buckets = {"anomalies": [], "hypotheses": [], "actions": []}
+            curr_sec = "anomalies"
+
             for line in insights.split("\n"):
-                raw_line = line.strip()
-                if not raw_line:
+                raw_l = line.strip()
+                if not raw_l:
+                    continue
+                if raw_l.lower() in ("markdown", "```markdown", "```") or raw_l.startswith("```") or raw_l in ("---", "* --", "***", "___"):
+                    continue
+                if raw_l.startswith("# ") and "báo cáo insight" in raw_l.lower():
                     continue
 
-                # Loại bỏ hoàn toàn rác markdown thuần
-                if raw_line.lower() in ("markdown", "```markdown", "```") or raw_line.startswith("```"):
+                low_l = raw_l.lower()
+                if len(raw_l) < 70 and any(k in low_l for k in ["giả thuyết", "nguyên nhân tiềm năng", "hypothe"]):
+                    curr_sec = "hypotheses"
                     continue
-                if raw_line.startswith("# ") and "báo cáo insight" in raw_line.lower():
+                elif len(raw_l) < 70 and any(k in low_l for k in ["đề xuất", "hành động", "action plan", "recommend"]):
+                    curr_sec = "actions"
                     continue
-                if raw_line in ("---", "* --", "***", "___"):
+                elif len(raw_l) < 70 and any(k in low_l for k in ["phát hiện bất thường", "xu hướng chính", "key anomalies"]):
+                    curr_sec = "anomalies"
                     continue
 
-                cleaned_line = clean_text_for_pdf(raw_line)
-                if not cleaned_line:
-                    continue
+                clean_l = clean_text_for_pdf(raw_l)
+                clean_l = re.sub(r"^[•\-\*]\s*", "", clean_l)
+                clean_l = re.sub(r"^\d+[\.\)]\s*", "", clean_l)
+                clean_l = re.sub(r"^[•\-\*]\s*", "", clean_l).strip()
+                if clean_l:
+                    buckets[curr_sec].append(clean_l)
 
-                # Phân loại tiêu đề mục con (2.1, 2.2, 2.3)
-                if raw_line.startswith("###") or raw_line.startswith("##"):
-                    clean_title = re.sub(r"^#+\s*", "", raw_line).strip()
-                    clean_title = clean_text_for_pdf(clean_title)
+            # --- 2.1. Phát hiện Bất thường & Xu hướng Chính ---
+            story.append(Paragraph(f"<b>{sec_num}.1. Phát hiện Bất thường & Xu hướng Chính</b>", sub_section_style))
+            if buckets["anomalies"]:
+                for item in buckets["anomalies"]:
+                    story.append(Paragraph(f"• {item}", bullet_style))
+            else:
+                story.append(Paragraph("• Không ghi nhận biến động cực đoan bất thường.", bullet_style))
+            story.append(Spacer(1, 4))
 
-                    # Chuẩn hóa số thứ tự thành sec_num.1, sec_num.2, sec_num.3
-                    m = re.match(r"^(\d+)(?:\.(\d+))?\.\s*(.*)", clean_title)
-                    if m:
-                        sub_idx = m.group(2) if m.group(2) else m.group(1)
-                        rest_title = m.group(3)
-                        story.append(Paragraph(f"<b>{sec_num}.{sub_idx}. {rest_title}</b>", sub_section_style))
+            # --- 2.2. Giả thuyết & Nguyên nhân Tiềm năng ---
+            story.append(Paragraph(f"<b>{sec_num}.2. Giả thuyết & Nguyên nhân Tiềm năng</b>", sub_section_style))
+            if buckets["hypotheses"]:
+                for idx_h, item in enumerate(buckets["hypotheses"], 1):
+                    story.append(Paragraph(f"• <b>Giả thuyết {idx_h}:</b> {item}", bullet_style))
+            else:
+                story.append(Paragraph("• Doanh thu vận hành ổn định theo quy luật kinh doanh.", bullet_style))
+            story.append(Spacer(1, 4))
+
+            # --- 2.3. Đề xuất Hành động (Action Plan) ---
+            story.append(Paragraph(f"<b>{sec_num}.3. Đề xuất Hành động (Action Plan)</b>", sub_section_style))
+            if buckets["actions"]:
+                for item in buckets["actions"]:
+                    if any(p in item for p in ["[Ưu tiên", "[High Priority", "[Medium Priority", "[Low Priority"]):
+                        story.append(Paragraph(f"<b>{item}</b>", priority_tag_style))
+                    elif item.lower().startswith("kpi") or "kpi :" in item.lower() or "kpi:" in item.lower():
+                        clean_kpi = re.sub(r"^kpi\s*:\s*", "", item, flags=re.IGNORECASE).strip()
+                        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ <i><b>KPI đo lường:</b> {clean_kpi}</i>", kpi_style))
                     else:
-                        story.append(Paragraph(f"<b>{clean_title}</b>", sub_section_style))
-
-                elif any(p in raw_line for p in ["[Ưu tiên", "[High Priority", "[Medium Priority", "[Low Priority"]):
-                    story.append(Paragraph(cleaned_line, priority_tag_style))
-                elif raw_line.startswith("-") or raw_line.startswith("•") or re.match(r"^\d+\.", raw_line):
-                    bullet_text = re.sub(r"^[•\-\*]\s*", "", cleaned_line)
-                    story.append(Paragraph(f"• {bullet_text}", bullet_style))
-                else:
-                    story.append(Paragraph(cleaned_line, body_style))
+                        story.append(Paragraph(f"• {item}", bullet_style))
+            else:
+                story.append(Paragraph("• Tiếp tục theo dõi chỉ số định kỳ.", bullet_style))
 
             story.append(Spacer(1, 8))
 
