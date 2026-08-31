@@ -106,7 +106,7 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
         hovermode="x unified"
     )
 
-    # Ép kiểu trục X thành category để Plotly luôn hiển thị đầy đủ mọi mốc dự báo
-    fig.update_xaxes(type="category")
+    # Ép kiểu trục X thành category để Plotly luôn hiển thị đầy đủ mọi mốc dự báo với số thẳng hàng
+    fig.update_xaxes(type="category", tickangle=0, automargin=True)
 
     return fig, FORECAST_METHOD_NAME

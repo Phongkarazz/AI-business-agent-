@@ -1,11 +1,11 @@
 """
-Smart Plotly charting module with automatic visualization selection, multi-series grouping,
-dynamic limit slider, and edge-case guards.
+Intelligent chart generation and auto-visualization using Plotly Express with heuristic column classification,
+multi-series color grouping for line/area charts, full category display (no skipped months), and straight horizontal ticks.
 """
 
+import streamlit as st
 import pandas as pd
 import plotly.express as px
-import streamlit as st
 
 from src.config import MAX_BAR_CATEGORIES
 from src.analytics.heuristics import (
@@ -17,27 +17,16 @@ from src.analytics.heuristics import (
 
 
 def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
-    """Vẽ biểu đồ thông minh dựa trên đặc tính dữ liệu với hỗ trợ phân nhóm đa tuyến (multi-series)."""
+    """Tự động phân loại cột và render biểu đồ phù hợp nhất:
+    - Line/Area: Nếu có cột thời gian -> biểu đồ xu hướng theo thời gian, hiển thị đầy đủ 100% các tháng với số nằm ngang thẳng.
+    - Bar: Nếu có cột nhãn và cột đo lường -> biểu đồ cột so sánh.
+    - Scatter: Nếu có >= 2 cột số đo lường -> biểu đồ phân tán tương quan.
+    """
     if df is None or df.empty:
         st.info("Không có dữ liệu để vẽ biểu đồ.")
-        return
+        return None
 
-    cols = df.columns.tolist()
-    if len(cols) < 2:
-        st.info("Dữ liệu cần tối thiểu 2 cột để vẽ biểu đồ.")
-        return
-
-    if len(df) <= 1:
-        if len(df) == 1:
-            row = df.iloc[0]
-            summary = " · ".join(f"**{c}**: {row[c]}" for c in df.columns)
-            st.info(f"📌 Chỉ có 1 dòng kết quả, không cần biểu đồ: {summary}")
-        else:
-            st.info("Không có dữ liệu để vẽ biểu đồ.")
-        return
-
-    measure_cols, cat_cols, time_col = get_axis_columns(df)
-    label_cols = [c for c in cat_cols if c != time_col]
+    measure_cols, label_cols, time_col = get_axis_columns(df)
     row_identity_col = get_row_identity_column(df)
 
     try:
@@ -50,7 +39,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 chosen = "Scatter"
             else:
                 st.info("Không tìm thấy dạng biểu đồ phù hợp — dữ liệu không có chỉ số đo lường số học rõ ràng (các cột số hiện có đều là mã định danh).")
-                return
+                return None
         else:
             chosen = chart_override
 
@@ -64,7 +53,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 chosen = "Bar"
             else:
                 st.info("Không có cột thời gian hợp lệ và không đủ dữ liệu để vẽ Bar/Scatter thay thế.")
-                return
+                return None
 
         # Xác định cột phân nhóm màu sắc cho Line/Area (ví dụ: phân loại theo Region, Product...)
         time_color_col = None
@@ -75,6 +64,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
 
         if chosen == "Line" and time_col and measure_cols:
             sorted_df = df.sort_values(time_col)
+            n_time_points = sorted_df[time_col].nunique(dropna=True)
+            tick_angle = 0 if n_time_points <= 20 else -45
+
             if time_color_col:
                 fig = px.line(
                     sorted_df,
@@ -95,12 +87,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     template="plotly_white"
                 )
             fig.update_layout(
-                xaxis=dict(tickangle=-45, automargin=True),
+                xaxis=dict(
+                    type="category" if n_time_points <= 36 else None,
+                    tickangle=tick_angle,
+                    automargin=True
+                ),
                 margin=dict(l=20, r=20, t=50, b=50)
             )
 
         elif chosen == "Area" and time_col and measure_cols:
             sorted_df = df.sort_values(time_col)
+            n_time_points = sorted_df[time_col].nunique(dropna=True)
+            tick_angle = 0 if n_time_points <= 20 else -45
+
             if time_color_col:
                 fig = px.area(
                     sorted_df,
@@ -119,7 +118,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     template="plotly_white"
                 )
             fig.update_layout(
-                xaxis=dict(tickangle=-45, automargin=True),
+                xaxis=dict(
+                    type="category" if n_time_points <= 36 else None,
+                    tickangle=tick_angle,
+                    automargin=True
+                ),
                 margin=dict(l=20, r=20, t=50, b=50)
             )
 
@@ -127,7 +130,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
             if label_name is None:
                 st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
-                return
+                return None
 
             plot_df = df.copy()
             plot_df[label_name] = label_series.values
@@ -138,40 +141,53 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             # Phát hiện dữ liệu thô chưa GROUP BY cần tổng hợp
             needs_aggregation = (
                 row_identity_col is None
-                and n_unique_labels < total_rows * 0.7
-                and n_unique_labels < 30
+                and n_unique_labels < total_rows
+                and (total_rows / max(1, n_unique_labels)) >= 2.0
             )
 
             if needs_aggregation:
-                agg_df = plot_df.groupby(label_name, as_index=False)[measure_cols[0]].mean()
-                category_order = list(dict.fromkeys(agg_df[label_name].tolist()))
+                grouped_df = plot_df.groupby(label_name, as_index=False)[measure_cols[0]].sum()
+                grouped_df = grouped_df.sort_values(measure_cols[0], ascending=False)
+                st.caption(
+                    f"ℹ️ Dữ liệu thô gồm {total_rows:,} dòng có `{n_unique_labels}` giá trị `{label_name}` lặp lại "
+                    f"— đã tự động tính tổng `{measure_cols[0]}` theo từng `{label_name}` để biểu đồ trực quan, chính xác."
+                )
+                plot_df = grouped_df
+                total_rows = len(plot_df)
+
+                if total_rows > 30:
+                    max_display = st.slider(
+                        f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng: {total_rows:,})",
+                        min_value=min(10, total_rows),
+                        max_value=total_rows,
+                        value=min(total_rows, MAX_BAR_CATEGORIES),
+                        step=5 if total_rows <= 100 else 10,
+                        key=f"bar_limit_{turn_id}"
+                    )
+                    plot_df = plot_df.head(max_display)
+
+                tick_angle = 0 if len(plot_df) <= 10 else -45
                 fig = px.bar(
-                    agg_df, x=label_name, y=measure_cols[0],
-                    title=f"{measure_cols[0]} trung bình theo {label_name}",
-                    category_orders={label_name: category_order},
+                    plot_df, x=label_name, y=measure_cols[0],
+                    title=f"Tổng {measure_cols[0]} theo {label_name}",
                     template="plotly_white"
                 )
                 fig.update_layout(
-                    xaxis=dict(type="category", tickangle=-45, automargin=True),
-                    margin=dict(l=20, r=20, t=50, b=80)
+                    xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
+                    margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
                 )
-                st.caption(
-                    f"📊 Dữ liệu có nhiều dòng trùng nhãn `{label_name}` ({n_unique_labels} nhãn / "
-                    f"{total_rows} dòng) — biểu đồ hiển thị **giá trị trung bình** theo từng nhãn thay vì "
-                    f"chồng toàn bộ dòng thô. Xem dữ liệu chi tiết trong bảng phía trên."
-                )
+
             else:
-                # Gắn ID vào nhãn nếu các thực thể khác nhau bị trùng tên
-                if row_identity_col and plot_df[label_name].duplicated().any():
+                has_duplicate_labels = n_unique_labels < total_rows
+                if has_duplicate_labels and row_identity_col and row_identity_col != label_name:
                     plot_df[label_name] = (
-                        plot_df[label_name] + " (#" + plot_df[row_identity_col].astype(str) + ")"
+                        plot_df[label_name].astype(str) + " (#" + plot_df[row_identity_col].astype(str) + ")"
                     )
                     st.caption(
                         f"ℹ️ Một số dòng trùng nhãn `{label_name}` nhưng là các thực thể khác nhau "
                         f"(khác `{row_identity_col}`) — đã gắn thêm mã `{row_identity_col}` vào nhãn để phân biệt rõ."
                     )
 
-                # Cho phép người dùng tùy chọn số lượng cột hiển thị nếu kết quả lớn hơn 30 dòng
                 if total_rows > 30:
                     max_display = st.slider(
                         f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
@@ -182,8 +198,6 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         key=f"bar_limit_{turn_id}"
                     )
                     plot_df = plot_df.head(max_display)
-                else:
-                    max_display = total_rows
 
                 category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
 
@@ -194,6 +208,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     if plot_df[cand].nunique(dropna=True) <= 20:
                         color_col = cand
 
+                tick_angle = 0 if len(plot_df) <= 10 else -45
                 fig = px.bar(
                     plot_df, x=label_name, y=measure_cols[0],
                     color=color_col,
@@ -202,8 +217,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     template="plotly_white"
                 )
                 fig.update_layout(
-                    xaxis=dict(type="category", tickangle=-45, automargin=True),
-                    margin=dict(l=20, r=20, t=50, b=80)
+                    xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
+                    margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
                 )
 
         elif chosen == "Scatter" and len(measure_cols) >= 2:
@@ -217,6 +232,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 template="plotly_white"
             )
             fig.update_layout(margin=dict(l=20, r=20, t=50, b=50))
+        else:
+            st.info("Không thể vẽ biểu đồ với các cột hiện có.")
+            return None
+
         st.plotly_chart(fig, width='stretch', key=f"chart_{turn_id}")
         return fig
 
