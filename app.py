@@ -150,6 +150,16 @@ if not st.session_state.get("connected") or st.session_state.get("view_mode") ==
 
 # Nếu đã kết nối: Hiển thị Sidebar & Màn hình Chat Phân tích chính
 else:
+    # 4.0 Xử lý câu hỏi bằng giọng nói từ Voice Input (nếu chuyển hướng qua URL)
+    voice_q = st.query_params.get("voice_q")
+    if voice_q:
+        st.session_state["pending_prompt"] = str(voice_q)
+        try:
+            del st.query_params["voice_q"]
+        except Exception:
+            pass
+        st.rerun()
+
     # 4.1 Hiển thị Sidebar tra cứu bảng và lịch sử chat
     render_main_sidebar()
 
