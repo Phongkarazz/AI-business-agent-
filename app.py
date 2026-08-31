@@ -18,12 +18,11 @@ from src.analytics.heuristics import generate_starter_prompts
 from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
 from src.ui.sidebar import perform_connection, render_main_sidebar
-from src.ui.connection_dialog import render_auto_connect_failed_view
 from src.ui.components import render_result
 from src.llm.agent import run_agent
 
 # ---------------------------------------------------------
-# 1. Cấu hình Trang Streamlit
+# 1. Cấu hình Trang Streamlit & Custom CSS Giao Diện Doanh Nghiệp
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Veraxus for SQL",
@@ -31,6 +30,53 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    /* Modern KPI Cards */
+    div[data-testid="stMetric"] {
+        background-color: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        padding: 14px 18px;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        transition: all 0.2s ease-in-out;
+    }
+    div[data-testid="stMetric"]:hover {
+        border-color: #CBD5E1;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+        transform: translateY(-1px);
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.82rem !important;
+        font-weight: 600 !important;
+        color: #64748B !important;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.45rem !important;
+        font-weight: 700 !important;
+        color: #0F172A !important;
+    }
+
+    /* Sleek buttons */
+    .stButton > button {
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        transition: all 0.15s ease-in-out !important;
+    }
+    .stButton > button:hover {
+        transform: translateY(-1px) !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # 2. Khởi tạo Session State

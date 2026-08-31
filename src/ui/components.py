@@ -25,8 +25,60 @@ def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: b
                 st.code(detail)
 
 
+def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
+    """Hiển thị cụm thẻ tóm tắt chỉ số điều hành (Executive KPI Summary Cards) trên đầu kết quả."""
+    if df is None or df.empty:
+        return
+
+    measure_cols, label_cols, _ = get_axis_columns(df)
+    if not measure_cols:
+        measure_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        label_cols = [c for c in df.columns if c not in measure_cols]
+
+    total_rows = len(df)
+
+    if measure_cols and total_rows > 1:
+        m_col = measure_cols[0]
+        m_clean = str(m_col).replace("_", " ").title()
+
+        valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()
+        if not valid_vals.empty:
+            total_val = valid_vals.sum()
+            avg_val = valid_vals.mean()
+            max_idx = valid_vals.idxmax()
+            peak_val = df.loc[max_idx, m_col]
+            peak_label = str(df.loc[max_idx, label_cols[0]]) if label_cols else f"#{max_idx + 1}"
+
+            fmt_total = f"{total_val:,.0f}" if isinstance(total_val, (int, float)) and total_val > 100 else f"{total_val:,.2f}"
+            fmt_avg = f"{avg_val:,.0f}" if isinstance(avg_val, (int, float)) and avg_val > 100 else f"{avg_val:,.2f}"
+            fmt_peak = f"{peak_val:,.0f}" if isinstance(peak_val, (int, float)) and peak_val > 100 else f"{peak_val:,.2f}"
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
+            with col2:
+                st.metric(f"💰 " + ("Tổng " if not is_en else "Total ") + m_clean, fmt_total)
+            with col3:
+                st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
+            with col4:
+                st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
+            st.write("")
+
+    elif total_rows == 1 and measure_cols:
+        m_col = measure_cols[0]
+        m_clean = str(m_col).replace("_", " ").title()
+        val = df[m_col].iloc[0]
+        fmt_val = f"{val:,.0f}" if isinstance(val, (int, float)) and val > 100 else f"{val:,.2f}"
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("📋 " + ("Số lượng bản ghi" if not is_en else "Record Count"), "1")
+        with col2:
+            st.metric("🎯 " + m_clean, fmt_val)
+        st.write("")
+
+
 def render_result(result: dict, turn_id: str):
-    """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với bảng, biểu đồ, insight, dự báo và bộ xuất báo cáo đa định dạng."""
+    """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với thẻ KPI, bảng, biểu đồ, insight, dự báo và bộ xuất báo cáo đa định dạng."""
     lang = result.get("lang", "vi")
     is_en = (lang == "en")
 
@@ -87,7 +139,10 @@ def render_result(result: dict, turn_id: str):
     df = cleaned_df
     result["df"] = df
 
-    # 3. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
+    # 3. Thẻ Tóm tắt Chỉ số Điều hành (Executive KPI Summary Cards)
+    render_executive_kpi_cards(df, is_en=is_en)
+
+    # 4. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
     st.dataframe(df, width='stretch')
 
     c_csv, c_excel, c_pdf, _ = st.columns([2, 2.5, 2.5, 3])
@@ -244,12 +299,44 @@ def render_result(result: dict, turn_id: str):
                     st.session_state["pending_prompt"] = q_text
                     st.rerun()
 
-    # 6. Chi tiết Kỹ thuật & SQL (Expander thu gọn ở cuối cùng)
-    exp_tech = "🛠️ Technical Details & SQL Query (Debug)" if is_en else "🛠️ Chi tiết Kỹ thuật & Câu lệnh SQL (Debug)"
+    # 6. Chi tiết Kỹ thuật & SQL Playground (Expander thu gọn ở cuối cùng)
+    exp_tech = "🛠️ Technical Details & SQL Query Playground" if is_en else "🛠️ Chi tiết Kỹ thuật & SQL Playground (Sửa & Chạy trực tiếp)"
     with st.expander(exp_tech, expanded=False):
         if sql_query:
-            st.markdown("**Executed SQL Query:**" if is_en else "**Câu lệnh SQL đã thực thi:**")
-            st.code(sql_query, language="sql")
+            st.markdown("#### ⚡ " + ("Chỉnh sửa & Chạy lại SQL Trực tiếp" if not is_en else "Live SQL Editor & Playground"))
+            st.caption(
+                "Bạn có thể sửa câu lệnh SQL (đổi điều kiện WHERE, GROUP BY, ORDER BY, LIMIT...) và bấm nút bên dưới để cập nhật kết quả tức thì mà không cần gọi lại AI."
+                if not is_en else
+                "You can edit the SQL query below and re-run it directly to update results instantly without calling AI."
+            )
+            edited_sql = st.text_area(
+                "SQL Editor",
+                value=sql_query,
+                height=130,
+                key=f"sql_edit_area_{turn_id}",
+                label_visibility="collapsed"
+            )
+
+            btn_rerun_label = "⚡ Chạy lại câu lệnh SQL này" if not is_en else "⚡ Re-run Edited SQL"
+            if st.button(btn_rerun_label, key=f"btn_rerun_{turn_id}", type="primary"):
+                engine = st.session_state.get("engine")
+                if not engine:
+                    st.error("Chưa kết nối database để chạy câu lệnh SQL." if not is_en else "Database engine is not connected.")
+                else:
+                    from src.database.query_runner import read_sql_capped
+                    from src.config import MAX_ROWS_CAP
+                    try:
+                        new_df, truncated = read_sql_capped(edited_sql, engine, cap=MAX_ROWS_CAP)
+                        if new_df is not None:
+                            result["sql"] = edited_sql
+                            result["df"] = new_df
+                            result["logs"].append(f"[SQL Playground] Updated with user-edited SQL.")
+                            st.toast("⚡ Đã cập nhật kết quả với câu lệnh SQL mới!", icon="⚡")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Lỗi thực thi SQL: {e}")
+
+            st.markdown("---")
 
         attempts = result.get("attempts", 1)
         if attempts > 1:
