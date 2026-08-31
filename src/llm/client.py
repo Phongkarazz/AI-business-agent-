@@ -117,7 +117,7 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
         clean_model = "gemini-3.7-flash"
 
     target_models = [clean_model]
-    for fallback in ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash"]:
+    for fallback in ["gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview"]:
         if fallback not in target_models:
             target_models.append(fallback)
 
@@ -130,7 +130,12 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
         except Exception as e:
             last_exc = e
             err_str = str(e).lower()
-            if "404" in err_str or "not_found" in err_str or "no longer available" in err_str or "not found" in err_str:
+            should_fallback = any(k in err_str for k in [
+                "404", "not_found", "no longer available", "not found",
+                "503", "unavailable", "high demand", "overloaded", "spikes in demand",
+                "429", "resource_exhausted", "quota"
+            ])
+            if should_fallback:
                 continue
             raise e
 
