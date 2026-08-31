@@ -1,6 +1,7 @@
 """
 Intelligent chart generation and auto-visualization using Plotly Express with heuristic column classification,
-multi-series color grouping for line/area charts, full category display (no skipped months), and straight horizontal ticks.
+multi-series color grouping for line/area charts, multi-metric benchmark comparison (Employee vs Team),
+full category display (no skipped months), and straight horizontal ticks.
 """
 
 import streamlit as st
@@ -19,7 +20,10 @@ from src.analytics.heuristics import (
 def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
     """Tự động phân loại cột và render biểu đồ phù hợp nhất:
     - Line/Area: Nếu có cột thời gian -> biểu đồ xu hướng theo thời gian, hiển thị đầy đủ 100% các tháng với số nằm ngang thẳng.
-    - Bar: Nếu có cột nhãn và cột đo lường -> biểu đồ cột so sánh.
+    - Bar:
+        + Nếu có 1 dòng và nhiều chỉ số đo lường (VD: Nhân viên vs Toàn đội) -> Biểu đồ so sánh Benchmark trực quan.
+        + Nếu có nhiều dòng và nhiều chỉ số đo lường -> Biểu đồ cột nhóm (Grouped Bar Chart).
+        + Nếu có cột nhãn và cột đo lường -> Biểu đồ cột so sánh.
     - Scatter: Nếu có >= 2 cột số đo lường -> biểu đồ phân tán tương quan.
     """
     if df is None or df.empty:
@@ -33,7 +37,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
         if chart_override == "Tự động":
             if time_col and measure_cols:
                 chosen = "Line"
-            elif label_cols and measure_cols:
+            elif measure_cols:
                 chosen = "Bar"
             elif len(measure_cols) >= 2:
                 chosen = "Scatter"
@@ -45,7 +49,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
 
         # Fallback nếu chọn Line/Area nhưng không có cột thời gian
         if chosen in ("Line", "Area") and not time_col:
-            if label_cols and measure_cols:
+            if measure_cols:
                 st.warning(
                     "⚠️ Biểu đồ Line/Area cần một cột thời gian hợp lệ, dữ liệu hiện tại không có. "
                     "Tự động chuyển sang Bar Chart để đảm bảo đúng ý nghĩa thống kê."
@@ -126,100 +130,178 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 margin=dict(l=20, r=20, t=50, b=50)
             )
 
-        elif chosen == "Bar" and label_cols and measure_cols:
-            label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
-            if label_name is None:
-                st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
-                return None
+        elif chosen == "Bar" and measure_cols:
+            # 1. Trường hợp đặc biệt: 1 dòng so sánh nhiều chỉ số (VD: Cá nhân vs Toàn đội / Benchmark)
+            if len(df) == 1 and len(measure_cols) >= 2:
+                person_name = None
+                if label_cols:
+                    for c in label_cols:
+                        if any(k in c.lower() for k in ["salesperson", "nhân viên", "employee", "people", "name", "tên"]):
+                            person_name = str(df[c].iloc[0])
+                            break
 
-            plot_df = df.copy()
-            plot_df[label_name] = label_series.values
+                comp_labels = []
+                comp_values = []
+                for m in measure_cols:
+                    try:
+                        val_num = float(df[m].iloc[0])
+                    except Exception:
+                        val_num = 0.0
 
-            n_unique_labels = plot_df[label_name].nunique(dropna=True)
-            total_rows = len(plot_df)
+                    m_low = m.lower()
+                    if any(k in m_low for k in ["team", "đội", "total", "toàn", "all"]):
+                        comp_labels.append(f"Toàn đội ({m})")
+                    elif person_name and any(k in m_low for k in ["sold", "amount", "boxes", "sales", "qty", "hộp", "tiền"]):
+                        comp_labels.append(f"{person_name} ({m})")
+                    else:
+                        comp_labels.append(m)
+                    comp_values.append(val_num)
 
-            # Phát hiện dữ liệu thô chưa GROUP BY cần tổng hợp
-            needs_aggregation = (
-                row_identity_col is None
-                and n_unique_labels < total_rows
-                and (total_rows / max(1, n_unique_labels)) >= 2.0
-            )
+                comp_df = pd.DataFrame({
+                    "Chỉ số So sánh": comp_labels,
+                    "Giá trị": comp_values
+                })
 
-            if needs_aggregation:
-                grouped_df = plot_df.groupby(label_name, as_index=False)[measure_cols[0]].sum()
-                grouped_df = grouped_df.sort_values(measure_cols[0], ascending=False)
-                st.caption(
-                    f"ℹ️ Dữ liệu thô gồm {total_rows:,} dòng có `{n_unique_labels}` giá trị `{label_name}` lặp lại "
-                    f"— đã tự động tính tổng `{measure_cols[0]}` theo từng `{label_name}` để biểu đồ trực quan, chính xác."
+                fig = px.bar(
+                    comp_df,
+                    x="Chỉ số So sánh",
+                    y="Giá trị",
+                    color="Chỉ số So sánh",
+                    text="Giá trị",
+                    title="📊 Biểu đồ So sánh Chỉ số: " + (" vs ".join(comp_labels)),
+                    template="plotly_white"
                 )
-                plot_df = grouped_df
+                fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
+                fig.update_layout(
+                    xaxis=dict(type="category", tickangle=0, automargin=True),
+                    margin=dict(l=20, r=20, t=50, b=50),
+                    showlegend=False
+                )
+
+            elif label_cols:
+                label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
+                if label_name is None:
+                    st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
+                    return None
+
+                plot_df = df.copy()
+                plot_df[label_name] = label_series.values
+
+                n_unique_labels = plot_df[label_name].nunique(dropna=True)
                 total_rows = len(plot_df)
 
-                if total_rows > 30:
-                    max_display = st.slider(
-                        f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng: {total_rows:,})",
-                        min_value=min(10, total_rows),
-                        max_value=total_rows,
-                        value=min(total_rows, MAX_BAR_CATEGORIES),
-                        step=5 if total_rows <= 100 else 10,
-                        key=f"bar_limit_{turn_id}"
-                    )
-                    plot_df = plot_df.head(max_display)
-
-                tick_angle = 0 if len(plot_df) <= 10 else -45
-                fig = px.bar(
-                    plot_df, x=label_name, y=measure_cols[0],
-                    title=f"Tổng {measure_cols[0]} theo {label_name}",
-                    template="plotly_white"
-                )
-                fig.update_layout(
-                    xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
-                    margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
+                # Phát hiện dữ liệu thô chưa GROUP BY cần tổng hợp
+                needs_aggregation = (
+                    row_identity_col is None
+                    and n_unique_labels < total_rows
+                    and (total_rows / max(1, n_unique_labels)) >= 2.0
                 )
 
-            else:
-                has_duplicate_labels = n_unique_labels < total_rows
-                if has_duplicate_labels and row_identity_col and row_identity_col != label_name:
-                    plot_df[label_name] = (
-                        plot_df[label_name].astype(str) + " (#" + plot_df[row_identity_col].astype(str) + ")"
-                    )
+                if needs_aggregation:
+                    grouped_df = plot_df.groupby(label_name, as_index=False)[measure_cols[0]].sum()
+                    grouped_df = grouped_df.sort_values(measure_cols[0], ascending=False)
                     st.caption(
-                        f"ℹ️ Một số dòng trùng nhãn `{label_name}` nhưng là các thực thể khác nhau "
-                        f"(khác `{row_identity_col}`) — đã gắn thêm mã `{row_identity_col}` vào nhãn để phân biệt rõ."
+                        f"ℹ️ Dữ liệu thô gồm {total_rows:,} dòng có `{n_unique_labels}` giá trị `{label_name}` lặp lại "
+                        f"— đã tự động tính tổng `{measure_cols[0]}` theo từng `{label_name}` để biểu đồ trực quan, chính xác."
+                    )
+                    plot_df = grouped_df
+                    total_rows = len(plot_df)
+
+                    if total_rows > 30:
+                        max_display = st.slider(
+                            f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng: {total_rows:,})",
+                            min_value=min(10, total_rows),
+                            max_value=total_rows,
+                            value=min(total_rows, MAX_BAR_CATEGORIES),
+                            step=5 if total_rows <= 100 else 10,
+                            key=f"bar_limit_{turn_id}"
+                        )
+                        plot_df = plot_df.head(max_display)
+
+                    tick_angle = 0 if len(plot_df) <= 10 else -45
+                    fig = px.bar(
+                        plot_df, x=label_name, y=measure_cols[0],
+                        title=f"Tổng {measure_cols[0]} theo {label_name}",
+                        template="plotly_white"
+                    )
+                    fig.update_layout(
+                        xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
+                        margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
                     )
 
-                if total_rows > 30:
-                    max_display = st.slider(
-                        f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
-                        min_value=min(10, total_rows),
-                        max_value=total_rows,
-                        value=min(total_rows, MAX_BAR_CATEGORIES),
-                        step=5 if total_rows <= 100 else 10,
-                        key=f"bar_limit_{turn_id}"
+                elif len(measure_cols) >= 2:
+                    # So sánh nhiều chỉ số theo từng nhóm đối tượng (Grouped Bar Chart)
+                    if total_rows > 30:
+                        max_display = st.slider(
+                            f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
+                            min_value=min(10, total_rows),
+                            max_value=total_rows,
+                            value=min(total_rows, MAX_BAR_CATEGORIES),
+                            step=5 if total_rows <= 100 else 10,
+                            key=f"bar_limit_{turn_id}"
+                        )
+                        plot_df = plot_df.head(max_display)
+
+                    category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
+                    tick_angle = 0 if len(plot_df) <= 10 else -45
+                    fig = px.bar(
+                        plot_df, x=label_name, y=measure_cols,
+                        barmode="group",
+                        title=f"So sánh các chỉ số ({', '.join(measure_cols)}) theo {label_name}",
+                        category_orders={label_name: category_order},
+                        template="plotly_white"
                     )
-                    plot_df = plot_df.head(max_display)
+                    fig.update_layout(
+                        xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
+                        margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
+                    )
 
-                category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
+                else:
+                    has_duplicate_labels = n_unique_labels < total_rows
+                    if has_duplicate_labels and row_identity_col and row_identity_col != label_name:
+                        plot_df[label_name] = (
+                            plot_df[label_name].astype(str) + " (#" + plot_df[row_identity_col].astype(str) + ")"
+                        )
+                        st.caption(
+                            f"ℹ️ Một số dòng trùng nhãn `{label_name}` nhưng là các thực thể khác nhau "
+                            f"(khác `{row_identity_col}`) — đã gắn thêm mã `{row_identity_col}` vào nhãn để phân biệt rõ."
+                        )
 
-                color_col = None
-                candidate_color_cols = [c for c in label_cols if c not in consumed_cols and c in plot_df.columns]
-                if candidate_color_cols:
-                    cand = candidate_color_cols[0]
-                    if plot_df[cand].nunique(dropna=True) <= 20:
-                        color_col = cand
+                    if total_rows > 30:
+                        max_display = st.slider(
+                            f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
+                            min_value=min(10, total_rows),
+                            max_value=total_rows,
+                            value=min(total_rows, MAX_BAR_CATEGORIES),
+                            step=5 if total_rows <= 100 else 10,
+                            key=f"bar_limit_{turn_id}"
+                        )
+                        plot_df = plot_df.head(max_display)
 
-                tick_angle = 0 if len(plot_df) <= 10 else -45
-                fig = px.bar(
-                    plot_df, x=label_name, y=measure_cols[0],
-                    color=color_col,
-                    title=f"{measure_cols[0]} theo {label_name}" + (f" (Phân loại theo {color_col})" if color_col else ""),
-                    category_orders={label_name: category_order},
-                    template="plotly_white"
-                )
-                fig.update_layout(
-                    xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
-                    margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
-                )
+                    category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
+
+                    color_col = None
+                    candidate_color_cols = [c for c in label_cols if c not in consumed_cols and c in plot_df.columns]
+                    if candidate_color_cols:
+                        cand = candidate_color_cols[0]
+                        if plot_df[cand].nunique(dropna=True) <= 20:
+                            color_col = cand
+
+                    tick_angle = 0 if len(plot_df) <= 10 else -45
+                    fig = px.bar(
+                        plot_df, x=label_name, y=measure_cols[0],
+                        color=color_col,
+                        title=f"{measure_cols[0]} theo {label_name}" + (f" (Phân loại theo {color_col})" if color_col else ""),
+                        category_orders={label_name: category_order},
+                        template="plotly_white"
+                    )
+                    fig.update_layout(
+                        xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
+                        margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
+                    )
+            else:
+                st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
+                return None
 
         elif chosen == "Scatter" and len(measure_cols) >= 2:
             x_m = measure_cols[0]
