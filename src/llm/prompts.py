@@ -278,7 +278,10 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ma
 - 🟢 **[Ưu tiên Thấp / Dài hạn - Long-term]**: Định hướng chiến lược bền vững dài hạn.
 Mỗi hành động phải nêu rõ chỉ số KPI / kết quả đo lường kỳ vọng).
 
-Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, không dùng từ ngữ sáo rỗng."""
+QUY TẮC ĐỊNH DẠNG VĂN BẢN (BẮT BUỘC):
+- Viết hoa, dấu câu và chính tả tiếng Việt chuẩn xác 100%. Tách từ chuẩn (viết "thấp hơn", "cao hơn", "lớn hơn", TUYỆT ĐỐI KHÔNG viết dính liền "thấphơn").
+- Định dạng số và chữ in đậm: Viết liền không khoảng cách bên trong dấu sao, ví dụ: **1,299,998** (TUYỆT ĐỐI KHÔNG viết ** 1, 299, 998 ** hoặc * *).
+- Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, không dùng từ ngữ sáo rỗng."""
 
 
 def build_followup_prompt(user_query: str, schema_context: str, df_sample_str: str, lang: str = "vi") -> str:

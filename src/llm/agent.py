@@ -11,7 +11,7 @@ import pandas as pd
 from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP
 from src.database.query_runner import read_sql_capped, sanitize_error
 from src.database.schema import get_table_names
-from src.analytics.heuristics import is_id_like, detect_query_language
+from src.analytics.heuristics import is_id_like, detect_query_language, sanitize_insight_markdown
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
 from .prompts import (
@@ -140,7 +140,9 @@ def generate_auto_insights(client, provider: str, model_name: str, user_query: s
     sample_str = df.head(10).to_string(index=False)
     prompt = build_auto_insight_prompt(user_query, sample_str, anomalies_info, lang=lang)
     insight, _ = call_llm(client, provider, model_name, prompt)
-    return insight
+    if insight:
+        return sanitize_insight_markdown(insight)
+    return None
 
 
 def is_ambiguous_question(q: str) -> bool:

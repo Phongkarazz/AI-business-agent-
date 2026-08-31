@@ -7,7 +7,7 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 
 import streamlit as st
 import pandas as pd
-from src.analytics.heuristics import get_axis_columns
+from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
 from src.analytics.export_reports import export_to_excel, export_to_png, export_to_pdf
@@ -191,7 +191,7 @@ def render_result(result: dict, turn_id: str):
             st.success("✅ No extreme anomalies or spikes detected in this dataset." if is_en else "✅ Thuật toán không phát hiện điểm đột biến hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
 
         # Báo cáo phân tích chuyên sâu từ AI với Priority Tagging
-        insights = result.get("insights")
+        insights = sanitize_insight_markdown(result.get("insights", ""))
         if insights:
             st.markdown("---")
             st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
@@ -207,10 +207,11 @@ def render_result(result: dict, turn_id: str):
                         client, provider, model_name, result["query"], df, anomalies_info, lang=lang
                     )
                     if generated:
-                        result["insights"] = generated
+                        clean_gen = sanitize_insight_markdown(generated)
+                        result["insights"] = clean_gen
                         st.markdown("---")
                         st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
-                        st.markdown(generated)
+                        st.markdown(clean_gen)
 
     with tab3:
         caption_forecast = (
