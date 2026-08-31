@@ -2,7 +2,8 @@
 Export utilities for Multi-format Reporting:
 - Styled Excel (.xlsx) with custom headers, cell borders, and currency/date formatting.
 - High-Resolution PNG (.png) for charts and slides.
-- Executive PDF Report (.pdf) with 100% Vietnamese Unicode font support, summary metrics, data tables, strategic insights, and SQL queries.
+- Executive PDF Report (.pdf) with 100% Vietnamese Unicode font support, clean typography,
+  complete emoji stripping (no white boxes), and professional business layout.
 """
 
 import io
@@ -11,20 +12,39 @@ import re
 import datetime
 import pandas as pd
 
+# Regex bắt toàn bộ các dải ký tự biểu tượng cảm xúc (Emoji) trong Unicode
+EMOJI_REGEX = re.compile(
+    r"[\U00010000-\U0010ffff]|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|[\u2300-\u23FF]|[\u2B50-\u2B55]|[\u200D\uFE0F]|[\uFE00-\uFE0F]",
+    flags=re.UNICODE
+)
 
-def clean_markdown_for_pdf(text: str) -> str:
-    """Chuyển đổi markdown cơ bản (**, *, `, <, >) sang định dạng XML an toàn cho ReportLab Paragraph."""
+
+def clean_text_for_pdf(text: str) -> str:
+    """Loại bỏ triệt để các emoji gây lỗi ô vuông trắng và chuẩn hóa cú pháp XML an toàn cho ReportLab."""
     if not text:
         return ""
-    # Thoát các ký tự đặc biệt XML trước
-    text = str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    # Chuyển **bold** thành <b>bold</b>
-    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    # Chuyển *italic* thành <i>italic</i>
-    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-    # Chuyển `code` thành <b>code</b>
-    text = re.sub(r'`(.*?)`', r'<b>\1</b>', text)
-    return text
+
+    text = str(text)
+
+    # 1. Chuyển đổi các biểu tượng ưu tiên thành nhãn văn bản chuẩn
+    text = text.replace("🔴", "").replace("🟡", "").replace("🟢", "")
+
+    # 2. Xóa toàn bộ emoji unicode không có trong bảng ký tự font
+    text = EMOJI_REGEX.sub("", text)
+
+    # 3. Thoát các ký tự XML đặc biệt
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    # 4. Chuyển đổi cú pháp markdown sang thẻ định dạng ReportLab
+    text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"\*(.*?)\*", r"<i>\1</i>", text)
+    text = re.sub(r"`(.*?)`", r"<b>\1</b>", text)
+
+    # 5. Dọn dẹp khoảng trắng thừa và ký tự rác đầu mục
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"^\s*[\.\-•]\s*", "", text.strip())
+
+    return text.strip()
 
 
 # ---------------------------------------------------------
@@ -80,7 +100,6 @@ def export_to_excel(df: pd.DataFrame, sheet_name: str = "Bao_Cao") -> bytes:
 
         return output.getvalue()
     except Exception:
-        # Fallback xuất excel cơ bản nếu gặp sự cố styling
         output = io.BytesIO()
         df.to_excel(output, index=False)
         return output.getvalue()
@@ -100,10 +119,10 @@ def export_to_png(fig) -> bytes | None:
 
 
 # ---------------------------------------------------------
-# 3. Xuất Tóm Tắt Báo Cáo Executive PDF (.pdf) Có Font Tiếng Việt
+# 3. Xuất Tóm Tắt Báo Cáo Executive PDF (.pdf) Chuẩn Doanh Nghiệp
 # ---------------------------------------------------------
 def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None) -> bytes:
-    """Tạo tài liệu Báo cáo Điều hành PDF (Executive Report) hoàn chỉnh hỗ trợ 100% tiếng Việt UTF-8."""
+    """Tạo tài liệu Báo cáo Điều hành PDF (Executive Report) chuẩn xác, loại bỏ hoàn toàn ô vuông lỗi font."""
     if result is None:
         return b""
 
@@ -116,7 +135,7 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
 
-        # 1. Đăng ký Font Unicode Tiếng Việt từ thư mục dự án hoặc hệ điều hành
+        # 1. Đăng ký Font Unicode Tiếng Việt từ thư mục dự án
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         bundled_font = os.path.join(base_dir, "assets", "fonts", "CustomUnicode.ttf")
         bundled_font_bold = os.path.join(base_dir, "assets", "fonts", "CustomUnicode-Bold.ttf")
@@ -169,16 +188,16 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             fontSize=16,
             leading=20,
             textColor=colors.HexColor("#1F4E78"),
-            spaceAfter=4
+            spaceAfter=2
         )
         subtitle_style = ParagraphStyle(
             "DocSub",
             parent=styles["Normal"],
             fontName=font_name,
-            fontSize=9,
-            leading=13,
-            textColor=colors.HexColor("#555555"),
-            spaceAfter=8
+            fontSize=8.5,
+            leading=12,
+            textColor=colors.HexColor("#4B5563"),
+            spaceAfter=4
         )
         section_style = ParagraphStyle(
             "SectionHead",
@@ -187,7 +206,7 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             fontSize=11,
             leading=15,
             textColor=colors.HexColor("#1F4E78"),
-            spaceBefore=8,
+            spaceBefore=10,
             spaceAfter=5
         )
         body_style = ParagraphStyle(
@@ -195,7 +214,8 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             parent=styles["Normal"],
             fontName=font_name,
             fontSize=8.5,
-            leading=12,
+            leading=12.5,
+            textColor=colors.HexColor("#1F2937"),
             spaceAfter=3
         )
         table_cell_style = ParagraphStyle(
@@ -204,6 +224,7 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             fontName=font_name,
             fontSize=8,
             leading=11,
+            textColor=colors.HexColor("#1F2937"),
         )
         table_cell_header = ParagraphStyle(
             "TableHead",
@@ -216,75 +237,115 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
 
         story = []
 
-        # 1. Header Báo cáo
-        story.append(Paragraph("🗄️ Veraxus for SQL - Executive Business Report", title_style))
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        query_text = clean_markdown_for_pdf(result.get("query", ""))
-        story.append(Paragraph(f"<b>Query:</b> {query_text} &nbsp;|&nbsp; <b>Exported at:</b> {now_str}", subtitle_style))
-        story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#1F4E78"), spaceAfter=8))
+        # 1. Header Báo cáo & Khung Thông Tin Tổng Quan (Metadata Bar)
+        story.append(Paragraph("VERAXUS FOR SQL - EXECUTIVE BUSINESS REPORT", title_style))
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        query_text = clean_text_for_pdf(result.get("query", ""))
+        total_rows_count = len(df) if df is not None else 0
 
-        # 2. Bảng Tóm Tắt Dữ liệu
+        # Khung thông tin điều hành (Metadata Box)
+        meta_data = [
+            [
+                Paragraph(f"<b>Câu hỏi truy vấn (Query):</b> {query_text}", subtitle_style),
+                Paragraph(f"<b>Thời gian xuất:</b> {now_str} &nbsp;|&nbsp; <b>Tổng dòng:</b> {total_rows_count:,}", subtitle_style),
+            ]
+        ]
+        meta_table = Table(meta_data, colWidths=[340, 183])
+        meta_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+            ("PADDING", (0, 0), (-1, -1), 5),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(meta_table)
+        story.append(Spacer(1, 8))
+
+        # 2. Bảng Tóm Tắt Dữ Liệu (Summary Data Table) với Zebra Striping
         if df is not None and not df.empty:
-            story.append(Paragraph(f"Summary Data Table (Top {min(10, len(df))} of {len(df)} rows)", section_style))
+            story.append(Paragraph(f"1. BẢNG TỔNG HỢP DỮ LIỆU (Top {min(10, len(df))} / {len(df)} dòng)", section_style))
             preview_df = df.head(10)
 
             n_cols = len(preview_df.columns)
-            col_w = max(45, min(140, 520 / max(1, n_cols)))
+            col_w = max(45, min(140, 523 / max(1, n_cols)))
 
-            table_data = [[Paragraph(f"<b>{clean_markdown_for_pdf(str(c))}</b>", table_cell_header) for c in preview_df.columns]]
+            table_data = [[Paragraph(f"<b>{clean_text_for_pdf(str(c))}</b>", table_cell_header) for c in preview_df.columns]]
             for _, row in preview_df.iterrows():
                 row_cells = []
                 for c in preview_df.columns:
                     val = row[c]
                     val_str = f"{val:,.0f}" if isinstance(val, (int, float)) else str(val)
-                    row_cells.append(Paragraph(clean_markdown_for_pdf(val_str), table_cell_style))
+                    row_cells.append(Paragraph(clean_text_for_pdf(val_str), table_cell_style))
                 table_data.append(row_cells)
 
             t = Table(table_data, colWidths=[col_w] * n_cols)
-            t.setStyle(TableStyle([
+            t_style = [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
                 ("ALIGN", (0, 0), (-1, -1), "LEFT"),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D9D9D9")),
-            ]))
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+            ]
+            # Zebra striping (dòng so le màu trắng / xám nhạt)
+            for r_idx in range(1, len(table_data)):
+                bg = colors.HexColor("#F8FAFC") if r_idx % 2 == 0 else colors.white
+                t_style.append(("BACKGROUND", (0, r_idx), (-1, r_idx), bg))
+
+            t.setStyle(TableStyle(t_style))
             story.append(t)
             story.append(Spacer(1, 8))
 
-        # 3. Ảnh Biểu đồ (nếu có)
+        # 3. Ảnh Biểu Đồ (nếu có)
         if chart_png_bytes:
-            story.append(Paragraph("Visual Analysis Chart", section_style))
+            story.append(Paragraph("2. BIỂU ĐỒ TRỰC QUAN HÓA (VISUAL CHART)", section_style))
             img_buffer = io.BytesIO(chart_png_bytes)
-            story.append(Image(img_buffer, width=500, height=250))
+            story.append(Image(img_buffer, width=500, height=240))
             story.append(Spacer(1, 8))
 
-        # 4. Bản Phân Tích Insight Chiến Lược & Priority Action Plan
+        # 4. Bản Phân Tích Insight Chiến Lược & Kế Hoạch Hành Động (Action Plan)
         insights = result.get("insights")
         if insights:
-            story.append(Paragraph("Strategic Insights & Priority Action Plan", section_style))
+            sec_num = "3" if chart_png_bytes else "2"
+            story.append(Paragraph(f"{sec_num}. PHÂN TÍCH INSIGHT CHIẾN LƯỢC & KẾ HOẠCH HÀNH ĐỘNG", section_style))
+
             for line in insights.split("\n"):
-                clean_line = line.strip()
-                if not clean_line:
+                raw_line = line.strip()
+                if not raw_line:
                     continue
-                if clean_line.startswith("###"):
-                    h_text = clean_line.replace("#", "").strip()
-                    story.append(Paragraph(f"<b>{clean_markdown_for_pdf(h_text)}</b>", section_style))
-                elif clean_line.startswith("-"):
-                    item_text = clean_line[1:].strip()
-                    story.append(Paragraph(f"• {clean_markdown_for_pdf(item_text)}", body_style))
+
+                # Loại bỏ hoàn toàn rác markdown thuần
+                if raw_line.lower() in ("markdown", "```markdown", "```") or raw_line.startswith("```"):
+                    continue
+                if raw_line.startswith("# ") and "báo cáo insight" in raw_line.lower():
+                    continue
+                if raw_line in ("---", "* --", "***", "___"):
+                    continue
+
+                cleaned_line = clean_text_for_pdf(raw_line)
+                if not cleaned_line:
+                    continue
+
+                # Phân loại tiêu đề mục con ###
+                if raw_line.startswith("###"):
+                    sub_h = clean_text_for_pdf(raw_line.replace("#", ""))
+                    story.append(Paragraph(f"<b>{sub_h}</b>", section_style))
+                elif raw_line.startswith("-") or raw_line.startswith("•"):
+                    story.append(Paragraph(f"• {cleaned_line}", body_style))
                 else:
-                    story.append(Paragraph(clean_markdown_for_pdf(clean_line), body_style))
+                    story.append(Paragraph(cleaned_line, body_style))
+
             story.append(Spacer(1, 8))
 
-        # 5. Chi Tiết Câu Lệnh SQL
+        # 5. Khung Chi Tiết Câu Lệnh SQL
         sql_text = result.get("sql")
         if sql_text:
-            story.append(Paragraph("Executed SQL Query", section_style))
-            sql_box_data = [[Paragraph(f"<font color='#333333'>{clean_markdown_for_pdf(sql_text)}</font>", table_cell_style)]]
-            sql_table = Table(sql_box_data, colWidths=[520])
+            sec_sql_num = "4" if chart_png_bytes else "3"
+            story.append(Paragraph(f"{sec_sql_num}. CHI TIẾT CÂU LỆNH SQL ĐÃ THỰC THI", section_style))
+            clean_sql = clean_text_for_pdf(sql_text)
+            sql_box_data = [[Paragraph(f"<font color='#374151'>{clean_sql}</font>", table_cell_style)]]
+            sql_table = Table(sql_box_data, colWidths=[523])
             sql_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F2F4F7")),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F1F5F9")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
                 ("PADDING", (0, 0), (-1, -1), 5),
             ]))
             story.append(sql_table)
