@@ -291,6 +291,7 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ma
 Mỗi hành động phải nêu rõ chỉ số KPI / kết quả đo lường kỳ vọng).
 
 QUY TẮC ĐỊNH DẠNG VĂN BẢN (BẮT BUỘC):
+- MỖI Ý PHÂN TÍCH BẮT BUỘC NẰM TRÊN MỘT DÒNG RIÊNG BIỆT (bắt đầu bằng gạch đầu dòng `• `). TUYỆT ĐỐI KHÔNG VIẾT CÁC Ý NỐI LIỀN NHAU TRÊN CÙNG 1 ĐOẠN VĂN!
 - TUYỆT ĐỐI KHÔNG TỰ Ý IN ĐẬM Ở TRONG THÂN CÂU (CẤM dùng ** bên trong câu).
 - CHỈ IN ĐẬM DUY NHẤT TIÊU ĐỀ Ở ĐẦU GẠCH ĐẦU DÒNG TRƯỚC DẤU HAI CHẤM (Ví dụ: `• **Tiêu đề phân tích**: Toàn bộ nội dung phân tích phía sau là chữ thường bình thường, không có bất kỳ dấu sao ** nào`).
 - Tách từ và số chuẩn xác (viết "thấp hơn", "cao hơn", "lớn hơn", "đạt 28,490,175", "11.0% so với", TUYỆT ĐỐI KHÔNG viết dính liền).

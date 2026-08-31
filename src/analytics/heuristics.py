@@ -239,6 +239,11 @@ def sanitize_insight_markdown(text: str) -> str:
     # 3. Sửa lỗi chính tả phổ biến
     text = text.replace("đư ợc", "được").replace("đư ọc", "được")
 
+    # 4. Tự động tách dòng cho các ý phân tích bị dính liền trên cùng 1 đoạn văn
+    text = re.sub(r"(?<=[^\n])\s+•\s*", "\n\n• ", text)
+    text = re.sub(r"(?<=[^\n•\-\*\s])\s+(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\n\n• \g<1>", text)
+    text = re.sub(r"(?<=[^\n])\s+(?:,\s*)?(?:với\s+)?(KPI\s+(?:đo lường|kỳ vọng|đo lường kỳ vọng)[^:\n]*:)", r"\n  - \g<1>", text, flags=re.IGNORECASE)
+
     lines = text.splitlines()
     cleaned_lines = []
 
@@ -289,7 +294,7 @@ def sanitize_insight_markdown(text: str) -> str:
             elif clean_tag.lower().startswith("kpi") or "kpi" in clean_tag.lower():
                 prefix_out = f"  - {clean_tag}"
             else:
-                if len(clean_tag.split()) > 6 or clean_tag.lower().startswith("tổng doanh số") or clean_tag.lower().startswith("nhóm"):
+                if len(clean_tag.split()) > 10 or clean_tag.lower().startswith("tổng doanh số") or clean_tag.lower().startswith("nhóm"):
                     prefix_out = f"• {clean_tag}"
                 else:
                     prefix_out = f"• **{clean_tag}**"
