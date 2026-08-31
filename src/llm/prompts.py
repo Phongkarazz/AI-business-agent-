@@ -54,7 +54,10 @@ MANDATORY RULES (STRICT COMPLIANCE):
    - Use `COUNT(*)` or `COUNT(col)`, NEVER `COUNT()`.
    - Perfectly balance all parentheses '(' and ')'.
    - Wrap table/column names in backticks ` if they contain special characters or spaces.
-5. OUTPUT FORMAT:
+5. CATEGORICAL NULL / BLANK HANDLING:
+   - When GROUP BY a category column (like `Team`, `Category`, `Region`):
+   - If the user asks about specific groups/teams, use `WHERE col != '' AND col IS NOT NULL` OR `COALESCE(NULLIF(col, ''), 'Unassigned') AS col` to avoid blank unnamed rows.
+6. OUTPUT FORMAT:
    - Return ONLY the raw SQL query (starting with SELECT or WITH).
    - NO markdown code block, NO explanations, NO comments (#, --).
 
@@ -90,7 +93,10 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-5. ĐỊNH DẠNG ĐẦU RA:
+5. XỬ LÝ GIÁ TRỊ RỖNG KHI GOM NHÓM (GROUP BY):
+   - Khi gom nhóm theo danh mục (như `Team`, `Category`, `Region`...):
+   - Nếu câu hỏi hỏi về từng nhóm/team của nhân viên, hãy dùng `WHERE people.Team != '' AND people.Team IS NOT NULL` (nếu chỉ lấy các nhóm chính thức) hoặc dùng `COALESCE(NULLIF(people.Team, ''), 'Chưa phân nhóm') AS Team` để tránh dòng rỗng không có tên.
+6. ĐỊNH DẠNG ĐẦU RA:
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích hay markdown code block bên ngoài.
 

@@ -75,6 +75,17 @@ def render_result(result: dict, turn_id: str):
                 st.code(sql_query, language="sql")
         return
 
+    # Tự động thay thế các ô chuỗi rỗng / khoảng trắng / NaN trong cột text bằng nhãn rõ ràng
+    cleaned_df = df.copy()
+    for col in cleaned_df.columns:
+        if not pd.api.types.is_numeric_dtype(cleaned_df[col]):
+            unassigned_label = "(Unassigned)" if is_en else "(Chưa phân nhóm)"
+            cleaned_df[col] = cleaned_df[col].apply(
+                lambda val: unassigned_label if pd.isna(val) or (isinstance(val, str) and not val.strip()) else val
+            )
+    df = cleaned_df
+    result["df"] = df
+
     # 3. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
     st.dataframe(df, width='stretch')
 

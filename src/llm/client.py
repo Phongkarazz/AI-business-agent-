@@ -1,6 +1,7 @@
 """
 Multi-provider LLM client supporting Google Gemini, OpenRouter, and Alibaba Qwen (OpenAI-compatible)
-with intelligent key detection, automatic model routing, and robust SQL extraction.
+with intelligent key detection, automatic model routing, max_tokens optimization (fixing 402 errors),
+and robust SQL extraction.
 """
 
 import re
@@ -28,19 +29,15 @@ def extract_clean_content(raw: str) -> str:
         extracted = raw.strip()
 
     # 2. Loại bỏ các tiền tố giải thích hoặc comment mở đầu (#, --, /* */) trước câu lệnh chính
-    # Bỏ comment dạng block /* ... */ ở đầu
     extracted = re.sub(r"^\s*/\*.*?\*/\s*", "", extracted, flags=re.DOTALL)
-    # Bỏ các dòng comment # ... hoặc -- ... ở đầu chuỗi
     lines = extracted.splitlines()
     cleaned_lines = []
     found_sql_start = False
     for line in lines:
         stripped_line = line.strip()
         if not found_sql_start:
-            # Nếu là dòng trống hoặc dòng comment (#, --)
             if not stripped_line or stripped_line.startswith("#") or stripped_line.startswith("--") or stripped_line.startswith("//"):
                 continue
-            # Nếu là dòng tiền tố sql\n hoặc json\n
             if stripped_line.lower() in ("sql", "json"):
                 continue
             found_sql_start = True
@@ -56,7 +53,6 @@ def normalize_model_for_openrouter(model_name: str) -> str:
     if not model_name:
         return "deepseek/deepseek-chat"
 
-    # Nếu chưa có tiền tố vendor/ (ví dụ: qwen-plus, qwen-turbo, gpt-4o)
     if "/" not in model_name:
         lowered = model_name.lower()
         if lowered.startswith("qwen"):
@@ -82,7 +78,6 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
 
     base_url_str = (base_url or "").strip().lower()
 
-    # Tự động phát hiện OpenRouter nếu key bắt đầu bằng sk-or-v1- hoặc base_url chứa openrouter.ai
     is_openrouter = (
         provider == "OpenRouter"
         or api_key.startswith("sk-or-v1-")
@@ -100,7 +95,7 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
             base_url=target_url,
             default_headers={
                 "HTTP-Referer": "https://localhost:8501",
-                "X-Title": "AI Business Agent",
+                "X-Title": "Veraxus for SQL",
             }
         )
     elif provider == "Qwen (Alibaba Cloud)":
@@ -112,25 +107,25 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
         raise ValueError(f"Provider không được hỗ trợ: {provider}")
 
 
-def _call_gemini_impl(client, model_name: str, prompt: str) -> str:
+def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
     response = client.models.generate_content(model=model_name, contents=prompt)
     return response.text
 
 
-def _call_openai_compatible_impl(client, model_name: str, prompt: str) -> str:
+def _call_openai_compatible_impl(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
     completion = client.chat.completions.create(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens
     )
     return completion.choices[0].message.content
 
 
 def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: int = 3) -> tuple[str | None, str | None]:
-    """Gọi LLM với cơ chế retry, tự chuẩn hóa model OpenRouter và trả về (kết_quả, thông_báo_lỗi)."""
+    """Gọi LLM với cấu hình max_tokens tối ưu (tránh lỗi 402 OpenRouter) và cơ chế tự động giảm tokens."""
     if not client:
         return None, "Chưa khởi tạo client AI."
 
-    # Kiểm tra xem client có đang trỏ tới OpenRouter không
     is_openrouter = (
         provider == "OpenRouter"
         or ("openrouter.ai" in str(getattr(client, "base_url", "")).lower())
@@ -141,15 +136,26 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
 
     impl = _call_gemini_impl if (provider == "Gemini (Google)" and not is_openrouter) else _call_openai_compatible_impl
 
+    current_max_tokens = 2048
     last_error = None
+
     for attempt in range(max_retries):
         try:
-            raw = impl(client, model_name, prompt)
+            raw = impl(client, model_name, prompt, max_tokens=current_max_tokens)
             cleaned = extract_clean_content(raw)
             return cleaned, None
         except Exception as e:
             err = str(e)
             last_error = err
+
+            # Tự động bắt lỗi 402 OpenRouter do vượt quá trần credit khi đặt max_tokens lớn
+            if "402" in err or "fewer max_tokens" in err or "can only afford" in err:
+                if current_max_tokens > 512:
+                    current_max_tokens = 1024 if current_max_tokens > 1024 else 512
+                    time.sleep(1)
+                    continue
+                return None, f"Tài khoản OpenRouter của bạn đã hết số dư ($0.00). Vui lòng nạp thêm credit tại https://openrouter.ai/settings/credits để tiếp tục."
+
             if "429" in err or "RESOURCE_EXHAUSTED" in err or "RateLimit" in err or "Throttling" in err or "insufficient_quota" in err:
                 return None, f"Hết quota hoặc đạt giới hạn gọi ({provider} - {model_name}). Vui lòng kiểm tra lại số dư hoặc đổi model."
             if "401" in err or "invalid_api_key" in err or "Incorrect API key" in err:
