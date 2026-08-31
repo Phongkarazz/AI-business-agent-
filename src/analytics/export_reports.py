@@ -41,6 +41,10 @@ def clean_text_for_pdf(text: str) -> str:
     text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ]):(\d)", r"\1: \2", text)
     text = re.sub(r":([A-ZÀ-Ỹa-zà-ỹ])", r": \1", text)
 
+    # 4.1 Đảm bảo khoảng trắng quanh thẻ in đậm
+    text = re.sub(r"\*\*([^\*\n]+?)\*\*([a-zA-Zà-ỹÀ-Ỹ0-9])", r"**\1** \2", text)
+    text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ0-9])\*\*([^\*\n]+?)\*\*", r"\1 **\2**", text)
+
     # 5. Thoát các ký tự XML đặc biệt
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -280,6 +284,15 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             leading=11,
             textColor=colors.HexColor("#1F2937"),
         )
+        table_cell_style_num = ParagraphStyle(
+            "TableCellNum",
+            parent=styles["Normal"],
+            fontName=font_name,
+            fontSize=8,
+            leading=11,
+            alignment=2,
+            textColor=colors.HexColor("#1F2937"),
+        )
         table_cell_header = ParagraphStyle(
             "TableHead",
             parent=styles["Normal"],
@@ -291,30 +304,66 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
 
         story = []
 
-        # 1. Header Báo cáo & Khung Thông Tin Tổng Quan (Metadata Bar)
-        story.append(Paragraph("VERAXUS FOR SQL - EXECUTIVE BUSINESS REPORT", title_style))
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        # 1. Header Báo cáo & Khung Thông Tin Điều Hành (Executive Metadata Box)
+        story.append(Paragraph("BÁO CÁO PHÂN TÍCH ĐIỀU HÀNH DOANH NGHIỆP", title_style))
+        now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         query_text = clean_text_for_pdf(result.get("query", ""))
         total_rows_count = len(df) if df is not None else 0
 
         # Khung thông tin điều hành (Metadata Box)
         meta_data = [
             [
-                Paragraph(f"<b>Câu hỏi truy vấn (Query):</b> {query_text}", subtitle_style),
-                Paragraph(f"<b>Thời gian xuất:</b> {now_str} &nbsp;|&nbsp; <b>Tổng dòng:</b> {total_rows_count:,}", subtitle_style),
+                Paragraph(f"<b>Chủ đề / Câu hỏi:</b> {query_text}", subtitle_style),
+                Paragraph(f"<b>Thời gian xuất:</b> {now_str} &nbsp;|&nbsp; <b>Tổng dòng:</b> {total_rows_count:,} &nbsp;|&nbsp; <b>Bảo mật:</b> Confidential", subtitle_style),
             ]
         ]
-        meta_table = Table(meta_data, colWidths=[340, 183])
+        meta_table = Table(meta_data, colWidths=[330, 193])
         meta_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
             ("PADDING", (0, 0), (-1, -1), 5),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
         story.append(meta_table)
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 4))
 
-        # 2. Bảng Tóm Tắt Dữ Liệu (Summary Data Table) với Zebra Striping
+        # Khung Tóm Tắt Chỉ Số Cốt Lõi (Executive KPI Snapshot Box)
+        if df is not None and not df.empty:
+            measure_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+            label_cols = [c for c in df.columns if c not in measure_cols]
+            if measure_cols and len(df) > 1:
+                m_col = measure_cols[0]
+                m_name = clean_text_for_pdf(str(m_col).replace("_", " ").title())
+                v_series = pd.to_numeric(df[m_col], errors="coerce").dropna()
+                if not v_series.empty:
+                    total_val = v_series.sum()
+                    avg_val = v_series.mean()
+                    max_idx = v_series.idxmax()
+                    peak_val = df.loc[max_idx, m_col]
+                    peak_label = clean_text_for_pdf(str(df.loc[max_idx, label_cols[0]])) if label_cols else f"#{max_idx+1}"
+
+                    fmt_total = f"{total_val:,.0f}" if total_val > 100 else f"{total_val:,.2f}"
+                    fmt_avg = f"{avg_val:,.0f}" if avg_val > 100 else f"{avg_val:,.2f}"
+                    fmt_peak = f"{peak_val:,.0f}" if peak_val > 100 else f"{peak_val:,.2f}"
+
+                    kpi_box_data = [
+                        [
+                            Paragraph(f"💰 <b>Tổng {m_name}:</b> {fmt_total}", subtitle_style),
+                            Paragraph(f"📈 <b>Trung bình:</b> {fmt_avg}", subtitle_style),
+                            Paragraph(f"🏆 <b>Đỉnh cao nhất:</b> {peak_label} ({fmt_peak})", subtitle_style),
+                        ]
+                    ]
+                    kpi_table = Table(kpi_box_data, colWidths=[174, 174, 175])
+                    kpi_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EFF6FF")),
+                        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#BFDBFE")),
+                        ("PADDING", (0, 0), (-1, -1), 4),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ]))
+                    story.append(kpi_table)
+                    story.append(Spacer(1, 6))
+
+        # 2. Bảng Tóm Tắt Dữ Liệu (Summary Data Table) với Căn Chỉnh Kế Toán & Zebra Striping
         if df is not None and not df.empty:
             story.append(Paragraph(f"1. BẢNG TỔNG HỢP DỮ LIỆU (Top {min(10, len(df))} / {len(df)} dòng)", section_style))
             preview_df = df.head(10)
@@ -327,19 +376,25 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                 row_cells = []
                 for c in preview_df.columns:
                     val = row[c]
-                    val_str = f"{val:,.0f}" if isinstance(val, (int, float)) else str(val)
-                    row_cells.append(Paragraph(clean_text_for_pdf(val_str), table_cell_style))
+                    if isinstance(val, (int, float)) or (isinstance(val, str) and val.replace(",", "").replace(".", "").isdigit()):
+                        try:
+                            num_val = float(str(val).replace(",", ""))
+                            val_str = f"{num_val:,.0f}" if num_val.is_integer() else f"{num_val:,.2f}"
+                        except Exception:
+                            val_str = str(val)
+                        row_cells.append(Paragraph(clean_text_for_pdf(val_str), table_cell_style_num))
+                    else:
+                        val_str = str(val)
+                        row_cells.append(Paragraph(clean_text_for_pdf(val_str), table_cell_style))
                 table_data.append(row_cells)
 
             t = Table(table_data, colWidths=[col_w] * n_cols)
             t_style = [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                 ("TOPPADDING", (0, 0), (-1, -1), 3),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
             ]
-            # Zebra striping (dòng so le màu trắng / xám nhạt)
             for r_idx in range(1, len(table_data)):
                 bg = colors.HexColor("#F8FAFC") if r_idx % 2 == 0 else colors.white
                 t_style.append(("BACKGROUND", (0, r_idx), (-1, r_idx), bg))

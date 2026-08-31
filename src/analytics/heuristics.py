@@ -252,19 +252,24 @@ def sanitize_insight_markdown(text: str) -> str:
     # 7. Xóa số thứ tự lặp lại sau bullet: • 1. -> •
     text = re.sub(r"^[•\-\*]\s*\d+[\.\)]\s*", "• ", text, flags=re.MULTILINE)
 
-    # 8. Tách các từ tiếng Việt và từ viết hoa viết tắt bị dính liền
+    # 8. Sửa dính chữ quanh thẻ in đậm (VD: **KHÔNG**Phát hiện -> **KHÔNG** Phát hiện, **USA**có -> **USA** có)
+    text = re.sub(r"\*\*([^\*\n]+?)\*\*([a-zA-Zà-ỹÀ-Ỹ0-9])", r"**\1** \2", text)
+    text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ0-9])\*\*([^\*\n]+?)\*\*", r"\1 **\2**", text)
+
+    # 9. Tách từ viết hoa viết tắt dính liền với từ thường (VD: APACchiếm -> APAC chiếm, USACó -> USA Có)
     text = re.sub(r"([A-ZÀ-Ỹ]{2,})([A-ZÀ-Ỹ][a-zà-ỹ])", r"\1 \2", text)
     text = re.sub(r"([A-Z]{2,})([a-zà-ỹ])", r"\1 \2", text)
+
+    # 10. Chuẩn hóa khoảng trắng sau dấu hai chấm
     text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ]):(\d)", r"\1: \2", text)
     text = re.sub(r":([A-ZÀ-Ỹa-zà-ỹ])", r": \1", text)
-    text = re.sub(r"(\w+)(hơn|nhất|bằng|trong|ngoài)", r"\1 \2", text)
-    text = re.sub(r"thấphơn", "thấp hơn", text)
-    text = re.sub(r"caohơn", "cao hơn", text)
-    text = re.sub(r"lớnhơn", "lớn hơn", text)
-    text = re.sub(r"nhỏhơn", "nhỏ hơn", text)
+    text = re.sub(r"\bthấphơn\b", "thấp hơn", text)
+    text = re.sub(r"\bcaohơn\b", "cao hơn", text)
+    text = re.sub(r"\blớnhơn\b", "lớn hơn", text)
+    text = re.sub(r"\bnhỏhơn\b", "nhỏ hơn", text)
     text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\1", text)
 
-    # 9. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
+    # 11. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
     has_head_21 = bool(re.search(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?Phát hiện Bất thường", text, flags=re.IGNORECASE | re.MULTILINE))
     if not has_head_21:
         text = "### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n\n" + text
@@ -279,7 +284,7 @@ def sanitize_insight_markdown(text: str) -> str:
     text = text.replace("### 2.2. ", "### 2.2. 🔍 ")
     text = text.replace("### 2.3. ", "### 2.3. 🎯 ")
 
-    # 10. Dọn dẹp các dấu sao thừa liên tiếp (3 dấu sao trở lên)
+    # 12. Dọn dẹp các dấu sao thừa liên tiếp
     text = re.sub(r"\*{3,}", r"**", text)
 
     return text.strip()

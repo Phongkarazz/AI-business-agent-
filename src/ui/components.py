@@ -208,7 +208,19 @@ def render_result(result: dict, turn_id: str):
 
     # 2. Hiển thị lỗi nếu có kèm Khung Sao chép Lỗi 1-Click (Copy to Clipboard)
     if result.get("error"):
-        st.error(f"❌ {result['error']}")
+        err_msg = result['error']
+        st.error(f"❌ {err_msg}")
+
+        # Nút hành động nhanh khi hết số dư / quota
+        if any(k in err_msg.lower() for k in ["hết số dư", "quota", "402", "429", "api key"]):
+            c_e1, c_e2 = st.columns([1.5, 1.5])
+            with c_e1:
+                if st.button("⚙️ Mở Cài Đặt (Đổi sang Gemini Miễn Phí / Cập nhật Key)", key=f"btn_err_settings_{turn_id}", type="primary", use_container_width=True):
+                    st.session_state["view_mode"] = "settings"
+                    st.rerun()
+            with c_e2:
+                if "openrouter" in err_msg.lower():
+                    st.link_button("💳 Nạp thêm credit OpenRouter ($5)", "https://openrouter.ai/settings/credits", use_container_width=True)
 
         # Chuẩn bị văn bản báo lỗi chuẩn chỉnh để 1-click copy
         logs = result.get("logs", [])
