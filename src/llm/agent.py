@@ -300,6 +300,16 @@ def run_agent(
         "followups": [],
     }
 
+    # 0.1 Tự động làm giàu schema_context nếu chưa có DISTINCT SAMPLE VALUES
+    if engine and ("DISTINCT SAMPLE VALUES" not in (schema_context or "") and "DANH SÁCH GIÁ TRỊ MẪU" not in (schema_context or "")):
+        from src.database.schema import auto_extract_schema
+        try:
+            enriched_schema = auto_extract_schema(engine)
+            if enriched_schema and len(enriched_schema) > len(schema_context or ""):
+                schema_context = enriched_schema
+        except Exception:
+            pass
+
     # 1. Sinh SQL ban đầu
     initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt)
