@@ -92,17 +92,14 @@ if (
                     st.rerun()
                 else:
                     st.session_state["_auto_connect_error"] = detail
+                    st.session_state["view_mode"] = "settings"
                     st.rerun()
 
 # ---------------------------------------------------------
 # 4. Điều hướng Giao diện (Routing)
 # ---------------------------------------------------------
-# Nếu có lỗi Auto-Connect: Hiển thị màn hình báo lỗi + Nút Thử lại & Mở Cấu hình
-if st.session_state.get("_auto_connect_error") and not st.session_state.get("connected"):
-    render_auto_connect_failed_view(st.session_state["_auto_connect_error"])
-
-# Nếu chưa kết nối hoặc người dùng bấm "Cài đặt": Hiển thị màn hình Onboarding / Settings
-elif not st.session_state.get("connected") or st.session_state.get("view_mode") == "settings":
+# Nếu chưa kết nối, kết nối thất bại hoặc người dùng đang ở Cài đặt: Hiển thị ngay màn hình Onboarding / Settings để chỉnh sửa
+if not st.session_state.get("connected") or st.session_state.get("view_mode") == "settings":
     render_onboarding()
 
 # Nếu đã kết nối: Hiển thị Sidebar & Màn hình Chat Phân tích chính

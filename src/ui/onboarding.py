@@ -34,6 +34,14 @@ def render_onboarding():
                 st.session_state["view_mode"] = "chat"
                 st.rerun()
 
+    # Thông báo nếu vừa tự động kết nối thất bại (do đổi link Pinggy/Host/Port)
+    auto_err = st.session_state.get("_auto_connect_error")
+    if auto_err and not is_already_connected:
+        st.warning(
+            f"⚠️ **Không thể kết nối Database với cấu hình đã lưu**: `{auto_err}`\n\n"
+            "👉 Vui lòng kiểm tra và cập nhật lại **Host**, **Port** hoặc mật khẩu MySQL ở bảng bên dưới rồi bấm **'🚀 Kết nối ngay'**."
+        )
+
     st.markdown("---")
 
     # Form nhập liệu 2 cột trực quan
