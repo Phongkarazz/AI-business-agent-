@@ -277,9 +277,31 @@ def sanitize_insight_markdown(text: str) -> str:
         # E. Xóa số thứ tự lặp lại sau bullet: • 1. -> •
         l = re.sub(r"^[•\-\*]\s*\d+[\.\)]\s*", "• ", l)
 
-        # F. QUY TẮC: KHÔNG ĐƯỢC TỰ Ý IN ĐẬM Ở TRONG CÂU
-        # Chỉ giữ in đậm ở tiêu đề trước dấu hai chấm: • **Tiêu đề**: hoặc • [Ưu tiên...]:
-        if ":" in l:
+        # F. Tách KPI nếu nằm trong câu hành động
+        kpi_part = None
+        kpi_match = re.search(r"(?:,\s*)?(?:với\s+)?(KPI\s+(?:đo lường|kỳ vọng|đo lường kỳ vọng|dự kiến))\s*(?:là|:)\s*(.*)$", l, flags=re.IGNORECASE)
+        if kpi_match and len(kpi_match.group(2).strip()) > 3:
+            kpi_title = kpi_match.group(1).strip()
+            kpi_desc = kpi_match.group(2).strip().rstrip(".").replace("**", "").replace("*", "")
+            if kpi_desc:
+                kpi_desc = kpi_desc[0].upper() + kpi_desc[1:]
+            kpi_part = f"  - **{kpi_title}**: {kpi_desc}."
+            l = l[:kpi_match.start()].strip()
+            if not l.endswith("."):
+                l += "."
+
+        # G. QUY TẮC: KHÔNG ĐƯỢC TỰ Ý IN ĐẬM Ở TRONG CÂU
+        # Chuẩn hóa mục 2.3 với nhãn ưu tiên in đậm và biểu tượng màu
+        if "Ưu tiên Cao" in l or "High Priority" in l:
+            body = re.sub(r"^[•\-\*]?\s*(?:🔴\s*)?\[?(?:Ưu tiên Cao|High Priority)[^\]:]*\]?:?\s*", "", l).replace("**", "").replace("*", "").strip()
+            l = f"• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: {body}"
+        elif "Ưu tiên Trung bình" in l or "Medium Priority" in l:
+            body = re.sub(r"^[•\-\*]?\s*(?:🟡\s*)?\[?(?:Ưu tiên Trung bình|Medium Priority)[^\]:]*\]?:?\s*", "", l).replace("**", "").replace("*", "").strip()
+            l = f"• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: {body}"
+        elif "Ưu tiên Thấp" in l or "Low Priority" in l:
+            body = re.sub(r"^[•\-\*]?\s*(?:🟢\s*)?\[?(?:Ưu tiên Thấp|Low Priority)[^\]:]*\]?:?\s*", "", l).replace("**", "").replace("*", "").strip()
+            l = f"• 🟢 **[Ưu tiên Thấp / Dài hạn]**: {body}"
+        elif ":" in l:
             prefix, rest = l.split(":", 1)
             clean_p = prefix.replace("**", "").replace("*", "").strip()
 
@@ -289,10 +311,8 @@ def sanitize_insight_markdown(text: str) -> str:
 
             clean_tag = clean_p.lstrip("•-* ").strip()
 
-            if "[" in clean_tag and "]" in clean_tag:
-                prefix_out = f"{bullet_char} {clean_tag}"
-            elif clean_tag.lower().startswith("kpi") or "kpi" in clean_tag.lower():
-                prefix_out = f"  - {clean_tag}"
+            if clean_tag.lower().startswith("kpi") or "kpi" in clean_tag.lower():
+                prefix_out = f"  - **{clean_tag}**"
             else:
                 if len(clean_tag.split()) > 10 or clean_tag.lower().startswith("tổng doanh số") or clean_tag.lower().startswith("nhóm"):
                     prefix_out = f"• {clean_tag}"
@@ -312,10 +332,12 @@ def sanitize_insight_markdown(text: str) -> str:
         # Dọn dẹp khoảng trắng thừa
         l = re.sub(r"[ \t]+", " ", l)
         cleaned_lines.append(l)
+        if kpi_part:
+            cleaned_lines.append(kpi_part)
 
-    text = "\n".join(cleaned_lines)
+    text = "\n\n".join(cleaned_lines)
 
-    # 4. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
+    # 5. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
     has_head_21 = bool(re.search(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?Phát hiện Bất thường", text, flags=re.IGNORECASE | re.MULTILINE))
     if not has_head_21:
         text = "### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n\n" + text
@@ -329,5 +351,8 @@ def sanitize_insight_markdown(text: str) -> str:
     text = text.replace("### 2.1. ", "### 2.1. 🚨 ")
     text = text.replace("### 2.2. ", "### 2.2. 🔍 ")
     text = text.replace("### 2.3. ", "### 2.3. 🎯 ")
+
+    # Dọn dẹp dòng trống thừa
+    text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text.strip()
