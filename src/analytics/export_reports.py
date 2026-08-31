@@ -2,7 +2,7 @@
 Export utilities for Multi-format Reporting:
 - Styled Excel (.xlsx) with custom headers, cell borders, and currency/date formatting.
 - High-Resolution PNG (.png) for charts and slides.
-- Executive PDF Report (.pdf) with summary metrics, data tables, strategic insights, and SQL queries.
+- Executive PDF Report (.pdf) with 100% Vietnamese Unicode font support, summary metrics, data tables, strategic insights, and SQL queries.
 """
 
 import io
@@ -100,10 +100,10 @@ def export_to_png(fig) -> bytes | None:
 
 
 # ---------------------------------------------------------
-# 3. Xuất Tóm Tắt Báo Cáo Executive PDF (.pdf)
+# 3. Xuất Tóm Tắt Báo Cáo Executive PDF (.pdf) Có Font Tiếng Việt
 # ---------------------------------------------------------
 def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None) -> bytes:
-    """Tạo tài liệu Báo cáo Điều hành PDF (Executive Report) hoàn chỉnh."""
+    """Tạo tài liệu Báo cáo Điều hành PDF (Executive Report) hoàn chỉnh hỗ trợ 100% tiếng Việt UTF-8."""
     if result is None:
         return b""
 
@@ -116,25 +116,40 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
 
+        # 1. Đăng ký Font Unicode Tiếng Việt từ thư mục dự án hoặc hệ điều hành
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        bundled_font = os.path.join(base_dir, "assets", "fonts", "CustomUnicode.ttf")
+        bundled_font_bold = os.path.join(base_dir, "assets", "fonts", "CustomUnicode-Bold.ttf")
+
         font_name = "Helvetica"
         font_name_bold = "Helvetica-Bold"
 
-        # Đăng ký font Unicode nếu có trên hệ điều hành
-        possible_fonts = [
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/Library/Fonts/Arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-        ]
-        for fpath in possible_fonts:
-            if os.path.exists(fpath):
-                try:
-                    pdfmetrics.registerFont(TTFont("CustomUnicode", fpath))
-                    font_name = "CustomUnicode"
-                    font_name_bold = "CustomUnicode"
-                    break
-                except Exception:
-                    pass
+        if os.path.exists(bundled_font):
+            try:
+                pdfmetrics.registerFont(TTFont("CustomUnicode", bundled_font))
+                font_name = "CustomUnicode"
+                font_name_bold = "CustomUnicode"
+                if os.path.exists(bundled_font_bold):
+                    pdfmetrics.registerFont(TTFont("CustomUnicodeBold", bundled_font_bold))
+                    font_name_bold = "CustomUnicodeBold"
+            except Exception:
+                pass
+        else:
+            possible_fonts = [
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/Library/Fonts/Arial.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+            ]
+            for fpath in possible_fonts:
+                if os.path.exists(fpath):
+                    try:
+                        pdfmetrics.registerFont(TTFont("CustomUnicode", fpath))
+                        font_name = "CustomUnicode"
+                        font_name_bold = "CustomUnicode"
+                        break
+                    except Exception:
+                        pass
 
         doc = SimpleDocTemplate(
             buffer,
@@ -202,7 +217,7 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
         story = []
 
         # 1. Header Báo cáo
-        story.append(Paragraph("Veraxus for SQL - Executive Business Report", title_style))
+        story.append(Paragraph("🗄️ Veraxus for SQL - Executive Business Report", title_style))
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         query_text = clean_markdown_for_pdf(result.get("query", ""))
         story.append(Paragraph(f"<b>Query:</b> {query_text} &nbsp;|&nbsp; <b>Exported at:</b> {now_str}", subtitle_style))

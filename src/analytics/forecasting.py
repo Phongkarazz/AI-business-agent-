@@ -93,7 +93,7 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
         name="Dự báo",
         line=dict(color="#EF4444", width=2.5, dash="dash"),
         marker=dict(size=8, color="#EF4444", symbol="circle"),
-        hovertemplate="<b>Dự báo</b><br>%{x}<br>Giá trị dự phóng: %{y:,.2f}<extra></extra>"
+        hovertemplate="<b>Dự báo</b><br>%{x}<br>Giá trị dự phòng: %{y:,.2f}<extra></extra>"
     ))
 
     fig.update_layout(
