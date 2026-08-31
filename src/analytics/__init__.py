@@ -1,5 +1,6 @@
 """
-Analytics package for column heuristics, statistical forecasting, anomaly detection, language detection, and starter prompts.
+Analytics package for column heuristics, statistical forecasting, anomaly detection, language detection,
+starter prompts, and multi-format reporting export (Excel, PNG, PDF).
 """
 
 from .heuristics import (
@@ -15,6 +16,7 @@ from .heuristics import (
 )
 from .forecasting import forecast_series
 from .anomaly import detect_outliers, analyze_data_anomalies
+from .export_reports import export_to_excel, export_to_png, export_to_pdf
 
 __all__ = [
     "is_id_like",
@@ -29,4 +31,7 @@ __all__ = [
     "forecast_series",
     "detect_outliers",
     "analyze_data_anomalies",
+    "export_to_excel",
+    "export_to_png",
+    "export_to_pdf",
 ]

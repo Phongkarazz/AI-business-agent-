@@ -1,6 +1,6 @@
 """
 Reusable UI components for rendering query results, charts, forecasts, automated insights,
-follow-up question suggestions, and notifications.
+follow-up question suggestions, and multi-format reporting export (Excel, PNG, PDF).
 Features clean Silent Fix interface, Priority Tagging display, Bilingual English/Vietnamese support,
 1-Click Copy Error button, and conversational AI explanation handling.
 """
@@ -9,6 +9,7 @@ import streamlit as st
 from src.analytics.heuristics import get_axis_columns
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
+from src.analytics.export_reports import export_to_excel, export_to_png, export_to_pdf
 from src.visualization.charts import render_smart_chart
 from src.llm.agent import generate_auto_insights
 
@@ -24,7 +25,7 @@ def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: b
 
 
 def render_result(result: dict, turn_id: str):
-    """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với bảng, biểu đồ, insight, dự báo và câu hỏi tiếp nối song ngữ."""
+    """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với bảng, biểu đồ, insight, dự báo và bộ xuất báo cáo đa định dạng."""
     lang = result.get("lang", "vi")
     is_en = (lang == "en")
 
@@ -74,16 +75,40 @@ def render_result(result: dict, turn_id: str):
                 st.code(sql_query, language="sql")
         return
 
-    # 3. Hiển thị Bảng dữ liệu & Nút Tải CSV
+    # 3. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
     st.dataframe(df, width='stretch')
-    c_csv, _ = st.columns([2, 5])
+
+    c_csv, c_excel, c_pdf, _ = st.columns([2, 2.5, 2.5, 3])
     with c_csv:
         st.download_button(
-            "⬇️ Download CSV" if is_en else "⬇️ Tải file CSV",
+            "⬇️ Tải CSV" if not is_en else "⬇️ Download CSV",
             df.to_csv(index=False).encode("utf-8-sig"),
             file_name=f"result_{turn_id}.csv",
             mime="text/csv",
-            key=f"csv_{turn_id}"
+            key=f"csv_{turn_id}",
+            use_container_width=True
+        )
+
+    with c_excel:
+        excel_bytes = export_to_excel(df, sheet_name=result.get("query", "Data"))
+        st.download_button(
+            "📊 Xuất Excel (.xlsx)" if not is_en else "📊 Export Excel (.xlsx)",
+            excel_bytes,
+            file_name=f"report_{turn_id}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"excel_{turn_id}",
+            use_container_width=True
+        )
+
+    with c_pdf:
+        pdf_bytes = export_to_pdf(result, df)
+        st.download_button(
+            "📄 Xuất Báo cáo PDF" if not is_en else "📄 Export PDF Report",
+            pdf_bytes,
+            file_name=f"executive_report_{turn_id}.pdf",
+            mime="application/pdf",
+            key=f"pdf_{turn_id}",
+            use_container_width=True
         )
 
     # 4. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
@@ -110,7 +135,22 @@ def render_result(result: dict, turn_id: str):
             key=f"charttype_{turn_id}"
         )
         norm_override = "Tự động" if chart_override in ("Tự động", "Automatic") else chart_override
-        render_smart_chart(df, norm_override, turn_id)
+        chart_fig = render_smart_chart(df, norm_override, turn_id)
+
+        # Nút Tải Ảnh Biểu Đồ PNG Độ Nét Cao
+        if chart_fig:
+            png_bytes = export_to_png(chart_fig)
+            if png_bytes:
+                c_png, _ = st.columns([3, 7])
+                with c_png:
+                    st.download_button(
+                        "📸 Tải Ảnh Biểu đồ PNG (HD)" if not is_en else "📸 Download Chart PNG (HD)",
+                        png_bytes,
+                        file_name=f"chart_{turn_id}.png",
+                        mime="image/png",
+                        key=f"png_{turn_id}",
+                        use_container_width=True
+                    )
 
         if has_anomaly:
             n_findings = len(anomalies_info.get("findings", []))

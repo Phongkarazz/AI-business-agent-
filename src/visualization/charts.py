@@ -217,11 +217,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 template="plotly_white"
             )
             fig.update_layout(margin=dict(l=20, r=20, t=50, b=50))
-        else:
-            st.info("Không thể vẽ biểu đồ với các cột hiện có.")
-            return
-
         st.plotly_chart(fig, width='stretch', key=f"chart_{turn_id}")
+        return fig
 
     except Exception as e:
         st.info(f"Chưa thể tự động vẽ biểu đồ: {str(e)}")
+        return None
