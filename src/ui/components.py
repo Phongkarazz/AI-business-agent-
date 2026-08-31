@@ -81,11 +81,10 @@ def render_voice_input_button(key: str = "voice_input_widget"):
 
             recognition.onresult = function(event) {
                 const transcript = event.results[0][0].transcript.trim();
-                speechStatus.innerText = 'Đã nhận diện: "' + transcript + '" (Đang gửi...)';
+                speechStatus.innerText = 'Đã điền câu hỏi! Bạn có thể sửa nếu cần và nhấn Enter hoặc ⬆️ để gửi.';
                 
-                // 1. Cập nhật vào Streamlit chat_input thông qua React Native Property Setter
+                // Cập nhật vào Streamlit chat_input thông qua React Native Property Setter
                 const textAreas = window.parent.document.querySelectorAll('textarea, input[type="text"]');
-                let found = false;
                 for (let ta of textAreas) {
                     if (ta.placeholder && (ta.placeholder.includes('Hỏi bất kỳ') || ta.placeholder.includes('Ask anything'))) {
                         try {
@@ -101,37 +100,13 @@ def render_voice_input_button(key: str = "voice_input_widget"):
                         
                         ta.dispatchEvent(new Event('input', { bubbles: true }));
                         ta.dispatchEvent(new Event('change', { bubbles: true }));
-                        found = true;
-
-                        // Tự động nhấn nút gửi ⬆️ sau 250ms
-                        setTimeout(() => {
-                            const chatContainer = ta.closest('[data-testid="stChatInput"]') || ta.closest('.stChatInput') || ta.parentElement;
-                            const sendBtn = chatContainer ? chatContainer.querySelector('button') : null;
-                            if (sendBtn && !sendBtn.disabled) {
-                                sendBtn.click();
-                            } else {
-                                const enterEvent = new KeyboardEvent('keydown', {
-                                    key: 'Enter',
-                                    code: 'Enter',
-                                    keyCode: 13,
-                                    which: 13,
-                                    bubbles: true
-                                });
-                                ta.dispatchEvent(enterEvent);
-                            }
-                        }, 250);
+                        
+                        // Đặt con trỏ chuột vào ô chat để người dùng xem và sửa tiếp
+                        ta.focus();
+                        try {
+                            ta.setSelectionRange(ta.value.length, ta.value.length);
+                        } catch(e) {}
                         break;
-                    }
-                }
-
-                // 2. Fallback trực tiếp qua URL Params nếu không tìm thấy ô chat
-                if (!found) {
-                    try {
-                        const url = new URL(window.parent.location.href);
-                        url.searchParams.set('voice_q', transcript);
-                        window.parent.location.href = url.toString();
-                    } catch (e) {
-                        console.error(e);
                     }
                 }
             };
