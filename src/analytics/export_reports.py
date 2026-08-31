@@ -206,8 +206,19 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             fontSize=11,
             leading=15,
             textColor=colors.HexColor("#1F4E78"),
-            spaceBefore=10,
-            spaceAfter=5
+            spaceBefore=12,
+            spaceAfter=6
+        )
+        sub_section_style = ParagraphStyle(
+            "SubSectionHead",
+            parent=styles["Heading3"],
+            fontName=font_name_bold,
+            fontSize=9.5,
+            leading=13.5,
+            textColor=colors.HexColor("#1F4E78"),
+            spaceBefore=9,
+            spaceAfter=4,
+            leftIndent=4
         )
         body_style = ParagraphStyle(
             "BodyText",
@@ -217,6 +228,27 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             leading=12.5,
             textColor=colors.HexColor("#1F2937"),
             spaceAfter=3
+        )
+        bullet_style = ParagraphStyle(
+            "BulletText",
+            parent=styles["Normal"],
+            fontName=font_name,
+            fontSize=8.5,
+            leading=12.5,
+            textColor=colors.HexColor("#1F2937"),
+            leftIndent=14,
+            spaceAfter=3
+        )
+        priority_tag_style = ParagraphStyle(
+            "PriorityTag",
+            parent=styles["Normal"],
+            fontName=font_name_bold,
+            fontSize=8.5,
+            leading=12.5,
+            textColor=colors.HexColor("#0F766E"),
+            leftIndent=8,
+            spaceBefore=5,
+            spaceAfter=2
         )
         table_cell_style = ParagraphStyle(
             "TableCell",
@@ -324,12 +356,25 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                 if not cleaned_line:
                     continue
 
-                # Phân loại tiêu đề mục con ###
-                if raw_line.startswith("###"):
-                    sub_h = clean_text_for_pdf(raw_line.replace("#", ""))
-                    story.append(Paragraph(f"<b>{sub_h}</b>", section_style))
-                elif raw_line.startswith("-") or raw_line.startswith("•"):
-                    story.append(Paragraph(f"• {cleaned_line}", body_style))
+                # Phân loại tiêu đề mục con (2.1, 2.2, 2.3)
+                if raw_line.startswith("###") or raw_line.startswith("##"):
+                    clean_title = re.sub(r"^#+\s*", "", raw_line).strip()
+                    clean_title = clean_text_for_pdf(clean_title)
+
+                    # Chuẩn hóa số thứ tự thành sec_num.1, sec_num.2, sec_num.3
+                    m = re.match(r"^(\d+)(?:\.(\d+))?\.\s*(.*)", clean_title)
+                    if m:
+                        sub_idx = m.group(2) if m.group(2) else m.group(1)
+                        rest_title = m.group(3)
+                        story.append(Paragraph(f"<b>{sec_num}.{sub_idx}. {rest_title}</b>", sub_section_style))
+                    else:
+                        story.append(Paragraph(f"<b>{clean_title}</b>", sub_section_style))
+
+                elif any(p in raw_line for p in ["[Ưu tiên", "[High Priority", "[Medium Priority", "[Low Priority"]):
+                    story.append(Paragraph(cleaned_line, priority_tag_style))
+                elif raw_line.startswith("-") or raw_line.startswith("•") or re.match(r"^\d+\.", raw_line):
+                    bullet_text = re.sub(r"^[•\-\*]\s*", "", cleaned_line)
+                    story.append(Paragraph(f"• {bullet_text}", bullet_style))
                 else:
                     story.append(Paragraph(cleaned_line, body_style))
 

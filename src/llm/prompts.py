@@ -268,13 +268,13 @@ Các điểm bất thường đã được thuật toán thống kê phát hiệ
 YÊU CẦU:
 Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và mang tính điều hành thực chiến cao (định dạng Markdown):
 
-### 1. 🚨 Phát hiện Bất thường & Xu hướng Chính
+### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính
 (Nêu rõ các điểm đột biến, kỳ tăng/giảm mạnh hoặc rủi ro tập trung nếu có. Đưa ra con số cụ thể).
 
-### 2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
+### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
 (Đưa ra 2-3 giả thuyết kinh doanh sát thực tế: mùa vụ, chiến dịch marketing, đứt gãy vận hành, khách hàng VIP, chính sách giá,...).
 
-### 3. 🎯 Đề xuất Hành động (Action Plan)
+### 2.3. 🎯 Đề xuất Hành động (Action Plan)
 (Đưa ra 2-3 hành động cụ thể, thiết thực cho nhà quản lý / ban lãnh đạo. BẮT BUỘC gắn nhãn mức độ ưu tiên và khung thời gian thực thi cho từng hành động:
 - 🔴 **[Ưu tiên Cao - Thực hiện Ngay / Immediate]**: Hành động khắc phục sự cố hoặc nắm bắt cơ hội cấp bách.
 - 🟡 **[Ưu tiên Trung bình - Quý tiếp theo / Next Quarter]**: Chiến lược tối ưu hóa hoạt động trung hạn.
