@@ -6,6 +6,7 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 """
 
 import streamlit as st
+import pandas as pd
 from src.analytics.heuristics import get_axis_columns
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
