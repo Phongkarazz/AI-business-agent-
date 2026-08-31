@@ -229,20 +229,22 @@ def sanitize_insight_markdown(text: str) -> str:
     text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
     text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
 
-    # 1. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề chuẩn
+    # 1. Gộp các dòng icon đơn độc (- 🔴, • 🔴, 🔴) vào dòng ưu tiên tiếp theo
+    text = re.sub(r"^[•\-\*]?\s*([🔴🟡🟢])\s*\n\s*[•\-\*]?\s*", r"• \1 ", text, flags=re.MULTILINE)
+
+    # 2. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề chuẩn
     text = re.sub(r"^[。・]\s*", "   - ", text, flags=re.MULTILINE)
     text = re.sub(r"^\s*[。・]\s*", "   - ", text, flags=re.MULTILINE)
 
-    # 2. Xóa các tiền tố #### trước nhãn ưu tiên
+    # 3. Xóa các tiền tố #### trước nhãn ưu tiên
     text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\g<1>", text)
 
-    # 3. Sửa lỗi chính tả phổ biến
+    # 4. Sửa lỗi chính tả phổ biến
     text = text.replace("đư ợc", "được").replace("đư ọc", "được")
 
-    # 4. Tự động tách dòng cho các ý phân tích bị dính liền trên cùng 1 đoạn văn
+    # 5. Tự động tách dòng cho các ý phân tích bị dính liền trên cùng 1 đoạn văn
     text = re.sub(r"(?<=[^\n])\s+•\s*", "\n\n• ", text)
     text = re.sub(r"(?<=[^\n•\-\*\s])\s+(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\n\n• \g<1>", text)
-    text = re.sub(r"(?<=[^\n])\s+(?:,\s*)?(?:với\s+)?(KPI\s+(?:đo lường|kỳ vọng|đo lường kỳ vọng)[^:\n]*:)", r"\n  - \g<1>", text, flags=re.IGNORECASE)
 
     lines = text.splitlines()
     cleaned_lines = []
@@ -250,12 +252,15 @@ def sanitize_insight_markdown(text: str) -> str:
     for line in lines:
         l = line.strip()
         if not l:
-            cleaned_lines.append("")
             continue
 
         # Giữ nguyên các tiêu đề Markdown lớn
         if l.startswith("#"):
             cleaned_lines.append(l)
+            continue
+
+        # Bỏ dòng rác chỉ chứa bullet hoặc icon đơn độc
+        if l in ("•", "-", "*", "• 🔴", "• 🟡", "• 🟢", "🔴", "🟡", "🟢", ".", "• ."):
             continue
 
         # A. Sửa lỗi dính từ tiếng Anh/Tên riêng với các từ nối tiếng Việt: Juciesđể -> Jucies để, Delishvà -> Delish và
@@ -277,7 +282,16 @@ def sanitize_insight_markdown(text: str) -> str:
         # E. Xóa số thứ tự lặp lại sau bullet: • 1. -> •
         l = re.sub(r"^[•\-\*]\s*\d+[\.\)]\s*", "• ", l)
 
-        # F. Tách KPI nếu nằm trong câu hành động
+        # F. Nếu là dòng KPI đứng riêng (VD: '• Chỉ số KPI / kết quả đo lường kỳ vọng: ...')
+        kpi_standalone = re.match(r"^[•\-\*]?\s*(?:Chỉ số\s+)?KPI(?:\s*\/\s*kết quả đo lường kỳ vọng|\s+đo lường|\s+kỳ vọng)?\s*[:\s]+(.*)$", l, flags=re.IGNORECASE)
+        if kpi_standalone:
+            desc = kpi_standalone.group(1).replace("**", "").replace("*", "").strip()
+            if desc:
+                desc = desc[0].upper() + desc[1:]
+            cleaned_lines.append(f"  - **KPI kỳ vọng**: {desc}")
+            continue
+
+        # G. Tách KPI nếu nằm trong câu hành động
         kpi_part = None
         kpi_match = re.search(r"(?:,\s*)?(?:với\s+)?(KPI\s+(?:đo lường|kỳ vọng|đo lường kỳ vọng|dự kiến))\s*(?:là|:)\s*(.*)$", l, flags=re.IGNORECASE)
         if kpi_match and len(kpi_match.group(2).strip()) > 3:
@@ -290,7 +304,7 @@ def sanitize_insight_markdown(text: str) -> str:
             if not l.endswith("."):
                 l += "."
 
-        # G. QUY TẮC: KHÔNG ĐƯỢC TỰ Ý IN ĐẬM Ở TRONG CÂU
+        # H. QUY TẮC: KHÔNG ĐƯỢC TỰ Ý IN ĐẬM Ở TRONG CÂU
         # Chuẩn hóa mục 2.3 với nhãn ưu tiên in đậm và biểu tượng màu
         if "Ưu tiên Cao" in l or "High Priority" in l:
             body = re.sub(r"^[•\-\*]?\s*(?:🔴\s*)?\[?(?:Ưu tiên Cao|High Priority)[^\]:]*\]?:?\s*", "", l).replace("**", "").replace("*", "").strip()
@@ -314,7 +328,7 @@ def sanitize_insight_markdown(text: str) -> str:
             if clean_tag.lower().startswith("kpi") or "kpi" in clean_tag.lower():
                 prefix_out = f"  - **{clean_tag}**"
             else:
-                if len(clean_tag.split()) > 10 or clean_tag.lower().startswith("tổng doanh số") or clean_tag.lower().startswith("nhóm"):
+                if len(clean_tag.split()) > 10:
                     prefix_out = f"• {clean_tag}"
                 else:
                     prefix_out = f"• **{clean_tag}**"
@@ -337,7 +351,7 @@ def sanitize_insight_markdown(text: str) -> str:
 
     text = "\n\n".join(cleaned_lines)
 
-    # 5. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
+    # 6. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
     has_head_21 = bool(re.search(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?Phát hiện Bất thường", text, flags=re.IGNORECASE | re.MULTILINE))
     if not has_head_21:
         text = "### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n\n" + text
@@ -351,6 +365,10 @@ def sanitize_insight_markdown(text: str) -> str:
     text = text.replace("### 2.1. ", "### 2.1. 🚨 ")
     text = text.replace("### 2.2. ", "### 2.2. 🔍 ")
     text = text.replace("### 2.3. ", "### 2.3. 🎯 ")
+
+    # Khôi phục các thuật ngữ viết tắt chuẩn xác
+    text = re.sub(r"\bB\s*2\s*B\b", "B2B", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bB\s*2\s*C\b", "B2C", text, flags=re.IGNORECASE)
 
     # Dọn dẹp dòng trống thừa
     text = re.sub(r"\n{3,}", "\n\n", text)
