@@ -1,6 +1,6 @@
 """
 Database schema inspector and metadata extractor.
-Provides schema text with exact Date Ranges for LLM prompts, table listing, and sample data preview.
+Provides schema text with exact Date Ranges and Distinct Sample Values (Products, Teams, Geos) for LLM prompts, table listing, and sample data preview.
 """
 
 import pandas as pd
@@ -9,7 +9,7 @@ from src.config import MAX_TABLES_SCHEMA
 
 
 def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA) -> str:
-    """Tự động trích xuất cấu trúc Bảng, Cột và Khoảng thời gian thực tế (Date Range) từ Database."""
+    """Tự động trích xuất cấu trúc Bảng, Cột, Khoảng thời gian thực tế (Date Range) và Danh mục mẫu (Sample Values) từ Database."""
     try:
         inspector = inspect(engine)
         all_tables = inspector.get_table_names()
@@ -17,6 +17,8 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA) -> str:
         schema_text = "Cơ sở dữ liệu bao gồm các bảng và cột sau:\n"
 
         date_ranges = []
+        distinct_samples = []
+        target_sample_cols = ["product", "category", "team", "geo", "region", "country", "size", "location", "status", "type"]
 
         for table_name in tables:
             schema_text += f"- Bảng `{table_name}`: "
@@ -24,7 +26,7 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA) -> str:
             col_names = [f"{col['name']} ({str(col['type'])})" for col in columns]
             schema_text += ", ".join(col_names) + "\n"
 
-            # Tự động quét các cột thời gian để trích xuất MIN và MAX date thực tế
+            # 1. Tự động quét các cột thời gian để trích xuất MIN và MAX date thực tế
             for col in columns:
                 col_name = col["name"]
                 col_type = str(col["type"]).lower()
@@ -48,11 +50,41 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA) -> str:
                     except Exception:
                         pass
 
+            # 2. Tự động quét các cột phân loại/tên đối tượng để trích xuất danh sách giá trị mẫu thực tế
+            for col in columns:
+                col_name = col["name"]
+                col_type = str(col["type"]).lower()
+                c_low = col_name.lower()
+                is_target_col = any(t in c_low for t in target_sample_cols)
+                is_id = any(id_k in c_low for id_k in ["id", "spid", "pid", "geoid", "key", "password", "pass"])
+                if (("char" in col_type or "text" in col_type or "varchar" in col_type or is_target_col) and not is_id):
+                    try:
+                        safe_tbl = table_name.replace("`", "")
+                        safe_col = col_name.replace("`", "")
+                        with engine.connect() as conn:
+                            res = conn.execute(
+                                text(f"SELECT DISTINCT `{safe_col}` FROM `{safe_tbl}` WHERE `{safe_col}` IS NOT NULL AND `{safe_col}` != '' LIMIT 25")
+                            ).fetchall()
+                            if res:
+                                sample_vals = [f"'{str(r[0]).strip()}'" for r in res if str(r[0]).strip()]
+                                if sample_vals:
+                                    distinct_samples.append(
+                                        f"• Bảng `{table_name}` (cột `{col_name}`): {', '.join(sample_vals[:20])}"
+                                    )
+                    except Exception:
+                        pass
+
         if date_ranges:
             schema_text += "\n=== KHOẢNG THỜI GIAN THỰC TẾ TRONG DỮ LIỆU (DATE RANGE) ===\n"
             schema_text += "\n".join(date_ranges) + "\n"
             schema_text += "LƯU Ý QUAN TRỌNG: Chỉ truy vấn và gợi ý trong các năm/khoảng thời gian thực tế ở trên.\n"
             schema_text += "===========================================================\n"
+
+        if distinct_samples:
+            schema_text += "\n=== DANH SÁCH GIÁ TRỊ MẪU THỰC TẾ TRONG CSDL (DISTINCT SAMPLE VALUES) ===\n"
+            schema_text += "\n".join(distinct_samples) + "\n"
+            schema_text += "LƯU Ý QUAN TRỌNG: Luôn đối chiếu tên sản phẩm/danh mục/nhóm mà người dùng nhập với các giá trị mẫu chính xác ở trên (Ví dụ: 'Dark 70%' chính là '70% Dark Bites'). Dùng LIKE linh hoạt để luôn khớp dữ liệu!\n"
+            schema_text += "=========================================================================\n"
 
         if len(all_tables) > max_tables:
             schema_text += f"\n(Lưu ý: DB có {len(all_tables)} bảng, chỉ hiển thị {max_tables} bảng đầu tiên.)\n"

@@ -86,17 +86,20 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
      + BẮT BUỘC dùng mốc ngày lớn nhất trong dữ liệu:
        * Trên MySQL: `WHERE date_col >= DATE_SUB((SELECT MAX(date_col) FROM table_name), INTERVAL 1 YEAR)`
        * Trên SQLite: `WHERE date_col >= date((SELECT MAX(date_col) FROM table_name), '-1 year')`
-3. TRÁNH LỌC CỨNG THỪA THÃI (OVER-FILTERING):
+3. ĐỐI CHIẾU VÀ KHỚP GIÁ TRỊ THỰC TẾ (STRICT VALUE MAPPING):
+   - Luôn đối chiếu tên sản phẩm, danh mục, nhóm, quốc gia người dùng hỏi với "DANH SÁCH GIÁ TRỊ MẪU THỰC TẾ TRONG CSDL" ở Schema trên.
+   - Khi lọc theo tên sản phẩm (VD: 'Dark 70%', 'Orange Choco', 'Mint Chip'): BẮT BUỘC dùng tên chính xác trong danh sách mẫu (ví dụ: '70% Dark Bites') hoặc dùng `LIKE '%70% Dark%'` hoặc `LIKE '%Dark%'` linh hoạt, TUYỆT ĐỐI KHÔNG dùng tên tự bịa khiến điều kiện WHERE không khớp và bị 0 dòng!
+4. TRÁNH LỌC CỨNG THỪA THÃI (OVER-FILTERING):
    - Khi người dùng hỏi từ ngữ chung của ngành hàng (VD: 'hộp chocolate', 'sản phẩm chocolate', 'bán chocolate'): Toàn bộ các bản ghi trong DB là chocolate, hãy tính `SUM(Boxes)` hoặc `SUM(Amount)` cho toàn bộ sản phẩm. TUYỆT ĐỐI KHÔNG thêm `WHERE Category = 'Chocolate'` hoặc `WHERE Product LIKE '%chocolate%'` trừ khi người dùng chỉ định rõ 1 danh mục cụ thể có trong Schema.
    - Khi hỏi về 'số hộp' / 'hộp': dùng `SUM(Boxes)`. Khi hỏi về 'doanh thu' / 'tiền': dùng `SUM(Amount)`.
-4. CÚ PHÁP CHUẨN XÁC:
+5. CÚ PHÁP CHUẨN XÁC:
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-5. XỬ LÝ GIÁ TRỊ RỖNG KHI GOM NHÓM (GROUP BY):
+6. XỬ LÝ GIÁ TRỊ RỖNG KHI GOM NHÓM (GROUP BY):
    - Khi gom nhóm theo danh mục (như `Team`, `Category`, `Region`...):
    - Nếu câu hỏi hỏi về từng nhóm/team của nhân viên, hãy dùng `WHERE people.Team != '' AND people.Team IS NOT NULL` (nếu chỉ lấy các nhóm chính thức) hoặc dùng `COALESCE(NULLIF(people.Team, ''), 'Chưa phân nhóm') AS Team` để tránh dòng rỗng không có tên.
-6. ĐỊNH DẠNG ĐẦU RA:
+7. ĐỊNH DẠNG ĐẦU RA:
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích hay markdown code block bên ngoài.
 
