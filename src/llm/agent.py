@@ -143,23 +143,129 @@ def generate_auto_insights(client, provider: str, model_name: str, user_query: s
     return insight
 
 
-def generate_followup_questions(client, provider: str, model_name: str, user_query: str, schema_context: str, df: pd.DataFrame, lang: str = "vi") -> list[str]:
-    """Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up suggestions) dựa trên kết quả hiện tại."""
+def is_ambiguous_question(q: str) -> bool:
+    """Kiểm tra câu hỏi có chứa các đại từ mơ hồ (này, đó, trên, these...) gây lỗi 0 dòng khi chạy độc lập."""
+    if not q:
+        return True
+    q_low = q.lower()
+    ambiguous_patterns = [
+        r"\b\d+\s*nhân viên này\b", r"\bnhân viên này\b", r"\bsản phẩm này\b",
+        r"\bnhóm này\b", r"\bđối tượng này\b", r"\bkhu vực này\b",
+        r"\bthị trường này\b", r"\bthese\b", r"\bthis product\b", r"\bthese reps\b"
+    ]
+    return any(re.search(p, q_low) for p in ambiguous_patterns)
+
+
+def generate_grounded_fallback_followups(df: pd.DataFrame, lang: str = "vi") -> list[str]:
+    """Sinh các câu hỏi đào sâu bám sát 100% vào các thực thể cụ thể có sẵn trong kết quả truy vấn."""
     if df is None or df.empty:
         return []
+
+    followups = []
+    cols = df.columns.tolist()
+
+    # 1. Nếu có cột Team / Nhóm
+    team_col = next((c for c in cols if "team" in c.lower() or "nhóm" in c.lower()), None)
+    if team_col:
+        valid_teams = [str(v).strip() for v in df[team_col].dropna().unique() if str(v).strip() and "(chưa" not in str(v).lower()]
+        if valid_teams:
+            t_name = valid_teams[0]
+            if lang == "en":
+                followups.append(f"Top 5 sales representatives in {t_name} team")
+                followups.append(f"Monthly sales revenue for {t_name} team")
+                followups.append(f"Best selling chocolate products by {t_name} team")
+            else:
+                followups.append(f"Top 5 nhân viên có doanh số cao nhất trong nhóm {t_name}")
+                followups.append(f"Doanh số của nhóm {t_name} theo từng tháng")
+                followups.append(f"Các sản phẩm bán chạy nhất của nhóm {t_name}")
+            return followups[:3]
+
+    # 2. Nếu có cột Product / Sản phẩm
+    prod_col = next((c for c in cols if "product" in c.lower() or "sản phẩm" in c.lower()), None)
+    if prod_col:
+        valid_prods = [str(v).strip() for v in df[prod_col].dropna().unique() if str(v).strip()]
+        if valid_prods:
+            p_name = valid_prods[0]
+            if lang == "en":
+                followups.append(f"Monthly revenue trend for {p_name}")
+                followups.append(f"Top 5 sales representatives selling {p_name}")
+                followups.append(f"Sales distribution of {p_name} across countries")
+            else:
+                followups.append(f"Doanh số sản phẩm {p_name} theo từng tháng")
+                followups.append(f"Top 5 nhân viên bán được nhiều sản phẩm {p_name} nhất")
+                followups.append(f"Phân bổ doanh thu của sản phẩm {p_name} theo từng quốc gia")
+            return followups[:3]
+
+    # 3. Nếu có cột Salesperson / Người bán
+    rep_col = next((c for c in cols if "salesperson" in c.lower() or "nhân viên" in c.lower() or "people" in c.lower()), None)
+    if rep_col:
+        valid_reps = [str(v).strip() for v in df[rep_col].dropna().unique() if str(v).strip()]
+        if valid_reps:
+            r_name = valid_reps[0]
+            if lang == "en":
+                followups.append(f"Monthly sales performance of {r_name}")
+                followups.append(f"Top products sold by {r_name}")
+                followups.append(f"Sales revenue by country for {r_name}")
+            else:
+                followups.append(f"Doanh số của nhân viên {r_name} theo từng tháng")
+                followups.append(f"Các sản phẩm bán chạy nhất của nhân viên {r_name}")
+                followups.append(f"Doanh thu theo từng quốc gia của nhân viên {r_name}")
+            return followups[:3]
+
+    # 4. Nếu có cột Geo / Quốc gia / Khu vực
+    geo_col = next((c for c in cols if "geo" in c.lower() or "country" in c.lower() or "quốc gia" in c.lower()), None)
+    if geo_col:
+        valid_geos = [str(v).strip() for v in df[geo_col].dropna().unique() if str(v).strip()]
+        if valid_geos:
+            g_name = valid_geos[0]
+            if lang == "en":
+                followups.append(f"Top 5 best selling products in {g_name}")
+                followups.append(f"Monthly sales trend in {g_name}")
+            else:
+                followups.append(f"Top 5 sản phẩm bán chạy nhất tại thị trường {g_name}")
+                followups.append(f"Xu hướng doanh số theo từng tháng tại thị trường {g_name}")
+            return followups[:3]
+
+    return followups
+
+
+def generate_followup_questions(client, provider: str, model_name: str, user_query: str, schema_context: str, df: pd.DataFrame, lang: str = "vi") -> list[str]:
+    """Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up suggestions) bám sát 100% vào thực thể có thật."""
+    if df is None or df.empty:
+        return []
+
+    # 1. Chuẩn bị các câu hỏi dự phòng bám sát thực thể có thật trong kết quả
+    fallback_questions = generate_grounded_fallback_followups(df, lang=lang)
+
+    # 2. Gọi AI để sinh câu hỏi phân tích thông minh
     try:
         sample_str = df.head(5).to_string(index=False)
         prompt = build_followup_prompt(user_query, schema_context, sample_str, lang=lang)
         res, _ = call_llm(client, provider, model_name, prompt)
-        if not res:
-            return []
-        cleaned = res.strip().strip("`").replace("json\n", "").strip()
-        parsed = json.loads(cleaned)
-        if isinstance(parsed, list):
-            return [str(q).strip() for q in parsed if str(q).strip()][:3]
-        return []
+
+        ai_questions = []
+        if res:
+            cleaned = res.strip().strip("`").replace("json\n", "").strip()
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, list):
+                for q in parsed:
+                    q_str = str(q).strip()
+                    # Loại bỏ các câu hỏi chứa đại từ mơ hồ "này", "đó", "these reps"
+                    if q_str and not is_ambiguous_question(q_str):
+                        ai_questions.append(q_str)
+
+        # 3. Kết hợp câu hỏi AI với câu hỏi bám sát thực thể
+        combined = []
+        for q in ai_questions:
+            if q not in combined:
+                combined.append(q)
+        for q in fallback_questions:
+            if q not in combined:
+                combined.append(q)
+
+        return combined[:3] if combined else fallback_questions[:3]
     except Exception:
-        return []
+        return fallback_questions[:3]
 
 
 def run_agent(

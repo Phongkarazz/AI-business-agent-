@@ -294,11 +294,12 @@ Available Database Schema & Actual Date Ranges:
 {schema_context}
 
 CRITICAL RULES FOR FOLLOW-UP QUESTIONS:
-1. STRICT TIME GROUNDING: ONLY suggest questions for years, quarters, and months that ACTUALLY EXIST in the Date Range in the Schema above.
-   - NEVER suggest future or non-existent years (such as 2023/2024/2025 if data only exists for 2021).
-   - If user asked about a specific year (e.g. 2021), suggest drill-downs for that same year or available historical periods.
-2. Propose 2 to 3 high-value analytical drill-down questions (e.g. breakdown by top sales reps, regional comparison, monthly trend).
-3. Questions must be written in concise, natural English and MUST be fully answerable using the schema.
+1. NO AMBIGUOUS PRONOUNS: NEVER use words like "these 3 reps", "this product", "these items", "they", "those".
+   - MUST use CONCRETE ENTITY NAMES directly from the sample data above (e.g., 'top 5 reps in Delish team', 'Dark 70% revenue by month', 'India market sales breakdown').
+   - Every question must be 100% standalone and immediately executable when clicked.
+2. STRICT TIME GROUNDING: ONLY suggest questions for years/quarters that ACTUALLY EXIST in the Date Range above.
+   - NEVER suggest future/hallucinated years (like 2023/2024 if data is 2021).
+3. Propose 2 to 3 high-value analytical drill-down questions.
 
 Return ONLY a JSON array of strings:
 ["Question 1", "Question 2", "Question 3"]"""
@@ -313,12 +314,14 @@ Schema CSDL & Khoảng thời gian thực tế:
 {schema_context}
 
 QUY TẮC BẮT BUỘC KHI ĐỀ XUẤT CÂU HỎI TIẾP NỐI:
-1. RÀNG BUỘC THỜI GIAN TUYỆT ĐỐI (QUAN TRỌNG):
-   - CHỈ đề xuất các câu hỏi cho những NĂM, QUÝ, THÁNG THỰC TẾ có trong phần "KHOẢNG THỜI GIAN THỰC TẾ TRONG DỮ LIỆU" ở Schema trên.
-   - TUYỆT ĐỐI KHÔNG tự bịa ra các năm không có trong dữ liệu (ví dụ: không gợi ý năm 2023/2024/2025 nếu dữ liệu chỉ có năm 2021 hoặc 2022).
-   - Nếu câu hỏi vừa hỏi về năm 2021, hãy đề xuất đào sâu tiếp cho năm 2021 (VD: theo quý trong năm 2021, theo nhân viên xuất sắc trong năm 2021, hoặc theo từng sản phẩm).
-2. Đề xuất 2 đến 3 câu hỏi đào sâu thông minh và thiết thực nhất cho người dùng.
-3. Câu hỏi phải viết bằng tiếng Việt ngắn gọn, tự nhiên và CHẮC CHẮN CÓ DỮ LIỆU TRUY VẤN ĐƯỢC từ Schema ở trên.
+1. TUYỆT ĐỐI CẤM ĐẠI TỪ MƠ HỒ (QUAN TRỌNG NHẤT):
+   - TUYỆT ĐỐI KHÔNG dùng các từ như: "3 nhân viên này", "sản phẩm này", "nhóm này", "các đối tượng trên", "họ", "chúng".
+   - BẮT BUỘC PHẢI DÙNG TÊN THỰC THỂ CỤ THỂ lấy trực tiếp từ bảng dữ liệu mẫu ở trên (Ví dụ: thay vì "của 3 nhân viên này", hãy ghi rõ: "Top 5 nhân viên có doanh số cao nhất trong nhóm Delish", "Doanh số sản phẩm Dark 70% theo từng tháng", "Doanh thu tại thị trường India").
+   - Mỗi câu hỏi phải hoàn toàn ĐỘC LẬP để khi người dùng bấm nút là chạy được ngay mà không phụ thuộc ngữ cảnh trước.
+2. RÀNG BUỘC THỜI GIAN TUYỆT ĐỐI:
+   - CHỈ đề xuất các câu hỏi cho những NĂM THỰC TẾ có trong phần "KHOẢNG THỜI GIAN THỰC TẾ TRONG DỮ LIỆU" ở Schema trên.
+   - TUYỆT ĐỐI KHÔNG tự bịa ra các năm không có trong dữ liệu (ví dụ: không gợi ý năm 2023/2024 nếu dữ liệu chỉ có năm 2021 hoặc 2022).
+3. Đề xuất 2 đến 3 câu hỏi đào sâu thông minh, thiết thực và CHẮC CHẮN CÓ DỮ LIỆU TRUY VẤN ĐƯỢC 100%.
 
 Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:
 ["Câu hỏi 1", "Câu hỏi 2", "Câu hỏi 3"]"""
