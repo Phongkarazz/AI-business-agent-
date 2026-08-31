@@ -215,36 +215,66 @@ def generate_starter_prompts(tables: list[str]) -> list[dict]:
 
 
 def sanitize_insight_markdown(text: str) -> str:
-    """Tự động làm sạch các lỗi định dạng markdown của AI (dấu sao ngắt quãng, khoảng trắng trong in đậm, từ dính liền)."""
+    """Tự động làm sạch hoàn toàn các lỗi định dạng markdown của AI:
+    - Xóa khoảng trắng thừa bên trong thẻ in đậm: ** text ** hoặc **text ** -> **text**
+    - Sửa dính thẻ: ]-** -> ] - **
+    - Thay thế ký tự lạ 。・ thành ↳ cho dòng KPI
+    - Khôi phục và chuẩn hóa tiêu đề ### 2.1. 🚨, ### 2.2. 🔍, ### 2.3. 🎯
+    """
     if not text:
         return ""
 
     text = str(text)
 
-    # 1. Gộp các dấu sao bị chèn khoảng trắng: * *, ** *, * ** -> **
+    # 1. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề ↳
+    text = re.sub(r"^[。・]\s*", "   ↳ ", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[。・]\s*", "   ↳ ", text, flags=re.MULTILINE)
+
+    # 2. Gộp các dấu sao bị chèn khoảng trắng: * *, ** *, * ** -> **
     text = re.sub(r"\*\s+\*", r"**", text)
 
-    # 2. Sửa lỗi số phân tách hàng nghìn bị chèn dấu cách: 1, 299, 998 -> 1,299,998
+    # 3. Xóa khoảng trắng thừa bên trong thẻ in đậm/nghiêng: ** 123 ** hoặc **123 ** -> **123**
+    for _ in range(2):
+        text = re.sub(r"\*\*\s*([^\*\n]+?)\s*\*\*", r"**\1**", text)
+        text = re.sub(r"\*\s*([^\*\n]+?)\s*\*", r"*\1*", text)
+
+    # 4. Sửa dính thẻ sau nhãn ưu tiên: ]-** -> ] - **
+    text = re.sub(r"\]\s*-\s*\*\*\s*", r"] - **", text)
+    text = re.sub(r"\]\s*-\s*", r"] - ", text)
+
+    # 5. Sửa khoảng trắng trước dấu hai chấm sau in đậm: **Text** : -> **Text**:
+    text = re.sub(r"\*\*\s*:\s*", r"**: ", text)
+
+    # 6. Sửa lỗi số phân tách hàng nghìn bị chèn dấu cách: 1, 299, 998 -> 1,299,998
     for _ in range(4):
         text = re.sub(r"(\d+),\s+(\d{3})", r"\1,\2", text)
 
-    # 3. Xóa khoảng trắng thừa bên trong thẻ in đậm/nghiêng: ** 123 ** -> **123**
-    text = re.sub(r"\*\*\s*([^\*\n]+?)\s*\*\*", r"**\1**", text)
-    text = re.sub(r"\*\s*([^\*\n]+?)\s*\*", r"*\1*", text)
+    # 7. Xóa số thứ tự lặp lại sau bullet: • 1. -> •
+    text = re.sub(r"^[•\-\*]\s*\d+[\.\)]\s*", "• ", text, flags=re.MULTILINE)
 
-    # 4. Tách các từ tiếng Việt bị dính liền phổ biến
+    # 8. Tách các từ tiếng Việt bị dính liền phổ biến
     text = re.sub(r"(\w+)(hơn|nhất|bằng|trong|ngoài)", r"\1 \2", text)
     text = re.sub(r"thấphơn", "thấp hơn", text)
     text = re.sub(r"caohơn", "cao hơn", text)
     text = re.sub(r"lớnhơn", "lớn hơn", text)
     text = re.sub(r"nhỏhơn", "nhỏ hơn", text)
 
-    # 5. Đảm bảo có khoảng cách trước thẻ in đậm nếu dính liền với từ trước: hơn**123 -> hơn **123
-    text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ,])\*\*([^\*\s])", r"\1 **\2", text)
-    # Đảm bảo có khoảng cách sau thẻ in đậm nếu dính liền với từ sau: **123**đồng -> **123** đồng
-    text = re.sub(r"([^\*\s])\*\*([a-zA-Zà-ỹÀ-Ỹ])", r"\1** \2", text)
+    # 9. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
+    has_head_21 = bool(re.search(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?Phát hiện Bất thường", text, flags=re.IGNORECASE | re.MULTILINE))
+    if not has_head_21:
+        text = "### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n\n" + text
 
-    # 6. Dọn dẹp các dấu sao thừa liên tiếp
+    text = re.sub(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?(Phát hiện Bất thường.*)", r"### 2.1. 🚨 \1", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \1", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \1", text, flags=re.IGNORECASE | re.MULTILINE)
+
+    # Dọn dẹp các tiền tố bị nhân đôi do regex
+    text = re.sub(r"###\s*2\.(\d)\.\s*[🚨🔍🎯]\s*(?:2\.\d\.?\s*)?(?:[🚨🔍🎯]\s*)?", r"### 2.\1. ", text)
+    text = text.replace("### 2.1. ", "### 2.1. 🚨 ")
+    text = text.replace("### 2.2. ", "### 2.2. 🔍 ")
+    text = text.replace("### 2.3. ", "### 2.3. 🎯 ")
+
+    # 10. Dọn dẹp các dấu sao thừa liên tiếp (3 dấu sao trở lên)
     text = re.sub(r"\*{3,}", r"**", text)
 
-    return text
+    return text.strip()
