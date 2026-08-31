@@ -108,13 +108,16 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
 
 
 def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
-    # Chuẩn hóa tên model Gemini và tự động chuyển tiếp nếu gặp model cũ bị 404
+    # Chuẩn hóa tên model Gemini và tự động chuyển tiếp lên Gemini 3 Series
     clean_model = (model_name or "").strip().lower()
-    if clean_model in ("gemini-2.5-flash", "gemini-flash", "gemini-pro", ""):
-        clean_model = "gemini-2.0-flash"
+    if "/" in clean_model:
+        clean_model = clean_model.split("/")[-1]
+
+    if clean_model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash", "gemini-pro", ""):
+        clean_model = "gemini-3.7-flash"
 
     target_models = [clean_model]
-    for fallback in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
+    for fallback in ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash"]:
         if fallback not in target_models:
             target_models.append(fallback)
 
@@ -127,7 +130,7 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
         except Exception as e:
             last_exc = e
             err_str = str(e).lower()
-            if "404" in err_str or "not_found" in err_str or "no longer available" in err_str:
+            if "404" in err_str or "not_found" in err_str or "no longer available" in err_str or "not found" in err_str:
                 continue
             raise e
 
