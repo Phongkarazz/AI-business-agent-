@@ -34,6 +34,13 @@ def load_saved_config() -> Dict[str, Any]:
         "forecast_periods": 3,
         "remember_config": True,
         "auto_connect": True,
+        "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID", ""),
+        "smtp_server": os.getenv("SMTP_SERVER", "smtp.gmail.com"),
+        "smtp_port": os.getenv("SMTP_PORT", "587"),
+        "smtp_user": os.getenv("SMTP_USER", ""),
+        "smtp_pass": os.getenv("SMTP_PASSWORD", ""),
+        "email_receivers": os.getenv("EMAIL_RECEIVERS", ""),
     }
 
     if os.path.exists(CONFIG_FILE_PATH):

@@ -18,7 +18,7 @@ from src.analytics.heuristics import generate_starter_prompts
 from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
 from src.ui.sidebar import perform_connection, render_main_sidebar
-from src.ui.components import render_result
+from src.ui.components import render_result, render_voice_input_button
 from src.llm.agent import run_agent
 
 # ---------------------------------------------------------
@@ -198,7 +198,8 @@ else:
                         st.session_state["pending_prompt"] = card["prompt"]
                         st.rerun()
 
-    # 4.4 Xử lý gửi câu hỏi (từ Chat Input hoặc từ nút bấm Starter / Follow-up)
+    # 4.4 Xử lý gửi câu hỏi (từ Chat Input, Giọng nói Micro hoặc từ nút bấm Starter / Follow-up)
+    render_voice_input_button()
     pending_prompt = st.session_state.get("pending_prompt")
     user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
 

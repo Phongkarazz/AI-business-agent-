@@ -218,6 +218,41 @@ def render_onboarding():
             key="onboarding_forecast_periods"
         )
 
+    with st.expander("📤 Cấu hình Gửi Báo Cáo Doanh Nghiệp (Telegram / Email) [Tùy chọn]", expanded=False):
+        st.markdown("##### 🚀 Kênh 1: Telegram Bot (Gửi Báo Cáo PDF vào Nhóm/Kênh)")
+        c_tg1, c_tg2 = st.columns(2)
+        with c_tg1:
+            telegram_bot_token = st.text_input(
+                "Telegram Bot Token",
+                value=saved.get("telegram_bot_token", ""),
+                type="password",
+                placeholder="123456789:ABCdef...",
+                key="onboarding_telegram_bot_token"
+            )
+        with c_tg2:
+            telegram_chat_id = st.text_input(
+                "Telegram Chat ID / Group ID",
+                value=saved.get("telegram_chat_id", ""),
+                placeholder="-100123456789 hoặc @channel_name",
+                key="onboarding_telegram_chat_id"
+            )
+
+        st.markdown("##### 📧 Kênh 2: Email SMTP (Gmail / Outlook / Công ty)")
+        c_em1, c_em2 = st.columns(2)
+        with c_em1:
+            smtp_server = st.text_input("SMTP Server", value=saved.get("smtp_server", "smtp.gmail.com"), key="onboarding_smtp_server")
+            smtp_user = st.text_input("Email Người gửi", value=saved.get("smtp_user", ""), placeholder="sender@company.com", key="onboarding_smtp_user")
+        with c_em2:
+            smtp_port = st.text_input("SMTP Port", value=saved.get("smtp_port", "587"), key="onboarding_smtp_port")
+            smtp_pass = st.text_input("Mật khẩu Ứng dụng (App Password)", value=saved.get("smtp_pass", ""), type="password", key="onboarding_smtp_pass")
+
+        email_receivers = st.text_input(
+            "Danh sách Email Người nhận mặc định (Cách nhau bằng dấu phẩy)",
+            value=saved.get("email_receivers", ""),
+            placeholder="boss@company.com, leads@company.com",
+            key="onboarding_email_receivers"
+        )
+
     with st.expander("📝 Mô tả Schema / Quy tắc Nghiệp vụ Bổ sung (Tùy chọn)", expanded=False):
         schema_context_input = st.text_area(
             "Mô tả nghiệp vụ hoặc chú thích thêm về cấu trúc bảng (Hệ thống sẽ tự trích xuất nếu để trống)",
@@ -257,6 +292,13 @@ def render_onboarding():
     st.session_state["enable_self_check"] = enable_self_check
     st.session_state["enable_cache"] = enable_cache
     st.session_state["forecast_periods"] = forecast_periods
+    st.session_state["telegram_bot_token"] = telegram_bot_token
+    st.session_state["telegram_chat_id"] = telegram_chat_id
+    st.session_state["smtp_server"] = smtp_server
+    st.session_state["smtp_port"] = smtp_port
+    st.session_state["smtp_user"] = smtp_user
+    st.session_state["smtp_pass"] = smtp_pass
+    st.session_state["email_receivers"] = email_receivers
 
     effective_provider = "OpenRouter" if is_openrouter_key else provider
 
@@ -286,6 +328,13 @@ def render_onboarding():
                         "forecast_periods": forecast_periods,
                         "remember_config": True,
                         "auto_connect": auto_connect,
+                        "telegram_bot_token": telegram_bot_token,
+                        "telegram_chat_id": telegram_chat_id,
+                        "smtp_server": smtp_server,
+                        "smtp_port": smtp_port,
+                        "smtp_user": smtp_user,
+                        "smtp_pass": smtp_pass,
+                        "email_receivers": email_receivers,
                     })
                     if effective_provider == "OpenRouter":
                         config_to_save["api_key_openrouter"] = clean_api_key

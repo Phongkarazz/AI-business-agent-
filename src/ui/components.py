@@ -11,8 +11,109 @@ from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
 from src.analytics.export_reports import export_to_excel, export_to_png, export_to_pdf
+from src.analytics.share_report import send_telegram_report, send_email_report
+from src.config_store import load_saved_config
 from src.visualization.charts import render_smart_chart
 from src.llm.agent import generate_auto_insights
+
+
+def render_voice_input_button(key: str = "voice_input_widget"):
+    """Hiển thị nút Micro nhập liệu bằng giọng nói tiếng Việt thời gian thực (Web Speech API)."""
+    voice_html = """
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+        <button id="micBtn" onclick="toggleSpeechRecognition()" style="
+            background: linear-gradient(135deg, #1F4E78 0%, #2563EB 100%);
+            color: #ffffff;
+            border: none;
+            border-radius: 20px;
+            padding: 7px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+        ">
+            <span id="micIcon">🎙️</span> <span id="micText">Nói câu hỏi (Tiếng Việt)</span>
+        </button>
+        <span id="speechStatus" style="font-size: 13px; color: #475569; font-style: italic;"></span>
+    </div>
+    <script>
+        let recognition = null;
+        let isListening = false;
+
+        function toggleSpeechRecognition() {
+            const micBtn = document.getElementById('micBtn');
+            const micIcon = document.getElementById('micIcon');
+            const micText = document.getElementById('micText');
+            const speechStatus = document.getElementById('speechStatus');
+
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                alert('Trình duyệt của bạn chưa hỗ trợ nhận diện giọng nói (Web Speech API). Vui lòng sử dụng Google Chrome, Microsoft Edge hoặc Safari.');
+                return;
+            }
+
+            if (isListening) {
+                if (recognition) recognition.stop();
+                isListening = false;
+                micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                micIcon.innerText = '🎙️';
+                micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
+                speechStatus.innerText = '';
+                return;
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'vi-VN';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onstart = function() {
+                isListening = true;
+                micBtn.style.background = '#DC2626';
+                micIcon.innerText = '🔴';
+                micText.innerText = 'Đang lắng nghe...';
+                speechStatus.innerText = 'Hãy nói câu hỏi của bạn vào micro...';
+            };
+
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                speechStatus.innerText = 'Đã nhận diện: "' + transcript + '"';
+                
+                // Tìm ô chat input của Streamlit và điền vào
+                const textAreas = window.parent.document.querySelectorAll('textarea, input[type="text"]');
+                for (let ta of textAreas) {
+                    if (ta.placeholder && (ta.placeholder.includes('Hỏi bất kỳ') || ta.placeholder.includes('Ask anything'))) {
+                        ta.value = transcript;
+                        ta.dispatchEvent(new Event('input', { bubbles: true }));
+                        break;
+                    }
+                }
+            };
+
+            recognition.onerror = function(event) {
+                isListening = false;
+                micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                micIcon.innerText = '🎙️';
+                micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
+                speechStatus.innerText = 'Lỗi: ' + event.error;
+            };
+
+            recognition.onend = function() {
+                isListening = false;
+                micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                micIcon.innerText = '🎙️';
+                micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
+            };
+
+            recognition.start();
+        }
+    </script>
+    """
+    st.components.v1.html(voice_html, height=45)
 
 
 def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: bool = False):
@@ -177,6 +278,83 @@ def render_result(result: dict, turn_id: str):
             key=f"pdf_{turn_id}",
             use_container_width=True
         )
+
+    # 4.1 Khung Gửi Báo Cáo Đa Kênh Tức Thì (Telegram Bot & Email SMTP)
+    exp_share_title = "📤 Gửi Báo Cáo cho Sếp / Đội ngũ (Telegram & Email)" if not is_en else "📤 Share Report (Telegram Bot & Email)"
+    with st.expander(exp_share_title, expanded=False):
+        saved = load_saved_config()
+        tab_tg, tab_em = st.tabs(["🚀 Gửi qua Telegram Bot", "📧 Gửi qua Email SMTP"])
+
+        with tab_tg:
+            st.caption("Gửi trực tiếp file Báo cáo PDF Executive kèm tóm tắt Insight vào nhóm Telegram.")
+            tg_token = st.text_input(
+                "Telegram Bot Token",
+                value=st.session_state.get("telegram_bot_token") or saved.get("telegram_bot_token", ""),
+                type="password",
+                placeholder="123456789:ABCdef...",
+                key=f"tg_tok_{turn_id}"
+            )
+            tg_chat_id = st.text_input(
+                "Telegram Chat ID / Group ID",
+                value=st.session_state.get("telegram_chat_id") or saved.get("telegram_chat_id", ""),
+                placeholder="-100123456789 hoặc @channel_name",
+                key=f"tg_chat_{turn_id}"
+            )
+
+            if st.button("🚀 Gửi Báo Cáo vào Telegram", key=f"btn_send_tg_{turn_id}", type="primary", use_container_width=True):
+                if not tg_token or not tg_chat_id:
+                    st.error("Vui lòng nhập Bot Token và Chat ID (hoặc cấu hình trong ⚙️ Cài đặt).")
+                else:
+                    with st.spinner("Đang gửi file báo cáo PDF vào Telegram..."):
+                        insight_summary = result.get("insights", "") or result.get("query", "")
+                        clean_cap = re.sub(r"#+\s*", "", insight_summary)
+                        clean_cap = clean_cap.replace("###", "").replace("**", "").replace("`", "")[:900]
+                        ok, msg = send_telegram_report(
+                            tg_token, tg_chat_id, clean_cap, pdf_bytes, filename=f"executive_report_{turn_id}.pdf"
+                        )
+                        if ok:
+                            st.success(f"✅ {msg}")
+                            st.toast(f"✅ {msg}", icon="🚀")
+                        else:
+                            st.error(f"❌ {msg}")
+
+        with tab_em:
+            st.caption("Gửi email đính kèm file Báo cáo PDF cho ban giám đốc hoặc danh sách người nhận.")
+            em_receivers = st.text_input(
+                "Email Người nhận (cách nhau bằng dấu phẩy)",
+                value=st.session_state.get("email_receivers") or saved.get("email_receivers", ""),
+                placeholder="boss@company.com, leads@company.com",
+                key=f"em_rec_{turn_id}"
+            )
+            em_subject = st.text_input(
+                "Tiêu đề Email",
+                value=f"Báo cáo Điều hành: {result.get('query', 'Tổng quan Doanh nghiệp')}",
+                key=f"em_sub_{turn_id}"
+            )
+
+            if st.button("📧 Gửi Báo Cáo qua Email", key=f"btn_send_em_{turn_id}", type="primary", use_container_width=True):
+                smtp_server = st.session_state.get("smtp_server") or saved.get("smtp_server", "smtp.gmail.com")
+                smtp_port = st.session_state.get("smtp_port") or saved.get("smtp_port", "587")
+                smtp_user = st.session_state.get("smtp_user") or saved.get("smtp_user", "")
+                smtp_pass = st.session_state.get("smtp_pass") or saved.get("smtp_pass", "")
+
+                if not smtp_user or not smtp_pass:
+                    st.error("Chưa cấu hình Email người gửi và Mật khẩu ứng dụng trong mục ⚙️ Cài đặt.")
+                elif not em_receivers:
+                    st.error("Vui lòng nhập email người nhận.")
+                else:
+                    with st.spinner("Đang gửi email đính kèm báo cáo..."):
+                        insight_summary = result.get("insights", "") or result.get("query", "")
+                        ok, msg = send_email_report(
+                            smtp_server, smtp_port, smtp_user, smtp_pass,
+                            em_receivers, em_subject, insight_summary, pdf_bytes,
+                            filename=f"executive_report_{turn_id}.pdf"
+                        )
+                        if ok:
+                            st.success(f"✅ {msg}")
+                            st.toast(f"✅ {msg}", icon="📧")
+                        else:
+                            st.error(f"❌ {msg}")
 
     # 4. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
     anomalies_info = result.get("anomalies_info") or analyze_data_anomalies(df)
