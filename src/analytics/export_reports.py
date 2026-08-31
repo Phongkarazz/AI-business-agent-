@@ -29,18 +29,30 @@ def clean_text_for_pdf(text: str) -> str:
     # 1. Chuyển đổi các biểu tượng ưu tiên thành nhãn văn bản chuẩn
     text = text.replace("🔴", "").replace("🟡", "").replace("🟢", "")
 
-    # 2. Xóa toàn bộ emoji unicode không có trong bảng ký tự font
+    # 2. Xóa toàn bộ emoji unicode và ký tự glyph lạ gây lỗi ô vuông tofu (□, ↳, ➔...)
     text = EMOJI_REGEX.sub("", text)
+    text = text.replace("↳", "").replace("➔", "").replace("➜", "").replace("➡", "").replace("►", "").replace("□", "")
 
-    # 3. Thoát các ký tự XML đặc biệt
+    # 3. Tách từ viết hoa dính liền với từ tiếng Việt (VD: KHÔNGPhát -> KHÔNG Phát, USACó -> USA Có)
+    text = re.sub(r"([A-ZÀ-Ỹ]{2,})([A-ZÀ-Ỹ][a-zà-ỹ])", r"\1 \2", text)
+    text = re.sub(r"([A-Z]{2,})([a-zà-ỹ])", r"\1 \2", text)
+
+    # 4. Thêm khoảng trắng sau dấu hai chấm nếu bị dính số hoặc chữ (VD: Zealand:7,435,918 -> Zealand: 7,435,918)
+    text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ]):(\d)", r"\1: \2", text)
+    text = re.sub(r":([A-ZÀ-Ỹa-zà-ỹ])", r": \1", text)
+
+    # 5. Thoát các ký tự XML đặc biệt
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    # 4. Chuyển đổi cú pháp markdown sang thẻ định dạng ReportLab
+    # 6. Chuyển đổi cú pháp markdown sang thẻ định dạng ReportLab
     text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"\*(.*?)\*", r"<i>\1</i>", text)
     text = re.sub(r"`(.*?)`", r"<b>\1</b>", text)
 
-    # 5. Dọn dẹp khoảng trắng thừa và ký tự rác đầu mục
+    # 7. Xóa các ký tự markdown header #### dư thừa trong dòng
+    text = re.sub(r"#+\s*", "", text)
+
+    # 8. Dọn dẹp khoảng trắng thừa và ký tự rác đầu mục
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"^\s*[\.\-•]\s*", "", text.strip())
 
@@ -402,13 +414,14 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             story.append(Paragraph(f"<b>{sec_num}.3. Đề xuất Hành động (Action Plan)</b>", sub_section_style))
             if buckets["actions"]:
                 for item in buckets["actions"]:
-                    if any(p in item for p in ["[Ưu tiên", "[High Priority", "[Medium Priority", "[Low Priority"]):
-                        story.append(Paragraph(f"<b>{item}</b>", priority_tag_style))
-                    elif item.lower().startswith("kpi") or "kpi :" in item.lower() or "kpi:" in item.lower():
-                        clean_kpi = re.sub(r"^kpi\s*:\s*", "", item, flags=re.IGNORECASE).strip()
-                        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;↳ <i><b>KPI đo lường:</b> {clean_kpi}</i>", kpi_style))
+                    clean_item = re.sub(r"^#+\s*", "", item).strip()
+                    if any(p in clean_item for p in ["[Ưu tiên", "[High Priority", "[Medium Priority", "[Low Priority"]):
+                        story.append(Paragraph(f"<b>{clean_item}</b>", priority_tag_style))
+                    elif clean_item.lower().startswith("kpi") or "kpi :" in clean_item.lower() or "kpi:" in clean_item.lower():
+                        clean_kpi = re.sub(r"^kpi\s*:\s*", "", clean_item, flags=re.IGNORECASE).strip()
+                        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;• <i><b>KPI đo lường:</b> {clean_kpi}</i>", kpi_style))
                     else:
-                        story.append(Paragraph(f"• {item}", bullet_style))
+                        story.append(Paragraph(f"• {clean_item}", bullet_style))
             else:
                 story.append(Paragraph("• Tiếp tục theo dõi chỉ số định kỳ.", bullet_style))
 

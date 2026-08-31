@@ -252,12 +252,17 @@ def sanitize_insight_markdown(text: str) -> str:
     # 7. Xóa số thứ tự lặp lại sau bullet: • 1. -> •
     text = re.sub(r"^[•\-\*]\s*\d+[\.\)]\s*", "• ", text, flags=re.MULTILINE)
 
-    # 8. Tách các từ tiếng Việt bị dính liền phổ biến
+    # 8. Tách các từ tiếng Việt và từ viết hoa viết tắt bị dính liền
+    text = re.sub(r"([A-ZÀ-Ỹ]{2,})([A-ZÀ-Ỹ][a-zà-ỹ])", r"\1 \2", text)
+    text = re.sub(r"([A-Z]{2,})([a-zà-ỹ])", r"\1 \2", text)
+    text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ]):(\d)", r"\1: \2", text)
+    text = re.sub(r":([A-ZÀ-Ỹa-zà-ỹ])", r": \1", text)
     text = re.sub(r"(\w+)(hơn|nhất|bằng|trong|ngoài)", r"\1 \2", text)
     text = re.sub(r"thấphơn", "thấp hơn", text)
     text = re.sub(r"caohơn", "cao hơn", text)
     text = re.sub(r"lớnhơn", "lớn hơn", text)
     text = re.sub(r"nhỏhơn", "nhỏ hơn", text)
+    text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\1", text)
 
     # 9. Đảm bảo tiêu đề 2.1, 2.2, 2.3 luôn tồn tại và được định dạng chuẩn
     has_head_21 = bool(re.search(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?Phát hiện Bất thường", text, flags=re.IGNORECASE | re.MULTILINE))
