@@ -18,7 +18,10 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA) -> str:
 
         date_ranges = []
         distinct_samples = []
-        target_sample_cols = ["product", "category", "team", "geo", "region", "country", "size", "location", "status", "type"]
+        target_sample_cols = [
+            "product", "category", "team", "geo", "region", "country", "size", "location", "status", "type",
+            "spid", "pid", "geoid", "id", "code", "sku", "salesperson"
+        ]
 
         for table_name in tables:
             schema_text += f"- Bảng `{table_name}`: "
@@ -50,26 +53,26 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA) -> str:
                     except Exception:
                         pass
 
-            # 2. Tự động quét các cột phân loại/tên đối tượng để trích xuất danh sách giá trị mẫu thực tế
+            # 2. Tự động quét các cột phân loại/tên đối tượng và mã ID để trích xuất danh sách giá trị mẫu thực tế
             for col in columns:
                 col_name = col["name"]
                 col_type = str(col["type"]).lower()
                 c_low = col_name.lower()
                 is_target_col = any(t in c_low for t in target_sample_cols)
-                is_id = any(id_k in c_low for id_k in ["id", "spid", "pid", "geoid", "key", "password", "pass"])
-                if (("char" in col_type or "text" in col_type or "varchar" in col_type or is_target_col) and not is_id):
+                is_sensitive = any(s in c_low for s in ["password", "pass", "secret", "token", "hash"])
+                if (("char" in col_type or "text" in col_type or "varchar" in col_type or is_target_col) and not is_sensitive):
                     try:
                         safe_tbl = table_name.replace("`", "")
                         safe_col = col_name.replace("`", "")
                         with engine.connect() as conn:
                             res = conn.execute(
-                                text(f"SELECT DISTINCT `{safe_col}` FROM `{safe_tbl}` WHERE `{safe_col}` IS NOT NULL AND `{safe_col}` != '' LIMIT 25")
+                                text(f"SELECT DISTINCT `{safe_col}` FROM `{safe_tbl}` WHERE `{safe_col}` IS NOT NULL AND `{safe_col}` != '' LIMIT 50")
                             ).fetchall()
                             if res:
                                 sample_vals = [f"'{str(r[0]).strip()}'" for r in res if str(r[0]).strip()]
                                 if sample_vals:
                                     distinct_samples.append(
-                                        f"• Bảng `{table_name}` (cột `{col_name}`): {', '.join(sample_vals[:20])}"
+                                        f"• Bảng `{table_name}` (cột `{col_name}`): {', '.join(sample_vals[:40])}"
                                     )
                     except Exception:
                         pass

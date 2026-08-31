@@ -299,6 +299,22 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
                     )
+            elif len(df) == 1 and len(measure_cols) == 1:
+                val = df[measure_cols[0]].iloc[0]
+                val_num = 0 if pd.isna(val) else val
+                fig = px.bar(
+                    x=[measure_cols[0]],
+                    y=[val_num],
+                    text=[f"{val_num:,.0f}" if isinstance(val_num, (int, float)) else str(val_num)],
+                    title=f"Tổng hợp Chỉ số: {measure_cols[0]}",
+                    template="plotly_white"
+                )
+                fig.update_traces(textposition="outside", marker_color="#1F4E78")
+                fig.update_layout(
+                    xaxis_title="",
+                    yaxis_title=measure_cols[0],
+                    margin=dict(l=20, r=20, t=50, b=50)
+                )
             else:
                 st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
                 return None

@@ -47,17 +47,21 @@ MANDATORY RULES (STRICT COMPLIANCE):
      + MUST anchor to the MAX date in the database:
        * MySQL: `WHERE date_col >= DATE_SUB((SELECT MAX(date_col) FROM table_name), INTERVAL 1 YEAR)`
        * SQLite: `WHERE date_col >= date((SELECT MAX(date_col) FROM table_name), '-1 year')`
-3. AVOID OVER-FILTERING:
+3. STRICT VALUE & ID MAPPING:
+   - Always check product names, categories, teams, geos, and IDs (SPID, PID, GeoID) against the 'DISTINCT SAMPLE VALUES' in the Schema.
+   - For Product Names (e.g. 'Milk Chocolate', 'Dark 70%'): In DB, 'Milk Chocolate' is 'Milk Bars' or products containing 'Milk'. Use: `(p.Product = 'Milk Bars' OR p.Product LIKE '%Milk%' OR p.Category = 'Milk')`.
+   - For IDs (e.g. 'SP001', 'SP1', 'P001'): If DB has 2-digit IDs ('SP01'), map to 'SP01' or use `(sales.SPID = 'SP01' OR sales.SPID = 'SP001' OR sales.SPID LIKE '%SP%1%')`. NEVER fail with 0 rows!
+4. AVOID OVER-FILTERING:
    - When the user mentions general domain terms (e.g., 'boxes of chocolate', 'chocolate sales'): All records represent chocolate, calculate `SUM(Boxes)` or `SUM(Amount)`. DO NOT add `WHERE Category = 'Chocolate'` unless a specific category is requested.
    - For 'boxes'/'quantity': use `SUM(Boxes)`. For 'revenue'/'money': use `SUM(Amount)`.
-4. PRECISE SYNTAX:
+5. PRECISE SYNTAX:
    - Use `COUNT(*)` or `COUNT(col)`, NEVER `COUNT()`.
    - Perfectly balance all parentheses '(' and ')'.
    - Wrap table/column names in backticks ` if they contain special characters or spaces.
-5. CATEGORICAL NULL / BLANK HANDLING:
+6. CATEGORICAL NULL / BLANK HANDLING:
    - When GROUP BY a category column (like `Team`, `Category`, `Region`):
    - If the user asks about specific groups/teams, use `WHERE col != '' AND col IS NOT NULL` OR `COALESCE(NULLIF(col, ''), 'Unassigned') AS col` to avoid blank unnamed rows.
-6. OUTPUT FORMAT:
+7. OUTPUT FORMAT:
    - Return ONLY the raw SQL query (starting with SELECT or WITH).
    - NO markdown code block, NO explanations, NO comments (#, --).
 
@@ -86,9 +90,14 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
      + BẮT BUỘC dùng mốc ngày lớn nhất trong dữ liệu:
        * Trên MySQL: `WHERE date_col >= DATE_SUB((SELECT MAX(date_col) FROM table_name), INTERVAL 1 YEAR)`
        * Trên SQLite: `WHERE date_col >= date((SELECT MAX(date_col) FROM table_name), '-1 year')`
-3. ĐỐI CHIẾU VÀ KHỚP GIÁ TRỊ THỰC TẾ (STRICT VALUE MAPPING):
-   - Luôn đối chiếu tên sản phẩm, danh mục, nhóm, quốc gia người dùng hỏi với "DANH SÁCH GIÁ TRỊ MẪU THỰC TẾ TRONG CSDL" ở Schema trên.
-   - Khi lọc theo tên sản phẩm (VD: 'Dark 70%', 'Orange Choco', 'Mint Chip'): BẮT BUỘC dùng tên chính xác trong danh sách mẫu (ví dụ: '70% Dark Bites') hoặc dùng `LIKE '%70% Dark%'` hoặc `LIKE '%Dark%'` linh hoạt, TUYỆT ĐỐI KHÔNG dùng tên tự bịa khiến điều kiện WHERE không khớp và bị 0 dòng!
+3. ĐỐI CHIẾU VÀ KHỚP GIÁ TRỊ THỰC TẾ & MÃ ĐỊNH DANH (FUZZY VALUE & ID MAPPING):
+   - Luôn đối chiếu tên sản phẩm, danh mục, nhóm, quốc gia và MÃ ĐỊNH DANH (SPID, PID, GeoID) người dùng hỏi với "DANH SÁCH GIÁ TRỊ MẪU THỰC TẾ TRONG CSDL" ở Schema trên.
+   - Khớp Tên Sản Phẩm (VD: 'Milk Chocolate', 'Dark 70%', 'socola sữa'):
+     + Trong CSDL 'Milk Chocolate' chính là 'Milk Bars' hoặc dòng sản phẩm chứa 'Milk'. BẮT BUỘC dùng: `(p.Product = 'Milk Bars' OR p.Product LIKE '%Milk%' OR p.Category = 'Milk')`.
+     + Với 'Dark 70%', dùng: `(p.Product = '70% Dark Bites' OR p.Product LIKE '%70% Dark%' OR p.Product LIKE '%Dark%')`.
+     + TUYỆT ĐỐI KHÔNG dùng điều kiện cứng `= 'Milk Chocolate'` nếu không có tên đó trong CSDL, tránh trả về 0 dòng!
+   - Khớp Mã Định Danh (VD: 'SP001', 'SP1', 'P001', 'G001'):
+     + Trong CSDL nếu mã là 'SP01' (2 chữ số), BẮT BUỘC map sang đúng mã trong CSDL là 'SP01' hoặc dùng: `(sales.SPID = 'SP01' OR sales.SPID = 'SP001' OR sales.SPID LIKE '%SP%1%')`!
 4. TRÁNH LỌC CỨNG THỪA THÃI (OVER-FILTERING):
    - Khi người dùng hỏi từ ngữ chung của ngành hàng (VD: 'hộp chocolate', 'sản phẩm chocolate', 'bán chocolate'): Toàn bộ các bản ghi trong DB là chocolate, hãy tính `SUM(Boxes)` hoặc `SUM(Amount)` cho toàn bộ sản phẩm. TUYỆT ĐỐI KHÔNG thêm `WHERE Category = 'Chocolate'` hoặc `WHERE Product LIKE '%chocolate%'` trừ khi người dùng chỉ định rõ 1 danh mục cụ thể có trong Schema.
    - Khi hỏi về 'số hộp' / 'hộp': dùng `SUM(Boxes)`. Khi hỏi về 'doanh thu' / 'tiền': dùng `SUM(Amount)`.
@@ -305,7 +314,8 @@ CRITICAL RULES FOR FOLLOW-UP QUESTIONS:
    - Every question must be 100% standalone and immediately executable when clicked.
 2. STRICT TIME GROUNDING: ONLY suggest questions for years/quarters that ACTUALLY EXIST in the Date Range above.
    - NEVER suggest future/hallucinated years (like 2023/2024 if data is 2021).
-3. Propose 2 to 3 high-value analytical drill-down questions.
+3. EXACT REAL ENTITIES: ONLY use real product names (e.g. 'Milk Bars', '70% Dark Bites'), real rep IDs (e.g. 'SP01'), and real geos from the sample list. NEVER use non-existent names like 'Milk Chocolate' or 'SP001'.
+4. Propose 2 to 3 high-value analytical drill-down questions.
 
 Return ONLY a JSON array of strings:
 ["Question 1", "Question 2", "Question 3"]"""
@@ -322,12 +332,15 @@ Schema CSDL & Khoảng thời gian thực tế:
 QUY TẮC BẮT BUỘC KHI ĐỀ XUẤT CÂU HỎI TIẾP NỐI:
 1. TUYỆT ĐỐI CẤM ĐẠI TỪ MƠ HỒ (QUAN TRỌNG NHẤT):
    - TUYỆT ĐỐI KHÔNG dùng các từ như: "3 nhân viên này", "sản phẩm này", "nhóm này", "các đối tượng trên", "họ", "chúng".
-   - BẮT BUỘC PHẢI DÙNG TÊN THỰC THỂ CỤ THỂ lấy trực tiếp từ bảng dữ liệu mẫu ở trên (Ví dụ: thay vì "của 3 nhân viên này", hãy ghi rõ: "Top 5 nhân viên có doanh số cao nhất trong nhóm Delish", "Doanh số sản phẩm Dark 70% theo từng tháng", "Doanh thu tại thị trường India").
+   - BẮT BUỘC PHẢI DÙNG TÊN THỰC THỂ CỤ THỂ lấy trực tiếp từ bảng dữ liệu mẫu ở trên (Ví dụ: thay vì "của 3 nhân viên này", hãy ghi rõ: "Top 5 nhân viên có doanh số cao nhất trong nhóm Delish", "Doanh số sản phẩm 70% Dark Bites theo từng tháng", "Doanh thu tại thị trường India").
    - Mỗi câu hỏi phải hoàn toàn ĐỘC LẬP để khi người dùng bấm nút là chạy được ngay mà không phụ thuộc ngữ cảnh trước.
 2. RÀNG BUỘC THỜI GIAN TUYỆT ĐỐI:
    - CHỈ đề xuất các câu hỏi cho những NĂM THỰC TẾ có trong phần "KHOẢNG THỜI GIAN THỰC TẾ TRONG DỮ LIỆU" ở Schema trên.
    - TUYỆT ĐỐI KHÔNG tự bịa ra các năm không có trong dữ liệu (ví dụ: không gợi ý năm 2023/2024 nếu dữ liệu chỉ có năm 2021 hoặc 2022).
-3. Đề xuất 2 đến 3 câu hỏi đào sâu thông minh, thiết thực và CHẮC CHẮN CÓ DỮ LIỆU TRUY VẤN ĐƯỢC 100%.
+3. CHỈ DÙNG TÊN THỰC THỂ CÓ THẬT TRONG CSDL:
+   - Dùng chính xác tên sản phẩm trong danh sách mẫu ('Milk Bars', '70% Dark Bites'...), mã nhân viên ('SP01'...), quốc gia ('India'...).
+   - TUYỆT ĐỐI KHÔNG dùng tên bịa như 'Milk Chocolate' nếu trong CSDL tên là 'Milk Bars'.
+4. Đề xuất 2 đến 3 câu hỏi đào sâu thông minh, thiết thực và CHẮC CHẮN CÓ DỮ LIỆU TRUY VẤN ĐƯỢC 100%.
 
 Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:
 ["Câu hỏi 1", "Câu hỏi 2", "Câu hỏi 3"]"""
