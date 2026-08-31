@@ -290,11 +290,15 @@ The user just asked: "{user_query}"
 Sample query results:
 {df_sample_str}
 
-Available Database Schema:
+Available Database Schema & Actual Date Ranges:
 {schema_context}
 
-Task: Propose 2 to 3 smart, high-value follow-up questions for deeper analytical drill-down (e.g., trend over time, top performing reps, regional breakdown, product comparison).
-Questions must be written in concise, natural English and MUST be fully answerable using the schema above.
+CRITICAL RULES FOR FOLLOW-UP QUESTIONS:
+1. STRICT TIME GROUNDING: ONLY suggest questions for years, quarters, and months that ACTUALLY EXIST in the Date Range in the Schema above.
+   - NEVER suggest future or non-existent years (such as 2023/2024/2025 if data only exists for 2021).
+   - If user asked about a specific year (e.g. 2021), suggest drill-downs for that same year or available historical periods.
+2. Propose 2 to 3 high-value analytical drill-down questions (e.g. breakdown by top sales reps, regional comparison, monthly trend).
+3. Questions must be written in concise, natural English and MUST be fully answerable using the schema.
 
 Return ONLY a JSON array of strings:
 ["Question 1", "Question 2", "Question 3"]"""
@@ -305,12 +309,16 @@ Người dùng vừa hỏi: "{user_query}"
 Kết quả dữ liệu mẫu thu được:
 {df_sample_str}
 
-Schema CSDL hiện có:
+Schema CSDL & Khoảng thời gian thực tế:
 {schema_context}
 
-Nhiệm vụ: Đề xuất 2 đến 3 câu hỏi phân tích tiếp nối (Follow-up questions) có tính đào sâu thông minh và thiết thực nhất cho người dùng (ví dụ: phân tích theo thời gian, theo nhân viên xuất sắc, theo thị trường, hoặc so sánh).
-LƯU Ý: Không dùng các từ chỉ thời gian thực tế 'gần đây', 'năm qua' dễ gây lỗi CURDATE() — hãy đặt câu hỏi rõ ràng về năm cụ thể hoặc xu hướng theo tháng/quý.
-Câu hỏi phải viết bằng tiếng Việt ngắn gọn, súc tích, tự nhiên và CÓ THỂ TRUY VẤN ĐƯỢC từ Schema ở trên.
+QUY TẮC BẮT BUỘC KHI ĐỀ XUẤT CÂU HỎI TIẾP NỐI:
+1. RÀNG BUỘC THỜI GIAN TUYỆT ĐỐI (QUAN TRỌNG):
+   - CHỈ đề xuất các câu hỏi cho những NĂM, QUÝ, THÁNG THỰC TẾ có trong phần "KHOẢNG THỜI GIAN THỰC TẾ TRONG DỮ LIỆU" ở Schema trên.
+   - TUYỆT ĐỐI KHÔNG tự bịa ra các năm không có trong dữ liệu (ví dụ: không gợi ý năm 2023/2024/2025 nếu dữ liệu chỉ có năm 2021 hoặc 2022).
+   - Nếu câu hỏi vừa hỏi về năm 2021, hãy đề xuất đào sâu tiếp cho năm 2021 (VD: theo quý trong năm 2021, theo nhân viên xuất sắc trong năm 2021, hoặc theo từng sản phẩm).
+2. Đề xuất 2 đến 3 câu hỏi đào sâu thông minh và thiết thực nhất cho người dùng.
+3. Câu hỏi phải viết bằng tiếng Việt ngắn gọn, tự nhiên và CHẮC CHẮN CÓ DỮ LIỆU TRUY VẤN ĐƯỢC từ Schema ở trên.
 
 Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:
 ["Câu hỏi 1", "Câu hỏi 2", "Câu hỏi 3"]"""
