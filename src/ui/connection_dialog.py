@@ -103,6 +103,10 @@ def show_connecting_dialog(
             "db_dialect": "SQLite" if use_demo else "MySQL",
             "view_mode": "chat",
             "_connecting_in_progress": False,
+            "history": [],
+            "query_cache": {},
+            "focused_turn_idx": None,
+            "pending_prompt": None,
         })
 
         if on_success_callback:

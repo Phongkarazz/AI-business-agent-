@@ -58,6 +58,10 @@ def perform_connection(
             "_db_pass_for_sanitize": db_pass,
             "is_demo": use_demo,
             "db_dialect": "SQLite" if use_demo else "MySQL",
+            "history": [],
+            "query_cache": {},
+            "focused_turn_idx": None,
+            "pending_prompt": None,
         })
         return True, final_model_name
     except Exception as e:

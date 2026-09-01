@@ -141,74 +141,173 @@ def pick_label_column(df: pd.DataFrame, label_cols: list) -> tuple:
     return chosen_col, df[chosen_col].astype(str), [chosen_col]
 
 
-def generate_starter_prompts(tables: list[str]) -> list[dict]:
-    """Tự động sinh 4 thẻ gợi ý câu hỏi thông minh 1-chạm dựa trên cấu trúc bảng của CSDL."""
+def generate_starter_prompts(tables: list[str], schema_context: str = "") -> list[dict]:
+    """Tự động sinh 4 thẻ gợi ý câu hỏi thông minh 1-chạm bám sát chính xác nghiệp vụ và cấu trúc bảng của CSDL."""
     tables_lower = [t.lower() for t in tables]
+    all_text = (" ".join(tables_lower) + " " + (schema_context or "").lower()).strip()
 
     cards = []
 
-    # 1. Nếu có bảng sản phẩm & doanh số
-    if any(t in tables_lower for t in ["products", "product", "items"]):
-        cards.append({
-            "icon": "🍫",
-            "title": "Top Sản Phẩm Doanh Thu Cao Nhất",
-            "prompt": "Top 5 sản phẩm mang lại doanh thu cao nhất",
-            "desc": "Xếp hạng sản phẩm theo tổng số tiền bán được"
-        })
-    else:
-        cards.append({
-            "icon": "📊",
-            "title": "Tổng Quan Doanh Số",
-            "prompt": "Tổng doanh số và số lượng giao dịch",
-            "desc": "Thống kê tổng thể toàn bộ dữ liệu kinh doanh"
-        })
+    # 1. Nhận diện các miền dữ liệu (Domains)
+    has_hr = any(t in tables_lower for t in ["employees", "nhan_vien", "salaries", "luong", "departments", "phong_ban", "titles", "dept_emp", "staff", "payroll"])
+    has_sales = any(t in tables_lower for t in ["sales", "orders", "don_hang", "order_details", "transactions", "invoices", "hoa_don"])
+    has_product = any(t in tables_lower for t in ["products", "san_pham", "items", "hang_hoa"])
+    has_education = any(t in tables_lower for t in ["students", "hoc_sinh", "courses", "khoa_hoc", "classes", "lop_hoc", "grades", "diem_thi"])
+    has_healthcare = any(t in tables_lower for t in ["patients", "benh_nhan", "doctors", "bac_si", "appointments", "lich_kham"])
+    has_finance = any(t in tables_lower for t in ["accounts", "tai_khoan", "loans", "vay_von", "cards", "the_ngan_hang"])
 
-    # 2. Nếu có chiều thời gian hoặc sales
-    if any(t in tables_lower for t in ["sales", "orders", "transactions", "invoices"]):
-        cards.append({
-            "icon": "📈",
-            "title": "Xu Hướng Doanh Số Theo Tháng",
-            "prompt": "Doanh số tổng theo từng tháng trong năm 2021",
-            "desc": "Phân tích biến động doanh thu và dự báo xu hướng"
-        })
-    else:
-        cards.append({
-            "icon": "📈",
-            "title": "Phân Tích Theo Thời Gian",
-            "prompt": "Thống kê số lượng dữ liệu theo từng tháng",
-            "desc": "Xem biểu đồ biến động theo các mốc thời gian"
-        })
+    # 2. Miền HR / Nhân sự / Tiền lương (như CSDL employees)
+    if has_hr and not has_sales:
+        if "salaries" in tables_lower or "luong" in tables_lower or "salary" in all_text:
+            cards.append({
+                "icon": "💰",
+                "title": "Mức Lương Trung Bình Theo Phòng Ban",
+                "prompt": "Mức lương trung bình của nhân viên theo từng phòng ban",
+                "desc": "So sánh thu nhập bình quân giữa các đơn vị và phòng ban"
+            })
+            cards.append({
+                "icon": "🏆",
+                "title": "Top 10 Nhân Viên Lương Cao Nhất",
+                "prompt": "Top 10 nhân viên có mức lương cao nhất",
+                "desc": "Danh sách nhân sự có đãi ngộ và thu nhập cao nhất"
+            })
+        if "titles" in tables_lower or "chuc_danh" in tables_lower or "title" in all_text:
+            cards.append({
+                "icon": "👔",
+                "title": "Cơ Cấu Nhân Sự Theo Chức Danh",
+                "prompt": "Thống kê số lượng nhân viên theo từng chức danh (title)",
+                "desc": "Phân bổ nhân sự theo các vị trí công việc"
+            })
+        if "departments" in tables_lower or "phong_ban" in tables_lower or "dept" in all_text:
+            cards.append({
+                "icon": "🏢",
+                "title": "Quy Mô Nhân Sự Từng Phòng Ban",
+                "prompt": "Số lượng nhân viên đang làm việc tại mỗi phòng ban",
+                "desc": "Đánh giá quy mô nhân lực của từng bộ phận"
+            })
+        while len(cards) < 4:
+            cards.append({
+                "icon": "👥",
+                "title": "Danh Sách Nhân Sự",
+                "prompt": "Top 10 nhân viên mới nhất trong hệ thống",
+                "desc": "Xem danh sách và thông tin hồ sơ nhân sự"
+            })
 
-    # 3. Nếu có bảng nhân viên
-    if any(t in tables_lower for t in ["people", "salespersons", "employees", "staff", "users"]):
+    # 3. Miền Giáo dục / Trường học
+    elif has_education:
         cards.append({
-            "icon": "👥",
-            "title": "Xếp Hạng Nhân Viên Bán Chạy Nhất",
-            "prompt": "Top 10 nhân viên bán được nhiều hộp chocolate nhất",
-            "desc": "Đánh giá hiệu suất kinh doanh của từng nhân sự"
+            "icon": "🎓",
+            "title": "Điểm Số Trung Bình Theo Môn Học",
+            "prompt": "Điểm số trung bình của học viên theo từng môn học",
+            "desc": "Đánh giá kết quả học tập và phân bố điểm số"
         })
-    else:
+        cards.append({
+            "icon": "📚",
+            "title": "Số Lượng Học Viên Đăng Ký",
+            "prompt": "Thống kê số lượng học viên theo từng khóa học",
+            "desc": "Xác định các khóa học thu hút nhiều học viên nhất"
+        })
         cards.append({
             "icon": "🏆",
-            "title": "Top Đối Tượng Nổi Bật",
-            "prompt": "Top 10 đối tượng có chỉ số cao nhất",
-            "desc": "Xếp hạng các mục dữ liệu quan trọng nhất"
+            "title": "Top 10 Học Viên Xuất Sắc",
+            "prompt": "Top 10 học viên có điểm số cao nhất",
+            "desc": "Bảng vinh danh các cá nhân có thành tích cao"
+        })
+        cards.append({
+            "icon": "🏫",
+            "title": "Quy Mô Đào Tạo Theo Khoa / Lớp",
+            "prompt": "Số lượng học viên phân bổ theo từng lớp",
+            "desc": "Thống kê sĩ số và quy mô tổ chức các lớp học"
         })
 
-    # 4. Nếu có bảng địa lý / thị trường
-    if any(t in tables_lower for t in ["geo", "regions", "countries", "locations", "stores"]):
+    # 4. Miền Y tế / Bệnh viện
+    elif has_healthcare:
         cards.append({
-            "icon": "🌍",
-            "title": "Phân Bổ Doanh Thu Theo Thị Trường",
-            "prompt": "Tổng doanh thu theo từng quốc gia và khu vực",
-            "desc": "Biểu đồ so sánh doanh số giữa các thị trường địa lý"
+            "icon": "🏥",
+            "title": "Số Lượng Bệnh Nhân Theo Chuyên Khoa",
+            "prompt": "Thống kê số lượng bệnh nhân theo từng chuyên khoa",
+            "desc": "Phân tích lưu lượng bệnh nhân khám và điều trị"
         })
-    else:
+        cards.append({
+            "icon": "📅",
+            "title": "Lượt Khám Bệnh Theo Tháng",
+            "prompt": "Tổng số lượt khám bệnh theo từng tháng",
+            "desc": "Theo dõi biến động số ca khám theo thời gian"
+        })
+        cards.append({
+            "icon": "🩺",
+            "title": "Top Bác Sĩ Tiếp Nhận Nhiều Ca Nhất",
+            "prompt": "Top 10 bác sĩ có số lượt khám cao nhất",
+            "desc": "Đánh giá công suất phục vụ của đội ngũ y bác sĩ"
+        })
+        cards.append({
+            "icon": "📋",
+            "title": "Thống Kê Ca Khám Mới Nhất",
+            "prompt": "Danh sách 10 lượt khám mới nhất",
+            "desc": "Xem chi tiết nhật ký tiếp nhận bệnh nhân"
+        })
+
+    # 5. Miền Bán hàng / Kinh doanh / Thương mại (Sales & Retail)
+    elif has_sales or has_product:
+        if has_product:
+            cards.append({
+                "icon": "📦",
+                "title": "Top Sản Phẩm Doanh Thu Cao Nhất",
+                "prompt": "Top 5 sản phẩm mang lại doanh thu cao nhất",
+                "desc": "Xếp hạng sản phẩm theo tổng số tiền bán được"
+            })
+        else:
+            cards.append({
+                "icon": "📊",
+                "title": "Tổng Quan Doanh Thu",
+                "prompt": "Tổng doanh thu và số lượng đơn hàng đã bán",
+                "desc": "Thống kê toàn diện hiệu quả kinh doanh"
+            })
+
+        cards.append({
+            "icon": "📈",
+            "title": "Xu Hướng Doanh Thu Theo Tháng",
+            "prompt": "Tổng doanh thu theo từng tháng",
+            "desc": "Phân tích biến động doanh số và chu kỳ tăng trưởng"
+        })
+
+        if any(t in tables_lower for t in ["people", "salespersons", "nhan_vien", "employees", "customers", "khach_hang"]):
+            cards.append({
+                "icon": "👥",
+                "title": "Xếp Hạng Người Bán Hàng Xuất Sắc",
+                "prompt": "Top 10 nhân sự có doanh số bán hàng cao nhất",
+                "desc": "Đánh giá hiệu suất kinh doanh của từng nhân sự"
+            })
+
+        if any(t in tables_lower for t in ["geo", "regions", "countries", "locations", "khu_vuc"]):
+            cards.append({
+                "icon": "🌍",
+                "title": "Phân Bổ Doanh Thu Theo Thị Trường",
+                "prompt": "Tổng doanh thu theo từng quốc gia và khu vực",
+                "desc": "Biểu đồ so sánh doanh số giữa các thị trường địa lý"
+            })
+
+    # 6. Fallback linh hoạt dựa theo danh sách bảng thực tế của CSDL
+    if len(cards) < 4:
+        icons = ["📊", "🔍", "📈", "📁", "✨", "📌"]
+        for i, t in enumerate(tables[:4]):
+            if len(cards) >= 4:
+                break
+            icon = icons[i % len(icons)]
+            cards.append({
+                "icon": icon,
+                "title": f"Thống Kê Bảng {t.title()}",
+                "prompt": f"Thống kê tổng số lượng bản ghi và xem dữ liệu bảng {t}",
+                "desc": f"Khám phá cấu trúc và dữ liệu thực tế của bảng {t}"
+            })
+
+    # Đảm bảo luôn có đủ 4 thẻ
+    while len(cards) < 4:
         cards.append({
             "icon": "🔍",
-            "title": "Khám Phá Dữ Liệu Chi Tiết",
-            "prompt": "Thống kê số lượng bản ghi và giá trị trung bình",
-            "desc": "Phân tích tổng hợp số liệu trên toàn bộ các bảng"
+            "title": "Tổng Quan Cơ Sở Dữ Liệu",
+            "prompt": "Thống kê tổng số lượng bản ghi trên tất cả các bảng",
+            "desc": "Tổng hợp bức tranh toàn cảnh về dữ liệu hiện tại"
         })
 
     return cards[:4]

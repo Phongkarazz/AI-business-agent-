@@ -195,7 +195,8 @@ else:
 
         engine = st.session_state.get("engine")
         tables = get_table_names(engine)
-        starter_cards = generate_starter_prompts(tables)
+        schema_context = st.session_state.get("schema_context", "")
+        starter_cards = generate_starter_prompts(tables, schema_context)
 
         col_s1, col_s2 = st.columns(2, gap="medium")
         for idx, card in enumerate(starter_cards):
