@@ -82,7 +82,12 @@ def show_connecting_dialog(
         # Bước 3: Schema Extraction
         progress_bar.progress(90, text="3/3: Đang trích xuất cấu trúc bảng (Schema)...")
         extracted_schema = auto_extract_schema(engine)
-        final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+        custom_notes = (schema_context_input or "").strip()
+        # Nếu người dùng có ghi chú nghiệp vụ riêng (và không phải là text schema cũ dạng 'Cơ sở dữ liệu bao gồm...')
+        if custom_notes and not custom_notes.startswith("Cơ sở dữ liệu bao gồm") and custom_notes != extracted_schema:
+            final_schema = f"{extracted_schema}\n\n=== GHI CHÚ NGHIỆP VỤ BỔ SUNG ===\n{custom_notes}"
+        else:
+            final_schema = extracted_schema
 
         final_model_name = selected_model
         if effective_provider == "OpenRouter":

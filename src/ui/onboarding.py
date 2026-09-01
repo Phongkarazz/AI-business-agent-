@@ -253,11 +253,15 @@ def render_onboarding():
             key="onboarding_email_receivers"
         )
 
-    with st.expander("📝 Mô tả Schema / Quy tắc Nghiệp vụ Bổ sung (Tùy chọn)", expanded=False):
+    with st.expander("📝 Ghi chú Quy tắc Nghiệp vụ Bổ sung (Tùy chọn)", expanded=False):
+        raw_saved_notes = saved.get("custom_business_notes", "")
+        if raw_saved_notes.startswith("Cơ sở dữ liệu bao gồm"):
+            raw_saved_notes = ""
         schema_context_input = st.text_area(
-            "Mô tả nghiệp vụ hoặc chú thích thêm về cấu trúc bảng (Hệ thống sẽ tự trích xuất nếu để trống)",
-            value=st.session_state.get("schema_context", ""),
-            height=120,
+            "Ghi chú thêm về quy tắc nghiệp vụ hoặc logic tính toán riêng (để trống nếu muốn hệ thống tự động trích xuất hoàn toàn)",
+            value=raw_saved_notes,
+            placeholder="VD: Chỉ tính nhân viên chính thức, Mức lương chưa bao gồm phụ cấp...",
+            height=100,
             key="onboarding_schema_context_input"
         )
 

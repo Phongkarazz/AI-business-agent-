@@ -42,7 +42,11 @@ def perform_connection(
 
         client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
         extracted_schema = auto_extract_schema(engine)
-        final_schema = schema_context_input if schema_context_input.strip() else extracted_schema
+        custom_notes = (schema_context_input or "").strip()
+        if custom_notes and not custom_notes.startswith("Cơ sở dữ liệu bao gồm") and custom_notes != extracted_schema:
+            final_schema = f"{extracted_schema}\n\n=== GHI CHÚ NGHIỆP VỤ BỔ SUNG ===\n{custom_notes}"
+        else:
+            final_schema = extracted_schema
 
         final_model_name = selected_model
         if effective_provider == "OpenRouter":

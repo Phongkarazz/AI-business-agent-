@@ -232,13 +232,19 @@ else:
                 render_result(result, turn_id=f"new{len(st.session_state['history'])}")
             else:
                 with st.spinner("Đang truy vấn & phân tích..."):
+                    current_engine = st.session_state.get("engine")
+                    current_schema = st.session_state.get("schema_context", "")
+                    if current_engine and (not current_schema or not current_schema.strip()):
+                        current_schema = auto_extract_schema(current_engine)
+                        st.session_state["schema_context"] = current_schema
+
                     result = run_agent(
                         user_query=prompt_to_run,
                         client=st.session_state.get("client"),
                         provider=st.session_state.get("provider"),
                         model_name=st.session_state.get("model_name"),
-                        engine=st.session_state.get("engine"),
-                        schema_context=st.session_state.get("schema_context"),
+                        engine=current_engine,
+                        schema_context=current_schema,
                         dialect=st.session_state.get("db_dialect", "SQLite"),
                         db_pass=st.session_state.get("_db_pass_for_sanitize", ""),
                         enable_self_check=st.session_state.get("enable_self_check", True),
