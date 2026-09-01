@@ -37,7 +37,9 @@ def clean_text_for_pdf(text: str) -> str:
     text = re.sub(r"([A-ZÀ-Ỹ]{2,})([A-ZÀ-Ỹ][a-zà-ỹ])", r"\1 \2", text)
     text = re.sub(r"([A-Z]{2,})([a-zà-ỹ])", r"\1 \2", text)
 
-    # 4. Thêm khoảng trắng sau dấu hai chấm nếu bị dính số hoặc chữ (VD: Zealand:7,435,918 -> Zealand: 7,435,918)
+    # 4. Thêm khoảng trắng sau dấu hai chấm nếu bị dính số hoặc chữ và sửa lỗi 2 dấu hai chấm
+    text = re.sub(r"\]\s*:\s*:\s*", "]: ", text)
+    text = re.sub(r"\s*:\s*:\s*", ": ", text)
     text = re.sub(r"([a-zA-Zà-ỹÀ-Ỹ]):(\d)", r"\1: \2", text)
     text = re.sub(r":([A-ZÀ-Ỹa-zà-ỹ])", r": \1", text)
 
@@ -329,8 +331,12 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
 
         # Khung Tóm Tắt Chỉ Số Cốt Lõi (Executive KPI Snapshot Box)
         if df is not None and not df.empty:
-            measure_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-            label_cols = [c for c in df.columns if c not in measure_cols]
+            from src.analytics.heuristics import get_axis_columns, pick_label_column, is_id_like
+            measure_cols, label_cols, _ = get_axis_columns(df)
+            if not measure_cols:
+                measure_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and not is_id_like(c)]
+                label_cols = [c for c in df.columns if c not in measure_cols]
+
             if measure_cols and len(df) > 1:
                 m_col = measure_cols[0]
                 m_name = clean_text_for_pdf(str(m_col).replace("_", " ").title())
@@ -340,7 +346,15 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                     avg_val = v_series.mean()
                     max_idx = v_series.idxmax()
                     peak_val = df.loc[max_idx, m_col]
-                    peak_label = clean_text_for_pdf(str(df.loc[max_idx, label_cols[0]])) if label_cols else f"#{max_idx+1}"
+
+                    # Lấy tên đối tượng đầy đủ (ưu tiên Họ và Tên nếu có)
+                    _, label_series, _ = pick_label_column(df, label_cols)
+                    if label_series is not None and max_idx in label_series.index:
+                        peak_label = clean_text_for_pdf(str(label_series.loc[max_idx]))
+                    elif label_cols:
+                        peak_label = clean_text_for_pdf(str(df.loc[max_idx, label_cols[0]]))
+                    else:
+                        peak_label = f"#{max_idx + 1}"
 
                     fmt_total = f"{total_val:,.0f}" if total_val > 100 else f"{total_val:,.2f}"
                     fmt_avg = f"{avg_val:,.0f}" if avg_val > 100 else f"{avg_val:,.2f}"
@@ -470,8 +484,30 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             if buckets["actions"]:
                 for item in buckets["actions"]:
                     clean_item = re.sub(r"^#+\s*", "", item).strip()
+                    clean_item = re.sub(r"\]\s*:\s*:\s*", "]: ", clean_item)
+                    clean_item = re.sub(r"\s*:\s*:\s*", ": ", clean_item)
+
                     if any(p in clean_item for p in ["[Ưu tiên", "[High Priority", "[Medium Priority", "[Low Priority"]):
-                        story.append(Paragraph(f"<b>{clean_item}</b>", priority_tag_style))
+                        tag_match = re.match(r"^(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority)[^\]]*\])\s*:?\s*(.*)$", clean_item, flags=re.IGNORECASE)
+                        if tag_match:
+                            tag_text = tag_match.group(1).strip()
+                            body_text = tag_match.group(2).strip()
+                        else:
+                            tag_text = clean_item
+                            body_text = ""
+
+                        if "Cao" in tag_text or "High" in tag_text:
+                            tag_color = "#DC2626"
+                        elif "Trung bình" in tag_text or "Medium" in tag_text:
+                            tag_color = "#D97706"
+                        else:
+                            tag_color = "#16A34A"
+
+                        if body_text:
+                            story.append(Paragraph(f"• <font color='{tag_color}'><b>{tag_text}</b></font>: {body_text}", bullet_style))
+                        else:
+                            story.append(Paragraph(f"• <font color='{tag_color}'><b>{tag_text}</b></font>", bullet_style))
+
                     elif clean_item.lower().startswith("kpi") or "kpi :" in clean_item.lower() or "kpi:" in clean_item.lower():
                         clean_kpi = re.sub(r"^kpi\s*:\s*", "", clean_item, flags=re.IGNORECASE).strip()
                         story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;• <i><b>KPI đo lường:</b> {clean_kpi}</i>", kpi_style))

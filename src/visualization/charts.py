@@ -338,6 +338,44 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
                 return None
 
+        elif chosen in ("Pie", "Biểu đồ tròn (Pie)", "Pie (Tròn)") and measure_cols:
+            if label_cols:
+                label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
+                if label_name is None:
+                    st.info("Không tìm thấy cột phù hợp để phân loại lát cắt biểu đồ tròn.")
+                    return None
+
+                plot_df = df.copy()
+                plot_df[label_name] = label_series.values
+
+                # Nếu quá nhiều lát cắt (> 10), giữ top 9 và gộp phần còn lại vào 'Khác'
+                if len(plot_df) > 10:
+                    top_df = plot_df.sort_values(measure_cols[0], ascending=False).head(9)
+                    other_sum = plot_df.sort_values(measure_cols[0], ascending=False).iloc[9:][measure_cols[0]].sum()
+                    other_row = pd.DataFrame([{label_name: "Các đối tượng khác", measure_cols[0]: other_sum}])
+                    plot_df = pd.concat([top_df, other_row], ignore_index=True)
+
+                fig = px.pie(
+                    plot_df,
+                    names=label_name,
+                    values=measure_cols[0],
+                    hole=0.38,
+                    title=f"Tỷ trọng {measure_cols[0]} theo {label_name}",
+                    template="plotly_white"
+                )
+                fig.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate="<b>%{label}</b><br>" + f"{measure_cols[0]}: " + "%{value:,.0f} (%{percent})<extra></extra>"
+                )
+                fig.update_layout(
+                    margin=dict(l=20, r=20, t=50, b=50),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                )
+            else:
+                st.info("Biểu đồ tròn cần ít nhất một cột phân loại để chia lát cắt.")
+                return None
+
         elif chosen == "Scatter" and len(measure_cols) >= 2:
             x_m = measure_cols[0]
             y_m = measure_cols[1]

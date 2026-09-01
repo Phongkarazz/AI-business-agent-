@@ -150,7 +150,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
 
     measure_cols, label_cols, _ = get_axis_columns(df)
     if not measure_cols:
-        measure_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        measure_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and not is_id_like(c)]
         label_cols = [c for c in df.columns if c not in measure_cols]
 
     total_rows = len(df)
@@ -165,7 +165,15 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
             avg_val = valid_vals.mean()
             max_idx = valid_vals.idxmax()
             peak_val = df.loc[max_idx, m_col]
-            peak_label = str(df.loc[max_idx, label_cols[0]]) if label_cols else f"#{max_idx + 1}"
+
+            # Lấy tên đối tượng đầy đủ (ưu tiên Họ và Tên nếu có)
+            _, label_series, _ = pick_label_column(df, label_cols)
+            if label_series is not None and max_idx in label_series.index:
+                peak_label = str(label_series.loc[max_idx])
+            elif label_cols:
+                peak_label = str(df.loc[max_idx, label_cols[0]])
+            else:
+                peak_label = f"#{max_idx + 1}"
 
             fmt_total = f"{total_val:,.0f}" if isinstance(total_val, (int, float)) and total_val > 100 else f"{total_val:,.2f}"
             fmt_avg = f"{avg_val:,.0f}" if isinstance(avg_val, (int, float)) and avg_val > 100 else f"{avg_val:,.2f}"
@@ -401,14 +409,26 @@ def render_result(result: dict, turn_id: str):
     tab1, tab2, tab3 = st.tabs([tab_chart_label, tab_insight_label, tab_forecast_label])
 
     with tab1:
-        chart_options = ["Automatic", "Line", "Bar", "Area", "Scatter"] if is_en else ["Tự động", "Line", "Bar", "Area", "Scatter"]
+        chart_options = ["Automatic", "Bar", "Line", "Pie", "Area", "Scatter"] if is_en else ["Tự động", "Bar (Cột)", "Line (Đường)", "Pie (Tròn)", "Area (Miền)", "Scatter (Phân tán)"]
         chart_override_label = "Chart Type" if is_en else "Loại biểu đồ"
         chart_override = st.selectbox(
             chart_override_label,
             chart_options,
             key=f"charttype_{turn_id}"
         )
-        norm_override = "Tự động" if chart_override in ("Tự động", "Automatic") else chart_override
+        if "Bar" in chart_override:
+            norm_override = "Bar"
+        elif "Line" in chart_override:
+            norm_override = "Line"
+        elif "Pie" in chart_override:
+            norm_override = "Pie"
+        elif "Area" in chart_override:
+            norm_override = "Area"
+        elif "Scatter" in chart_override:
+            norm_override = "Scatter"
+        else:
+            norm_override = "Tự động"
+
         chart_fig = render_smart_chart(df, norm_override, turn_id)
 
         # Nút Tải Ảnh Biểu Đồ PNG Độ Nét Cao

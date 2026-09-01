@@ -341,8 +341,10 @@ def sanitize_insight_markdown(text: str) -> str:
     text = re.sub(r"^[。・]\s*", "   - ", text, flags=re.MULTILINE)
     text = re.sub(r"^\s*[。・]\s*", "   - ", text, flags=re.MULTILINE)
 
-    # 2. Xóa các tiền tố #### trước nhãn ưu tiên
+    # 2. Xóa các tiền tố #### trước nhãn ưu tiên và sửa lỗi 2 dấu hai chấm
     text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\g<1>", text)
+    text = re.sub(r"\]\s*:\s*:\s*", "]: ", text)
+    text = re.sub(r"\s*:\s*:\s*", ": ", text)
 
     # 3. Sửa lỗi chính tả phổ biến
     text = text.replace("đư ợc", "được").replace("đư ọc", "được")
