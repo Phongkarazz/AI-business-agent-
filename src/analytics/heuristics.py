@@ -119,12 +119,21 @@ def get_best_name_column(df: pd.DataFrame, exclude_cols: list = None):
 
 def pick_label_column(df: pd.DataFrame, label_cols: list) -> tuple:
     """Chọn cột nhãn tốt nhất cho trục X:
+    - Nếu có cả first_name và last_name, ưu tiên ghép lại làm nhãn 'Họ và Tên'.
     - Nếu có cột name-like (Product, Country, Quốc gia, etc.), ưu tiên chọn.
     - Nếu có nhiều cột text, ưu tiên cột có độ phân biệt (unique) cao hơn làm trục X.
     - Trả về (label_name, label_series, consumed_cols).
     """
     if df is None or df.empty or not label_cols:
         return None, None, []
+
+    # 0. Nếu có cả first_name và last_name, ưu tiên ghép lại làm nhãn đầy đủ
+    c_low_map = {c.lower(): c for c in label_cols}
+    if "first_name" in c_low_map and "last_name" in c_low_map:
+        f_col = c_low_map["first_name"]
+        l_col = c_low_map["last_name"]
+        full_name_series = df[f_col].astype(str) + " " + df[l_col].astype(str)
+        return "Họ và Tên", full_name_series, [f_col, l_col]
 
     # 1. Tìm cột khớp pattern name-like
     best_name = get_best_name_column(df, exclude_cols=[])

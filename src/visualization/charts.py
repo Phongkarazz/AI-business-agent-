@@ -34,8 +34,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
     row_identity_col = get_row_identity_column(df)
 
     try:
+        n_time = df[time_col].nunique(dropna=True) if (time_col and time_col in df.columns) else 0
+
         if chart_override == "Tự động":
-            if time_col and measure_cols:
+            # Chỉ chọn Line/Area khi có ít nhất 2 mốc thời gian khác nhau để tạo thành đường xu hướng
+            if time_col and measure_cols and n_time > 1:
                 chosen = "Line"
             elif measure_cols:
                 chosen = "Bar"
@@ -47,13 +50,16 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
         else:
             chosen = chart_override
 
-        # Fallback nếu chọn Line/Area nhưng không có cột thời gian
-        if chosen in ("Line", "Area") and not time_col:
+        # Fallback nếu chọn Line/Area nhưng không có cột thời gian hoặc chỉ có 1 mốc thời gian
+        if chosen in ("Line", "Area") and (not time_col or n_time <= 1):
             if measure_cols:
-                st.warning(
-                    "⚠️ Biểu đồ Line/Area cần một cột thời gian hợp lệ, dữ liệu hiện tại không có. "
-                    "Tự động chuyển sang Bar Chart để đảm bảo đúng ý nghĩa thống kê."
-                )
+                if n_time == 1 and chart_override in ("Line", "Area"):
+                    st.caption("ℹ️ Dữ liệu chỉ có 1 mốc thời gian duy nhất — tự động hiển thị dưới dạng Bar Chart để hiển thị rõ số liệu.")
+                elif not time_col:
+                    st.warning(
+                        "⚠️ Biểu đồ Line/Area cần một cột thời gian hợp lệ, dữ liệu hiện tại không có. "
+                        "Tự động chuyển sang Bar Chart để đảm bảo đúng ý nghĩa thống kê."
+                    )
                 chosen = "Bar"
             else:
                 st.info("Không có cột thời gian hợp lệ và không đủ dữ liệu để vẽ Bar/Scatter thay thế.")
@@ -303,6 +309,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         category_orders={label_name: category_order},
                         template="plotly_white"
                     )
+                    fig.update_traces(
+                        texttemplate='%{y:,.2f}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else '%{y:,.0f}',
+                        textposition='outside',
+                        width=0.35 if len(plot_df) <= 2 else None
+                    )
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
@@ -313,11 +324,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 fig = px.bar(
                     x=[measure_cols[0]],
                     y=[val_num],
-                    text=[f"{val_num:,.0f}" if isinstance(val_num, (int, float)) else str(val_num)],
-                    title=f"Tổng hợp Chỉ số: {measure_cols[0]}",
+                    text=[f"{val_num:,.2f}" if isinstance(val_num, float) else f"{val_num:,.0f}" if isinstance(val_num, int) else str(val_num)],
+                    title=f"Chỉ số: {measure_cols[0]}",
                     template="plotly_white"
                 )
-                fig.update_traces(textposition="outside", marker_color="#1F4E78")
+                fig.update_traces(textposition="outside", marker_color="#1F4E78", width=0.35)
                 fig.update_layout(
                     xaxis_title="",
                     yaxis_title=measure_cols[0],
