@@ -22,10 +22,10 @@ def get_dialect_hints(dialect: str, lang: str = "vi") -> str:
 
 
 def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: str = "vi") -> str:
-    """Xây dựng prompt tạo câu lệnh SQL từ ngôn ngữ tự nhiên với Schema Grounding nghiêm ngặt."""
+    """Xây dựng prompt tạo câu lệnh SQL từ ngôn ngữ tự nhiên với Schema Grounding thuần khiết, linh hoạt cho mọi CSDL."""
     dialect_hint = get_dialect_hints(dialect, lang=lang)
     if lang == "en":
-        return f"""You are a world-class senior SQL expert.
+        return f"""You are a world-class senior SQL database architect.
 
 === ACTUAL DATABASE SCHEMA ===
 {schema_context}
@@ -34,36 +34,27 @@ def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: s
 Dialect Notice: {dialect_hint}
 
 MANDATORY RULES (STRICT COMPLIANCE):
-1. SCHEMA GROUNDING: ONLY use tables and columns that explicitly appear in the Schema above.
-   - NEVER hallucinate or assume tables not in the schema (such as `employees`, `salaries`, `titles`, `dept_emp`).
-   - If the schema has `people` or `salespersons`, use that for staff/sales reps.
-   - If the schema has `products`, use that for items/goods.
-   - If the schema has `sales`, use that for transactions/revenue/boxes.
-   - If the schema has `geo`, use that for countries/regions.
+1. PURE SCHEMA GROUNDING:
+   - ONLY use the tables, views, and columns that explicitly appear in the Schema above.
+   - NEVER invent or assume table or column names that are not in the Schema.
+   - Determine the correct JOIN paths by matching primary and foreign keys provided in the Schema.
 2. HISTORICAL RELATIVE TIME HANDLING:
-   - Business databases contain historical data (not real-time today).
-   - When the user asks relative time ('last year', 'past year', 'recent', 'past 12 months'):
-     + NEVER use `CURRENT_DATE()`, `CURDATE()`, `NOW()` as it will return 0 rows!
-     + MUST anchor to the MAX date in the database:
+   - Business databases often contain historical data.
+   - When the user asks for relative time ('last year', 'past 12 months', 'recent period'):
+     + NEVER use CURRENT_DATE(), CURDATE(), NOW() if the data is historical as it will return 0 rows.
+     + Anchor to the MAX date in the target table:
        * MySQL: `WHERE date_col >= DATE_SUB((SELECT MAX(date_col) FROM table_name), INTERVAL 1 YEAR)`
        * SQLite: `WHERE date_col >= date((SELECT MAX(date_col) FROM table_name), '-1 year')`
-3. STRICT VALUE & ID MAPPING:
-   - Always check product names, categories, teams, geos, and IDs (SPID, PID, GeoID) against the 'DISTINCT SAMPLE VALUES' in the Schema.
-   - For Product Names (e.g. 'Milk Chocolate', 'Dark 70%'): In DB, 'Milk Chocolate' is 'Milk Bars' or products containing 'Milk'. Use: `(p.Product = 'Milk Bars' OR p.Product LIKE '%Milk%' OR p.Category = 'Milk')`.
-   - For IDs (e.g. 'SP001', 'SP1', 'P001'): If DB has 2-digit IDs ('SP01'), map to 'SP01' or use `(sales.SPID = 'SP01' OR sales.SPID = 'SP001' OR sales.SPID LIKE '%SP%1%')`. NEVER fail with 0 rows!
-4. AVOID OVER-FILTERING:
-   - When the user mentions general domain terms (e.g., 'boxes of chocolate', 'chocolate sales'): All records represent chocolate, calculate `SUM(Boxes)` or `SUM(Amount)`. DO NOT add `WHERE Category = 'Chocolate'` unless a specific category is requested.
-   - For 'boxes'/'quantity': use `SUM(Boxes)`. For 'revenue'/'money': use `SUM(Amount)`.
-5. PRECISE SYNTAX:
-   - Use `COUNT(*)` or `COUNT(col)`, NEVER `COUNT()`.
-   - Perfectly balance all parentheses '(' and ')'.
-   - Wrap table/column names in backticks ` if they contain special characters or spaces.
-6. CATEGORICAL NULL / BLANK HANDLING:
-   - When GROUP BY a category column (like `Team`, `Category`, `Region`):
-   - If the user asks about specific groups/teams, use `WHERE col != '' AND col IS NOT NULL` OR `COALESCE(NULLIF(col, ''), 'Unassigned') AS col` to avoid blank unnamed rows.
-7. OUTPUT FORMAT:
-   - Return ONLY the raw SQL query (starting with SELECT or WITH).
-   - NO markdown code block, NO explanations, NO comments (#, --).
+3. DISTINCT VALUES & TEXT MATCHING:
+   - Check against the 'DISTINCT SAMPLE VALUES' section in the Schema if present.
+   - Use flexible pattern matching (e.g. `LIKE '%term%'` or exact match) when querying textual categories and names.
+4. SYNTAX PRECISION:
+   - Use `COUNT(*)` or `COUNT(column)`, never `COUNT()`.
+   - Ensure all parentheses () and quotes are balanced.
+   - Wrap identifiers in backticks ` when needed.
+5. CLEAN OUTPUT:
+   - Return ONLY the single executable raw SQL statement (starting with SELECT or WITH).
+   - No markdown code blocks, no explanations, no comments.
 
 User Query: "{user_query}"
 SQL Query:"""
@@ -77,38 +68,25 @@ SQL Query:"""
 Lưu ý Dialect: {dialect_hint}
 
 QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
-1. SCHEMA GROUNDING: CHỈ ĐƯỢC PHÉP SỬ DỤNG CÁC BẢNG VÀ CỘT XUẤT HIỆN TRONG SCHEMA Ở TRÊN.
-   - Tuyệt đối KHÔNG tự ý suy đoán hoặc bịa ra các bảng không có trong Schema (như `employees`, `salaries`, `titles`, `dept_emp`).
-   - Nếu trong Schema có bảng `people` hoặc `salespersons`, hãy dùng bảng đó cho nhân viên/người bán.
-   - Nếu trong Schema có bảng `products`, hãy dùng bảng đó cho sản phẩm.
-   - Nếu trong Schema có bảng `sales`, hãy dùng bảng đó cho doanh số/giao dịch/hộp bán.
-   - Nếu trong Schema có bảng `geo`, hãy dùng bảng đó cho quốc gia/khu vực.
+1. TUÂN THỦ SCHEMA TUYỆT ĐỐI (PURE SCHEMA GROUNDING):
+   - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
+   - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
+   - Tự động phát hiện các cột khóa liên kết giữa các bảng để viết mệnh đề `JOIN ... ON ...` chính xác 100%.
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
    - CSDL doanh nghiệp chứa dữ liệu các năm lịch sử (không phải realtime hôm nay).
    - Khi người dùng hỏi các mốc thời gian tương đối ('trong năm qua', 'gần đây', '12 tháng gần nhất', 'năm gần nhất'):
-     + TUYỆT ĐỐI KHÔNG dùng `CURRENT_DATE()`, `CURDATE()`, `NOW()` vì sẽ bị 0 dòng dữ liệu!
+     + TUYỆT ĐỐI KHÔNG dùng `CURRENT_DATE()`, `CURDATE()`, `NOW()` nếu dữ liệu là lịch sử vì sẽ bị 0 dòng!
      + BẮT BUỘC dùng mốc ngày lớn nhất trong dữ liệu:
        * Trên MySQL: `WHERE date_col >= DATE_SUB((SELECT MAX(date_col) FROM table_name), INTERVAL 1 YEAR)`
        * Trên SQLite: `WHERE date_col >= date((SELECT MAX(date_col) FROM table_name), '-1 year')`
-3. ĐỐI CHIẾU VÀ KHỚP GIÁ TRỊ THỰC TẾ & MÃ ĐỊNH DANH (FUZZY VALUE & ID MAPPING):
-   - Luôn đối chiếu tên sản phẩm, danh mục, nhóm, quốc gia và MÃ ĐỊNH DANH (SPID, PID, GeoID) người dùng hỏi với "DANH SÁCH GIÁ TRỊ MẪU THỰC TẾ TRONG CSDL" ở Schema trên.
-   - Khớp Tên Sản Phẩm (VD: 'Milk Chocolate', 'Dark 70%', 'socola sữa'):
-     + Trong CSDL 'Milk Chocolate' chính là 'Milk Bars' hoặc dòng sản phẩm chứa 'Milk'. BẮT BUỘC dùng: `(p.Product = 'Milk Bars' OR p.Product LIKE '%Milk%' OR p.Category = 'Milk')`.
-     + Với 'Dark 70%', dùng: `(p.Product = '70% Dark Bites' OR p.Product LIKE '%70% Dark%' OR p.Product LIKE '%Dark%')`.
-     + TUYỆT ĐỐI KHÔNG dùng điều kiện cứng `= 'Milk Chocolate'` nếu không có tên đó trong CSDL, tránh trả về 0 dòng!
-   - Khớp Mã Định Danh (VD: 'SP001', 'SP1', 'P001', 'G001'):
-     + Trong CSDL nếu mã là 'SP01' (2 chữ số), BẮT BUỘC map sang đúng mã trong CSDL là 'SP01' hoặc dùng: `(sales.SPID = 'SP01' OR sales.SPID = 'SP001' OR sales.SPID LIKE '%SP%1%')`!
-4. TRÁNH LỌC CỨNG THỪA THÃI (OVER-FILTERING):
-   - Khi người dùng hỏi từ ngữ chung của ngành hàng (VD: 'hộp chocolate', 'sản phẩm chocolate', 'bán chocolate'): Toàn bộ các bản ghi trong DB là chocolate, hãy tính `SUM(Boxes)` hoặc `SUM(Amount)` cho toàn bộ sản phẩm. TUYỆT ĐỐI KHÔNG thêm `WHERE Category = 'Chocolate'` hoặc `WHERE Product LIKE '%chocolate%'` trừ khi người dùng chỉ định rõ 1 danh mục cụ thể có trong Schema.
-   - Khi hỏi về 'số hộp' / 'hộp': dùng `SUM(Boxes)`. Khi hỏi về 'doanh thu' / 'tiền': dùng `SUM(Amount)`.
-5. CÚ PHÁP CHUẨN XÁC:
+3. ĐỐI CHIẾU GIÁ TRỊ THỰC TẾ & TÌM KIẾM MỀM DẺO:
+   - Tham khảo phần "DANH SÁCH GIÁ TRỊ MẪU THỰC TẾ TRONG CSDL" (nếu có) trong Schema để chọn đúng giá trị lọc.
+   - Dùng `LIKE '%từ_khóa%'` hoặc khớp chính xác tùy theo yêu cầu câu hỏi để tránh trả về 0 dòng.
+4. CÚ PHÁP CHUẨN XÁC:
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-6. XỬ LÝ GIÁ TRỊ RỖNG KHI GOM NHÓM (GROUP BY):
-   - Khi gom nhóm theo danh mục (như `Team`, `Category`, `Region`...):
-   - Nếu câu hỏi hỏi về từng nhóm/team của nhân viên, hãy dùng `WHERE people.Team != '' AND people.Team IS NOT NULL` (nếu chỉ lấy các nhóm chính thức) hoặc dùng `COALESCE(NULLIF(people.Team, ''), 'Chưa phân nhóm') AS Team` để tránh dòng rỗng không có tên.
-7. ĐỊNH DẠNG ĐẦU RA:
+5. ĐỊNH DẠNG ĐẦU RA:
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích hay markdown code block bên ngoài.
 
@@ -137,10 +115,9 @@ SYSTEM FEEDBACK:
 
 FIX INSTRUCTIONS:
 1. If result returned 0 rows due to CURRENT_DATE(), NOW(), CURDATE() or overly strict date filtering: Anchor to `(SELECT MAX(date_col) FROM table_name)` or remove restrictive date filters to fetch real data!
-2. If result returned 0 rows due to filtering `Category = 'Chocolate'`: Remove it because all products in the DB are chocolate.
-3. If 'Table doesn't exist': Strictly use only existing tables listed in the Schema.
-4. If syntax error: Use `COUNT(*)`, ensure balanced parentheses ().
-5. Return ONLY the single corrected raw SQL query (SELECT or WITH). No markdown, no comments, no explanations."""
+2. If 'Table or column doesn't exist': Carefully check the SCHEMA above and ONLY use tables and columns that exist in the Schema.
+3. If syntax error: Use `COUNT(*)`, ensure balanced parentheses ().
+4. Return ONLY the single corrected raw SQL query (SELECT or WITH). No markdown, no comments, no explanations."""
 
     return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra CẦN ĐƯỢC ĐIỀU CHỈNH LẠI trên {dialect}.
 
@@ -159,10 +136,9 @@ THÔNG BÁO TỪ HỆ THỐNG:
 
 HƯỚNG DẪN ĐIỀU CHỈNH:
 1. Nếu kết quả trả về 0 dòng dữ liệu do dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc thời gian quá chặt: Hãy thay thế bằng `(SELECT MAX(date_col) FROM table_name)` làm mốc ngày gần nhất hoặc bỏ điều kiện lọc thời gian để lấy dữ liệu thực tế!
-2. Nếu kết quả trả về 0 dòng do lọc `Category = 'Chocolate'`: Hãy bỏ lọc vì toàn bộ sản phẩm trong DB là chocolate.
-3. Nếu lỗi 'Table doesn't exist': Hãy nhìn kỹ SCHEMA ở trên và chỉ dùng đúng các bảng có thật trong danh sách.
-4. Nếu lỗi cú pháp: Dùng `COUNT(*)`, kiểm tra cân đối dấu ngoặc đơn ().
-5. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
+2. Nếu lỗi 'Table or column doesn't exist': Hãy nhìn kỹ SCHEMA ở trên và CHỈ DÙNG đúng các bảng và cột có thật trong danh sách.
+3. Nếu lỗi cú pháp: Dùng `COUNT(*)`, kiểm tra cân đối dấu ngoặc đơn ().
+4. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str, lang: str = "vi") -> str:
