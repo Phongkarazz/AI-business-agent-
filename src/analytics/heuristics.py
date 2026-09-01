@@ -229,20 +229,17 @@ def sanitize_insight_markdown(text: str) -> str:
     text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
     text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
 
-    # 1. Gộp các dòng icon đơn độc (- 🔴, • 🔴, 🔴) vào dòng ưu tiên tiếp theo
-    text = re.sub(r"^[•\-\*]?\s*([🔴🟡🟢])\s*\n\s*[•\-\*]?\s*", r"• \1 ", text, flags=re.MULTILINE)
-
-    # 2. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề chuẩn
+    # 1. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề chuẩn
     text = re.sub(r"^[。・]\s*", "   - ", text, flags=re.MULTILINE)
     text = re.sub(r"^\s*[。・]\s*", "   - ", text, flags=re.MULTILINE)
 
-    # 3. Xóa các tiền tố #### trước nhãn ưu tiên
+    # 2. Xóa các tiền tố #### trước nhãn ưu tiên
     text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\g<1>", text)
 
-    # 4. Sửa lỗi chính tả phổ biến
+    # 3. Sửa lỗi chính tả phổ biến
     text = text.replace("đư ợc", "được").replace("đư ọc", "được")
 
-    # 5. Tự động tách dòng cho các ý phân tích bị dính liền trên cùng 1 đoạn văn
+    # 4. Tự động tách dòng cho các ý phân tích bị dính liền trên cùng 1 đoạn văn
     text = re.sub(r"(?<=[^\n])\s+•\s*", "\n\n• ", text)
     text = re.sub(r"(?<=[^\n•\-\*\s])\s+(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\n\n• \g<1>", text)
 
@@ -260,7 +257,7 @@ def sanitize_insight_markdown(text: str) -> str:
             continue
 
         # Bỏ dòng rác chỉ chứa bullet hoặc icon đơn độc
-        if l in ("•", "-", "*", "• 🔴", "• 🟡", "• 🟢", "🔴", "🟡", "🟢", ".", "• ."):
+        if re.fullmatch(r"[•\-\*🔴🟡🟢\s\.\:]+", l):
             continue
 
         # A. Sửa lỗi dính từ tiếng Anh/Tên riêng với các từ nối tiếng Việt: Juciesđể -> Jucies để, Delishvà -> Delish và
@@ -306,15 +303,33 @@ def sanitize_insight_markdown(text: str) -> str:
 
         # H. QUY TẮC: KHÔNG ĐƯỢC TỰ Ý IN ĐẬM Ở TRONG CÂU
         # Chuẩn hóa mục 2.3 với nhãn ưu tiên in đậm và biểu tượng màu
+        p_type = None
         if "Ưu tiên Cao" in l or "High Priority" in l:
-            body = re.sub(r"^[•\-\*]?\s*(?:🔴\s*)?\[?(?:Ưu tiên Cao|High Priority)[^\]:]*\]?:?\s*", "", l).replace("**", "").replace("*", "").strip()
-            l = f"• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: {body}"
+            p_type = "Cao"
         elif "Ưu tiên Trung bình" in l or "Medium Priority" in l:
-            body = re.sub(r"^[•\-\*]?\s*(?:🟡\s*)?\[?(?:Ưu tiên Trung bình|Medium Priority)[^\]:]*\]?:?\s*", "", l).replace("**", "").replace("*", "").strip()
-            l = f"• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: {body}"
+            p_type = "Trung bình"
         elif "Ưu tiên Thấp" in l or "Low Priority" in l:
-            body = re.sub(r"^[•\-\*]?\s*(?:🟢\s*)?\[?(?:Ưu tiên Thấp|Low Priority)[^\]:]*\]?:?\s*", "", l).replace("**", "").replace("*", "").strip()
-            l = f"• 🟢 **[Ưu tiên Thấp / Dài hạn]**: {body}"
+            p_type = "Thấp"
+
+        if p_type:
+            # Loại bỏ toàn bộ tiền tố ưu tiên bị lặp lại ở đầu câu
+            body = l
+            for _ in range(3):
+                body = re.sub(r"^[•\-\*]?\s*(?:[🔴🟡🟢]\s*)?\[?(?:Ưu tiên (?:Cao|Trung bình|Thấp)|High Priority|Medium Priority|Low Priority)[^\]:]*\]?:?\s*", "", body, flags=re.IGNORECASE).strip()
+                body = re.sub(r"^[•\-\*]?\s*(?:[🔴🟡🟢]\s*)?", "", body).strip()
+
+            body = body.replace("**", "").replace("*", "").strip()
+            # Nếu dòng chỉ là tiêu đề không có nội dung hành động -> bỏ qua dòng rác này
+            if len(body) < 5 or body.lower() in ("[ưu tiên cao]", "[ưu tiên trung bình]", "[ưu tiên thấp]"):
+                continue
+
+            if p_type == "Cao":
+                l = f"• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: {body}"
+            elif p_type == "Trung bình":
+                l = f"• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: {body}"
+            else:
+                l = f"• 🟢 **[Ưu tiên Thấp / Dài hạn]**: {body}"
+
         elif ":" in l:
             prefix, rest = l.split(":", 1)
             clean_p = prefix.replace("**", "").replace("*", "").strip()
