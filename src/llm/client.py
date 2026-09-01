@@ -113,11 +113,12 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
     if "/" in clean_model:
         clean_model = clean_model.split("/")[-1]
 
-    if clean_model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash", "gemini-pro", ""):
+    if clean_model in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash", "gemini-pro", ""):
         clean_model = "gemini-3.7-flash"
 
+    # Danh sách model dự phòng ưu tiên theo thứ tự chịu tải tốt và tốc độ cao
     target_models = [clean_model]
-    for fallback in ["gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview"]:
+    for fallback in ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-3.7-flash", "gemini-3.1-pro-preview"]:
         if fallback not in target_models:
             target_models.append(fallback)
 
@@ -133,9 +134,10 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
             should_fallback = any(k in err_str for k in [
                 "404", "not_found", "no longer available", "not found",
                 "503", "unavailable", "high demand", "overloaded", "spikes in demand",
-                "429", "resource_exhausted", "quota"
+                "429", "resource_exhausted", "quota", "rate_limit", "exhausted"
             ])
             if should_fallback:
+                time.sleep(1.0)
                 continue
             raise e
 
@@ -154,7 +156,7 @@ def _call_openai_compatible_impl(client, model_name: str, prompt: str, max_token
 
 
 def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: int = 3) -> tuple[str | None, str | None]:
-    """Gọi LLM với cấu hình max_tokens tối ưu (tránh lỗi 402 OpenRouter) và cơ chế tự động giảm tokens."""
+    """Gọi LLM với cấu hình max_tokens tối ưu, cơ chế Exponential Backoff trên lỗi 429/503 và tự động fallback."""
     if not client:
         return None, "Chưa khởi tạo client AI."
 
@@ -180,21 +182,32 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
             err = str(e)
             last_error = err
 
-            # Tự động bắt lỗi 402 OpenRouter do vượt quá trần credit khi đặt max_tokens lớn
+            # 1. Tự động bắt lỗi 402 OpenRouter do vượt quá trần credit khi đặt max_tokens lớn
             if "402" in err or "fewer max_tokens" in err or "can only afford" in err:
                 if current_max_tokens > 512:
                     current_max_tokens = 1024 if current_max_tokens > 1024 else 512
                     time.sleep(1)
                     continue
-                return None, f"Tài khoản OpenRouter của bạn đã hết số dư ($0.00). Vui lòng nạp thêm credit tại https://openrouter.ai/settings/credits để tiếp tục."
+                return None, "Tài khoản OpenRouter của bạn đã hết số dư ($0.00). Vui lòng nạp thêm credit tại https://openrouter.ai/settings/credits để tiếp tục."
 
-            if "429" in err or "RESOURCE_EXHAUSTED" in err or "RateLimit" in err or "Throttling" in err or "insufficient_quota" in err:
-                return None, f"Hết quota hoặc đạt giới hạn gọi ({provider} - {model_name}). Vui lòng kiểm tra lại số dư hoặc đổi model."
+            # 2. Xử lý lỗi 429 (Rate Limit / Quota) với cơ chế tự động chờ (Exponential Backoff)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err or "RateLimit" in err or "Throttling" in err or "insufficient_quota" in err or "quota" in err.lower():
+                if attempt < max_retries - 1:
+                    wait_time = 2 * (attempt + 1)
+                    time.sleep(wait_time)
+                    continue
+                return None, f"Đạt giới hạn tần suất gọi hoặc hết quota ({provider} - {model_name}). Hệ thống đã tự động thử lại {max_retries} lần nhưng chưa thành công. Vui lòng chờ 1 phút hoặc chuyển sang model khác."
+
+            # 3. Xử lý lỗi API Key
             if "401" in err or "invalid_api_key" in err or "Incorrect API key" in err:
                 return None, f"API Key không hợp lệ cho {provider}. (Nếu dùng OpenRouter, hãy đảm bảo chọn đúng Provider: OpenRouter hoặc dán key dạng sk-or-v1-...)."
+
+            # 4. Xử lý lỗi 503 (Server quá tải)
             if "503" in err or "UNAVAILABLE" in err:
-                wait = 2 * (attempt + 1)
-                time.sleep(wait)
+                if attempt < max_retries - 1:
+                    wait_time = 2 * (attempt + 1)
+                    time.sleep(wait_time)
+                    continue
             else:
                 return None, f"Lỗi {provider} ({model_name}): {err}"
 
