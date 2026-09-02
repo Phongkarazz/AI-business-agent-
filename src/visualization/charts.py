@@ -273,15 +273,33 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     )
 
                 else:
+                    color_col = None
+                    candidate_color_cols = [
+                        c for c in label_cols
+                        if c not in consumed_cols and c in plot_df.columns and not is_id_like(c)
+                    ]
+                    if candidate_color_cols:
+                        cand = candidate_color_cols[0]
+                        if plot_df[cand].nunique(dropna=True) <= 20:
+                            color_col = cand
+
                     has_duplicate_labels = n_unique_labels < total_rows
-                    if has_duplicate_labels and row_identity_col and row_identity_col != label_name:
-                        plot_df[label_name] = (
-                            plot_df[label_name].astype(str) + " (#" + plot_df[row_identity_col].astype(str) + ")"
-                        )
-                        st.caption(
-                            f"ℹ️ Một số dòng trùng nhãn `{label_name}` nhưng là các thực thể khác nhau "
-                            f"(khác `{row_identity_col}`) — đã gắn thêm mã `{row_identity_col}` vào nhãn để phân biệt rõ."
-                        )
+                    if has_duplicate_labels:
+                        if row_identity_col and row_identity_col != label_name:
+                            plot_df[label_name] = (
+                                plot_df[label_name].astype(str) + " (#" + plot_df[row_identity_col].astype(str) + ")"
+                            )
+                            st.caption(
+                                f"ℹ️ Một số dòng trùng nhãn `{label_name}` nhưng là các thực thể khác nhau "
+                                f"(khác `{row_identity_col}`) — đã gắn thêm mã `{row_identity_col}` vào nhãn để phân biệt rõ."
+                            )
+                        else:
+                            grp_cols = [label_name]
+                            if color_col and color_col in plot_df.columns and color_col != label_name:
+                                grp_cols.append(color_col)
+                            plot_df = plot_df.groupby(grp_cols, as_index=False)[measure_cols[0]].sum()
+                            plot_df = plot_df.sort_values(measure_cols[0], ascending=False)
+                            total_rows = len(plot_df)
 
                     if total_rows > 30:
                         max_display = st.slider(
@@ -295,16 +313,6 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         plot_df = plot_df.head(max_display)
 
                     category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
-
-                    color_col = None
-                    candidate_color_cols = [
-                        c for c in label_cols
-                        if c not in consumed_cols and c in plot_df.columns and not is_id_like(c)
-                    ]
-                    if candidate_color_cols:
-                        cand = candidate_color_cols[0]
-                        if plot_df[cand].nunique(dropna=True) <= 20:
-                            color_col = cand
 
                     # Tự động đo độ dài tên lớn nhất để quyết định góc xoay nghiêng chống đè chữ
                     max_label_len = max((len(str(v)) for v in plot_df[label_name]), default=0)

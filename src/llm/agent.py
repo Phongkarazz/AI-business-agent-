@@ -9,7 +9,7 @@ import re
 import concurrent.futures
 import pandas as pd
 
-from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP
+from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP, INDIVIDUAL_ENTITY_REGEX
 from src.database.query_runner import read_sql_capped, sanitize_error
 from src.database.schema import get_table_names
 from src.analytics.heuristics import is_id_like, detect_query_language, sanitize_insight_markdown, sanitize_followup_question
@@ -115,20 +115,21 @@ def is_conversational_explanation(text_response: str) -> bool:
 
 
 def detect_duplicate_entity_warning(df: pd.DataFrame) -> str | None:
-    """Kiểm tra xem có dấu hiệu nhân bản dữ liệu do JOIN bảng lịch sử không."""
+    """Kiểm tra xem có dấu hiệu nhân bản dữ liệu do JOIN bảng lịch sử hoặc thiếu GROUP BY không."""
     if df is None or df.empty:
         return None
 
-    id_cols = [c for c in df.columns if is_id_like(c)]
-    for c in id_cols:
+    # 1. Kiểm tra cột định danh hoặc cột thực thể con người / sản phẩm
+    check_cols = [c for c in df.columns if is_id_like(c) or INDIVIDUAL_ENTITY_REGEX.search(str(c))]
+    for c in check_cols:
         try:
             n_unique = df[c].nunique(dropna=True)
         except Exception:
             continue
         if 0 < n_unique < len(df):
             return (
-                f"Cột `{c}` chỉ có {n_unique} giá trị duy nhất nhưng kết quả trả về "
-                f"{len(df)} dòng (dấu hiệu JOIN với bảng lịch sử chưa lọc bản ghi hiện tại)."
+                f"Cột thực thể `{c}` chỉ có {n_unique} giá trị duy nhất nhưng kết quả trả về "
+                f"{len(df)} dòng (bị trùng lặp đối tượng do chọn đơn hàng lẻ thay vì tính tổng SUM & GROUP BY)."
             )
     return None
 
@@ -428,10 +429,23 @@ def run_agent(
             dup_warning = detect_duplicate_entity_warning(df)
             if dup_warning:
                 result["logs"].append(f"⚠️ Cảnh báo: {dup_warning}")
+                if attempt < 3:
+                    dup_fix_reason = (
+                        f"{dup_warning} "
+                        f"BẮT BUỘC dùng hàm tổng hợp SUM(s.Amount) AS TotalSales và GROUP BY theo thực thể đó (ví dụ: GROUP BY p.Salesperson, p.Team) ORDER BY TotalSales DESC!"
+                        if lang != "en" else
+                        f"{dup_warning} MUST use SUM(s.Amount) AS TotalSales and GROUP BY (e.g. GROUP BY p.Salesperson, p.Team) ORDER BY TotalSales DESC!"
+                    )
+                    fix_prompt = build_fix_prompt(
+                        schema_context, dialect, user_query, sql_query, dup_fix_reason, lang=lang
+                    )
+                    fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+                    sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
+                    continue
 
             # Fast-path: Nếu câu lệnh thành công ngay lần đầu, df có dữ liệu và không có cảnh báo trùng lặp
             # Bỏ qua lượt gọi QA LLM để tiết kiệm 2-3 giây cho người dùng
-            should_run_qa = enable_self_check and (attempt > 1 or dup_warning is not None)
+            should_run_qa = enable_self_check and (attempt > 1)
             if should_run_qa:
                 check = self_check_sql(client, provider, model_name, schema_context, user_query, sql_query, df, lang=lang)
             else:

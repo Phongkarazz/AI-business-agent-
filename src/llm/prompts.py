@@ -96,10 +96,17 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-   - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG / BẢNG LỚN:
-     + Khi người dùng hỏi dạng Top N / Xếp hạng doanh số / sản lượng ('Top 10 nhân sự có doanh số cao nhất'):
-       BẮT BUỘC dùng hàm tổng hợp `SUM(Amount) AS TotalSales`, `GROUP BY` theo tên nhân sự (ví dụ: `GROUP BY p.Salesperson, p.Team`) và `ORDER BY TotalSales DESC LIMIT 10`!
-       TUYỆT ĐỐI KHÔNG `SELECT Amount` rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một người nhiều lần!
+   - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG DOANH SỐ / SẢN LƯỢNG (Ví dụ: 'Top 10 nhân sự có doanh số cao nhất'):
+       BẮT BUỘC: Mỗi nhân sự/thực thể chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG DOANH SỐ TÍCH LŨY.
+       BẮT BUỘC dùng hàm tính tổng `SUM(s.Amount) AS TotalSales`, `GROUP BY` theo nhân sự (ví dụ: `GROUP BY p.Salesperson, p.Team`) và `ORDER BY TotalSales DESC LIMIT 10`!
+       TUYỆT ĐỐI KHÔNG `SELECT s.Amount` rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một người nhiều lần!
+       MẪU CHUẨN BẮT BUỘC:
+       SELECT p.Salesperson, SUM(s.Amount) AS TotalSales, p.Team
+       FROM people p
+       JOIN sales s ON p.SPID = s.SPID
+       GROUP BY p.Salesperson, p.Team
+       ORDER BY TotalSales DESC
+       LIMIT 10;
      + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không ghi rõ số lượng cụ thể: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
@@ -293,15 +300,18 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ma
 - 🔴 **[Ưu tiên Cao - Thực hiện Ngay / Immediate]**: Hành động khắc phục sự cố hoặc nắm bắt cơ hội cấp bách.
 - 🟡 **[Ưu tiên Trung bình - Quý tiếp theo / Next Quarter]**: Chiến lược tối ưu hóa hoạt động trung hạn.
 - 🟢 **[Ưu tiên Thấp / Dài hạn - Long-term]**: Định hướng chiến lược bền vững dài hạn.
-TUYỆT ĐỐI KHÔNG DÙNG BẢNG (TUYỆT ĐỐI KHÔNG dùng dấu gạch đứng |, không dùng dấu +---+). BẮT BUỘC chỉ viết dưới dạng danh sách gạch đầu dòng bullet như trên! MỖI HÀNH ĐỘNG BẮT BUỘC VIẾT TRÊN 1 DÒNG DUY NHẤT.
-Ví dụ chuẩn:
-• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Tối ưu hóa quy trình bán hàng và chính sách hoa hồng. Mục tiêu đo lường: Tăng 10% doanh số tháng tới.
-• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Tổ chức đào tạo nâng cao kỹ năng cho đội ngũ kinh doanh. Mục tiêu đo lường: Hoàn thành đào tạo trong Quý 2.)
+TUYỆT ĐỐI KHÔNG DÙNG BẢNG (TUYỆT ĐỐI KHÔNG dùng dấu gạch đứng |, không dùng dấu +---+).
+TUYỆT ĐỐI KHÔNG VIẾT CHỮ "Ví dụ chuẩn:" HAY CHÉP LẠI VÍ DỤ VÀO BÀI LÀM!
+BẮT BUỘC chỉ viết 3 dòng hành động tương ứng với 3 mức độ ưu tiên:
+• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: [Hành động cấp bách bám sát kết quả dữ liệu]
+• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: [Chiến lược trung hạn]
+• 🟢 **[Ưu tiên Thấp / Dài hạn]**: [Định hướng dài hạn]
 
-QUY TẮC ĐỊNH DẠNG VĂN BẢN (BẮT BUỘC):
+QUY TẮC ĐỊNH DẠNG & NGÔN NGỮ (BẮT BUỘC):
+- BẮT BUỘC DÙNG TIẾNG VIỆT KINH DOANH CHUẨN MỰC, TỰ NHIÊN (TUYỆT ĐỐI CẤM dùng từ ngữ dịch máy ngô nghê như 'mẫu marketers', 'đòi hỏi sự kỹ năng', 'gian nhà hàng').
 - MỖI Ý PHÂN TÍCH BẮT BUỘC NẰM TRÊN MỘT DÒNG RIÊNG BIỆT (bắt đầu bằng gạch đầu dòng `• `). TUYỆT ĐỐI KHÔNG VIẾT CÁC Ý NỐI LIỀN NHAU TRÊN CÙNG 1 ĐOẠN VĂN!
 - TUYỆT ĐỐI KHÔNG TỰ Ý IN ĐẬM Ở TRONG THÂN CÂU (CẤM dùng ** bên trong câu).
-- CHỈ IN ĐẬM DUY NHẤT TIÊU ĐỀ Ở ĐẦU GẠCH ĐẦU DÒNG TRƯỚC DẤU HAI CHẤM (Ví dụ: `• **Tiêu đề phân tích**: Toàn bộ nội dung phân tích phía sau là chữ thường bình thường, không có bất kỳ dấu sao ** nào`).
+- CHỈ IN ĐẬM DUY NHẤT TIÊU ĐỀ Ở ĐẦU GẠCH ĐẦU DÒNG TRƯỚC DẤU HAI CHẤM.
 - Tách từ và số chuẩn xác (viết "thấp hơn", "cao hơn", "lớn hơn", "đạt 28,490,175", "11.0% so với", TUYỆT ĐỐI KHÔNG viết dính liền).
 - Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, văn phong giám đốc điều hành."""
 

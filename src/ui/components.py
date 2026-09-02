@@ -7,7 +7,7 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 
 import streamlit as st
 import pandas as pd
-from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown, pick_label_column, is_id_like, sanitize_followup_question
+from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown, pick_label_column, is_id_like, sanitize_followup_question, split_insight_sections
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
 from src.analytics.export_reports import export_to_excel, export_to_png, export_to_pdf
@@ -201,6 +201,56 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
         with col2:
             st.metric("🎯 " + m_clean, fmt_val)
         st.write("")
+
+
+def render_insight_cards(insights_raw: str, is_en: bool = False):
+    """Render 3 Thẻ Giao Diện Độc Lập (Cards) cho Insight: Bất thường, Nguyên nhân, Kế hoạch hành động."""
+    if not insights_raw:
+        return
+
+    sections = split_insight_sections(insights_raw)
+    p21 = sections.get("anomaly", "").strip()
+    p22 = sections.get("hypothesis", "").strip()
+    p23 = sections.get("action_plan", "").strip()
+
+    st.markdown("---")
+    st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
+
+    # Card 1: Phát hiện bất thường & Xu hướng
+    if p21:
+        st.markdown(
+            f"""<div style="background-color: #FFF9F5; border-left: 4px solid #E65100; border-radius: 8px; padding: 12px 16px; margin-top: 10px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+                <div style="font-size: 15px; font-weight: 700; color: #B23C00; margin-bottom: 4px;">
+                    🚨 {"1. Key Discoveries & Trend Anomalies" if is_en else "1. Phát hiện Bất thường & Xu hướng Chính"}
+                </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+        st.markdown(p21)
+
+    # Card 2: Giả thuyết & Nguyên nhân
+    if p22:
+        st.markdown(
+            f"""<div style="background-color: #F4F8FB; border-left: 4px solid #0288D1; border-radius: 8px; padding: 12px 16px; margin-top: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+                <div style="font-size: 15px; font-weight: 700; color: #01579B; margin-bottom: 4px;">
+                    🔍 {"2. Potential Root Causes & Hypotheses" if is_en else "2. Giả thuyết & Nguyên nhân Tiềm năng"}
+                </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+        st.markdown(p22)
+
+    # Card 3: Đề xuất hành động
+    if p23:
+        st.markdown(
+            f"""<div style="background-color: #F1F8F4; border-left: 4px solid #2E7D32; border-radius: 8px; padding: 12px 16px; margin-top: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+                <div style="font-size: 15px; font-weight: 700; color: #1B5E20; margin-bottom: 4px;">
+                    🎯 {"3. Executive Action Plan & Priority Recommendations" if is_en else "3. Kế hoạch Hành động & Đề xuất Ưu tiên"}
+                </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+        st.markdown(p23)
 
 
 def render_result(result: dict, turn_id: str):
@@ -466,12 +516,10 @@ def render_result(result: dict, turn_id: str):
         else:
             st.success("✅ No extreme anomalies or spikes detected in this dataset." if is_en else "✅ Thuật toán không phát hiện điểm đột biến hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
 
-        # Báo cáo phân tích chuyên sâu từ AI với Priority Tagging
-        insights = sanitize_insight_markdown(result.get("insights", ""))
+        # Báo cáo phân tích chuyên sâu từ AI với Priority Tagging dạng 3 Cards
+        insights = result.get("insights", "")
         if insights:
-            st.markdown("---")
-            st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
-            st.markdown(insights)
+            render_insight_cards(insights, is_en=is_en)
         else:
             btn_insight_text = "🔍 Generate Executive Insights & Priority Action Plan" if is_en else "🔍 Yêu cầu AI phân tích Insight & Đề xuất hành động"
             if st.button(btn_insight_text, key=f"gen_insight_{turn_id}"):
@@ -485,9 +533,7 @@ def render_result(result: dict, turn_id: str):
                     if generated:
                         clean_gen = sanitize_insight_markdown(generated)
                         result["insights"] = clean_gen
-                        st.markdown("---")
-                        st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
-                        st.markdown(clean_gen)
+                        render_insight_cards(clean_gen, is_en=is_en)
 
     with tab3:
         caption_forecast = (

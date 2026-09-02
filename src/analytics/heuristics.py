@@ -343,10 +343,10 @@ def sanitize_insight_markdown(text: str) -> str:
     for _ in range(4):
         text = re.sub(r"(\d{1,3}),\s+(\d{3})", r"\g<1>,\g<2>", text)
 
-    # 0.1 Chuẩn hóa tiêu đề 2.1, 2.2, 2.3 thành ### trước khi xử lý
-    text = re.sub(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?(Phát hiện Bất thường.*)", r"### 2.1. 🚨 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
-    text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
-    text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
+    # 0.1 Chuẩn hóa tiêu đề 2.1, 2.2, 2.3 thành ### trước khi xử lý (chấp nhận cả bullet •, -, *, số thứ tự 1., 2., 3.)
+    text = re.sub(r"^[•\-\*#\s]*(?:1|2\.1)?[\.\)]?\s*(?:🚨\s*)?(Phát hiện Bất thường.*)", r"### 2.1. 🚨 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^[•\-\*#\s]*(?:2|2\.2)?[\.\)]?\s*(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"^[•\-\*#\s]*(?:3|2\.3)?[\.\)]?\s*(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
 
     # 1. Thay thế ký tự bullet lạ tiếng Trung 。・ thành ký hiệu thụt lề chuẩn
     text = re.sub(r"^[。・]\s*", "   - ", text, flags=re.MULTILINE)
@@ -397,6 +397,7 @@ def sanitize_insight_markdown(text: str) -> str:
         lines.append(curr)
         i += 1
     cleaned_lines = []
+    skip_example_block = False
 
     for line in lines:
         l = line.strip()
@@ -405,11 +406,21 @@ def sanitize_insight_markdown(text: str) -> str:
 
         # Giữ nguyên các tiêu đề Markdown lớn
         if l.startswith("#"):
+            skip_example_block = False
             cleaned_lines.append(l)
+            continue
+
+        # Nếu đang trong khối ví dụ mẫu của AI chép lại -> bỏ qua
+        if skip_example_block:
             continue
 
         # Bỏ dòng rác chỉ chứa bullet, icon hoặc đường kẻ phân cách bảng (+---+, |)
         if re.fullmatch(r"[•\-\*🔴🟡🟢\s\.\:\+\|_=]+", l):
+            continue
+
+        # Bỏ qua các dòng ví dụ mẫu bị AI sao chép: Ví dụ chuẩn:, Ví dụ:... và bỏ toàn bộ các dòng ví dụ theo sau
+        if re.search(r"^[•\-\*#\s]*(?:ví dụ chuẩn|ví dụ|example)[:\s]*", l, re.IGNORECASE):
+            skip_example_block = True
             continue
 
         # A. Sửa lỗi dính từ tiếng Anh/Tên riêng với các từ nối tiếng Việt: Juciesđể -> Jucies để, Delishvà -> Delish và
@@ -617,3 +628,44 @@ def sanitize_followup_question(q: str) -> str:
     q = re.sub(r"(để|và|với|chiếm|trong|của|cho|tại|theo|đạt|có|so)([a-zA-Z]{3,})", r"\g<1> \g<2>", q)
     q = re.sub(r"\s+", " ", q).strip()
     return q
+
+
+def split_insight_sections(markdown_text: str) -> dict[str, str]:
+    """Bóc tách nội dung insight thành 3 phần riêng biệt để hiển thị dạng 3 Card UI chuyên nghiệp."""
+    if not markdown_text:
+        return {"anomaly": "", "hypothesis": "", "action_plan": ""}
+
+    cleaned = sanitize_insight_markdown(markdown_text)
+
+    # Tìm vị trí các header
+    m21 = re.search(r"### 2\.1\.\s*🚨[^\n]*\n?", cleaned)
+    m22 = re.search(r"### 2\.2\.\s*🔍[^\n]*\n?", cleaned)
+    m23 = re.search(r"### 2\.3\.\s*🎯[^\n]*\n?", cleaned)
+
+    idx21 = m21.start() if m21 else -1
+    idx22 = m22.start() if m22 else -1
+    idx23 = m23.start() if m23 else -1
+
+    part_21 = ""
+    part_22 = ""
+    part_23 = ""
+
+    if idx21 != -1:
+        end21 = idx22 if idx22 != -1 else (idx23 if idx23 != -1 else len(cleaned))
+        part_21 = cleaned[m21.end():end21].strip()
+
+    if idx22 != -1:
+        end22 = idx23 if idx23 != -1 else len(cleaned)
+        part_22 = cleaned[m22.end():end22].strip()
+
+    if idx23 != -1:
+        part_23 = cleaned[m23.end():].strip()
+
+    if not part_21 and not part_22 and not part_23:
+        part_21 = cleaned
+
+    return {
+        "anomaly": part_21,
+        "hypothesis": part_22,
+        "action_plan": part_23,
+    }
