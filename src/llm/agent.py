@@ -501,6 +501,21 @@ def run_agent(
                 except Exception:
                     pass
 
+            # Bắt lỗi 1054 / Unknown column để tự động chỉ ra tên cột chuẩn xác
+            if "1054" in lowered_err or "unknown column" in lowered_err or "no such column" in lowered_err:
+                col_m = re.search(r"unknown column '([^']+)'", lowered_err)
+                bad_col = col_m.group(1) if col_m else "tên cột"
+                augmented_error += (
+                    f"\n\nLƯU Ý CỘT KHÔNG TỒN TẠI: Cột '{bad_col}' không tồn tại trong CSDL! "
+                    f"Nếu bạn đang truy vấn người bán/nhân sự (bảng 'people'): Tên nhân viên là cột 'Salesperson' (TUYỆT ĐỐI KHÔNG DÙNG 'Name' hay 'Employee'). "
+                    f"Nếu bạn đang truy vấn sản phẩm (bảng 'products'): Tên sản phẩm là cột 'Product'. "
+                    f"Hãy xem kỹ lại danh sách cột trong Schema ở trên và sửa lại câu SQL bằng đúng tên cột có thật!"
+                    if lang != "en" else
+                    f"\n\nCOLUMN ERROR: Column '{bad_col}' does not exist! "
+                    f"For employees/people table: The column is 'Salesperson' (NOT 'Name'). "
+                    f"For products table: The column is 'Product'. Please use the exact column names from the Schema above!"
+                )
+
             fix_prompt = build_fix_prompt(
                 schema_context, dialect, user_query, sql_query, augmented_error, lang=lang
             )

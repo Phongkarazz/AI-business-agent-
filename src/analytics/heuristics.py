@@ -332,7 +332,11 @@ def sanitize_insight_markdown(text: str) -> str:
     if not text:
         return ""
 
-    # 0. Chuẩn hóa tiêu đề 2.1, 2.2, 2.3 thành ### trước khi xử lý
+    # 0. Sửa lỗi số tiền có khoảng trắng thừa sau dấu phẩy: 1, 837, 388.00 -> 1,837,388.00
+    for _ in range(4):
+        text = re.sub(r"(\d{1,3}),\s+(\d{3})", r"\g<1>,\g<2>", text)
+
+    # 0.1 Chuẩn hóa tiêu đề 2.1, 2.2, 2.3 thành ### trước khi xử lý
     text = re.sub(r"^(?:#+\s*)?(?:1\.?\s*|2\.1\.?\s*)?(?:🚨\s*)?(Phát hiện Bất thường.*)", r"### 2.1. 🚨 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
     text = re.sub(r"^(?:#+\s*)?(?:2\.?\s*|2\.2\.?\s*)?(?:🔍\s*)?(Giả thuyết & Nguyên nhân.*)", r"### 2.2. 🔍 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
     text = re.sub(r"^(?:#+\s*)?(?:3\.?\s*|2\.3\.?\s*)?(?:🎯\s*)?(Đề xuất Hành động.*)", r"### 2.3. 🎯 \g<1>", text, flags=re.IGNORECASE | re.MULTILINE)
@@ -397,8 +401,8 @@ def sanitize_insight_markdown(text: str) -> str:
             cleaned_lines.append(l)
             continue
 
-        # Bỏ dòng rác chỉ chứa bullet hoặc icon đơn độc
-        if re.fullmatch(r"[•\-\*🔴🟡🟢\s\.\:]+", l):
+        # Bỏ dòng rác chỉ chứa bullet, icon hoặc đường kẻ phân cách bảng (+---+, |)
+        if re.fullmatch(r"[•\-\*🔴🟡🟢\s\.\:\+\|_=]+", l):
             continue
 
         # A. Sửa lỗi dính từ tiếng Anh/Tên riêng với các từ nối tiếng Việt: Juciesđể -> Jucies để, Delishvà -> Delish và
@@ -441,6 +445,46 @@ def sanitize_insight_markdown(text: str) -> str:
             l = l[:kpi_match.start()].strip()
             if not l.endswith("."):
                 l += "."
+
+        # Bỏ qua các tiêu đề phụ thừa thãi không có nội dung: Xu hướng Chính, Giả thuyết:, Ghi Chép Nguyên Nhân...
+        l_clean = l.lower().strip(":-•* ")
+        if l_clean in [
+            "xu hướng chính", "giả thuyết", "ghi chép nguyên nhân rất đáng phán hướng",
+            "ghi chép nguyên nhân", "kết quả kinh doanh", "nguyên nhân tiềm năng", "nguyên nhân"
+        ]:
+            continue
+
+        # Bóc tách và chuyển đổi các dòng bảng ASCII méo mó (- | Dự Án | Tiêu Định | Thời Gian |)
+        if "|" in l:
+            # Bỏ qua dòng ranh giới bảng: +----+ hoặc |
+            if re.search(r"^[\|\+\-\s=]+$", l):
+                continue
+            cells = [c.strip() for c in l.split("|") if c.strip() and not set(c.strip()).issubset({'-', '+', '=', ' '})]
+            # Bỏ qua dòng tiêu đề cột: | Dự Án | Tiêu Định | Thời Gian |
+            if any(h in "".join(cells).lower() for h in ["dự án", "tiêu định", "thời gian", "kế hoạch", "action", "timeframe"]):
+                continue
+            if len(cells) >= 2:
+                time_cell = cells[-1].lower() if len(cells) >= 3 else ""
+                action_cell = cells[0].lstrip("-•* ")
+                goal_cell = cells[1].lstrip("-•* ") if len(cells) >= 2 else ""
+
+                p_level = "Cao"
+                if any(k in time_cell for k in ["trung bình", "quý", "next quarter", "medium"]):
+                    p_level = "Trung bình"
+                elif any(k in time_cell for k in ["thấp", "long-term", "dài hạn", "low"]):
+                    p_level = "Thấp"
+                elif any(k in time_cell for k in ["ngay", "immediate", "cao", "gấp"]):
+                    p_level = "Cao"
+
+                detail_text = f"{action_cell} - {goal_cell}".strip(" -")
+                if p_level == "Cao":
+                    l = f"• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: {detail_text}"
+                elif p_level == "Trung bình":
+                    l = f"• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: {detail_text}"
+                else:
+                    l = f"• 🟢 **[Ưu tiên Thấp / Dài hạn]**: {detail_text}"
+            else:
+                continue
 
         # H. QUY TẮC: KHÔNG ĐƯỢC TỰ Ý IN ĐẬM Ở TRONG CÂU
         # Chuẩn hóa mục 2.3 với nhãn ưu tiên in đậm và biểu tượng màu

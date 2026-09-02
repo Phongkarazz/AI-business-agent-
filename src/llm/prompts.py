@@ -71,10 +71,17 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
 1. TUÂN THỦ SCHEMA TUYỆT ĐỐI (PURE SCHEMA GROUNDING):
    - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
    - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
-   - BẮT BUỘC KIỂM TRA KỸ TÊN CỘT TRONG SCHEMA KHI JOIN:
-     + Bảng nhân sự/người bán (people) liên kết với bảng bán hàng (sales) bằng cột `SPID` (people.SPID = sales.SPID). Bảng `people` KHÔNG CÓ cột PID!
-     + Bảng sản phẩm (products) liên kết với bảng bán hàng (sales) bằng cột `PID` (products.PID = sales.PID).
-     + TUYỆT ĐỐI KHÔNG JOIN bảng people trực tiếp với products bằng PID!
+   - BẮT BUỘC KIỂM TRA KỸ TÊN CỘT TRONG SCHEMA KHI TRUY VẤN & JOIN:
+     + Bảng nhân sự/người bán (people): Tên người bán là cột `Salesperson`, TUYỆT ĐỐI KHÔNG DÙNG `Name`, `Employee_Name` hay `Employee`! Mã nhân viên là `SPID`, nhóm là `Team`.
+     + Bảng sản phẩm (products): Tên sản phẩm là cột `Product`, TUYỆT ĐỐI KHÔNG DÙNG `ProductName`! Mã sản phẩm là `PID`.
+     + Bảng bán hàng (sales): Cột người bán là `SPID`, cột sản phẩm là `PID`, cột doanh số là `Amount`.
+     + Mối quan hệ liên kết:
+       * `people.SPID = sales.SPID`
+       * `products.PID = sales.PID`
+       * TUYỆT ĐỐI KHÔNG JOIN bảng people trực tiếp với products bằng PID!
+     + Để lọc nhân viên trong một nhóm cụ thể (ví dụ nhóm 'Yummies'):
+       Chỉ cần: `FROM people p JOIN sales s ON p.SPID = s.SPID WHERE p.Team = 'Yummies' GROUP BY p.Salesperson ORDER BY TotalSales DESC LIMIT 5`
+       TUYỆT ĐỐI KHÔNG tự JOIN bảng people 2 lần!
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
    - CSDL doanh nghiệp chứa dữ liệu các năm lịch sử (không phải realtime hôm nay).
    - Khi người dùng hỏi các mốc thời gian tương đối ('trong năm qua', 'gần đây', '12 tháng gần nhất', 'năm gần nhất'):
@@ -244,6 +251,14 @@ Each recommendation must specify an expected measurable KPI/metric).
 
 Style: Executive, concise, data-driven, professional tone."""
 
+    ratio_note = ""
+    if stats.get('count', 0) == 1:
+        ratio_note = """
+LƯU Ý KHI KẾT QUẢ TRẢ VỀ 1 BẢN GHI (TỔNG HỢP / TỶ LỆ PHẦN TRĂM):
+- Nếu kết quả chỉ có 1 dòng hoặc 1 con số tỷ lệ phần trăm: ĐÂY CHÍNH LÀ ĐÁP ÁN CHÍNH XÁC của câu hỏi.
+- TUYỆT ĐỐI CẤM TỪ CHỐI BÁO CÁO! TUYỆT ĐỐI KHÔNG NÓI "không có dữ liệu cụ thể"!
+- BẮT BUỘC phân tích sâu ý nghĩa kinh doanh của con số này bám sát vào câu hỏi người dùng."""
+
     return f"""Bạn là Giám đốc Phân tích Dữ liệu Kinh doanh (Chief BI & Analytics Officer).
 
 Câu hỏi phân tích của người dùng: "{user_query}"
@@ -260,14 +275,7 @@ Các điểm bất thường đã được thuật toán thống kê phát hiệ
 - Loại bất thường: {types_text}
 - Chi tiết phát hiện:
 {findings_text}
-
-LƯU Ý CỰC KỲ QUAN TRỌNG KHI KẾT QUẢ TRẢ VỀ 1 BẢN GHI (TỔNG / TỶ LỆ PHẦN TRĂM):
-- Nếu kết quả chỉ có 1 dòng hoặc 1 con số tỷ lệ phần trăm (ví dụ: Percentage: 4.62%): ĐÂY CHÍNH LÀ ĐÁP ÁN CHÍNH XÁC của câu hỏi.
-- TUYỆT ĐỐI CẤM TỪ CHỐI BÁO CÁO! TUYỆT ĐỐI KHÔNG NÓI "không có dữ liệu cụ thể", "yêu cầu phức tạp" hay "cần cung cấp thêm dữ liệu"!
-- BẮT BUỘC phân tích sâu ý nghĩa kinh doanh của con số này:
-  + Nêu rõ con số cụ thể trong phân tích (ví dụ: sản phẩm Raspberry Choco đóng góp 4.62% vào tổng doanh thu năm 2021).
-  + Đánh giá tỷ trọng 4.62% là khiêm tốn so với 95.38% phần còn lại của doanh nghiệp.
-  + Đưa ra giả thuyết kinh doanh sát thực tế (sản phẩm ngách, mới ra mắt, hoặc chưa được đầu tư phân phối) và đề xuất chiến lược hành động rõ ràng.
+{ratio_note}
 
 YÊU CẦU:
 Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và mang tính điều hành thực chiến cao (định dạng Markdown):
@@ -283,10 +291,10 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ma
 - 🔴 **[Ưu tiên Cao - Thực hiện Ngay / Immediate]**: Hành động khắc phục sự cố hoặc nắm bắt cơ hội cấp bách.
 - 🟡 **[Ưu tiên Trung bình - Quý tiếp theo / Next Quarter]**: Chiến lược tối ưu hóa hoạt động trung hạn.
 - 🟢 **[Ưu tiên Thấp / Dài hạn - Long-term]**: Định hướng chiến lược bền vững dài hạn.
-MỖI HÀNH ĐỘNG BẮT BUỘC VIẾT TRÊN 1 DÒNG DUY NHẤT (TUYỆT ĐỐI KHÔNG tách thành 2 dòng tiêu đề và mô tả riêng biệt, TUYỆT ĐỐI KHÔNG đánh số thứ tự 1. 2. sau nhãn ưu tiên, TUYỆT ĐỐI KHÔNG dùng hai dấu hai chấm : :).
+TUYỆT ĐỐI KHÔNG DÙNG BẢNG (TUYỆT ĐỐI KHÔNG dùng dấu gạch đứng |, không dùng dấu +---+). BẮT BUỘC chỉ viết dưới dạng danh sách gạch đầu dòng bullet như trên! MỖI HÀNH ĐỘNG BẮT BUỘC VIẾT TRÊN 1 DÒNG DUY NHẤT.
 Ví dụ chuẩn:
-• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Rà soát lại mức lương nhân viên để đảm bảo tính công bằng nội bộ. Mục tiêu đo lường: Hoàn thành rà soát trong tuần tới.
-• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Đánh giá hiệu suất làm việc của nhóm nhân sự nhận lương cao. Mục tiêu đo lường: Tăng 15% hiệu suất đóng góp.)
+• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Tối ưu hóa quy trình bán hàng và chính sách hoa hồng. Mục tiêu đo lường: Tăng 10% doanh số tháng tới.
+• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Tổ chức đào tạo nâng cao kỹ năng cho đội ngũ kinh doanh. Mục tiêu đo lường: Hoàn thành đào tạo trong Quý 2.)
 
 QUY TẮC ĐỊNH DẠNG VĂN BẢN (BẮT BUỘC):
 - MỖI Ý PHÂN TÍCH BẮT BUỘC NẰM TRÊN MỘT DÒNG RIÊNG BIỆT (bắt đầu bằng gạch đầu dòng `• `). TUYỆT ĐỐI KHÔNG VIẾT CÁC Ý NỐI LIỀN NHAU TRÊN CÙNG 1 ĐOẠN VĂN!
