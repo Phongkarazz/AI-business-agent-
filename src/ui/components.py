@@ -409,14 +409,20 @@ def render_result(result: dict, turn_id: str):
     tab1, tab2, tab3 = st.tabs([tab_chart_label, tab_insight_label, tab_forecast_label])
 
     with tab1:
-        chart_options = ["Automatic", "Bar", "Line", "Pie", "Area", "Scatter"] if is_en else ["Tự động", "Bar (Cột)", "Line (Đường)", "Pie (Tròn)", "Area (Miền)", "Scatter (Phân tán)"]
+        chart_options = (
+            ["Automatic", "Bar (Vertical)", "Bar (Horizontal Ranking)", "Line", "Pie", "Area", "Scatter"]
+            if is_en else
+            ["Tự động", "Bar (Cột đứng)", "Bar (Cột ngang xếp hạng)", "Line (Đường)", "Pie (Tròn)", "Area (Miền)", "Scatter (Phân tán)"]
+        )
         chart_override_label = "Chart Type" if is_en else "Loại biểu đồ"
         chart_override = st.selectbox(
             chart_override_label,
             chart_options,
             key=f"charttype_{turn_id}"
         )
-        if "Bar" in chart_override:
+        if "ngang" in chart_override.lower() or "horizontal" in chart_override.lower():
+            norm_override = "Bar Ngang"
+        elif "Bar" in chart_override:
             norm_override = "Bar"
         elif "Line" in chart_override:
             norm_override = "Line"

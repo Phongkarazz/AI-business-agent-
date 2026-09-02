@@ -295,13 +295,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
 
                     color_col = None
-                    candidate_color_cols = [c for c in label_cols if c not in consumed_cols and c in plot_df.columns]
+                    candidate_color_cols = [
+                        c for c in label_cols
+                        if c not in consumed_cols and c in plot_df.columns and not is_id_like(c)
+                    ]
                     if candidate_color_cols:
                         cand = candidate_color_cols[0]
                         if plot_df[cand].nunique(dropna=True) <= 20:
                             color_col = cand
 
-                    tick_angle = 0 if len(plot_df) <= 10 else -45
+                    # Tự động đo độ dài tên lớn nhất để quyết định góc xoay nghiêng chống đè chữ
+                    max_label_len = max((len(str(v)) for v in plot_df[label_name]), default=0)
+                    tick_angle = -35 if (max_label_len > 8 or len(plot_df) > 5) else 0
+
                     fig = px.bar(
                         plot_df, x=label_name, y=measure_cols[0],
                         color=color_col,
@@ -309,14 +315,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         category_orders={label_name: category_order},
                         template="plotly_white"
                     )
-                    fig.update_traces(
-                        texttemplate='%{y:,.2f}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else '%{y:,.0f}',
-                        textposition='outside',
-                        width=0.35 if len(plot_df) <= 2 else None
-                    )
+                    trace_kwargs = {
+                        "texttemplate": '%{y:,.2f}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else '%{y:,.0f}',
+                        "textposition": 'outside',
+                    }
+                    if not color_col:
+                        trace_kwargs["marker_color"] = "#1F4E78"
+                    if len(plot_df) <= 2:
+                        trace_kwargs["width"] = 0.35
+
+                    fig.update_traces(**trace_kwargs)
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
-                        margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
+                        margin=dict(l=20, r=20, t=50, b=90 if tick_angle != 0 else 50)
                     )
             elif len(df) == 1 and len(measure_cols) == 1:
                 val = df[measure_cols[0]].iloc[0]
@@ -374,6 +385,46 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                 )
             else:
                 st.info("Biểu đồ tròn cần ít nhất một cột phân loại để chia lát cắt.")
+                return None
+
+        elif chosen in ("Bar Ngang", "Bar Cột Ngang", "Bar Ngang (Xếp hạng)", "Horizontal Bar") and measure_cols:
+            if label_cols:
+                label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
+                if label_name is None:
+                    st.info("Không tìm thấy cột phù hợp để làm nhãn.")
+                    return None
+
+                plot_df = df.copy()
+                plot_df[label_name] = label_series.values
+
+                if len(plot_df) > 30:
+                    plot_df = plot_df.head(30)
+
+                # Sắp xếp tăng dần để khi vẽ từ dưới lên thì người cao nhất nằm trên cùng
+                plot_df = plot_df.sort_values(measure_cols[0], ascending=True)
+
+                fig = px.bar(
+                    plot_df,
+                    x=measure_cols[0],
+                    y=label_name,
+                    orientation='h',
+                    title=f"Xếp hạng {measure_cols[0]} theo {label_name}",
+                    template="plotly_white"
+                )
+                fig.update_traces(
+                    marker_color="#1F4E78",
+                    texttemplate='%{x:,.2f}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else '%{x:,.0f}',
+                    textposition='outside',
+                    width=0.45 if len(plot_df) <= 3 else None
+                )
+                fig.update_layout(
+                    yaxis=dict(type="category", automargin=True),
+                    xaxis_title=measure_cols[0],
+                    yaxis_title="",
+                    margin=dict(l=20, r=40, t=50, b=50)
+                )
+            else:
+                st.info("Không tìm thấy cột phù hợp để làm nhãn biểu đồ.")
                 return None
 
         elif chosen == "Scatter" and len(measure_cols) >= 2:
