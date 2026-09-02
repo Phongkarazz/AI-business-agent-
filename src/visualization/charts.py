@@ -496,7 +496,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             st.info("Không thể vẽ biểu đồ với các cột hiện có.")
             return None
 
-        st.plotly_chart(fig, width='stretch', key=f"chart_{turn_id}")
+        st.plotly_chart(
+            fig,
+            width='stretch',
+            key=f"chart_{turn_id}",
+            config={"toImageButtonOptions": {"format": "png", "filename": f"chart_{turn_id}", "scale": 2}}
+        )
         return fig
 
     except Exception as e:

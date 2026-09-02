@@ -127,13 +127,10 @@ def export_to_excel(df: pd.DataFrame, sheet_name: str = "Bao_Cao") -> bytes:
 # 2. Xuất Ảnh Biểu Đồ PNG Độ Nét Cao
 # ---------------------------------------------------------
 def export_to_png(fig) -> bytes | None:
-    """Xuất biểu đồ Plotly sang ảnh PNG độ phân giải cao (2x Resolution) để chèn PowerPoint."""
-    if fig is None:
-        return None
-    try:
-        return fig.to_image(format="png", width=1000, height=550, scale=2)
-    except Exception:
-        return None
+    """Xuất biểu đồ Plotly sang ảnh PNG.
+    Đã tắt việc gọi Chrome headless ngầm để chống treo server (người dùng tải trực tiếp qua nút Camera 📷 trên biểu đồ).
+    """
+    return None
 
 
 # ---------------------------------------------------------

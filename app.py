@@ -244,16 +244,14 @@ else:
         st.session_state["pending_prompt"] = None
         st.session_state["focused_turn_idx"] = None
 
-        st.chat_message("user").write(prompt_to_run)
-        with st.chat_message("assistant"):
-            cache_key = prompt_to_run.strip().lower()
-            cached = st.session_state.get("query_cache", {}).get(cache_key)
+        cache_key = prompt_to_run.strip().lower()
+        cached = st.session_state.get("query_cache", {}).get(cache_key)
 
-            if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
-                st.caption("♻️ Dùng lại kết quả đã hỏi trước đó trong phiên này (tiết kiệm quota API).")
-                result = cached
-                render_result(result, turn_id=f"new{len(st.session_state['history'])}")
-            else:
+        if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
+            result = cached
+        else:
+            st.chat_message("user").write(prompt_to_run)
+            with st.chat_message("assistant"):
                 status_placeholder = st.empty()
                 def update_status(text: str):
                     status_placeholder.markdown(f"🟡 **{text}**")
@@ -279,7 +277,6 @@ else:
                     status_callback=update_status
                 )
                 status_placeholder.empty()
-                render_result(result, turn_id=f"new{len(st.session_state['history'])}")
                 if not result.get("error"):
                     st.session_state.setdefault("query_cache", {})[cache_key] = result
 

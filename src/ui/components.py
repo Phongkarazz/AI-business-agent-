@@ -437,20 +437,8 @@ def render_result(result: dict, turn_id: str):
 
         chart_fig = render_smart_chart(df, norm_override, turn_id)
 
-        # Nút Tải Ảnh Biểu Đồ PNG Độ Nét Cao
         if chart_fig:
-            png_bytes = export_to_png(chart_fig)
-            if png_bytes:
-                c_png, _ = st.columns([3, 7])
-                with c_png:
-                    st.download_button(
-                        "📸 Tải Ảnh Biểu đồ PNG (HD)" if not is_en else "📸 Download Chart PNG (HD)",
-                        png_bytes,
-                        file_name=f"chart_{turn_id}.png",
-                        mime="image/png",
-                        key=f"png_{turn_id}",
-                        use_container_width=True
-                    )
+            st.caption("💡 **Mẹo:** Rê chuột vào góc trên bên phải biểu đồ và bấm biểu tượng máy ảnh 📷 để tải ngay ảnh PNG độ nét cao (HD)." if not is_en else "💡 **Tip:** Hover over the top-right of the chart and click the camera icon 📷 to download HD PNG image instantly.")
 
         if has_anomaly:
             n_findings = len(anomalies_info.get("findings", []))
