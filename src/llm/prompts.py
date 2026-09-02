@@ -268,7 +268,10 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và ma
 - 🔴 **[Ưu tiên Cao - Thực hiện Ngay / Immediate]**: Hành động khắc phục sự cố hoặc nắm bắt cơ hội cấp bách.
 - 🟡 **[Ưu tiên Trung bình - Quý tiếp theo / Next Quarter]**: Chiến lược tối ưu hóa hoạt động trung hạn.
 - 🟢 **[Ưu tiên Thấp / Dài hạn - Long-term]**: Định hướng chiến lược bền vững dài hạn.
-Mỗi hành động phải nêu rõ chỉ số KPI / kết quả đo lường kỳ vọng).
+MỖI HÀNH ĐỘNG BẮT BUỘC VIẾT TRÊN 1 DÒNG DUY NHẤT (TUYỆT ĐỐI KHÔNG tách thành 2 dòng tiêu đề và mô tả riêng biệt, TUYỆT ĐỐI KHÔNG đánh số thứ tự 1. 2. sau nhãn ưu tiên, TUYỆT ĐỐI KHÔNG dùng hai dấu hai chấm : :).
+Ví dụ chuẩn:
+• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Rà soát lại mức lương nhân viên để đảm bảo tính công bằng nội bộ. Mục tiêu đo lường: Hoàn thành rà soát trong tuần tới.
+• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Đánh giá hiệu suất làm việc của nhóm nhân sự nhận lương cao. Mục tiêu đo lường: Tăng 15% hiệu suất đóng góp.)
 
 QUY TẮC ĐỊNH DẠNG VĂN BẢN (BẮT BUỘC):
 - MỖI Ý PHÂN TÍCH BẮT BUỘC NẰM TRÊN MỘT DÒNG RIÊNG BIỆT (bắt đầu bằng gạch đầu dòng `• `). TUYỆT ĐỐI KHÔNG VIẾT CÁC Ý NỐI LIỀN NHAU TRÊN CÙNG 1 ĐOẠN VĂN!

@@ -486,12 +486,16 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                     clean_item = re.sub(r"^#+\s*", "", item).strip()
                     clean_item = re.sub(r"\]\s*:\s*:\s*", "]: ", clean_item)
                     clean_item = re.sub(r"\s*:\s*:\s*", ": ", clean_item)
+                    clean_item = re.sub(r":\s*:\s*", ": ", clean_item)
 
                     if any(p in clean_item for p in ["[Ưu tiên", "[High Priority", "[Medium Priority", "[Low Priority"]):
                         tag_match = re.match(r"^(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority)[^\]]*\])\s*:?\s*(.*)$", clean_item, flags=re.IGNORECASE)
                         if tag_match:
                             tag_text = tag_match.group(1).strip()
                             body_text = tag_match.group(2).strip()
+                            body_text = re.sub(r"^[:\s\-\•\*\.]+", "", body_text).strip()
+                            body_text = re.sub(r"^\d+[\.\)]\s*", "", body_text).strip()
+                            body_text = re.sub(r"^[:\s\-\•\*\.]+", "", body_text).strip()
                         else:
                             tag_text = clean_item
                             body_text = ""
@@ -508,9 +512,9 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                         else:
                             story.append(Paragraph(f"• <font color='{tag_color}'><b>{tag_text}</b></font>", bullet_style))
 
-                    elif clean_item.lower().startswith("kpi") or "kpi :" in clean_item.lower() or "kpi:" in clean_item.lower():
-                        clean_kpi = re.sub(r"^kpi\s*:\s*", "", clean_item, flags=re.IGNORECASE).strip()
-                        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;• <i><b>KPI đo lường:</b> {clean_kpi}</i>", kpi_style))
+                    elif any(k in clean_item.lower() for k in ["kpi", "mục tiêu đo lường", "chỉ số đo lường"]):
+                        clean_kpi = re.sub(r"^(?:kpi|mục tiêu đo lường|chỉ số đo lường|kpi đo lường)\s*:\s*", "", clean_item, flags=re.IGNORECASE).strip()
+                        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;• <i><b>Mục tiêu đo lường:</b> {clean_kpi}</i>", kpi_style))
                     else:
                         story.append(Paragraph(f"• {clean_item}", bullet_style))
             else:

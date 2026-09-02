@@ -345,15 +345,46 @@ def sanitize_insight_markdown(text: str) -> str:
     text = re.sub(r"#+\s*(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\g<1>", text)
     text = re.sub(r"\]\s*:\s*:\s*", "]: ", text)
     text = re.sub(r"\s*:\s*:\s*", ": ", text)
+    text = re.sub(r":\s*:\s*", ": ", text)
 
     # 3. Sửa lỗi chính tả phổ biến
     text = text.replace("đư ợc", "được").replace("đư ọc", "được")
 
     # 4. Tự động tách dòng cho các ý phân tích bị dính liền trên cùng 1 đoạn văn
     text = re.sub(r"(?<=[^\n])\s+•\s*", "\n\n• ", text)
-    text = re.sub(r"(?<=[^\n•\-\*\s])\s+(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\n\n• \g<1>", text)
+    text = re.sub(r"(?<=[^\n•\-\*\s🔴🟡🟢])\s+(\[(?:Ưu tiên|High Priority|Medium Priority|Low Priority))", r"\n\n• \g<1>", text)
 
-    lines = text.splitlines()
+    raw_lines = [line.strip() for line in text.splitlines() if line.strip()]
+    lines = []
+    i = 0
+    while i < len(raw_lines):
+        curr = raw_lines[i]
+        if i + 1 < len(raw_lines):
+            next_l = raw_lines[i + 1]
+            p_curr = next((p for p in ['Ưu tiên Cao', 'Ưu tiên Trung bình', 'Ưu tiên Thấp', 'High Priority', 'Medium Priority', 'Low Priority'] if p in curr), None)
+            p_next = next((p for p in ['Ưu tiên Cao', 'Ưu tiên Trung bình', 'Ưu tiên Thấp', 'High Priority', 'Medium Priority', 'Low Priority'] if p in next_l), None)
+
+            # Nếu 2 dòng liên tiếp cùng 1 mức ưu tiên và dòng 1 là tiêu đề ngắn
+            if p_curr and p_curr == p_next:
+                body_curr = re.sub(r"^.*\]\s*:?\s*:?\s*", "", curr).strip()
+                body_curr = re.sub(r"^\d+[\.\)]\s*", "", body_curr).strip()
+                body_curr = re.sub(r"^[:\s\-\•\*\.]+", "", body_curr).strip()
+                body_curr = re.sub(r"[:\s]+$", "", body_curr).strip()
+
+                body_next = re.sub(r"^.*\]\s*:?\s*:?\s*", "", next_l).strip()
+                body_next = re.sub(r"^\d+[\.\)]\s*", "", body_next).strip()
+                body_next = re.sub(r"^[:\s\-\•\*\.]+", "", body_next).strip()
+
+                tag_part = curr.split("]")[0] + "]"
+                if body_curr and body_next:
+                    curr = f"{tag_part}: {body_curr} - {body_next}"
+                else:
+                    curr = f"{tag_part}: {body_curr or body_next}"
+                i += 2
+                lines.append(curr)
+                continue
+        lines.append(curr)
+        i += 1
     cleaned_lines = []
 
     for line in lines:
@@ -400,7 +431,7 @@ def sanitize_insight_markdown(text: str) -> str:
 
         # G. Tách KPI nếu nằm trong câu hành động
         kpi_part = None
-        kpi_match = re.search(r"(?:,\s*)?(?:với\s+)?(KPI\s+(?:đo lường|kỳ vọng|đo lường kỳ vọng|dự kiến))\s*(?:là|:)\s*(.*)$", l, flags=re.IGNORECASE)
+        kpi_match = re.search(r"(?:,\s*)?(?:với\s+)?((?:KPI|Mục tiêu|Chỉ số)\s+(?:đo lường|kỳ vọng|đo lường kỳ vọng|dự kiến))\s*(?:là|:)\s*(.*)$", l, flags=re.IGNORECASE)
         if kpi_match and len(kpi_match.group(2).strip()) > 3:
             kpi_title = kpi_match.group(1).strip()
             kpi_desc = kpi_match.group(2).strip().rstrip(".").replace("**", "").replace("*", "")
@@ -429,6 +460,13 @@ def sanitize_insight_markdown(text: str) -> str:
                 body = re.sub(r"^[•\-\*]?\s*(?:[🔴🟡🟢]\s*)?", "", body).strip()
 
             body = body.replace("**", "").replace("*", "").strip()
+            # Dọn sạch triệt để mọi dấu hai chấm kép, số thứ tự và dấu gạch thừa
+            body = re.sub(r"^[:\s\-\•\*\.]+", "", body).strip()
+            body = re.sub(r"^\d+[\.\)]\s*", "", body).strip()
+            body = re.sub(r"^[:\s\-\•\*\.]+", "", body).strip()
+            body = re.sub(r"\s*:\s*:\s*", ": ", body)
+            body = re.sub(r":\s*:\s*", ": ", body)
+
             # Nếu dòng chỉ là tiêu đề không có nội dung hành động -> bỏ qua dòng rác này
             if len(body) < 5 or body.lower() in ("[ưu tiên cao]", "[ưu tiên trung bình]", "[ưu tiên thấp]"):
                 continue
