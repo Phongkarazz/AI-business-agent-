@@ -77,6 +77,7 @@ PROVIDER_CONFIGS = {
     },
     "Ollama (Local AI Offline)": {
         "models": [
+            "qwen2.5-coder:1.5b",
             "qwen2.5-coder:7b",
             "qwen2.5-coder:14b",
             "deepseek-r1:8b",
