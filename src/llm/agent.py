@@ -49,12 +49,41 @@ def check_parentheses_balance(sql: str) -> tuple[bool, str]:
     return True, ""
 
 
+def clean_sql_query(sql: str) -> str:
+    """Loại bỏ hoàn toàn markdown backtick, code blocks, tiền tố thừa và khoảng trắng trước sau SQL."""
+    if not sql:
+        return ""
+    s = sql.strip()
+    # 1. Bóc code block ```sql ... ```
+    m = re.search(r"```(?:sql|json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
+    if m:
+        s = m.group(1).strip()
+
+    # 2. Xóa các tiền tố markdown thừa (dấu backtick đơn `, ```)
+    s = re.sub(r"^```(?:sql|json)?\s*", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*```$", "", s)
+    s = s.strip().strip("`").strip()
+
+    # 3. Tìm vị trí SELECT hoặc WITH đầu tiên nếu có lời dẫn phía trước
+    match_kw = re.search(r"\b(SELECT|WITH)\b", s, re.IGNORECASE)
+    if match_kw and match_kw.start() > 0:
+        prefix = s[:match_kw.start()].strip()
+        if not any(k in prefix.lower() for k in FORBIDDEN_KEYWORDS):
+            s = s[match_kw.start():].strip()
+
+    return s.strip().strip("`").rstrip(";").strip()
+
+
 def is_safe_select(sql: str) -> bool:
     """Kiểm tra câu lệnh SQL có phải là SELECT/WITH hợp lệ và an toàn không."""
     if not sql:
         return False
 
-    cleaned = strip_comments_and_literals(sql.strip())
+    cleaned_sql = clean_sql_query(sql)
+    if not cleaned_sql:
+        return False
+
+    cleaned = strip_comments_and_literals(cleaned_sql)
     raw_cleaned = cleaned.strip().rstrip(";")
     lowered = raw_cleaned.lower()
 
@@ -308,6 +337,8 @@ def run_agent(
 
     initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt)
+    if sql_query:
+        sql_query = clean_sql_query(sql_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -337,11 +368,11 @@ def run_agent(
 
             fix_prompt = build_fix_prompt(
                 schema_context, dialect, user_query, sql_query,
-                "Query must start with SELECT or WITH and contain no forbidden keywords.",
+                "Query must start with SELECT or WITH and contain no forbidden keywords. Do not use markdown backticks.",
                 lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
-            sql_query = fixed_sql or sql_query
+            sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
             continue
 
         # 2.1 Kiểm tra cân đối dấu ngoặc trước khi thực thi
@@ -387,7 +418,7 @@ def run_agent(
                     schema_context, dialect, user_query, sql_query, empty_fix_reason, lang=lang
                 )
                 fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
-                sql_query = fixed_sql or sql_query
+                sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
                 continue
 
             dup_warning = detect_duplicate_entity_warning(df)
@@ -441,7 +472,7 @@ def run_agent(
                 schema_context, dialect, user_query, sql_query, check.get("ly_do", ""), lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
-            sql_query = fixed_sql or sql_query
+            sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
 
         except Exception as e:
             error_msg = sanitize_error(str(e), db_pass)
@@ -474,6 +505,6 @@ def run_agent(
                 schema_context, dialect, user_query, sql_query, augmented_error, lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
-            sql_query = fixed_sql or sql_query
+            sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
 
     return result

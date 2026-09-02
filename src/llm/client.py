@@ -17,7 +17,7 @@ from src.config import DASHSCOPE_BASE_URL, OPENROUTER_BASE_URL, OLLAMA_BASE_URL
 
 
 def extract_clean_content(raw: str) -> str:
-    """Trích xuất nội dung sạch từ phản hồi của mô hình (bóc tách code block, loại bỏ comment mở đầu)."""
+    """Trích xuất nội dung sạch từ phản hồi của mô hình (bóc tách code block, loại bỏ backticks, lời thoại mở đầu)."""
     if not raw:
         return ""
 
@@ -28,13 +28,18 @@ def extract_clean_content(raw: str) -> str:
     else:
         extracted = raw.strip()
 
-    # 2. Loại bỏ các tiền tố giải thích hoặc comment mở đầu (#, --, /* */) trước câu lệnh chính
+    # 2. Bóc bỏ markdown backticks đơn/kép/ba bao quanh: `SELECT ...` hoặc ```sql SELECT ...
+    extracted = re.sub(r"^```(?:sql|json)?\s*", "", extracted, flags=re.IGNORECASE)
+    extracted = re.sub(r"\s*```$", "", extracted)
+    extracted = extracted.strip().strip("`").strip()
+
+    # 3. Loại bỏ các tiền tố giải thích hoặc comment mở đầu (#, --, /* */) trước câu lệnh chính
     extracted = re.sub(r"^\s*/\*.*?\*/\s*", "", extracted, flags=re.DOTALL)
     lines = extracted.splitlines()
     cleaned_lines = []
     found_sql_start = False
     for line in lines:
-        stripped_line = line.strip()
+        stripped_line = line.strip().strip("`")
         if not found_sql_start:
             if not stripped_line or stripped_line.startswith("#") or stripped_line.startswith("--") or stripped_line.startswith("//"):
                 continue
@@ -43,8 +48,16 @@ def extract_clean_content(raw: str) -> str:
             found_sql_start = True
         cleaned_lines.append(line)
 
-    extracted = "\n".join(cleaned_lines).strip()
-    return extracted
+    extracted = "\n".join(cleaned_lines).strip().strip("`").strip()
+
+    # 4. Tìm vị trí SELECT hoặc WITH đầu tiên nếu có lời dẫn tự nhiên
+    match_kw = re.search(r"\b(SELECT|WITH)\b", extracted, re.IGNORECASE)
+    if match_kw and match_kw.start() > 0:
+        prefix = extracted[:match_kw.start()].strip()
+        if not any(k in prefix.lower() for k in ["insert", "update", "delete", "drop", "alter", "create"]):
+            extracted = extracted[match_kw.start():].strip()
+
+    return extracted.strip().strip("`").strip()
 
 
 def normalize_model_for_openrouter(model_name: str) -> str:
