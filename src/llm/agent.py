@@ -281,7 +281,11 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
             parsed = json.loads(cleaned)
             if isinstance(parsed, list):
                 for q in parsed:
-                    q_str = sanitize_followup_question(str(q))
+                    if isinstance(q, dict):
+                        raw_val = q.get("question") or q.get("prompt") or q.get("query") or next(iter(q.values()), str(q))
+                    else:
+                        raw_val = str(q)
+                    q_str = sanitize_followup_question(raw_val)
                     # Loại bỏ các câu hỏi chứa đại từ mơ hồ "này", "đó", "these reps"
                     if q_str and not is_ambiguous_question(q_str):
                         ai_questions.append(q_str)

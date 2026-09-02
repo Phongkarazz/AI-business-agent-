@@ -97,7 +97,9 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
    - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG / BẢNG LỚN:
-     + Khi người dùng hỏi dạng Top N ('Top 10 nhân sự có doanh số cao nhất'): BẮT BUỘC dùng `ORDER BY TotalSales DESC LIMIT 10`.
+     + Khi người dùng hỏi dạng Top N / Xếp hạng doanh số / sản lượng ('Top 10 nhân sự có doanh số cao nhất'):
+       BẮT BUỘC dùng hàm tổng hợp `SUM(Amount) AS TotalSales`, `GROUP BY` theo tên nhân sự (ví dụ: `GROUP BY p.Salesperson, p.Team`) và `ORDER BY TotalSales DESC LIMIT 10`!
+       TUYỆT ĐỐI KHÔNG `SELECT Amount` rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một người nhiều lần!
      + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không ghi rõ số lượng cụ thể: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!

@@ -4,7 +4,7 @@ Column classification, language detection, starter prompts generator, and heuris
 
 import re
 import pandas as pd
-from src.config import ID_LIKE_REGEX, NAME_LIKE_REGEX, TIME_KEYWORDS
+from src.config import ID_LIKE_REGEX, NAME_LIKE_REGEX, TIME_KEYWORDS, INDIVIDUAL_ENTITY_REGEX
 
 VI_CHAR_REGEX = re.compile(r'[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]', re.IGNORECASE)
 EN_MARKERS = {
@@ -134,6 +134,13 @@ def pick_label_column(df: pd.DataFrame, label_cols: list) -> tuple:
         l_col = c_low_map["last_name"]
         full_name_series = df[f_col].astype(str) + " " + df[l_col].astype(str)
         return "Họ và Tên", full_name_series, [f_col, l_col]
+
+    # 0.1 Nếu có cột thuộc về thực thể cá nhân (Salesperson, Product, Employee, Customer...)
+    # BẮT BUỘC ưu tiên thực thể cá nhân này làm trục X thay vì cột nhóm phân loại (Team, Region, Category)
+    individual_candidates = [c for c in label_cols if INDIVIDUAL_ENTITY_REGEX.search(str(c))]
+    if individual_candidates:
+        chosen_ind = sorted(individual_candidates, key=lambda c: df[c].nunique(dropna=True), reverse=True)[0]
+        return chosen_ind, df[chosen_ind].astype(str), [chosen_ind]
 
     # 1. Tìm cột khớp pattern name-like
     best_name = get_best_name_column(df, exclude_cols=[])
@@ -585,6 +592,7 @@ def sanitize_insight_markdown(text: str) -> str:
 
 def sanitize_followup_question(q: str) -> str:
     """Làm sạch câu hỏi gợi ý phân tích tiếp nối:
+    - Bóc tách cấu trúc dict rác nếu AI trả về string dạng {'question': '...'}
     - Chuyển đổi ký tự tiếng Hàn/Trung lạ (như '각' -> 'từng')
     - Tách từ dính tiếng Việt và tiếng Anh (mụcBars -> mục Bars)
     - Tách từ tiếng Anh và từ nối tiếng Việt (Barsvà -> Bars và)
@@ -592,6 +600,16 @@ def sanitize_followup_question(q: str) -> str:
     if not q:
         return ""
     q = str(q).strip()
+
+    # Bóc tách nếu là chuỗi dict hoặc json string: {'question': '...'} hoặc {"question": "..."}
+    m_dict = re.match(r"^\{['\"](?:question|prompt|query)['\"]\s*:\s*['\"](.*)['\"]\}$", q, re.DOTALL)
+    if m_dict:
+        q = m_dict.group(1).strip()
+    else:
+        # Nếu chỉ có tiền tố/hậu tố {'question':
+        q = re.sub(r"^\{['\"](?:question|prompt|query)['\"]\s*:\s*['\"]?", "", q)
+        q = re.sub(r"['\"]?\}$", "", q).strip()
+
     q = q.replace("각", "từng")
     q = re.sub(r"[\u4e00-\u9fff\uac00-\ud7af]+", "", q)
     q = re.sub(r"([a-zà-ỹ])([A-Z])", r"\g<1> \g<2>", q)
