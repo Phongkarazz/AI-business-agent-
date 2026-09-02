@@ -17,7 +17,16 @@ def sanitize_error(msg: str, pw: str) -> str:
 
 
 def read_sql_capped(sql_query: str, engine, cap: int = MAX_ROWS_CAP, chunksize: int = 1000):
-    """Đọc dữ liệu theo từng chunk, dừng ngay khi đạt giới hạn cap để tránh tràn bộ nhớ."""
+    """Đọc dữ liệu an toàn, dừng ngay khi đạt giới hạn cap để tránh tràn bộ nhớ."""
+    lowered = sql_query.lower()
+    # Nếu câu lệnh đã có mệnh đề LIMIT, đọc trực tiếp để đạt tốc độ tối đa tức thì
+    if "limit" in lowered:
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql_query), conn)
+            if len(df) > cap:
+                return df.head(cap), True
+            return df, False
+
     chunks, total, truncated = [], 0, False
     with engine.connect() as conn:
         for chunk in pd.read_sql(text(sql_query), conn, chunksize=chunksize):

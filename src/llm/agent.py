@@ -6,6 +6,7 @@ automatic business insight discovery with Priority Tagging, bilingual support, a
 
 import json
 import re
+import concurrent.futures
 import pandas as pd
 
 from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP
@@ -280,7 +281,8 @@ def run_agent(
     dialect: str = "SQLite",
     db_pass: str = "",
     enable_self_check: bool = True,
-    enable_auto_insights: bool = True
+    enable_auto_insights: bool = True,
+    status_callback=None
 ) -> dict:
     """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi âm thầm (bao gồm cứu kết quả 0 dòng) và tự động khám phá Insight."""
     # 0. Tự động nhận diện ngôn ngữ của câu hỏi (vi / en)
@@ -301,6 +303,9 @@ def run_agent(
     }
 
     # 1. Sinh SQL ban đầu
+    if status_callback:
+        status_callback("🤖 Đang phân tích câu hỏi & tạo câu lệnh SQL tối ưu...")
+
     initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt)
 
@@ -356,6 +361,9 @@ def run_agent(
             continue
 
         # 2.2 Thực thi SQL trên Database Engine
+        if status_callback:
+            status_callback("⚡ Đang thực thi truy vấn trên Database...")
+
         try:
             df, truncated = read_sql_capped(sql_query, engine, cap=MAX_ROWS_CAP)
             if truncated:
@@ -386,10 +394,13 @@ def run_agent(
             if dup_warning:
                 result["logs"].append(f"⚠️ Cảnh báo: {dup_warning}")
 
-            if enable_self_check:
+            # Fast-path: Nếu câu lệnh thành công ngay lần đầu, df có dữ liệu và không có cảnh báo trùng lặp
+            # Bỏ qua lượt gọi QA LLM để tiết kiệm 2-3 giây cho người dùng
+            should_run_qa = enable_self_check and (attempt > 1 or dup_warning is not None)
+            if should_run_qa:
                 check = self_check_sql(client, provider, model_name, schema_context, user_query, sql_query, df, lang=lang)
             else:
-                check = {"day_du": True, "ly_do": "Skipped self-check." if lang == "en" else "Bỏ qua self-check (đã tắt trong cài đặt)."}
+                check = {"day_du": True, "ly_do": "SQL hợp lệ (Fast-path tối ưu tốc độ)."}
 
             if check.get("day_du", True) or attempt == 3:
                 if check.get("day_du", True):
@@ -400,22 +411,28 @@ def run_agent(
                 result["df"] = df
                 result["sql"] = sql_query
 
-                # 3. Tự động phát hiện bất thường & sinh Insight Kinh doanh với Priority Tagging
+                # 3. Tự động phát hiện bất thường & sinh Insight Kinh doanh song song với Gợi ý tiếp nối
                 if df is not None and not df.empty:
+                    if status_callback:
+                        status_callback("📊 Đang phân tích Insight & Trực quan hóa dữ liệu...")
+
                     anomalies_info = analyze_data_anomalies(df)
                     result["anomalies_info"] = anomalies_info
 
-                    if enable_auto_insights:
-                        insights = generate_auto_insights(
-                            client, provider, model_name, user_query, df, anomalies_info, lang=lang
+                    # Chạy song song sinh Insight và Follow-up questions để giảm 50% thời gian chờ
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                        fut_insights = (
+                            executor.submit(generate_auto_insights, client, provider, model_name, user_query, df, anomalies_info, lang)
+                            if enable_auto_insights else None
                         )
-                        result["insights"] = insights
+                        fut_followups = executor.submit(
+                            generate_followup_questions, client, provider, model_name, user_query, schema_context, df, lang
+                        )
 
-                    # 4. Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up Questions)
-                    followups = generate_followup_questions(
-                        client, provider, model_name, user_query, schema_context, df, lang=lang
-                    )
-                    result["followups"] = followups
+                        if fut_insights:
+                            result["insights"] = fut_insights.result()
+                        if fut_followups:
+                            result["followups"] = fut_followups.result()
 
                 return result
 

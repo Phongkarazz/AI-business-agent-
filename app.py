@@ -231,25 +231,31 @@ else:
                 result = cached
                 render_result(result, turn_id=f"new{len(st.session_state['history'])}")
             else:
-                with st.spinner("Đang truy vấn & phân tích..."):
-                    current_engine = st.session_state.get("engine")
-                    current_schema = st.session_state.get("schema_context", "")
-                    if current_engine and (not current_schema or not current_schema.strip()):
-                        current_schema = auto_extract_schema(current_engine)
-                        st.session_state["schema_context"] = current_schema
+                status_placeholder = st.empty()
+                def update_status(text: str):
+                    status_placeholder.markdown(f"🟡 **{text}**")
 
-                    result = run_agent(
-                        user_query=prompt_to_run,
-                        client=st.session_state.get("client"),
-                        provider=st.session_state.get("provider"),
-                        model_name=st.session_state.get("model_name"),
-                        engine=current_engine,
-                        schema_context=current_schema,
-                        dialect=st.session_state.get("db_dialect", "SQLite"),
-                        db_pass=st.session_state.get("_db_pass_for_sanitize", ""),
-                        enable_self_check=st.session_state.get("enable_self_check", True),
-                        enable_auto_insights=st.session_state.get("enable_auto_insights", True)
-                    )
+                update_status("Đang chuẩn bị truy vấn & phân tích...")
+                current_engine = st.session_state.get("engine")
+                current_schema = st.session_state.get("schema_context", "")
+                if current_engine and (not current_schema or not current_schema.strip()):
+                    current_schema = auto_extract_schema(current_engine)
+                    st.session_state["schema_context"] = current_schema
+
+                result = run_agent(
+                    user_query=prompt_to_run,
+                    client=st.session_state.get("client"),
+                    provider=st.session_state.get("provider"),
+                    model_name=st.session_state.get("model_name"),
+                    engine=current_engine,
+                    schema_context=current_schema,
+                    dialect=st.session_state.get("db_dialect", "SQLite"),
+                    db_pass=st.session_state.get("_db_pass_for_sanitize", ""),
+                    enable_self_check=st.session_state.get("enable_self_check", True),
+                    enable_auto_insights=st.session_state.get("enable_auto_insights", True),
+                    status_callback=update_status
+                )
+                status_placeholder.empty()
                 render_result(result, turn_id=f"new{len(st.session_state['history'])}")
                 if not result.get("error"):
                     st.session_state.setdefault("query_cache", {})[cache_key] = result
