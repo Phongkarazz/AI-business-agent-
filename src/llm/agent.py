@@ -12,7 +12,7 @@ import pandas as pd
 from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP
 from src.database.query_runner import read_sql_capped, sanitize_error
 from src.database.schema import get_table_names
-from src.analytics.heuristics import is_id_like, detect_query_language, sanitize_insight_markdown
+from src.analytics.heuristics import is_id_like, detect_query_language, sanitize_insight_markdown, sanitize_followup_question
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
 from .prompts import (
@@ -252,7 +252,7 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
             parsed = json.loads(cleaned)
             if isinstance(parsed, list):
                 for q in parsed:
-                    q_str = str(q).strip()
+                    q_str = sanitize_followup_question(str(q))
                     # Loại bỏ các câu hỏi chứa đại từ mơ hồ "này", "đó", "these reps"
                     if q_str and not is_ambiguous_question(q_str):
                         ai_questions.append(q_str)

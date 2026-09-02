@@ -537,3 +537,21 @@ def sanitize_insight_markdown(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text.strip()
+
+
+def sanitize_followup_question(q: str) -> str:
+    """Làm sạch câu hỏi gợi ý phân tích tiếp nối:
+    - Chuyển đổi ký tự tiếng Hàn/Trung lạ (như '각' -> 'từng')
+    - Tách từ dính tiếng Việt và tiếng Anh (mụcBars -> mục Bars)
+    - Tách từ tiếng Anh và từ nối tiếng Việt (Barsvà -> Bars và)
+    """
+    if not q:
+        return ""
+    q = str(q).strip()
+    q = q.replace("각", "từng")
+    q = re.sub(r"[\u4e00-\u9fff\uac00-\ud7af]+", "", q)
+    q = re.sub(r"([a-zà-ỹ])([A-Z])", r"\g<1> \g<2>", q)
+    q = re.sub(r"([a-zA-Z]{2,})(để|và|với|chiếm|trong|của|cho|tại|theo|đạt|có|so)", r"\g<1> \g<2>", q)
+    q = re.sub(r"(để|và|với|chiếm|trong|của|cho|tại|theo|đạt|có|so)([a-zA-Z]{3,})", r"\g<1> \g<2>", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    return q

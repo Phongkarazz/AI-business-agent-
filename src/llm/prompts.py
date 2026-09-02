@@ -90,6 +90,8 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
      + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không ghi rõ số lượng cụ thể: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
+     + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):
+        Nên trả về bảng so sánh gồm tên đối tượng, doanh thu và tỷ lệ phần trăm (ví dụ: phân nhóm Đối tượng X vs 'Các sản phẩm khác') để có thể vẽ biểu đồ tròn Donut trực quan sinh động cho người dùng.
 5. ĐỊNH DẠNG ĐẦU RA:
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng SELECT hoặc WITH).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích hay markdown code block bên ngoài.
@@ -254,6 +256,14 @@ Các điểm bất thường đã được thuật toán thống kê phát hiệ
 - Chi tiết phát hiện:
 {findings_text}
 
+LƯU Ý CỰC KỲ QUAN TRỌNG KHI KẾT QUẢ TRẢ VỀ 1 BẢN GHI (TỔNG / TỶ LỆ PHẦN TRĂM):
+- Nếu kết quả chỉ có 1 dòng hoặc 1 con số tỷ lệ phần trăm (ví dụ: Percentage: 4.62%): ĐÂY CHÍNH LÀ ĐÁP ÁN CHÍNH XÁC của câu hỏi.
+- TUYỆT ĐỐI CẤM TỪ CHỐI BÁO CÁO! TUYỆT ĐỐI KHÔNG NÓI "không có dữ liệu cụ thể", "yêu cầu phức tạp" hay "cần cung cấp thêm dữ liệu"!
+- BẮT BUỘC phân tích sâu ý nghĩa kinh doanh của con số này:
+  + Nêu rõ con số cụ thể trong phân tích (ví dụ: sản phẩm Raspberry Choco đóng góp 4.62% vào tổng doanh thu năm 2021).
+  + Đánh giá tỷ trọng 4.62% là khiêm tốn so với 95.38% phần còn lại của doanh nghiệp.
+  + Đưa ra giả thuyết kinh doanh sát thực tế (sản phẩm ngách, mới ra mắt, hoặc chưa được đầu tư phân phối) và đề xuất chiến lược hành động rõ ràng.
+
 YÊU CẦU:
 Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và mang tính điều hành thực chiến cao (định dạng Markdown):
 
@@ -326,6 +336,9 @@ QUY TẮC BẮT BUỘC KHI ĐỀ XUẤT CÂU HỎI TIẾP NỐI:
    - Dùng chính xác tên sản phẩm trong danh sách mẫu ('Milk Bars', '70% Dark Bites'...), mã nhân viên ('SP01'...), quốc gia ('India'...).
    - TUYỆT ĐỐI KHÔNG dùng tên bịa như 'Milk Chocolate' nếu trong CSDL tên là 'Milk Bars'.
 4. Đề xuất 2 đến 3 câu hỏi đào sâu thông minh, thiết thực và CHẮC CHẮN CÓ DỮ LIỆU TRUY VẤN ĐƯỢC 100%.
+5. CHÍNH TẢ & NGÔN NGỮ THUẦN VIỆT:
+   - Viết 100% tiếng Việt chuẩn xác, TUYỆT ĐỐI KHÔNG dùng ký tự lạ hay chữ tiếng Hàn/Trung (như '각'). Dùng từ 'từng khu vực' hoặc 'các khu vực'.
+   - Luôn tách từ rõ ràng, có dấu cách giữa tiếng Việt và tiếng Anh (ví dụ: viết 'danh mục Bars', TUYỆT ĐỐI KHÔNG viết 'danh mụcBars').
 
 Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:
 ["Câu hỏi 1", "Câu hỏi 2", "Câu hỏi 3"]"""

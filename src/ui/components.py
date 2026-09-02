@@ -7,7 +7,7 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 
 import streamlit as st
 import pandas as pd
-from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown, pick_label_column, is_id_like
+from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown, pick_label_column, is_id_like, sanitize_followup_question
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
 from src.analytics.export_reports import export_to_excel, export_to_png, export_to_pdf
@@ -526,10 +526,11 @@ def render_result(result: dict, turn_id: str):
         st.markdown(header_fup)
         cols = st.columns(len(followups))
         for col_f, q_text in zip(cols, followups):
+            clean_q = sanitize_followup_question(q_text)
             with col_f:
-                help_text = f"Run query: {q_text}" if is_en else f"Chạy tiếp câu hỏi: {q_text}"
-                if st.button(f"👉 {q_text}", key=f"btn_fup_{turn_id}_{abs(hash(q_text))}", use_container_width=True, help=help_text):
-                    st.session_state["pending_prompt"] = q_text
+                help_text = f"Run query: {clean_q}" if is_en else f"Chạy tiếp câu hỏi: {clean_q}"
+                if st.button(f"👉 {clean_q}", key=f"btn_fup_{turn_id}_{abs(hash(clean_q))}", use_container_width=True, help=help_text):
+                    st.session_state["pending_prompt"] = clean_q
                     st.rerun()
 
     # 6. Chi tiết Kỹ thuật & SQL Playground (Expander thu gọn ở cuối cùng)

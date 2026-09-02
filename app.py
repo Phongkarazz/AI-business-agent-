@@ -66,13 +66,36 @@ st.markdown("""
         color: #0F172A !important;
     }
 
-    /* Sleek buttons */
+    /* Sleek, readable buttons */
     .stButton > button {
-        border-radius: 8px !important;
-        font-weight: 600 !important;
+        border-radius: 10px !important;
+        font-weight: 500 !important;
+        font-size: 0.88rem !important;
+        line-height: 1.45 !important;
+        letter-spacing: 0.015em !important;
+        padding: 10px 14px !important;
+        min-height: 56px !important;
+        height: auto !important;
         transition: all 0.15s ease-in-out !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
+    }
+    .stButton > button p {
+        font-size: 0.88rem !important;
+        font-weight: 500 !important;
+        line-height: 1.45 !important;
+        letter-spacing: 0.015em !important;
+        margin: 0 !important;
     }
     .stButton > button:hover {
+        border-color: #2563EB !important;
+        background-color: #F8FAFC !important;
+        color: #1E40AF !important;
+        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08) !important;
         transform: translateY(-1px) !important;
     }
 </style>

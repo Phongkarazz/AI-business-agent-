@@ -40,6 +40,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             # Chỉ chọn Line/Area khi có ít nhất 2 mốc thời gian khác nhau để tạo thành đường xu hướng
             if time_col and measure_cols and n_time > 1:
                 chosen = "Line"
+            elif len(df) == 1 and measure_cols and any(k in measure_cols[0].lower() for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram", "%"]):
+                chosen = "Pie"
             elif measure_cols:
                 chosen = "Bar"
             elif len(measure_cols) >= 2:
@@ -332,19 +334,44 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
             elif len(df) == 1 and len(measure_cols) == 1:
                 val = df[measure_cols[0]].iloc[0]
                 val_num = 0 if pd.isna(val) else val
-                fig = px.bar(
-                    x=[measure_cols[0]],
-                    y=[val_num],
-                    text=[f"{val_num:,.2f}" if isinstance(val_num, float) else f"{val_num:,.0f}" if isinstance(val_num, int) else str(val_num)],
-                    title=f"Chỉ số: {measure_cols[0]}",
-                    template="plotly_white"
-                )
-                fig.update_traces(textposition="outside", marker_color="#1F4E78", width=0.35)
-                fig.update_layout(
-                    xaxis_title="",
-                    yaxis_title=measure_cols[0],
-                    margin=dict(l=20, r=20, t=50, b=50)
-                )
+                m_name = str(measure_cols[0])
+                m_lower = m_name.lower()
+                is_pct = any(k in m_lower for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram", "%"]) or (isinstance(val_num, (int, float)) and 0.0 < float(val_num) <= 100.0 and any(k in m_lower for k in ["pct", "share", "portion"]))
+
+                if is_pct and isinstance(val_num, (int, float)) and 0.0 <= float(val_num) <= 100.0:
+                    pct_val = float(val_num)
+                    rem_val = max(0.0, 100.0 - pct_val)
+                    fig = px.pie(
+                        names=[f"{m_name} ({pct_val:,.2f}%)", f"Còn lại ({rem_val:,.2f}%)"],
+                        values=[pct_val, rem_val],
+                        hole=0.55,
+                        title=f"Biểu đồ Tỷ trọng (Donut): {m_name} ({pct_val:,.2f}%)",
+                        template="plotly_white",
+                        color_discrete_sequence=["#1F4E78", "#E2E8F0"]
+                    )
+                    fig.update_traces(
+                        textinfo="percent+label",
+                        textposition="outside",
+                        direction="clockwise"
+                    )
+                    fig.update_layout(
+                        margin=dict(l=20, r=20, t=50, b=50),
+                        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                    )
+                else:
+                    fig = px.bar(
+                        x=[m_name],
+                        y=[val_num],
+                        text=[f"{val_num:,.2f}" if isinstance(val_num, float) else f"{val_num:,.0f}" if isinstance(val_num, int) else str(val_num)],
+                        title=f"Chỉ số: {m_name}",
+                        template="plotly_white"
+                    )
+                    fig.update_traces(textposition="outside", marker_color="#1F4E78", width=0.35)
+                    fig.update_layout(
+                        xaxis_title="",
+                        yaxis_title=m_name,
+                        margin=dict(l=20, r=20, t=50, b=50)
+                    )
             else:
                 st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
                 return None
@@ -378,6 +405,33 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     textposition='inside',
                     textinfo='percent+label',
                     hovertemplate="<b>%{label}</b><br>" + f"{measure_cols[0]}: " + "%{value:,.0f} (%{percent})<extra></extra>"
+                )
+                fig.update_layout(
+                    margin=dict(l=20, r=20, t=50, b=50),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                )
+            elif len(df) == 1:
+                val = df[measure_cols[0]].iloc[0]
+                val_num = 0 if pd.isna(val) else val
+                m_name = str(measure_cols[0])
+                try:
+                    pct_val = float(val_num)
+                except (ValueError, TypeError):
+                    pct_val = 0.0
+
+                rem_val = max(0.0, 100.0 - pct_val) if (0.0 <= pct_val <= 100.0) else 0.0
+                fig = px.pie(
+                    names=[f"{m_name} ({pct_val:,.2f}%)", f"Còn lại ({rem_val:,.2f}%)"],
+                    values=[pct_val, rem_val],
+                    hole=0.55,
+                    title=f"Biểu đồ Tỷ trọng (Donut): {m_name} ({pct_val:,.2f}%)",
+                    template="plotly_white",
+                    color_discrete_sequence=["#1F4E78", "#E2E8F0"]
+                )
+                fig.update_traces(
+                    textinfo="percent+label",
+                    textposition="outside",
+                    direction="clockwise"
                 )
                 fig.update_layout(
                     margin=dict(l=20, r=20, t=50, b=50),
