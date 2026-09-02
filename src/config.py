@@ -75,6 +75,18 @@ PROVIDER_CONFIGS = {
         "key_placeholder": "sk-...",
         "free_tier_note": "Model Qwen của Alibaba Cloud, tương thích OpenAI SDK.",
     },
+    "Ollama (Local AI Offline)": {
+        "models": [
+            "qwen2.5-coder:7b",
+            "qwen2.5-coder:14b",
+            "deepseek-r1:8b",
+            "llama3.1:8b",
+            "mistral:7b",
+        ],
+        "key_help": "Ollama chạy trực tiếp trên máy tính của bạn, hoàn toàn không cần API key.",
+        "key_placeholder": "Không cần API Key (Mặc định: ollama)",
+        "free_tier_note": "100% Offline, 0 đồng, 0 token, bảo mật tuyệt đối. Cần mở ứng dụng Ollama trên máy.",
+    },
 }
 
 # ---------------------------------------------------------
@@ -82,6 +94,7 @@ PROVIDER_CONFIGS = {
 # ---------------------------------------------------------
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 MAX_ROWS_CAP = 5000
 MAX_TABLES_SCHEMA = 50

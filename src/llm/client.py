@@ -13,7 +13,7 @@ try:
 except ImportError:
     _OpenAIClient = None
 
-from src.config import DASHSCOPE_BASE_URL, OPENROUTER_BASE_URL
+from src.config import DASHSCOPE_BASE_URL, OPENROUTER_BASE_URL, OLLAMA_BASE_URL
 
 
 def extract_clean_content(raw: str) -> str:
@@ -71,10 +71,12 @@ def normalize_model_for_openrouter(model_name: str) -> str:
 
 
 def get_llm_client(provider: str, api_key: str, base_url: str = None):
-    """Tạo client AI tương ứng với provider được chọn với tính năng tự động nhận diện OpenRouter."""
+    """Tạo client AI tương ứng với provider được chọn với tính năng tự động nhận diện OpenRouter và Ollama."""
     api_key = (api_key or "").strip()
-    if not api_key:
+    if not api_key and provider != "Ollama (Local AI Offline)":
         raise ValueError("API Key không được để trống.")
+    if provider == "Ollama (Local AI Offline)" and not api_key:
+        api_key = "ollama"
 
     base_url_str = (base_url or "").strip().lower()
 
@@ -86,6 +88,11 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
 
     if provider == "Gemini (Google)" and not is_openrouter:
         return genai.Client(api_key=api_key)
+    elif provider == "Ollama (Local AI Offline)":
+        if _OpenAIClient is None:
+            raise ImportError("Thiếu thư viện `openai`. Vui lòng cài đặt: pip install openai")
+        target_url = (base_url or "").strip() or OLLAMA_BASE_URL
+        return _OpenAIClient(api_key="ollama", base_url=target_url)
     elif is_openrouter:
         if _OpenAIClient is None:
             raise ImportError("Thiếu thư viện `openai`. Vui lòng cài đặt: pip install openai")
@@ -208,6 +215,10 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
                     wait_time = 2 * (attempt + 1)
                     time.sleep(wait_time)
                     continue
+            # 5. Xử lý lỗi kết nối Ollama khi chưa bật ứng dụng
+            if provider == "Ollama (Local AI Offline)" and any(k in err.lower() for k in ["connection refused", "connecterror", "failed to connect", "connection error"]):
+                return None, "Không thể kết nối đến Ollama tại http://localhost:11434. Vui lòng đảm bảo bạn đã mở ứng dụng Ollama trên máy tính của bạn."
+
             else:
                 return None, f"Lỗi {provider} ({model_name}): {err}"
 

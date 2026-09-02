@@ -7,6 +7,7 @@ from src.config import (
     PROVIDER_CONFIGS,
     DASHSCOPE_BASE_URL,
     OPENROUTER_BASE_URL,
+    OLLAMA_BASE_URL,
 )
 from src.config_store import load_saved_config, save_user_config, clear_saved_config
 from src.ui.connection_dialog import show_connecting_dialog
@@ -124,17 +125,23 @@ def render_onboarding():
             default_key = saved.get("api_key_openrouter", "")
         elif provider == "Gemini (Google)":
             default_key = saved.get("api_key_gemini", "")
+        elif provider == "Ollama (Local AI Offline)":
+            default_key = saved.get("api_key_ollama", "ollama")
         else:
             default_key = saved.get("api_key_qwen", "")
 
-        api_key = st.text_input(
-            f"API Key cho {provider}",
-            value=default_key,
-            type="password",
-            help=provider_cfg["key_help"],
-            placeholder=provider_cfg["key_placeholder"],
-            key="onboarding_api_key"
-        )
+        if provider == "Ollama (Local AI Offline)":
+            st.success("💡 **Ollama chạy cục bộ trên máy tính (100% Offline, 0 đồng, không cần API Key)**. Hãy đảm bảo bạn đã mở ứng dụng Ollama trên máy tính.")
+            api_key = default_key or "ollama"
+        else:
+            api_key = st.text_input(
+                f"API Key cho {provider}",
+                value=default_key,
+                type="password",
+                help=provider_cfg["key_help"],
+                placeholder=provider_cfg["key_placeholder"],
+                key="onboarding_api_key"
+            )
 
         clean_api_key = api_key.strip()
         is_openrouter_key = clean_api_key.startswith("sk-or-v1-")
@@ -162,6 +169,23 @@ def render_onboarding():
                     value=saved.get("custom_openrouter_model", ""),
                     help="Để trống nếu dùng model đã chọn trong danh sách ở trên.",
                     key="onboarding_custom_openrouter_model"
+                ).strip()
+                if custom_model_input:
+                    selected_model = custom_model_input
+
+        elif provider == "Ollama (Local AI Offline)":
+            with st.expander("🔧 Cấu hình nâng cao Ollama", expanded=False):
+                custom_base_url = st.text_input(
+                    "Base URL Ollama",
+                    value=saved.get("ollama_base_url", OLLAMA_BASE_URL),
+                    help="Mặc định là http://localhost:11434/v1",
+                    key="onboarding_ollama_base_url"
+                ).strip() or OLLAMA_BASE_URL
+                custom_model_input = st.text_input(
+                    "Nhập Model ID tùy chỉnh (VD: qwen2.5-coder:7b)",
+                    value=saved.get("custom_ollama_model", ""),
+                    help="Để trống nếu dùng model đã chọn trong danh sách ở trên.",
+                    key="onboarding_custom_ollama_model"
                 ).strip()
                 if custom_model_input:
                     selected_model = custom_model_input
@@ -307,7 +331,10 @@ def render_onboarding():
     effective_provider = "OpenRouter" if is_openrouter_key else provider
 
     if connect_btn:
-        if not clean_api_key:
+        if effective_provider == "Ollama (Local AI Offline)" and not clean_api_key:
+            clean_api_key = "ollama"
+
+        if not clean_api_key and effective_provider != "Ollama (Local AI Offline)":
             st.error(f"❌ Vui lòng nhập API Key cho {effective_provider}!")
         elif not use_demo and not (db_host and db_user and db_name):
             st.error("❌ Vui lòng điền đầy đủ Host, User, Database Name!")
@@ -346,6 +373,10 @@ def render_onboarding():
                         config_to_save["custom_openrouter_model"] = custom_model_input
                     elif effective_provider == "Gemini (Google)":
                         config_to_save["api_key_gemini"] = clean_api_key
+                    elif effective_provider == "Ollama (Local AI Offline)":
+                        config_to_save["api_key_ollama"] = clean_api_key
+                        config_to_save["ollama_base_url"] = custom_base_url
+                        config_to_save["custom_ollama_model"] = custom_model_input
                     elif effective_provider == "Qwen (Alibaba Cloud)":
                         config_to_save["api_key_qwen"] = clean_api_key
                         config_to_save["qwen_base_url"] = custom_base_url
