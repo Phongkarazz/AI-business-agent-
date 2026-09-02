@@ -7,7 +7,7 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 
 import streamlit as st
 import pandas as pd
-from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown
+from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown, pick_label_column, is_id_like
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
 from src.analytics.export_reports import export_to_excel, export_to_png, export_to_pdf
