@@ -72,13 +72,22 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
    - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
    - BẮT BUỘC KIỂM TRA KỸ TÊN CỘT TRONG SCHEMA KHI TRUY VẤN & JOIN:
-     + Bảng nhân sự/người bán (people): Tên người bán là cột `Salesperson`, TUYỆT ĐỐI KHÔNG DÙNG `Name`, `Employee_Name` hay `Employee`! Mã nhân viên là `SPID`, nhóm là `Team`.
-     + Bảng sản phẩm (products): Tên sản phẩm là cột `Product`, TUYỆT ĐỐI KHÔNG DÙNG `ProductName`! Mã sản phẩm là `PID`.
-     + Bảng bán hàng (sales): Cột người bán là `SPID`, cột sản phẩm là `PID`, cột doanh số là `Amount`.
+     + Bảng `products`:
+       * Cột: `PID` (Khóa chính), `Product` (Tên sản phẩm: 'Mint Chip Choco', 'Milk Bars'...), `Category`, `Size`, `Cost_per_box`.
+       * CẢNH BÁO: TUYỆT ĐỐI KHÔNG DÙNG `p.Salesperson` (Salesperson nằm ở bảng people, KHÔNG nằm ở products)! TUYỆT ĐỐI KHÔNG DÙNG `ProductCost_per_box` (cột chi phí là `Cost_per_box`)!
+     + Bảng `people`:
+       * Cột: `SPID` (Khóa chính), `Salesperson` (Tên nhân viên: 'Van Tuxwell'...), `Team` ('Yummies', 'Jucies', 'Delish'...), `Location`.
+       * CẢNH BÁO: Tên nhân viên là cột `Salesperson`, TUYỆT ĐỐI KHÔNG DÙNG `Name` hay `Employee`!
+     + Bảng `geo`:
+       * Cột: `GeoID` (Khóa chính), `Geo` (Tên quốc gia/thị trường: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand'), `Region` (Khu vực địa lý lớn: 'APAC', 'Americas').
+       * CẢNH BÁO: Khi lọc thị trường hoặc khu vực Australia, Ấn Độ (India), Mỹ (USA)... BẮT BUỘC DÙNG `geo.Geo = 'Australia'` (hoặc `geo.Geo = 'India'`)!
+     + Bảng `sales`:
+       * Cột: `SPID` (liên kết people.SPID), `PID` (liên kết products.PID), `GeoID` (liên kết geo.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
      + Mối quan hệ liên kết:
-       * `people.SPID = sales.SPID`
        * `products.PID = sales.PID`
-       * TUYỆT ĐỐI KHÔNG JOIN bảng people trực tiếp với products bằng PID!
+       * `people.SPID = sales.SPID`
+       * `geo.GeoID = sales.GeoID`
+     + TUYỆT ĐỐI KHÔNG DÙNG CTE (`WITH ...`) cho các truy vấn đơn giản. Hãy viết câu lệnh SELECT ... JOIN ... GROUP BY phẳng, trực tiếp và chạy siêu tốc!
      + Để lọc nhân viên trong một nhóm cụ thể (ví dụ nhóm 'Yummies'):
        Chỉ cần: `FROM people p JOIN sales s ON p.SPID = s.SPID WHERE p.Team = 'Yummies' GROUP BY p.Salesperson ORDER BY TotalSales DESC LIMIT 5`
        TUYỆT ĐỐI KHÔNG tự JOIN bảng people 2 lần!
@@ -96,17 +105,27 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-   - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG DOANH SỐ / SẢN LƯỢNG (Ví dụ: 'Top 10 nhân sự có doanh số cao nhất'):
-       BẮT BUỘC: Mỗi nhân sự/thực thể chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG DOANH SỐ TÍCH LŨY.
-       BẮT BUỘC dùng hàm tính tổng `SUM(s.Amount) AS TotalSales`, `GROUP BY` theo nhân sự (ví dụ: `GROUP BY p.Salesperson, p.Team`) và `ORDER BY TotalSales DESC LIMIT 10`!
-       TUYỆT ĐỐI KHÔNG `SELECT s.Amount` rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một người nhiều lần!
-       MẪU CHUẨN BẮT BUỘC:
+   - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG DOANH SỐ / SẢN LƯỢNG:
+       BẮT BUỘC: Mỗi nhân sự/sản phẩm chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG DOANH SỐ TÍCH LŨY.
+       BẮT BUỘC dùng hàm tính tổng `SUM(s.Amount) AS TotalSales`, `GROUP BY` và `ORDER BY TotalSales DESC LIMIT N`!
+       TUYỆT ĐỐI KHÔNG `SELECT s.Amount` rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một thực thể nhiều lần!
+       MẪU CHUẨN TOP NHÂN SỰ:
        SELECT p.Salesperson, SUM(s.Amount) AS TotalSales, p.Team
        FROM people p
        JOIN sales s ON p.SPID = s.SPID
        GROUP BY p.Salesperson, p.Team
        ORDER BY TotalSales DESC
        LIMIT 10;
+
+       MẪU CHUẨN TOP SẢN PHẨM THEO THỊ TRƯỜNG:
+       SELECT p.Product, SUM(s.Amount) AS TotalSales
+       FROM products p
+       JOIN sales s ON p.PID = s.PID
+       JOIN geo g ON s.GeoID = g.GeoID
+       WHERE g.Geo = 'Australia' AND YEAR(s.SaleDate) = 2021
+       GROUP BY p.Product
+       ORDER BY TotalSales DESC
+       LIMIT 2;
      + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không ghi rõ số lượng cụ thể: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
@@ -360,7 +379,12 @@ QUY TẮC BẮT BUỘC KHI ĐỀ XUẤT CÂU HỎI TIẾP NỐI:
 3. CHỈ DÙNG TÊN THỰC THỂ CÓ THẬT TRONG CSDL:
    - Dùng chính xác tên sản phẩm trong danh sách mẫu ('Milk Bars', '70% Dark Bites'...), mã nhân viên ('SP01'...), quốc gia ('India'...).
    - TUYỆT ĐỐI KHÔNG dùng tên bịa như 'Milk Chocolate' nếu trong CSDL tên là 'Milk Bars'.
-4. Đề xuất 2 đến 3 câu hỏi đào sâu thông minh, thiết thực và CHẮC CHẮN CÓ DỮ LIỆU TRUY VẤN ĐƯỢC 100%.
+4. ĐỊNH HƯỚNG CÁC DẠNG CÂU HỎI TIẾP NỐI CHUẨN KINH DOANH (DỄ VIẾT SQL VÀ CHẮC CHẮN VẼ ĐƯỢC BIỂU ĐỒ):
+   - Dạng Xếp hạng: "Top 5 sản phẩm bán chạy nhất tại thị trường Australia năm 2021" hoặc "Top 5 nhân viên có doanh số cao nhất trong nhóm Yummies"
+   - Dạng Xu hướng: "Doanh số theo từng tháng tại thị trường Australia năm 2021" hoặc "Doanh số của sản phẩm Milk Bars theo từng tháng năm 2021"
+   - Dạng Phân bổ: "Doanh thu theo từng quốc gia của sản phẩm Drinking Coco"
+   - TUYỆT ĐỐI KHÔNG đề xuất các câu hỏi cấu trúc kỳ lạ, mơ hồ, phi thực tế như 'ở đầu tháng và cuối tháng', 'doanh thu của mỗi sản phẩm tại...'.
+   - CHỈ đề xuất các quốc gia có trong CSDL: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand' (TUYỆT ĐỐI KHÔNG bịa ra 'Việt Nam' hay 'Japan').
 5. CHÍNH TẢ & NGÔN NGỮ THUẦN VIỆT:
    - Viết 100% tiếng Việt chuẩn xác, TUYỆT ĐỐI KHÔNG dùng ký tự lạ hay chữ tiếng Hàn/Trung (như '각'). Dùng từ 'từng khu vực' hoặc 'các khu vực'.
    - Luôn tách từ rõ ràng, có dấu cách giữa tiếng Việt và tiếng Anh (ví dụ: viết 'danh mục Bars', TUYỆT ĐỐI KHÔNG viết 'danh mụcBars').

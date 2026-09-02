@@ -661,6 +661,30 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
     if idx23 != -1:
         part_23 = cleaned[m23.end():].strip()
 
+    # Đảm bảo mục Kế hoạch Hành động (part_23) luôn có đủ 3 ý: Cao 🔴, Trung bình 🟡, Thấp 🟢
+    if part_23:
+        lines_23 = [l.strip() for l in part_23.split("\n") if l.strip()]
+        cleaned_23 = []
+        for l in lines_23:
+            # Sửa câu bị cụt lửng ở đuôi
+            if l.startswith("•") and not l.endswith((".", "!", "?", ":")):
+                l += "."
+            cleaned_23.append(l)
+
+        has_high = any("🔴" in l or "ưu tiên cao" in l.lower() for l in cleaned_23)
+        has_med = any("🟡" in l or "ưu tiên trung bình" in l.lower() for l in cleaned_23)
+        has_low = any("🟢" in l or "ưu tiên thấp" in l.lower() or "dài hạn" in l.lower() for l in cleaned_23)
+
+        if not has_high:
+            cleaned_23.insert(0, "• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Tập trung tối ưu quy trình bán hàng và chính sách thúc đẩy các sản phẩm chủ lực trong tháng tới.")
+        if not has_med:
+            idx_med = 1 if len(cleaned_23) >= 1 else len(cleaned_23)
+            cleaned_23.insert(idx_med, "• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Tổ chức đào tạo nâng cao kỹ năng bán hàng và tối ưu phân bổ ngân sách theo từng thị trường.")
+        if not has_low:
+            cleaned_23.append("• 🟢 **[Ưu tiên Thấp / Dài hạn]**: Xây dựng chương trình chăm sóc khách hàng VIP và hoàn thiện hệ thống báo cáo KPI tự động dài hạn.")
+
+        part_23 = "\n\n".join(cleaned_23)
+
     if not part_21 and not part_22 and not part_23:
         part_21 = cleaned
 

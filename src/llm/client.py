@@ -50,12 +50,18 @@ def extract_clean_content(raw: str) -> str:
 
     extracted = "\n".join(cleaned_lines).strip().strip("`").strip()
 
-    # 4. Tìm vị trí SELECT hoặc WITH đầu tiên nếu có lời dẫn tự nhiên
-    match_kw = re.search(r"\b(SELECT|WITH)\b", extracted, re.IGNORECASE)
-    if match_kw and match_kw.start() > 0:
-        prefix = extracted[:match_kw.start()].strip()
-        if not any(k in prefix.lower() for k in ["insert", "update", "delete", "drop", "alter", "create"]):
-            extracted = extracted[match_kw.start():].strip()
+    # 4. Tìm câu lệnh SQL thực sự (phải có SELECT ... FROM hoặc WITH ... SELECT ... FROM)
+    # Tránh bắt nhầm các lời thoại bình luận mở đầu như: "Select phần**:", "SELECT mục 1:", "Select câu hỏi..."
+    if re.search(r"^\s*SELECT[^\n]*(?:[\*\:]{2,}|phần|mục|đoạn|bước|câu)", extracted, re.IGNORECASE):
+        real_sql_match = re.search(r"(?:^|\n)\s*(SELECT\s+[\s\S]*?\bFROM\b[\s\S]*?)(?:;|\n\n|$)", extracted, re.IGNORECASE)
+        if real_sql_match:
+            extracted = real_sql_match.group(1).strip()
+    else:
+        match_kw = re.search(r"\b(SELECT\s+[\s\S]*?\bFROM\b|WITH\s+[a-zA-Z0-9_]+\s+AS\b)", extracted, re.IGNORECASE)
+        if match_kw and match_kw.start() > 0:
+            prefix = extracted[:match_kw.start()].strip()
+            if not any(k in prefix.lower() for k in ["insert", "update", "delete", "drop", "alter", "create"]):
+                extracted = extracted[match_kw.start():].strip()
 
     return extracted.strip().strip("`").strip()
 

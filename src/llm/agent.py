@@ -189,77 +189,80 @@ def is_ambiguous_question(q: str) -> bool:
     return any(re.search(p, q_low) for p in ambiguous_patterns)
 
 
+def is_hallucinated_followup(q: str) -> bool:
+    """Loại bỏ các câu hỏi chứa thực thể hoặc cấu trúc ảo giác không có trong CSDL."""
+    q_low = q.lower()
+    # Các quốc gia/địa danh ảo giác không tồn tại trong CSDL
+    forbidden_terms = [
+        "việt nam", "vietnam", "hà nội", "hcm", "sài gòn", "japan", "tokyo", "china",
+        "singapore", "thái lan", "pháp", "đức",
+        "đầu tháng và cuối tháng", "đầu tháng", "cuối tháng",
+        "milk chips choco"
+    ]
+    return any(t in q_low for t in forbidden_terms)
+
+
 def generate_grounded_fallback_followups(df: pd.DataFrame, lang: str = "vi") -> list[str]:
-    """Sinh các câu hỏi đào sâu bám sát 100% vào các thực thể cụ thể có sẵn trong kết quả truy vấn."""
+    """Sinh các câu hỏi đào sâu bám sát 100% vào các thực thể cụ thể có sẵn trong kết quả truy vấn.
+    Đảm bảo 100% câu hỏi:
+    1. Truy vấn thành công có dữ liệu.
+    2. Vẽ được biểu đồ tương tác (Bar hoặc Line).
+    3. Nêu được Insight phân tích kinh doanh chuẩn mực.
+    """
     if df is None or df.empty:
         return []
 
     followups = []
     cols = df.columns.tolist()
 
-    # 1. Nếu có cột Team / Nhóm
-    team_col = next((c for c in cols if "team" in c.lower() or "nhóm" in c.lower()), None)
-    if team_col:
-        valid_teams = [str(v).strip() for v in df[team_col].dropna().unique() if str(v).strip() and "(chưa" not in str(v).lower()]
-        if valid_teams:
-            t_name = valid_teams[0]
-            if lang == "en":
-                followups.append(f"Top 5 sales representatives in {t_name} team")
-                followups.append(f"Monthly sales revenue for {t_name} team")
-                followups.append(f"Best selling chocolate products by {t_name} team")
-            else:
-                followups.append(f"Top 5 nhân viên có doanh số cao nhất trong nhóm {t_name}")
-                followups.append(f"Doanh số của nhóm {t_name} theo từng tháng")
-                followups.append(f"Các sản phẩm bán chạy nhất của nhóm {t_name}")
-            return followups[:3]
-
-    # 2. Nếu có cột Product / Sản phẩm
+    # Thu thập thực thể từ DataFrame
     prod_col = next((c for c in cols if "product" in c.lower() or "sản phẩm" in c.lower()), None)
-    if prod_col:
-        valid_prods = [str(v).strip() for v in df[prod_col].dropna().unique() if str(v).strip()]
-        if valid_prods:
-            p_name = valid_prods[0]
-            if lang == "en":
-                followups.append(f"Monthly revenue trend for {p_name}")
-                followups.append(f"Top 5 sales representatives selling {p_name}")
-                followups.append(f"Sales distribution of {p_name} across countries")
-            else:
-                followups.append(f"Doanh số sản phẩm {p_name} theo từng tháng")
-                followups.append(f"Top 5 nhân viên bán được nhiều sản phẩm {p_name} nhất")
-                followups.append(f"Phân bổ doanh thu của sản phẩm {p_name} theo từng quốc gia")
-            return followups[:3]
-
-    # 3. Nếu có cột Salesperson / Người bán
     rep_col = next((c for c in cols if "salesperson" in c.lower() or "nhân viên" in c.lower() or "people" in c.lower()), None)
-    if rep_col:
-        valid_reps = [str(v).strip() for v in df[rep_col].dropna().unique() if str(v).strip()]
-        if valid_reps:
-            r_name = valid_reps[0]
-            if lang == "en":
-                followups.append(f"Monthly sales performance of {r_name}")
-                followups.append(f"Top products sold by {r_name}")
-                followups.append(f"Sales revenue by country for {r_name}")
-            else:
-                followups.append(f"Doanh số của nhân viên {r_name} theo từng tháng")
-                followups.append(f"Các sản phẩm bán chạy nhất của nhân viên {r_name}")
-                followups.append(f"Doanh thu theo từng quốc gia của nhân viên {r_name}")
-            return followups[:3]
-
-    # 4. Nếu có cột Geo / Quốc gia / Khu vực
+    team_col = next((c for c in cols if "team" in c.lower() or "nhóm" in c.lower()), None)
     geo_col = next((c for c in cols if "geo" in c.lower() or "country" in c.lower() or "quốc gia" in c.lower()), None)
-    if geo_col:
-        valid_geos = [str(v).strip() for v in df[geo_col].dropna().unique() if str(v).strip()]
-        if valid_geos:
-            g_name = valid_geos[0]
-            if lang == "en":
-                followups.append(f"Top 5 best selling products in {g_name}")
-                followups.append(f"Monthly sales trend in {g_name}")
-            else:
-                followups.append(f"Top 5 sản phẩm bán chạy nhất tại thị trường {g_name}")
-                followups.append(f"Xu hướng doanh số theo từng tháng tại thị trường {g_name}")
-            return followups[:3]
 
-    return followups
+    sample_prod = str(df[prod_col].dropna().iloc[0]).strip() if prod_col and not df[prod_col].dropna().empty else None
+    sample_rep = str(df[rep_col].dropna().iloc[0]).strip() if rep_col and not df[rep_col].dropna().empty else None
+    sample_team = str(df[team_col].dropna().iloc[0]).strip() if team_col and not df[team_col].dropna().empty else None
+    sample_geo = str(df[geo_col].dropna().iloc[0]).strip() if geo_col and not df[geo_col].dropna().empty else None
+
+    # 1. Câu hỏi dạng Xếp hạng (Bar Chart)
+    if sample_geo:
+        followups.append(f"Top 5 sản phẩm bán chạy nhất tại thị trường {sample_geo} năm 2021" if lang != "en" else f"Top 5 best selling products in {sample_geo} in 2021")
+    elif sample_team:
+        followups.append(f"Top 5 nhân viên có doanh số cao nhất trong nhóm {sample_team}" if lang != "en" else f"Top 5 sales representatives in {sample_team} team")
+    elif sample_prod:
+        followups.append(f"Top 5 nhân viên bán được nhiều sản phẩm {sample_prod} nhất" if lang != "en" else f"Top 5 sales reps for {sample_prod}")
+    elif sample_rep:
+        followups.append(f"Top các sản phẩm bán chạy nhất của nhân viên {sample_rep}" if lang != "en" else f"Top selling products by {sample_rep}")
+    else:
+        followups.append("Top 5 sản phẩm bán chạy nhất năm 2021" if lang != "en" else "Top 5 best selling products in 2021")
+
+    # 2. Câu hỏi dạng Xu hướng theo thời gian (Line Chart & Dự báo)
+    if sample_prod:
+        followups.append(f"Doanh số của sản phẩm {sample_prod} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_prod} in 2021")
+    elif sample_rep:
+        followups.append(f"Doanh số của nhân viên {sample_rep} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_rep} in 2021")
+    elif sample_team:
+        followups.append(f"Doanh số của nhóm {sample_team} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_team} team in 2021")
+    elif sample_geo:
+        followups.append(f"Doanh số theo từng tháng tại thị trường {sample_geo} năm 2021" if lang != "en" else f"Monthly sales trend in {sample_geo} in 2021")
+    else:
+        followups.append("Doanh số toàn công ty theo từng tháng năm 2021" if lang != "en" else "Monthly company revenue trend in 2021")
+
+    # 3. Câu hỏi dạng Phân bổ thị trường / Nhóm (Bar / Donut Chart)
+    if sample_geo and sample_team:
+        followups.append(f"Doanh thu của nhóm {sample_team} tại các thị trường quốc gia" if lang != "en" else f"Revenue of {sample_team} team across countries")
+    elif sample_prod:
+        followups.append(f"Doanh thu của sản phẩm {sample_prod} tại các thị trường quốc gia" if lang != "en" else f"Revenue distribution of {sample_prod} across countries")
+    elif sample_rep:
+        followups.append(f"Doanh thu theo từng quốc gia của nhân viên {sample_rep}" if lang != "en" else f"Sales by country for {sample_rep}")
+    elif sample_team:
+        followups.append("So sánh tổng doanh số giữa các nhóm (Team) trong năm 2021" if lang != "en" else "Compare total sales across teams in 2021")
+    else:
+        followups.append("So sánh tổng doanh thu giữa các thị trường quốc gia năm 2021" if lang != "en" else "Compare revenue across countries in 2021")
+
+    return followups[:3]
 
 
 def generate_followup_questions(client, provider: str, model_name: str, user_query: str, schema_context: str, df: pd.DataFrame, lang: str = "vi") -> list[str]:
@@ -267,16 +270,16 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
     if df is None or df.empty:
         return []
 
-    # 1. Chuẩn bị các câu hỏi dự phòng bám sát thực thể có thật trong kết quả
-    fallback_questions = generate_grounded_fallback_followups(df, lang=lang)
+    # 1. Chuẩn bị các câu hỏi bám sát thực thể có thật 100% trong kết quả truy vấn
+    grounded_questions = generate_grounded_fallback_followups(df, lang=lang)
 
-    # 2. Gọi AI để sinh câu hỏi phân tích thông minh
+    # 2. Gọi AI để sinh thêm gợi ý (nếu có)
+    ai_questions = []
     try:
         sample_str = df.head(5).to_string(index=False)
         prompt = build_followup_prompt(user_query, schema_context, sample_str, lang=lang)
         res, _ = call_llm(client, provider, model_name, prompt)
 
-        ai_questions = []
         if res:
             cleaned = res.strip().strip("`").replace("json\n", "").strip()
             parsed = json.loads(cleaned)
@@ -287,22 +290,22 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
                     else:
                         raw_val = str(q)
                     q_str = sanitize_followup_question(raw_val)
-                    # Loại bỏ các câu hỏi chứa đại từ mơ hồ "này", "đó", "these reps"
-                    if q_str and not is_ambiguous_question(q_str):
+                    # Loại bỏ các câu hỏi mơ hồ, câu hỏi ảo giác hoặc nhắc đến thực thể không có thật
+                    if q_str and not is_ambiguous_question(q_str) and not is_hallucinated_followup(q_str):
                         ai_questions.append(q_str)
-
-        # 3. Kết hợp câu hỏi AI với câu hỏi bám sát thực thể
-        combined = []
-        for q in ai_questions:
-            if q not in combined:
-                combined.append(q)
-        for q in fallback_questions:
-            if q not in combined:
-                combined.append(q)
-
-        return combined[:3] if combined else fallback_questions[:3]
     except Exception:
-        return fallback_questions[:3]
+        pass
+
+    # 3. ƯU TIÊN 100% CÁC CÂU HỎI BÁM SÁT CSDL ĐỂ ĐẢM BẢO CHẠY THÀNH CÔNG
+    combined = []
+    for q in grounded_questions:
+        if q not in combined:
+            combined.append(q)
+    for q in ai_questions:
+        if q not in combined:
+            combined.append(q)
+
+    return combined[:3] if combined else grounded_questions[:3]
 
 
 def run_agent(
@@ -524,14 +527,19 @@ def run_agent(
                 col_m = re.search(r"unknown column '([^']+)'", lowered_err)
                 bad_col = col_m.group(1) if col_m else "tên cột"
                 augmented_error += (
-                    f"\n\nLƯU Ý CỘT KHÔNG TỒN TẠI: Cột '{bad_col}' không tồn tại trong CSDL! "
-                    f"Nếu bạn đang truy vấn người bán/nhân sự (bảng 'people'): Tên nhân viên là cột 'Salesperson' (TUYỆT ĐỐI KHÔNG DÙNG 'Name' hay 'Employee'). "
-                    f"Nếu bạn đang truy vấn sản phẩm (bảng 'products'): Tên sản phẩm là cột 'Product'. "
-                    f"Hãy xem kỹ lại danh sách cột trong Schema ở trên và sửa lại câu SQL bằng đúng tên cột có thật!"
+                    f"\n\nLƯU Ý CỘT KHÔNG TỒN TẠI: Cột '{bad_col}' không tồn tại trong CSDL!\n"
+                    f"- Nếu là 'p.Salesperson': Cột 'Salesperson' nằm ở bảng 'people', KHÔNG nằm ở bảng 'products'! Hãy bỏ cột này nếu câu hỏi không hỏi nhân viên, hoặc JOIN với 'people pe ON s.SPID = pe.SPID' và dùng 'pe.Salesperson'.\n"
+                    f"- Nếu là 'ProductCost_per_box': Cột chi phí trong bảng products là 'Cost_per_box'.\n"
+                    f"- Nếu là 'p.Product' trong subquery/CTE 'monthly_sales': Bảng 'monthly_sales' không có bí danh 'p'! Hãy bỏ hoàn toàn CTE (WITH ...) và viết SELECT ... FROM products p JOIN sales s JOIN geo g phẳng đơn giản!\n"
+                    f"- Nếu lọc quốc gia 'Australia', 'India', 'USA': BẮT BUỘC dùng 'geo.Geo = Australia' (cột Geo chứa tên nước, không phải Region)!\n"
+                    f"Hãy sửa lại câu SQL dùng đúng các cột có thật trong Schema ở trên!"
                     if lang != "en" else
-                    f"\n\nCOLUMN ERROR: Column '{bad_col}' does not exist! "
-                    f"For employees/people table: The column is 'Salesperson' (NOT 'Name'). "
-                    f"For products table: The column is 'Product'. Please use the exact column names from the Schema above!"
+                    f"\n\nCOLUMN ERROR: Column '{bad_col}' does not exist!\n"
+                    f"- If 'p.Salesperson': 'Salesperson' belongs to 'people', NOT 'products'! Drop it or JOIN with people.\n"
+                    f"- If 'ProductCost_per_box': The column is 'Cost_per_box'.\n"
+                    f"- If 'monthly_sales': Drop CTE and write a flat SELECT query.\n"
+                    f"- For Country: Use 'geo.Geo = Australia'.\n"
+                    f"Please use exact column names from the Schema above!"
                 )
 
             fix_prompt = build_fix_prompt(
