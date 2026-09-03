@@ -174,40 +174,30 @@ def generate_starter_prompts(tables: list[str], schema_context: str = "") -> lis
 
     # 2. Miền HR / Nhân sự / Tiền lương (như CSDL employees)
     if has_hr and not has_sales:
-        if "salaries" in tables_lower or "luong" in tables_lower or "salary" in all_text:
-            cards.append({
-                "icon": "💰",
-                "title": "Mức Lương Trung Bình Theo Phòng Ban",
-                "prompt": "Mức lương trung bình của nhân viên theo từng phòng ban",
-                "desc": "So sánh thu nhập bình quân giữa các đơn vị và phòng ban"
-            })
-            cards.append({
-                "icon": "🏆",
-                "title": "Top 10 Nhân Viên Lương Cao Nhất",
-                "prompt": "Top 10 nhân viên có mức lương cao nhất",
-                "desc": "Danh sách nhân sự có đãi ngộ và thu nhập cao nhất"
-            })
-        if "titles" in tables_lower or "chuc_danh" in tables_lower or "title" in all_text:
-            cards.append({
-                "icon": "👔",
-                "title": "Cơ Cấu Nhân Sự Theo Chức Danh",
-                "prompt": "Thống kê số lượng nhân viên theo từng chức danh (title)",
-                "desc": "Phân bổ nhân sự theo các vị trí công việc"
-            })
-        if "departments" in tables_lower or "phong_ban" in tables_lower or "dept" in all_text:
-            cards.append({
-                "icon": "🏢",
-                "title": "Quy Mô Nhân Sự Từng Phòng Ban",
-                "prompt": "Số lượng nhân viên đang làm việc tại mỗi phòng ban",
-                "desc": "Đánh giá quy mô nhân lực của từng bộ phận"
-            })
-        while len(cards) < 4:
-            cards.append({
-                "icon": "👥",
-                "title": "Danh Sách Nhân Sự",
-                "prompt": "Top 10 nhân viên mới nhất trong hệ thống",
-                "desc": "Xem danh sách và thông tin hồ sơ nhân sự"
-            })
+        cards.append({
+            "icon": "💰",
+            "title": "Top 10 Nhân Viên Lương Cao Nhất",
+            "prompt": "Top 10 nhân viên có mức lương cao nhất",
+            "desc": "Danh sách nhân sự có đãi ngộ và thu nhập cao nhất"
+        })
+        cards.append({
+            "icon": "🏢",
+            "title": "Mức Lương Trung Bình Theo Phòng Ban",
+            "prompt": "Mức lương trung bình của nhân viên theo từng phòng ban",
+            "desc": "So sánh thu nhập bình quân giữa các đơn vị và phòng ban"
+        })
+        cards.append({
+            "icon": "👥",
+            "title": "Quy Mô Nhân Sự Từng Phòng Ban",
+            "prompt": "Số lượng nhân viên theo từng phòng ban",
+            "desc": "Thống kê số lượng nhân sự đang làm việc tại mỗi phòng ban"
+        })
+        cards.append({
+            "icon": "👔",
+            "title": "Mức Lương Theo Chức Danh",
+            "prompt": "Mức lương trung bình theo từng chức danh (Title)",
+            "desc": "So sánh thu nhập bình quân theo các cấp bậc công việc"
+        })
 
     # 3. Miền Giáo dục / Trường học
     elif has_education:

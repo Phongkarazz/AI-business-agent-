@@ -202,8 +202,8 @@ def is_hallucinated_followup(q: str) -> bool:
     return any(t in q_low for t in forbidden_terms)
 
 
-def generate_grounded_fallback_followups(df: pd.DataFrame, lang: str = "vi") -> list[str]:
-    """Sinh các câu hỏi đào sâu bám sát 100% vào các thực thể cụ thể có sẵn trong kết quả truy vấn.
+def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str = "", lang: str = "vi") -> list[str]:
+    """Sinh các câu hỏi đào sâu bám sát 100% vào cấu trúc CSDL và các thực thể cụ thể có sẵn trong kết quả truy vấn.
     Đảm bảo 100% câu hỏi:
     1. Truy vấn thành công có dữ liệu.
     2. Vẽ được biểu đồ tương tác (Bar hoặc Line).
@@ -214,53 +214,88 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, lang: str = "vi") -> 
 
     followups = []
     cols = df.columns.tolist()
+    cols_low = [str(c).lower() for c in cols]
+    schema_low = (schema_context or "").lower()
 
-    # Thu thập thực thể từ DataFrame
-    prod_col = next((c for c in cols if "product" in c.lower() or "sản phẩm" in c.lower()), None)
-    rep_col = next((c for c in cols if "salesperson" in c.lower() or "nhân viên" in c.lower() or "people" in c.lower()), None)
-    team_col = next((c for c in cols if "team" in c.lower() or "nhóm" in c.lower()), None)
-    geo_col = next((c for c in cols if "geo" in c.lower() or "country" in c.lower() or "quốc gia" in c.lower()), None)
+    # Nhận diện CSDL
+    is_employees_db = "departments" in schema_low or "dept_emp" in schema_low or "salaries" in schema_low or any(c in cols_low for c in ["salary", "avgsalary", "dept_name", "department", "emp_no"])
+    is_chocolates_db = "people" in schema_low and "products" in schema_low
 
-    sample_prod = str(df[prod_col].dropna().iloc[0]).strip() if prod_col and not df[prod_col].dropna().empty else None
-    sample_rep = str(df[rep_col].dropna().iloc[0]).strip() if rep_col and not df[rep_col].dropna().empty else None
-    sample_team = str(df[team_col].dropna().iloc[0]).strip() if team_col and not df[team_col].dropna().empty else None
-    sample_geo = str(df[geo_col].dropna().iloc[0]).strip() if geo_col and not df[geo_col].dropna().empty else None
+    if is_employees_db:
+        # Miền HR / employees
+        dept_col = next((c for c in cols if "department" in c.lower() or "dept" in c.lower() or "phòng" in c.lower()), None)
+        title_col = next((c for c in cols if "title" in c.lower() or "chức danh" in c.lower()), None)
 
-    # 1. Câu hỏi dạng Xếp hạng (Bar Chart)
-    if sample_geo:
-        followups.append(f"Top 5 sản phẩm bán chạy nhất tại thị trường {sample_geo} năm 2021" if lang != "en" else f"Top 5 best selling products in {sample_geo} in 2021")
-    elif sample_team:
-        followups.append(f"Top 5 nhân viên có doanh số cao nhất trong nhóm {sample_team}" if lang != "en" else f"Top 5 sales representatives in {sample_team} team")
-    elif sample_prod:
-        followups.append(f"Top 5 nhân viên bán được nhiều sản phẩm {sample_prod} nhất" if lang != "en" else f"Top 5 sales reps for {sample_prod}")
-    elif sample_rep:
-        followups.append(f"Top các sản phẩm bán chạy nhất của nhân viên {sample_rep}" if lang != "en" else f"Top selling products by {sample_rep}")
-    else:
-        followups.append("Top 5 sản phẩm bán chạy nhất năm 2021" if lang != "en" else "Top 5 best selling products in 2021")
+        dept_sample = str(df[dept_col].dropna().iloc[0]).strip() if dept_col and not df[dept_col].dropna().empty else None
+        title_sample = str(df[title_col].dropna().iloc[0]).strip() if title_col and not df[title_col].dropna().empty else None
 
-    # 2. Câu hỏi dạng Xu hướng theo thời gian (Line Chart & Dự báo)
-    if sample_prod:
-        followups.append(f"Doanh số của sản phẩm {sample_prod} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_prod} in 2021")
-    elif sample_rep:
-        followups.append(f"Doanh số của nhân viên {sample_rep} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_rep} in 2021")
-    elif sample_team:
-        followups.append(f"Doanh số của nhóm {sample_team} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_team} team in 2021")
-    elif sample_geo:
-        followups.append(f"Doanh số theo từng tháng tại thị trường {sample_geo} năm 2021" if lang != "en" else f"Monthly sales trend in {sample_geo} in 2021")
-    else:
-        followups.append("Doanh số toàn công ty theo từng tháng năm 2021" if lang != "en" else "Monthly company revenue trend in 2021")
+        if dept_sample:
+            followups.append(f"Top 10 nhân viên có mức lương cao nhất trong phòng ban {dept_sample}" if lang != "en" else f"Top 10 employees with highest salary in {dept_sample} department")
+            followups.append("Mức lương trung bình của nhân viên theo từng phòng ban" if lang != "en" else "Average salary of employees by department")
+            followups.append("Số lượng nhân viên theo từng phòng ban" if lang != "en" else "Total number of employees by department")
+        elif title_sample:
+            followups.append(f"Danh sách nhân viên có chức danh {title_sample} và mức lương cao nhất" if lang != "en" else f"Top paid employees with title {title_sample}")
+            followups.append("Mức lương trung bình theo từng chức danh (Title)" if lang != "en" else "Average salary by job title")
+            followups.append("Top 10 nhân viên có mức lương cao nhất" if lang != "en" else "Top 10 highest paid employees")
+        else:
+            followups.append("Mức lương trung bình của nhân viên theo từng phòng ban" if lang != "en" else "Average salary of employees by department")
+            followups.append("Top 10 nhân viên có mức lương cao nhất" if lang != "en" else "Top 10 highest paid employees")
+            followups.append("Số lượng nhân viên theo từng phòng ban" if lang != "en" else "Total number of employees by department")
 
-    # 3. Câu hỏi dạng Phân bổ thị trường / Nhóm (Bar / Donut Chart)
-    if sample_geo and sample_team:
-        followups.append(f"Doanh thu của nhóm {sample_team} tại các thị trường quốc gia" if lang != "en" else f"Revenue of {sample_team} team across countries")
-    elif sample_prod:
-        followups.append(f"Doanh thu của sản phẩm {sample_prod} tại các thị trường quốc gia" if lang != "en" else f"Revenue distribution of {sample_prod} across countries")
-    elif sample_rep:
-        followups.append(f"Doanh thu theo từng quốc gia của nhân viên {sample_rep}" if lang != "en" else f"Sales by country for {sample_rep}")
-    elif sample_team:
-        followups.append("So sánh tổng doanh số giữa các nhóm (Team) trong năm 2021" if lang != "en" else "Compare total sales across teams in 2021")
-    else:
-        followups.append("So sánh tổng doanh thu giữa các thị trường quốc gia năm 2021" if lang != "en" else "Compare revenue across countries in 2021")
+        return followups[:3]
+
+    if is_chocolates_db:
+        # Miền Awesome Chocolates
+        prod_col = next((c for c in cols if "product" in c.lower() or "sản phẩm" in c.lower()), None)
+        rep_col = next((c for c in cols if "salesperson" in c.lower() or "nhân viên" in c.lower() or "people" in c.lower()), None)
+        team_col = next((c for c in cols if "team" in c.lower() or "nhóm" in c.lower()), None)
+        geo_col = next((c for c in cols if "geo" in c.lower() or "country" in c.lower() or "quốc gia" in c.lower()), None)
+
+        sample_prod = str(df[prod_col].dropna().iloc[0]).strip() if prod_col and not df[prod_col].dropna().empty else None
+        sample_rep = str(df[rep_col].dropna().iloc[0]).strip() if rep_col and not df[rep_col].dropna().empty else None
+        sample_team = str(df[team_col].dropna().iloc[0]).strip() if team_col and not df[team_col].dropna().empty else None
+        sample_geo = str(df[geo_col].dropna().iloc[0]).strip() if geo_col and not df[geo_col].dropna().empty else None
+
+        if sample_geo:
+            followups.append(f"Top 5 sản phẩm bán chạy nhất tại thị trường {sample_geo} năm 2021" if lang != "en" else f"Top 5 best selling products in {sample_geo} in 2021")
+        elif sample_team:
+            followups.append(f"Top 5 nhân viên có doanh số cao nhất trong nhóm {sample_team}" if lang != "en" else f"Top 5 sales representatives in {sample_team} team")
+        elif sample_prod:
+            followups.append(f"Doanh số của sản phẩm {sample_prod} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_prod} in 2021")
+        elif sample_rep:
+            followups.append(f"Top các sản phẩm bán chạy nhất của nhân viên {sample_rep}" if lang != "en" else f"Top selling products by {sample_rep}")
+        else:
+            followups.append("Top 5 sản phẩm mang lại doanh thu cao nhất năm 2021" if lang != "en" else "Top 5 best selling products in 2021")
+
+        if sample_prod:
+            followups.append(f"Doanh thu của sản phẩm {sample_prod} tại các thị trường quốc gia" if lang != "en" else f"Revenue distribution of {sample_prod} across countries")
+        elif sample_rep:
+            followups.append(f"Doanh số của nhân viên {sample_rep} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_rep} in 2021")
+        else:
+            followups.append("Doanh số toàn công ty theo từng tháng năm 2021" if lang != "en" else "Monthly company revenue trend in 2021")
+
+        if sample_geo and sample_team:
+            followups.append(f"Doanh thu của nhóm {sample_team} tại các thị trường quốc gia" if lang != "en" else f"Revenue of {sample_team} team across countries")
+        elif sample_team:
+            followups.append("Top 10 nhân sự có doanh số cao nhất trong nhóm Yummies" if lang != "en" else "Top 10 sales reps in Yummies team")
+        else:
+            followups.append("Doanh thu theo từng quốc gia và khu vực năm 2021" if lang != "en" else "Compare revenue across countries in 2021")
+
+        return followups[:3]
+
+    # CSDL Tổng quát
+    from src.analytics.heuristics import get_axis_columns
+    measure_cols, label_cols, _ = get_axis_columns(df)
+    if not measure_cols:
+        measure_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+        label_cols = [c for c in cols if c not in measure_cols]
+
+    m_col = measure_cols[0] if measure_cols else cols[0]
+    l_col = label_cols[0] if label_cols else cols[0]
+
+    followups.append(f"Top 5 {l_col} có {m_col} cao nhất" if lang != "en" else f"Top 5 {l_col} by {m_col}")
+    followups.append(f"Tổng {m_col} phân bổ theo từng {l_col}" if lang != "en" else f"Total {m_col} grouped by {l_col}")
+    followups.append(f"Mức trung bình của {m_col} theo {l_col}" if lang != "en" else f"Average {m_col} by {l_col}")
 
     return followups[:3]
 
@@ -271,7 +306,7 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
         return []
 
     # 1. Chuẩn bị các câu hỏi bám sát thực thể có thật 100% trong kết quả truy vấn
-    grounded_questions = generate_grounded_fallback_followups(df, lang=lang)
+    grounded_questions = generate_grounded_fallback_followups(df, schema_context=schema_context, lang=lang)
 
     # 2. Gọi AI để sinh thêm gợi ý (nếu có)
     ai_questions = []
@@ -284,15 +319,26 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
             cleaned = res.strip().strip("`").replace("json\n", "").strip()
             parsed = json.loads(cleaned)
             if isinstance(parsed, list):
+                schema_low = (schema_context or "").lower()
+                is_employees_db = "departments" in schema_low or "dept_emp" in schema_low or "salaries" in schema_low
+
                 for q in parsed:
                     if isinstance(q, dict):
                         raw_val = q.get("question") or q.get("prompt") or q.get("query") or next(iter(q.values()), str(q))
                     else:
                         raw_val = str(q)
                     q_str = sanitize_followup_question(raw_val)
-                    # Loại bỏ các câu hỏi mơ hồ, câu hỏi ảo giác hoặc nhắc đến thực thể không có thật
-                    if q_str and not is_ambiguous_question(q_str) and not is_hallucinated_followup(q_str):
-                        ai_questions.append(q_str)
+                    if not q_str or is_ambiguous_question(q_str) or is_hallucinated_followup(q_str):
+                        continue
+
+                    # Lọc sạch cross-database contamination
+                    q_low = q_str.lower()
+                    if is_employees_db and any(k in q_low for k in ["sản phẩm", "chocolate", "bán chạy", "doanh thu", "sales", "boxes", "quốc gia", "thị trường"]):
+                        continue
+                    if not is_employees_db and any(k in q_low for k in ["mức lương", "salary", "salaries", "phòng ban", "departments"]):
+                        continue
+
+                    ai_questions.append(q_str)
     except Exception:
         pass
 
@@ -338,6 +384,36 @@ def run_agent(
         "insights": None,
         "followups": [],
     }
+
+    # 0.1 Kiểm tra sự tương thích giữa câu hỏi và CSDL hiện tại (Domain Mismatch Pre-check)
+    valid_tables = get_table_names(engine)
+    valid_tbls_low = [t.lower() for t in valid_tables]
+    is_employees_db = "departments" in valid_tbls_low and "employees" in valid_tbls_low
+    is_chocolates_db = "people" in valid_tbls_low and "products" in valid_tbls_low
+
+    user_query_low = user_query.lower()
+
+    # Nếu đang ở DB employees mà người dùng hỏi sản phẩm / bán hàng / chocolate
+    if is_employees_db and any(k in user_query_low for k in ["sản phẩm", "bán chạy", "chocolate", "cost per box", "hộp kẹo", "khách hàng mua", "thị trường úc", "thị trường ấn độ"]):
+        result["explanation"] = (
+            "💡 **Thông báo từ Trợ lý:** Cơ sở dữ liệu hiện tại (**`employees`**) là cơ sở dữ liệu về **Nhân sự, Tiền lương và Phòng ban** (gồm các bảng `employees`, `salaries`, `departments`, `dept_emp`, `titles`), không chứa bảng sản phẩm hay doanh số bán hàng.\n\n"
+            "👉 **Gợi ý:** Nếu bạn muốn truy vấn về **Sản phẩm bán chạy** hoặc **Doanh số kinh doanh**, vui lòng chọn cơ sở dữ liệu **`awesome chocolates`** ở thanh menu bên trái (Sidebar) nhé!"
+            if lang != "en" else
+            "💡 **Notice:** The current database (**`employees`**) is for **HR, Salaries, and Departments**, and does not contain product or sales tables.\n\n"
+            "👉 Please switch to the **`awesome chocolates`** database in the Sidebar to query product sales!"
+        )
+        return result
+
+    # Nếu đang ở DB awesome chocolates mà người dùng hỏi mức lương / salary
+    if is_chocolates_db and any(k in user_query_low for k in ["mức lương", "bảng lương", "lương trung bình", "tiền lương", "salary", "salaries"]):
+        result["explanation"] = (
+            "💡 **Thông báo từ Trợ lý:** Cơ sở dữ liệu hiện tại (**`awesome chocolates`**) là cơ sở dữ liệu về **Sản phẩm, Nhân viên kinh doanh và Doanh số bán hàng** (gồm các bảng `sales`, `products`, `people`, `geo`), không chứa bảng tiền lương nhân viên.\n\n"
+            "👉 **Gợi ý:** Nếu bạn muốn truy vấn về **Tiền lương nhân viên**, vui lòng chọn cơ sở dữ liệu **`employees`** ở thanh menu bên trái (Sidebar) nhé!"
+            if lang != "en" else
+            "💡 **Notice:** The current database (**`awesome chocolates`**) is for **Products and Sales**, and does not contain salary tables.\n\n"
+            "👉 Please switch to the **`employees`** database in the Sidebar to query employee salaries!"
+        )
+        return result
 
     # 1. Sinh SQL ban đầu
     if status_callback:

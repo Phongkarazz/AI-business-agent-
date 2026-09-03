@@ -93,6 +93,33 @@ SQL Query:"""
        JOIN departments d ON de.dept_no = d.dept_no
        WHERE s.to_date = '9999-01-01' AND de.to_date = '9999-01-01'
        GROUP BY d.dept_name
+       ORDER BY AvgSalary DESC;
+
+     + MẪU CHUẨN TOP 10 LƯƠNG TRONG PHÒNG BAN CỤ THỂ (Ví dụ: Sales / Marketing):
+       SELECT e.emp_no, CONCAT(e.first_name, ' ', e.last_name) AS full_name, MAX(s.salary) AS max_salary
+       FROM employees e
+       JOIN salaries s ON e.emp_no = s.emp_no
+       JOIN dept_emp de ON e.emp_no = de.emp_no
+       JOIN departments d ON de.dept_no = d.dept_no
+       WHERE d.dept_name = 'Sales' AND s.to_date = '9999-01-01' AND de.to_date = '9999-01-01'
+       GROUP BY e.emp_no, full_name
+       ORDER BY max_salary DESC
+       LIMIT 10;
+
+     + MẪU CHUẨN SỐ LƯỢNG NHÂN VIÊN THEO PHÒNG BAN:
+       SELECT d.dept_name AS Department, COUNT(de.emp_no) AS TotalEmployees
+       FROM departments d
+       JOIN dept_emp de ON d.dept_no = de.dept_no
+       WHERE de.to_date = '9999-01-01'
+       GROUP BY d.dept_name
+       ORDER BY TotalEmployees DESC;
+
+     + MẪU CHUẨN LƯƠNG THEO CHỨC DANH (TITLE):
+       SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
+       FROM salaries s
+       JOIN titles t ON s.emp_no = t.emp_no
+       WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+       GROUP BY t.title
        ORDER BY AvgSalary DESC;"""
     elif is_chocolates_db:
         db_specific_rules = """   - QUY TẮC CSDL AWESOME CHOCOLATES:
