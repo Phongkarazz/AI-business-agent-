@@ -39,6 +39,36 @@ def strip_comments_and_literals(sql: str) -> str:
     return sql
 
 
+def auto_balance_parentheses(sql: str) -> str:
+    """Tự động phát hiện và đóng dấu ngoặc ')' bị thiếu trước các từ khóa AS, FROM hoặc cuối dòng."""
+    if not sql:
+        return sql
+    cleaned = strip_comments_and_literals(sql)
+    diff = cleaned.count("(") - cleaned.count(")")
+    if diff <= 0:
+        return sql
+
+    lines = sql.splitlines()
+    fixed_lines = []
+    for line in lines:
+        c_line = strip_comments_and_literals(line)
+        l_diff = c_line.count("(") - c_line.count(")")
+        if l_diff > 0:
+            if re.search(r"\bAS\b", line, re.IGNORECASE):
+                line = re.sub(r"(\s+)(AS\b)", ")" * l_diff + r"\1\2", line, count=1, flags=re.IGNORECASE)
+            elif line.strip().endswith(","):
+                line = line.rstrip().rstrip(",") + (")" * l_diff) + ","
+            else:
+                line = line + (")" * l_diff)
+        fixed_lines.append(line)
+
+    result = "\n".join(fixed_lines)
+    final_diff = strip_comments_and_literals(result).count("(") - strip_comments_and_literals(result).count(")")
+    if final_diff > 0:
+        result = result.rstrip().rstrip(";") + (")" * final_diff)
+    return result
+
+
 def check_parentheses_balance(sql: str) -> tuple[bool, str]:
     """Kiểm tra số lượng dấu mở ngoặc '(' và đóng ngoặc ')' trong SQL."""
     cleaned = strip_comments_and_literals(sql)
@@ -85,6 +115,9 @@ def clean_sql_query(sql: str) -> str:
         prefix = s[:match_kw.start()].strip()
         if not any(k in prefix.lower() for k in FORBIDDEN_KEYWORDS):
             s = s[match_kw.start():].strip()
+
+    # 5. Tự động cân bằng dấu ngoặc đơn () nếu bị thiếu dấu đóng ngoặc trước AS/FROM
+    s = auto_balance_parentheses(s)
 
     return s.strip().strip("`").rstrip(";").strip()
 

@@ -57,15 +57,15 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
     )
 
     if is_month_num:
-        hist_x = [f"Tháng {int(v)}" for v in raw_x_values]
-        future_x = [f"Kỳ +{i+1} (Dự báo)" for i in range(periods)]
+        hist_x = [f"T{int(v)}" for v in raw_x_values]
+        future_x = [f"+{i+1} (Dự báo)" for i in range(periods)]
     elif is_year_num:
-        hist_x = [f"Năm {int(v)}" for v in raw_x_values]
+        hist_x = [str(int(v)) for v in raw_x_values]
         last_year = int(raw_x_values[-1])
-        future_x = [f"Năm {last_year + i + 1} (Dự báo)" for i in range(periods)]
+        future_x = [f"{last_year + i + 1} (Dự báo)" for i in range(periods)]
     else:
         hist_x = [str(v) for v in raw_x_values]
-        future_x = [f"Kỳ +{i+1} (Dự báo)" for i in range(periods)]
+        future_x = [f"+{i+1} (Dự báo)" for i in range(periods)]
 
     # Điểm cầu nối nối giữa Thực tế và Dự báo
     bridge_x = [hist_x[-1]] + future_x
@@ -96,17 +96,20 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
         hovertemplate="<b>Dự báo</b><br>%{x}<br>Giá trị dự phòng: %{y:,.2f}<extra></extra>"
     ))
 
+    all_x_len = len(hist_x) + len(future_x)
+    tick_angle = -45 if all_x_len >= 8 else 0
+
     fig.update_layout(
         title=f"📈 Biểu đồ Dự báo Xu hướng theo {x_col} (+{periods} kỳ tương lai)",
         xaxis_title=x_col,
         yaxis_title=y_col,
         template="plotly_white",
-        margin=dict(l=20, r=20, t=50, b=20),
+        margin=dict(l=20, r=20, t=50, b=60 if tick_angle != 0 else 30),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         hovermode="x unified"
     )
 
-    # Ép kiểu trục X thành category để Plotly luôn hiển thị đầy đủ mọi mốc dự báo với số thẳng hàng
-    fig.update_xaxes(type="category", tickangle=0, automargin=True)
+    # Ép kiểu trục X thành category và tự động xoay nghiêng để các mốc thời gian không bị đè chồng
+    fig.update_xaxes(type="category", tickangle=tick_angle, automargin=True)
 
     return fig, FORECAST_METHOD_NAME
