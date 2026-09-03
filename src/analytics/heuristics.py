@@ -658,12 +658,32 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
         "use ai", "machine learning", "tối ưuuize", "giảm giá sản phẩm",
         "thuật ngữ", "dịch không phù hợp", "chỉ số tham khảo", "tiếng anh", "nếu chúng ta tiếp tục",
         "bàn giao", "giả sử là", "tác dụng chính", "khắc chế", "stability", "производ", "trajectory", "fluctuate",
-        "avgsalary", "averagesalary", "employee salary overview"
+        "avgsalary", "averagesalary", "employee salary overview", "change from prev period", "difference from mean",
+        "rank 1:", "difference from", "prev period", "from mean"
     ]
 
     def is_noise(text_line: str) -> bool:
         low = text_line.lower()
         return any(k in low for k in noise_keywords)
+
+    def is_english_line(text_line: str) -> bool:
+        """Kiểm tra nếu dòng văn bản chứa nhiều từ tiếng Anh (khi ngôn ngữ yêu cầu là tiếng Việt)."""
+        english_indicators = [
+            "department", "sales department", "finance department", "employee benefits",
+            "is growing", "difference from", "change from", "average salary", "rank ",
+            "out of", "with experience", "risk management", "financial planning",
+            "market research", "accounting", "actively adapting", "growing steadily"
+        ]
+        low = text_line.lower()
+        if any(ind in low for ind in english_indicators):
+            return True
+        words = low.split()
+        if len(words) >= 4:
+            common_en = {"is", "are", "the", "and", "in", "of", "to", "with", "for", "from", "by", "has", "have", "that"}
+            en_matches = sum(1 for w in words if w in common_en)
+            if en_matches >= 2:
+                return True
+        return False
 
     if part_21:
         lines_21 = [l.strip() for l in part_21.split("\n") if l.strip()]
@@ -672,7 +692,7 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
             if l.startswith("#") or "##" in l:
                 continue
             clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
-            if is_noise(clean_check):
+            if is_noise(clean_check) or is_english_line(clean_check):
                 continue
             # Loại bỏ các subheader gây lặp lại "Nguyên nhân tiềm năng" ở Thẻ 1
             if re.search(r"^(?:kỹ thuật\s*&\s*)?nguyên nhân(?:\s*tiềm năng)?$", clean_check, re.IGNORECASE):
@@ -730,7 +750,7 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
                 continue
             if re.search(r"^###?\s*2\.2", l, re.IGNORECASE):
                 continue
-            if is_noise(l):
+            if is_noise(l) or is_english_line(l):
                 continue
             clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
             if re.search(r"^(?:giả thuyết|nguyên nhân|nguyên nhân tiềm năng)", clean_check, re.IGNORECASE):
@@ -750,17 +770,33 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
             l = re.sub(r"^[•\-\*]?\s*(?:Hiểu lý:?\s*)+", "• ", l)
             l = re.sub(r"^[•\-\*]?\s*Giả thuyết:?\s*", "• ", l)
             l = re.sub(r"^•\s*-\s*", "• ", l)
+            clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
+            # Loại bỏ các tiêu đề mồ côi (chỉ có tiêu đề không có nội dung phân tích)
+            if clean_check.endswith(":") or len(clean_check) < 30 or re.search(r"^(?:\d+[\.\)]\s*)?(?:quy mô|chính sách|tính chất|thị trường|đặc thù)", clean_check, re.IGNORECASE):
+                continue
             if not l.startswith("•"):
                 l = "• " + l
             cleaned_22.append(l)
         part_22 = "\n\n".join(cleaned_22)
 
-    # Nếu part_22 rỗng do bị lọc hết rác -> tạo 2 giả thuyết executive chuẩn mực
+    # Nếu part_22 rỗng do bị lọc hết rác/tiếng Anh -> tạo 2 giả thuyết executive chuẩn mực
     if not part_22 or len([l for l in part_22.split("\n") if l.strip()]) < 2:
-        part_22 = (
-            "• **Trách nhiệm & Thâm niên**: Nhóm dẫn đầu gánh vác vai trò chuyên môn then chốt và có bề dày kinh nghiệm quản lý, tạo nên mức đãi ngộ cao vượt trội.\n\n"
-            "• **Cơ chế cạnh tranh & Giữ chân nhân tài**: Sự phân hóa phản ánh định hướng của tổ chức trong việc đãi ngộ các vị trí nòng cốt và tối ưu hóa hiệu suất vận hành."
-        )
+        is_hr = False
+        if df is not None and not df.empty:
+            cols_str = " ".join([str(c).lower() for c in df.columns])
+            if any(k in cols_str for k in ["salary", "department", "emp", "title", "lương"]):
+                is_hr = True
+
+        if is_hr:
+            part_22 = (
+                "• **Trách nhiệm & Quy mô đơn vị**: Các phòng ban/chức danh dẫn đầu có tính chất cạnh tranh cao, quy mô lớn và đóng góp trực tiếp vào mục tiêu cốt lõi nên có mức đãi ngộ vượt trội.\n\n"
+                "• **Chính sách đãi ngộ & Cạnh tranh nhân tài**: Sự chênh lệch thu nhập phản ánh định hướng của tổ chức trong việc thu hút nhân sự chuyên môn giỏi và giữ chân các vị trí nòng cốt."
+            )
+        else:
+            part_22 = (
+                "• **Nhu cầu thị trường & Mùa vụ**: Nhóm sản phẩm/thị trường dẫn đầu đáp ứng tốt thị hiếu tiêu dùng và đón đầu hiệu quả các đợt cao điểm mua sắm.\n\n"
+                "• **Hiệu quả kênh phân phối**: Doanh số cao là kết quả của chiến lược xúc tiến thương mại mạnh mẽ và độ phủ sóng rộng khắp của đội ngũ bán hàng."
+            )
 
     # 3. Đảm bảo mục Kế hoạch Hành động (part_23) luôn có đủ 3 ý: Cao 🔴, Trung bình 🟡, Thấp 🟢
     if part_23:
