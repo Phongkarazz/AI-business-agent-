@@ -143,15 +143,20 @@ def get_db_specific_rules(schema_context: str) -> str:
        GROUP BY t.title, e.gender
        ORDER BY t.title, e.gender;
 
-     + MẪU CHUẨN TỶ LỆ GIỚI TÍNH TRONG BAN QUẢN LÝ (DEPT_MANAGER):
-       SELECT d.dept_name AS Department, e.gender AS Gender, COUNT(dm.emp_no) AS TotalManagers
-       FROM dept_manager dm
-       JOIN employees e ON dm.emp_no = e.emp_no
-       JOIN departments d ON dm.dept_no = d.dept_no
-       WHERE dm.to_date = '9999-01-01'
-       GROUP BY d.dept_name, e.gender
-       ORDER BY d.dept_name, e.gender;
-       * CẢNH BÁO: Khi câu hỏi về số lượng, tỷ lệ hoặc cơ cấu Nam/Nữ ban quản lý: BẮT BUỘC chỉ dùng hàm COUNT(dm.emp_no), TUYỆT ĐỐI KHÔNG JOIN bảng salaries và KHÔNG tính toán công thức lương!
+      + MẪU CHUẨN TỶ LỆ GIỚI TÍNH TRONG BAN QUẢN LÝ (DEPT_MANAGER):
+        SELECT 
+            d.dept_name AS Department,
+            SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers,
+            SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers,
+            COUNT(*) AS TotalManagers,
+            ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct,
+            ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct
+        FROM dept_manager dm
+        JOIN employees e ON dm.emp_no = e.emp_no
+        JOIN departments d ON dm.dept_no = d.dept_no
+        GROUP BY d.dept_name
+        ORDER BY d.dept_name;
+        * CẢNH BÁO: Dùng COUNT(*) để đếm tổng số, BẮT BUỘC chỉ GROUP BY d.dept_name (TUYỆT ĐỐI KHÔNG GROUP BY e.gender) để mỗi phòng ban là 1 dòng duy nhất! Không JOIN salaries khi hỏi tỷ lệ quản lý!
 
      + MẪU CHUẨN XU HƯỚNG TUYỂN DỤNG THEO NĂM:
        SELECT YEAR(hire_date) AS HireYear, COUNT(*) AS TotalHires

@@ -257,7 +257,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     )
 
                 elif len(measure_cols) >= 2:
-                    # So sánh nhiều chỉ số theo từng nhóm đối tượng (Grouped Bar Chart)
+                    # Lọc các chỉ số có cùng thang đo (tránh vẽ lẫn lộn số lượng 1,2 và phần trăm 100% trên cùng 1 trục)
+                    pct_cols = [c for c in measure_cols if any(k in c.lower() for k in ["pct", "percent", "rate", "tỷ lệ", "%"])]
+                    non_total_cols = [c for c in measure_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])]
+
+                    if pct_cols:
+                        active_measures = pct_cols
+                        chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
+                    elif len(non_total_cols) >= 2:
+                        active_measures = non_total_cols
+                        chart_title = f"So sánh ({', '.join(non_total_cols)}) theo {label_name}"
+                    else:
+                        active_measures = measure_cols
+                        chart_title = f"So sánh các chỉ số ({', '.join(measure_cols)}) theo {label_name}"
+
                     if total_rows > 30:
                         max_display = st.slider(
                             f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
@@ -272,9 +285,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
                     tick_angle = 0 if len(plot_df) <= 10 else -45
                     fig = px.bar(
-                        plot_df, x=label_name, y=measure_cols,
+                        plot_df, x=label_name, y=active_measures,
                         barmode="group",
-                        title=f"So sánh các chỉ số ({', '.join(measure_cols)}) theo {label_name}",
+                        title=chart_title,
                         category_orders={label_name: category_order},
                         template="plotly_white"
                     )
