@@ -210,12 +210,11 @@ def is_hallucinated_followup(q: str) -> bool:
     return any(t in q_low for t in forbidden_terms)
 
 
-def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str = "", lang: str = "vi") -> list[str]:
-    """Sinh các câu hỏi đào sâu bám sát 100% vào cấu trúc CSDL và các thực thể cụ thể có sẵn trong kết quả truy vấn.
-    Đảm bảo 100% câu hỏi:
-    1. Truy vấn thành công có dữ liệu.
-    2. Vẽ được biểu đồ tương tác (Bar hoặc Line).
-    3. Nêu được Insight phân tích kinh doanh chuẩn mực.
+def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str = "", current_query: str = "", lang: str = "vi") -> list[str]:
+    """Sinh các câu hỏi đào sâu bám sát 100% vào cấu trúc CSDL theo 3 Chiều Chiến Lược Cấp Điều Hành (Multi-Tiered Strategic Drilldown):
+    - Chiều 1 (📈): Chuỗi thời gian, Xu hướng & Kích hoạt Tab Dự Báo (Line Chart / Forecasting)
+    - Chiều 2 (⚖️): Phân tích đối chuẩn & So sánh đa nhóm (Grouped Bar / Benchmarking)
+    - Chiều 3 (🍩): Phân tích cơ cấu, Tỷ lệ phần trăm & Quản trị (Donut Chart / Distribution)
     """
     if df is None or df.empty:
         return []
@@ -224,72 +223,78 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
     cols = df.columns.tolist()
     cols_low = [str(c).lower() for c in cols]
     schema_low = (schema_context or "").lower()
+    q_low = (current_query or "").lower()
 
     # Nhận diện CSDL
     is_employees_db = "departments" in schema_low or "dept_emp" in schema_low or "salaries" in schema_low or any(c in cols_low for c in ["salary", "avgsalary", "dept_name", "department", "emp_no"])
     is_chocolates_db = "people" in schema_low and "products" in schema_low
 
     if is_employees_db:
-        # Miền HR / employees
-        dept_col = next((c for c in cols if "department" in c.lower() or "dept" in c.lower() or "phòng" in c.lower()), None)
-        title_col = next((c for c in cols if "title" in c.lower() or "chức danh" in c.lower()), None)
-
+        # Nhận diện thực thể trong kết quả hiện tại
+        dept_col = next((c for c in cols if any(k in c.lower() for k in ["dept_name", "department", "phòng"])), None)
+        title_col = next((c for c in cols if any(k in c.lower() for k in ["title", "chức danh"])), None)
         dept_sample = str(df[dept_col].dropna().iloc[0]).strip() if dept_col and not df[dept_col].dropna().empty else None
         title_sample = str(df[title_col].dropna().iloc[0]).strip() if title_col and not df[title_col].dropna().empty else None
 
-        if dept_sample:
-            followups.append(f"Top 10 nhân viên có mức lương cao nhất trong phòng ban {dept_sample}" if lang != "en" else f"Top 10 employees with highest salary in {dept_sample} department")
-            followups.append("Mức lương trung bình của nhân viên theo từng phòng ban" if lang != "en" else "Average salary of employees by department")
-            followups.append("Số lượng nhân viên theo từng phòng ban" if lang != "en" else "Total number of employees by department")
-        elif title_sample:
-            followups.append(f"Danh sách nhân viên có chức danh {title_sample} và mức lương cao nhất" if lang != "en" else f"Top paid employees with title {title_sample}")
-            followups.append("Mức lương trung bình theo từng chức danh (Title)" if lang != "en" else "Average salary by job title")
-            followups.append("Top 10 nhân viên có mức lương cao nhất" if lang != "en" else "Top 10 highest paid employees")
-        else:
-            followups.append("Mức lương trung bình của nhân viên theo từng phòng ban" if lang != "en" else "Average salary of employees by department")
-            followups.append("Top 10 nhân viên có mức lương cao nhất" if lang != "en" else "Top 10 highest paid employees")
-            followups.append("Số lượng nhân viên theo từng phòng ban" if lang != "en" else "Total number of employees by department")
+        # Tier 1: Xu Hướng & Dự Báo (Time-Series & Forecasting)
+        tier1_candidates = [
+            ("Thống kê số lượng nhân viên được tuyển dụng theo từng năm từ trước đến nay", "Total number of employees hired per year"),
+            ("Mức lương trung bình của toàn công ty thay đổi như thế nào qua các năm?", "Average company-wide salary trend across years")
+        ]
 
-        return followups[:3]
+        # Tier 2: Đối Chuẩn & So Sánh (Comparative / Benchmark)
+        tier2_candidates = [
+            ("So sánh mức lương trung bình giữa nhân viên nam và nữ theo từng chức danh", "Compare average salary between male and female employees across job titles"),
+            ("Phòng ban nào có mức chênh lệch lương giữa người cao nhất và thấp nhất lớn nhất?", "Which department has the largest salary spread between highest and lowest earners?"),
+            ("Mức lương trung bình của nhân viên theo từng phòng ban", "Average salary of employees by department")
+        ]
+
+        # Tier 3: Cơ Cấu Tỷ Lệ & Đào Sâu Quản Trị (Distribution & Executive Share)
+        tier3_candidates = [
+            ("Tỷ lệ nam và nữ trong ban quản lý (dept_manager) của từng phòng ban", "Gender distribution in management (dept_manager) across departments"),
+            ("Danh sách các Manager hiện tại của từng phòng ban kèm mức lương mới nhất", "Current department managers and their latest salary"),
+            ("Số lượng nhân viên theo từng phòng ban", "Total number of employees by department")
+        ]
+
+        # Nếu đang xem 1 phòng ban cụ thể -> Ưu tiên các câu đào sâu theo phòng ban đó
+        if dept_sample and dept_sample.lower() not in ["none", "nan", ""]:
+            tier2_candidates.insert(0, (f"So sánh mức lương trung bình của phòng ban {dept_sample} so với các phòng ban khác", f"Compare average salary of {dept_sample} department with other departments"))
+
+        # Lọc thông minh: Chọn câu chưa xuất hiện trong current_query
+        p1 = next((item for item in tier1_candidates if item[0].lower() not in q_low), tier1_candidates[0])
+        p2 = next((item for item in tier2_candidates if item[0].lower() not in q_low), tier2_candidates[0])
+        p3 = next((item for item in tier3_candidates if item[0].lower() not in q_low), tier3_candidates[0])
+
+        selected = [p1, p2, p3]
+        return [item[1] if lang == "en" else item[0] for item in selected]
 
     if is_chocolates_db:
-        # Miền Awesome Chocolates
-        prod_col = next((c for c in cols if "product" in c.lower() or "sản phẩm" in c.lower()), None)
-        rep_col = next((c for c in cols if "salesperson" in c.lower() or "nhân viên" in c.lower() or "people" in c.lower()), None)
-        team_col = next((c for c in cols if "team" in c.lower() or "nhóm" in c.lower()), None)
-        geo_col = next((c for c in cols if "geo" in c.lower() or "country" in c.lower() or "quốc gia" in c.lower()), None)
+        # Tier 1: Xu Hướng & Dự Báo (Time-Series & Forecasting)
+        tier1_candidates = [
+            ("Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng năm 2021?", "Monthly revenue trend across countries in 2021"),
+            ("Doanh số toàn công ty theo từng tháng năm 2021", "Monthly company-wide revenue trend in 2021")
+        ]
 
-        sample_prod = str(df[prod_col].dropna().iloc[0]).strip() if prod_col and not df[prod_col].dropna().empty else None
-        sample_rep = str(df[rep_col].dropna().iloc[0]).strip() if rep_col and not df[rep_col].dropna().empty else None
-        sample_team = str(df[team_col].dropna().iloc[0]).strip() if team_col and not df[team_col].dropna().empty else None
-        sample_geo = str(df[geo_col].dropna().iloc[0]).strip() if geo_col and not df[geo_col].dropna().empty else None
+        # Tier 2: Đối Chuẩn & So Sánh (Comparative / Benchmark)
+        tier2_candidates = [
+            ("So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh", "Compare total revenue and boxes sold across sales teams"),
+            ("Mức lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm", "Average profit per box across chocolate products"),
+            ("Top 5 sản phẩm có doanh số cao nhất năm 2021", "Top 5 best selling products in 2021")
+        ]
 
-        if sample_geo:
-            followups.append(f"Top 5 sản phẩm bán chạy nhất tại thị trường {sample_geo} năm 2021" if lang != "en" else f"Top 5 best selling products in {sample_geo} in 2021")
-        elif sample_team:
-            followups.append(f"Top 5 nhân viên có doanh số cao nhất trong nhóm {sample_team}" if lang != "en" else f"Top 5 sales representatives in {sample_team} team")
-        elif sample_prod:
-            followups.append(f"Doanh số của sản phẩm {sample_prod} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_prod} in 2021")
-        elif sample_rep:
-            followups.append(f"Top các sản phẩm bán chạy nhất của nhân viên {sample_rep}" if lang != "en" else f"Top selling products by {sample_rep}")
-        else:
-            followups.append("Top 5 sản phẩm mang lại doanh thu cao nhất năm 2021" if lang != "en" else "Top 5 best selling products in 2021")
+        # Tier 3: Cơ Cấu Tỷ Lệ & Đào Sâu Quản Trị (Distribution & Share)
+        tier3_candidates = [
+            ("Tỷ lệ đóng góp doanh thu của từng nhóm sản phẩm (Category) vào tổng doanh thu", "Revenue contribution percentage by product category"),
+            ("Những nhân viên bán hàng có tổng doanh số vượt mức 50,000 USD", "Sales representatives with total sales exceeding 50,000 USD"),
+            ("Top 10 nhân sự có doanh số cao nhất trong nhóm Yummies", "Top 10 sales representatives in Yummies team")
+        ]
 
-        if sample_prod:
-            followups.append(f"Doanh thu của sản phẩm {sample_prod} tại các thị trường quốc gia" if lang != "en" else f"Revenue distribution of {sample_prod} across countries")
-        elif sample_rep:
-            followups.append(f"Doanh số của nhân viên {sample_rep} theo từng tháng năm 2021" if lang != "en" else f"Monthly sales trend of {sample_rep} in 2021")
-        else:
-            followups.append("Doanh số toàn công ty theo từng tháng năm 2021" if lang != "en" else "Monthly company revenue trend in 2021")
+        p1 = next((item for item in tier1_candidates if item[0].lower() not in q_low), tier1_candidates[0])
+        p2 = next((item for item in tier2_candidates if item[0].lower() not in q_low), tier2_candidates[0])
+        p3 = next((item for item in tier3_candidates if item[0].lower() not in q_low), tier3_candidates[0])
 
-        if sample_geo and sample_team:
-            followups.append(f"Doanh thu của nhóm {sample_team} tại các thị trường quốc gia" if lang != "en" else f"Revenue of {sample_team} team across countries")
-        elif sample_team:
-            followups.append("Top 10 nhân sự có doanh số cao nhất trong nhóm Yummies" if lang != "en" else "Top 10 sales reps in Yummies team")
-        else:
-            followups.append("Doanh thu theo từng quốc gia và khu vực năm 2021" if lang != "en" else "Compare revenue across countries in 2021")
-
-        return followups[:3]
+        selected = [p1, p2, p3]
+        return [item[1] if lang == "en" else item[0] for item in selected]
 
     # CSDL Tổng quát
     from src.analytics.heuristics import get_axis_columns
@@ -301,9 +306,9 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
     m_col = measure_cols[0] if measure_cols else cols[0]
     l_col = label_cols[0] if label_cols else cols[0]
 
-    followups.append(f"Top 5 {l_col} có {m_col} cao nhất" if lang != "en" else f"Top 5 {l_col} by {m_col}")
-    followups.append(f"Tổng {m_col} phân bổ theo từng {l_col}" if lang != "en" else f"Total {m_col} grouped by {l_col}")
-    followups.append(f"Mức trung bình của {m_col} theo {l_col}" if lang != "en" else f"Average {m_col} by {l_col}")
+    followups.append(f"Xu hướng thay đổi của {m_col} theo thời gian" if lang != "en" else f"Time-series trend of {m_col}")
+    followups.append(f"So sánh {m_col} giữa các {l_col} hàng đầu" if lang != "en" else f"Compare {m_col} across top {l_col}")
+    followups.append(f"Tỷ lệ phần trăm đóng góp của từng {l_col} vào tổng {m_col}" if lang != "en" else f"Percentage contribution of each {l_col} to total {m_col}")
 
     return followups[:3]
 
@@ -543,8 +548,8 @@ def run_agent(
                     result["anomalies_info"] = anomalies_info
 
                     # Tối ưu hóa siêu tốc (Instant Grounded Analytics):
-                    # 1. Sinh câu hỏi gợi ý tiếp nối ngay lập tức trong 0.0001s bám sát thực thể thật
-                    result["followups"] = generate_grounded_fallback_followups(df, schema_context=schema_context, lang=lang)
+                    # 1. Sinh câu hỏi gợi ý tiếp nối ngay lập tức trong 0.0001s theo 3 chiều chiến lược
+                    result["followups"] = generate_grounded_fallback_followups(df, schema_context=schema_context, current_query=user_query, lang=lang)
 
                     # 2. Sinh Insight Phân Tích
                     if enable_auto_insights:
