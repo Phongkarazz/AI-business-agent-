@@ -83,11 +83,15 @@ PROVIDER_CONFIGS = {
     },
     "Ollama (Local AI Offline)": {
         "models": [
+            "qwen2.5-coder:3b",
             "qwen2.5-coder:1.5b",
             "qwen2.5-coder:7b",
             "qwen2.5-coder:14b",
+            "deepseek-r1:1.5b",
+            "deepseek-r1:7b",
             "deepseek-r1:8b",
             "llama3.1:8b",
+            "gemma2:2b",
             "mistral:7b",
         ],
         "key_help": "Ollama chạy trực tiếp trên máy tính của bạn, hoàn toàn không cần API key.",

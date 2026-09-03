@@ -149,7 +149,22 @@ def render_onboarding():
         if is_openrouter_key and provider != "OpenRouter":
             st.info("💡 Phát hiện API Key của **OpenRouter**. Hệ thống sẽ tự động định tuyến qua OpenRouter Base URL (`https://openrouter.ai/api/v1`).")
 
-        model_options = provider_cfg["models"]
+        model_options = list(provider_cfg["models"])
+        if provider == "Ollama (Local AI Offline)":
+            try:
+                import json
+                import urllib.request
+                req = urllib.request.Request("http://localhost:11434/api/tags", headers={"User-Agent": "Veraxus"})
+                with urllib.request.urlopen(req, timeout=0.6) as response:
+                    data = json.loads(response.read().decode())
+                    installed = [m["name"] for m in data.get("models", []) if "name" in m]
+                    for inst in reversed(installed):
+                        if inst in model_options:
+                            model_options.remove(inst)
+                        model_options.insert(0, inst)
+            except Exception:
+                pass
+
         saved_model = saved.get("model_name", "")
         model_idx = model_options.index(saved_model) if saved_model in model_options else 0
         selected_model = st.selectbox("Chọn Model AI", model_options, index=model_idx, key="onboarding_model")
