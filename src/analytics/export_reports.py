@@ -428,7 +428,7 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             story.append(Paragraph(f"{sec_num}. PHÂN TÍCH INSIGHT CHIẾN LƯỢC & KẾ HOẠCH HÀNH ĐỘNG", section_style))
 
             from src.analytics.heuristics import split_insight_sections
-            sec_dict = split_insight_sections(insights)
+            sec_dict = split_insight_sections(insights, df=df)
             p21 = sec_dict.get("anomaly", "").strip()
             p22 = sec_dict.get("hypothesis", "").strip()
             p23 = sec_dict.get("action_plan", "").strip()
