@@ -72,24 +72,27 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
    - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
    - BẮT BUỘC KIỂM TRA KỸ TÊN CỘT TRONG SCHEMA KHI TRUY VẤN & JOIN:
-     + Bảng `products`:
+     + Bảng `products` (Bí danh bắt buộc: `pr`):
        * Cột: `PID` (Khóa chính), `Product` (Tên sản phẩm: 'Mint Chip Choco', 'Milk Bars'...), `Category`, `Size`, `Cost_per_box`.
-       * CẢNH BÁO: TUYỆT ĐỐI KHÔNG DÙNG `p.Salesperson` (Salesperson nằm ở bảng people, KHÔNG nằm ở products)! TUYỆT ĐỐI KHÔNG DÙNG `ProductCost_per_box` (cột chi phí là `Cost_per_box`)!
-     + Bảng `people`:
+       * CẢNH BÁO: TUYỆT ĐỐI KHÔNG DÙNG `pr.Salesperson` (Salesperson nằm ở bảng people, KHÔNG nằm ở products)! TUYỆT ĐỐI KHÔNG DÙNG `ProductCost_per_box` (cột chi phí là `Cost_per_box`)!
+     + Bảng `people` (Bí danh bắt buộc: `pe`):
        * Cột: `SPID` (Khóa chính), `Salesperson` (Tên nhân viên: 'Van Tuxwell'...), `Team` ('Yummies', 'Jucies', 'Delish'...), `Location`.
        * CẢNH BÁO: Tên nhân viên là cột `Salesperson`, TUYỆT ĐỐI KHÔNG DÙNG `Name` hay `Employee`!
-     + Bảng `geo`:
+     + Bảng `geo` (Bí danh bắt buộc: `g`):
        * Cột: `GeoID` (Khóa chính), `Geo` (Tên quốc gia/thị trường: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand'), `Region` (Khu vực địa lý lớn: 'APAC', 'Americas').
-       * CẢNH BÁO: Khi lọc thị trường hoặc khu vực Australia, Ấn Độ (India), Mỹ (USA)... BẮT BUỘC DÙNG `geo.Geo = 'Australia'` (hoặc `geo.Geo = 'India'`)!
-     + Bảng `sales`:
-       * Cột: `SPID` (liên kết people.SPID), `PID` (liên kết products.PID), `GeoID` (liên kết geo.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
+       * CẢNH BÁO: Khi lọc thị trường hoặc khu vực Australia, Ấn Độ (India), Mỹ (USA)... BẮT BUỘC DÙNG `g.Geo = 'Australia'` (hoặc `g.Geo = 'India'`)!
+     + Bảng `sales` (Bí danh bắt buộc: `s`):
+       * Cột: `SPID` (liên kết pe.SPID), `PID` (liên kết pr.PID), `GeoID` (liên kết g.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
+     + QUY TẮC BÍ DANH (ALIAS) TUYỆT ĐỐI KHÔNG TRÙNG NHAU:
+       * TUYỆT ĐỐI KHÔNG đặt cùng bí danh `p` cho cả people và products (sẽ gây lỗi MySQL 1066 Not unique table/alias)!
+       * Luôn dùng: `pe` cho people, `pr` cho products, `s` cho sales, `g` cho geo.
      + Mối quan hệ liên kết:
-       * `products.PID = sales.PID`
-       * `people.SPID = sales.SPID`
-       * `geo.GeoID = sales.GeoID`
+       * `pr.PID = s.PID`
+       * `pe.SPID = s.SPID`
+       * `g.GeoID = s.GeoID`
      + TUYỆT ĐỐI KHÔNG DÙNG CTE (`WITH ...`) cho các truy vấn đơn giản. Hãy viết câu lệnh SELECT ... JOIN ... GROUP BY phẳng, trực tiếp và chạy siêu tốc!
      + Để lọc nhân viên trong một nhóm cụ thể (ví dụ nhóm 'Yummies'):
-       Chỉ cần: `FROM people p JOIN sales s ON p.SPID = s.SPID WHERE p.Team = 'Yummies' GROUP BY p.Salesperson ORDER BY TotalSales DESC LIMIT 5`
+       Chỉ cần: `FROM people pe JOIN sales s ON pe.SPID = s.SPID WHERE pe.Team = 'Yummies' GROUP BY pe.Salesperson ORDER BY TotalSales DESC LIMIT 5`
        TUYỆT ĐỐI KHÔNG tự JOIN bảng people 2 lần!
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
    - CSDL doanh nghiệp chứa dữ liệu các năm lịch sử (không phải realtime hôm nay).
@@ -109,24 +112,46 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
        BẮT BUỘC: Mỗi nhân sự/sản phẩm chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG DOANH SỐ TÍCH LŨY.
        BẮT BUỘC dùng hàm tính tổng `SUM(s.Amount) AS TotalSales`, `GROUP BY` và `ORDER BY TotalSales DESC LIMIT N`!
        TUYỆT ĐỐI KHÔNG `SELECT s.Amount` rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một thực thể nhiều lần!
+       
        MẪU CHUẨN TOP NHÂN SỰ:
-       SELECT p.Salesperson, SUM(s.Amount) AS TotalSales, p.Team
-       FROM people p
-       JOIN sales s ON p.SPID = s.SPID
-       GROUP BY p.Salesperson, p.Team
+       SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
+       FROM people pe
+       JOIN sales s ON pe.SPID = s.SPID
+       GROUP BY pe.Salesperson, pe.Team
+       ORDER BY TotalSales DESC
+       LIMIT 10;
+
+       MẪU CHUẨN TOP SẢN PHẨM CỦA 1 NHÂN VIÊN:
+       SELECT pr.Product, SUM(s.Amount) AS TotalSales, pr.Category
+       FROM people pe
+       JOIN sales s ON pe.SPID = s.SPID
+       JOIN products pr ON s.PID = pr.PID
+       WHERE pe.Salesperson = 'Madelene Upcott'
+       GROUP BY pr.Product, pr.Category
        ORDER BY TotalSales DESC
        LIMIT 10;
 
        MẪU CHUẨN TOP SẢN PHẨM THEO THỊ TRƯỜNG:
-       SELECT p.Product, SUM(s.Amount) AS TotalSales
-       FROM products p
-       JOIN sales s ON p.PID = s.PID
+       SELECT pr.Product, SUM(s.Amount) AS TotalSales
+       FROM products pr
+       JOIN sales s ON pr.PID = s.PID
        JOIN geo g ON s.GeoID = g.GeoID
        WHERE g.Geo = 'Australia' AND YEAR(s.SaleDate) = 2021
-       GROUP BY p.Product
+       GROUP BY pr.Product
        ORDER BY TotalSales DESC
-       LIMIT 2;
-     + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không ghi rõ số lượng cụ thể: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
+       LIMIT 5;
+
+   - VỚI CÂU HỎI THEO THỜI GIAN / THEO THÁNG / THEO QUÝ / XU HƯỚNG:
+       + TUYỆT ĐỐI CẤM DÙNG `LIMIT 10` (Bởi vì 1 năm có đủ 12 tháng, nếu dùng LIMIT 10 sẽ bị cắt mất tháng 6 hoặc tháng 12!).
+       + BẮT BUỘC `ORDER BY Month ASC` (hoặc `ORDER BY s.SaleDate ASC`) để biểu đồ đường vẽ liền mạch, chuẩn xác từ tháng 1 đến tháng 12 theo đúng trình tự thời gian!
+       + MẪU CHUẨN DOANH SỐ THEO TỪNG THÁNG:
+       SELECT DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month, SUM(s.Amount) AS TotalSales
+       FROM people pe
+       JOIN sales s ON pe.SPID = s.SPID
+       WHERE pe.Salesperson = 'Madelene Upcott' AND YEAR(s.SaleDate) = 2021
+       GROUP BY Month
+       ORDER BY Month ASC;
+     + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không phải theo chuỗi thời gian: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
      + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):

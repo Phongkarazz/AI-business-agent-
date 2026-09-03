@@ -661,7 +661,37 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
     if idx23 != -1:
         part_23 = cleaned[m23.end():].strip()
 
-    # Đảm bảo mục Kế hoạch Hành động (part_23) luôn có đủ 3 ý: Cao 🔴, Trung bình 🟡, Thấp 🟢
+    # 1. Làm sạch mục Phát hiện Bất thường & Xu hướng (part_21)
+    if part_21:
+        lines_21 = [l.strip() for l in part_21.split("\n") if l.strip()]
+        cleaned_21 = []
+        for l in lines_21:
+            clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
+            # Loại bỏ các subheader gây lặp lại "Nguyên nhân tiềm năng" ở Thẻ 1
+            if re.search(r"^(?:kỹ thuật\s*&\s*)?nguyên nhân(?:\s*tiềm năng)?$", clean_check, re.IGNORECASE):
+                continue
+            if re.search(r"^xu hướng(?:\s*chính)?$", clean_check, re.IGNORECASE):
+                continue
+            # Loại bỏ các dòng đọc vẹt thống kê Min/Max/Mean/Median
+            if re.search(r"^(?:\d+[\.\)]\s*)?điểm\s+(?:thấp nhất|cao nhất|trung bình|trung vị)\s*\([A-Za-z]+\)\s*:\s*[\d,\.]+\s*-\s*không có dấu hiệu bất thường", clean_check, re.IGNORECASE):
+                continue
+            # Loại bỏ các dòng rời rạc giá trị nhỏ nhất / doanh thu thấp nhất
+            if re.search(r"^(?:đơn giá thấp nhất|giá trị nhỏ nhất|doanh thu thấp nhất)\s*:\s*[\d,\.]+", clean_check, re.IGNORECASE):
+                continue
+            cleaned_21.append(l)
+        part_21 = "\n\n".join(cleaned_21)
+
+    # 2. Làm sạch mục Giả thuyết & Nguyên nhân (part_22)
+    if part_22:
+        lines_22 = [l.strip() for l in part_22.split("\n") if l.strip()]
+        cleaned_22 = []
+        for l in lines_22:
+            if re.search(r"^###?\s*2\.2", l, re.IGNORECASE):
+                continue
+            cleaned_22.append(l)
+        part_22 = "\n\n".join(cleaned_22)
+
+    # 3. Đảm bảo mục Kế hoạch Hành động (part_23) luôn có đủ 3 ý: Cao 🔴, Trung bình 🟡, Thấp 🟢
     if part_23:
         lines_23 = [l.strip() for l in part_23.split("\n") if l.strip()]
         cleaned_23 = []

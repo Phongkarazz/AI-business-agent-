@@ -522,23 +522,39 @@ def run_agent(
                 except Exception:
                     pass
 
+            # Bắt lỗi 1066 / Not unique table/alias để tự động hướng dẫn đổi bí danh
+            if "1066" in lowered_err or "not unique table/alias" in lowered_err:
+                augmented_error += (
+                    f"\n\nLỖI TRÙNG BÍ DANH (1066 Not unique table/alias):\n"
+                    f"Bạn đang gán trùng bí danh (ví dụ cùng dùng 'p' cho cả bảng 'people' và 'products')!\n"
+                    f"BẮT BUỘC ĐỔI BÍ DANH:\n"
+                    f"- Bảng 'people': dùng bí danh 'pe' (pe.Salesperson, pe.SPID, pe.Team)\n"
+                    f"- Bảng 'products': dùng bí danh 'pr' (pr.Product, pr.PID, pr.Category)\n"
+                    f"- Bảng 'sales': dùng bí danh 's' (s.Amount, s.SaleDate)\n"
+                    f"- Bảng 'geo': dùng bí danh 'g' (g.Geo, g.GeoID)\n"
+                    f"Hãy sửa lại câu SQL bằng các bí danh phân biệt rõ ràng này!"
+                    if lang != "en" else
+                    f"\n\nALIAS COLLISION ERROR (1066 Not unique table/alias):\n"
+                    f"You used the same alias 'p' for multiple tables! Please use 'pe' for people, 'pr' for products, 's' for sales, 'g' for geo!"
+                )
+
             # Bắt lỗi 1054 / Unknown column để tự động chỉ ra tên cột chuẩn xác
             if "1054" in lowered_err or "unknown column" in lowered_err or "no such column" in lowered_err:
                 col_m = re.search(r"unknown column '([^']+)'", lowered_err)
                 bad_col = col_m.group(1) if col_m else "tên cột"
                 augmented_error += (
                     f"\n\nLƯU Ý CỘT KHÔNG TỒN TẠI: Cột '{bad_col}' không tồn tại trong CSDL!\n"
-                    f"- Nếu là 'p.Salesperson': Cột 'Salesperson' nằm ở bảng 'people', KHÔNG nằm ở bảng 'products'! Hãy bỏ cột này nếu câu hỏi không hỏi nhân viên, hoặc JOIN với 'people pe ON s.SPID = pe.SPID' và dùng 'pe.Salesperson'.\n"
+                    f"- Nếu là 'p.Salesperson' hoặc 'pr.Salesperson': Cột 'Salesperson' nằm ở bảng 'people' (pe.Salesperson), KHÔNG nằm ở 'products'! Hãy bỏ cột này nếu câu hỏi không hỏi nhân viên, hoặc JOIN với 'people pe ON s.SPID = pe.SPID' và dùng 'pe.Salesperson'.\n"
                     f"- Nếu là 'ProductCost_per_box': Cột chi phí trong bảng products là 'Cost_per_box'.\n"
-                    f"- Nếu là 'p.Product' trong subquery/CTE 'monthly_sales': Bảng 'monthly_sales' không có bí danh 'p'! Hãy bỏ hoàn toàn CTE (WITH ...) và viết SELECT ... FROM products p JOIN sales s JOIN geo g phẳng đơn giản!\n"
-                    f"- Nếu lọc quốc gia 'Australia', 'India', 'USA': BẮT BUỘC dùng 'geo.Geo = Australia' (cột Geo chứa tên nước, không phải Region)!\n"
+                    f"- Nếu là 'p.Product' trong subquery/CTE 'monthly_sales': Bảng 'monthly_sales' không có bí danh 'p'! Hãy bỏ hoàn toàn CTE (WITH ...) và viết SELECT ... FROM products pr JOIN sales s JOIN geo g phẳng đơn giản!\n"
+                    f"- Nếu lọc quốc gia 'Australia', 'India', 'USA': BẮT BUỘC dùng 'g.Geo = Australia' (cột Geo chứa tên nước, không phải Region)!\n"
                     f"Hãy sửa lại câu SQL dùng đúng các cột có thật trong Schema ở trên!"
                     if lang != "en" else
                     f"\n\nCOLUMN ERROR: Column '{bad_col}' does not exist!\n"
-                    f"- If 'p.Salesperson': 'Salesperson' belongs to 'people', NOT 'products'! Drop it or JOIN with people.\n"
+                    f"- If 'Salesperson': 'Salesperson' belongs to 'people' (pe.Salesperson), NOT 'products'! Drop it or JOIN with people.\n"
                     f"- If 'ProductCost_per_box': The column is 'Cost_per_box'.\n"
                     f"- If 'monthly_sales': Drop CTE and write a flat SELECT query.\n"
-                    f"- For Country: Use 'geo.Geo = Australia'.\n"
+                    f"- For Country: Use 'g.Geo = Australia'.\n"
                     f"Please use exact column names from the Schema above!"
                 )
 
