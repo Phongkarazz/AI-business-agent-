@@ -427,60 +427,45 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             sec_num = "3" if chart_png_bytes else "2"
             story.append(Paragraph(f"{sec_num}. PHÂN TÍCH INSIGHT CHIẾN LƯỢC & KẾ HOẠCH HÀNH ĐỘNG", section_style))
 
-            # Phân tách Insight thành 3 khối nội dung rõ ràng
-            buckets = {"anomalies": [], "hypotheses": [], "actions": []}
-            curr_sec = "anomalies"
-
-            for line in insights.split("\n"):
-                raw_l = line.strip()
-                if not raw_l:
-                    continue
-                if raw_l.lower() in ("markdown", "```markdown", "```") or raw_l.startswith("```") or raw_l in ("---", "* --", "***", "___"):
-                    continue
-                if raw_l.startswith("# ") and "báo cáo insight" in raw_l.lower():
-                    continue
-
-                low_l = raw_l.lower()
-                if len(raw_l) < 70 and any(k in low_l for k in ["giả thuyết", "nguyên nhân tiềm năng", "hypothe"]):
-                    curr_sec = "hypotheses"
-                    continue
-                elif len(raw_l) < 70 and any(k in low_l for k in ["đề xuất", "hành động", "action plan", "recommend"]):
-                    curr_sec = "actions"
-                    continue
-                elif len(raw_l) < 70 and any(k in low_l for k in ["phát hiện bất thường", "xu hướng chính", "key anomalies"]):
-                    curr_sec = "anomalies"
-                    continue
-
-                clean_l = clean_text_for_pdf(raw_l)
-                clean_l = re.sub(r"^[•\-\*]\s*", "", clean_l)
-                clean_l = re.sub(r"^\d+[\.\)]\s*", "", clean_l)
-                clean_l = re.sub(r"^[•\-\*]\s*", "", clean_l).strip()
-                if clean_l:
-                    buckets[curr_sec].append(clean_l)
+            from src.analytics.heuristics import split_insight_sections
+            sec_dict = split_insight_sections(insights)
+            p21 = sec_dict.get("anomaly", "").strip()
+            p22 = sec_dict.get("hypothesis", "").strip()
+            p23 = sec_dict.get("action_plan", "").strip()
 
             # --- 2.1. Phát hiện Bất thường & Xu hướng Chính ---
             story.append(Paragraph(f"<b>{sec_num}.1. Phát hiện Bất thường & Xu hướng Chính</b>", sub_section_style))
-            if buckets["anomalies"]:
-                for item in buckets["anomalies"]:
-                    story.append(Paragraph(f"• {item}", bullet_style))
+            if p21:
+                for line in p21.split("\n"):
+                    l_clean = clean_text_for_pdf(line.strip())
+                    if l_clean:
+                        l_clean = re.sub(r"^[•\-\*]\s*", "", l_clean)
+                        story.append(Paragraph(f"• {l_clean}", bullet_style))
             else:
                 story.append(Paragraph("• Không ghi nhận biến động cực đoan bất thường.", bullet_style))
             story.append(Spacer(1, 4))
 
             # --- 2.2. Giả thuyết & Nguyên nhân Tiềm năng ---
             story.append(Paragraph(f"<b>{sec_num}.2. Giả thuyết & Nguyên nhân Tiềm năng</b>", sub_section_style))
-            if buckets["hypotheses"]:
-                for idx_h, item in enumerate(buckets["hypotheses"], 1):
-                    story.append(Paragraph(f"• <b>Giả thuyết {idx_h}:</b> {item}", bullet_style))
+            if p22:
+                for line in p22.split("\n"):
+                    l_clean = clean_text_for_pdf(line.strip())
+                    if l_clean:
+                        l_clean = re.sub(r"^[•\-\*]\s*", "", l_clean)
+                        story.append(Paragraph(f"• {l_clean}", bullet_style))
             else:
                 story.append(Paragraph("• Doanh thu vận hành ổn định theo quy luật kinh doanh.", bullet_style))
             story.append(Spacer(1, 4))
 
             # --- 2.3. Đề xuất Hành động (Action Plan) ---
             story.append(Paragraph(f"<b>{sec_num}.3. Đề xuất Hành động (Action Plan)</b>", sub_section_style))
-            if buckets["actions"]:
-                for item in buckets["actions"]:
-                    clean_item = re.sub(r"^#+\s*", "", item).strip()
+            if p23:
+                for line in p23.split("\n"):
+                    clean_item = clean_text_for_pdf(line.strip())
+                    if not clean_item:
+                        continue
+                    clean_item = re.sub(r"^[•\-\*]\s*", "", clean_item)
+                    clean_item = re.sub(r"^#+\s*", "", clean_item).strip()
                     clean_item = re.sub(r"\]\s*:\s*:\s*", "]: ", clean_item)
                     clean_item = re.sub(r"\s*:\s*:\s*", ": ", clean_item)
                     clean_item = re.sub(r":\s*:\s*", ": ", clean_item)

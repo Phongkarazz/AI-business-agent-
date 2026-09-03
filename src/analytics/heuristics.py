@@ -662,11 +662,23 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         part_23 = cleaned[m23.end():].strip()
 
     # 1. Làm sạch mục Phát hiện Bất thường & Xu hướng (part_21)
+    noise_keywords = [
+        "hiểu lý", "hiệu quả:", "một số thực tế", "nhà hàng", "đặt đơn hàng trực tuyến",
+        "đặt hàng trực tuyến", "marketing nội hàng", "giảm chi phí vận hành", "bảo vệ khách hàng", "bán vé",
+        "use ai", "machine learning", "tối ưuuize", "giảm giá sản phẩm"
+    ]
+
+    def is_noise(text_line: str) -> bool:
+        low = text_line.lower()
+        return any(k in low for k in noise_keywords)
+
     if part_21:
         lines_21 = [l.strip() for l in part_21.split("\n") if l.strip()]
         cleaned_21 = []
         for l in lines_21:
             clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
+            if is_noise(clean_check):
+                continue
             # Loại bỏ các subheader gây lặp lại "Nguyên nhân tiềm năng" ở Thẻ 1
             if re.search(r"^(?:kỹ thuật\s*&\s*)?nguyên nhân(?:\s*tiềm năng)?$", clean_check, re.IGNORECASE):
                 continue
@@ -682,6 +694,8 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
             # Loại bỏ các dòng rời rạc giá trị nhỏ nhất / doanh thu thấp nhất
             if re.search(r"^(?:đơn giá thấp nhất|giá trị nhỏ nhất|doanh thu thấp nhất)\s*:\s*[\d,\.]+", clean_check, re.IGNORECASE):
                 continue
+            # Làm sạch tiền tố giả thuyết thừa nếu có
+            l = re.sub(r"^[•\-\*]?\s*(?:Giả thuyết \d+:?\s*)+", "• ", l)
             cleaned_21.append(l)
         part_21 = "\n\n".join(cleaned_21)
 
@@ -692,6 +706,8 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         for l in lines_22:
             if re.search(r"^###?\s*2\.2", l, re.IGNORECASE):
                 continue
+            if is_noise(l):
+                continue
             # Loại bỏ các nhãn ưu tiên rò rỉ vào Card 2
             if re.search(r"\[ưu\s*tiên\s*(?:cao|trung\s*bình|thấp)\]", l, re.IGNORECASE) or any(c in l for c in ["🔴", "🟡", "🟢"]):
                 continue
@@ -700,14 +716,29 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
                 continue
             if "kinh thuần" in l.lower() or "mùa thu mới" in l.lower():
                 continue
+
+            # Làm sạch triệt để các tiền tố lặp: Giả thuyết 1: Giả thuyết:, Nguyên nhân: Hiểu lý:
+            l = re.sub(r"^[•\-\*]?\s*(?:Giả thuyết \d+:?\s*)+", "• ", l)
+            l = re.sub(r"^[•\-\*]?\s*(?:Nguyên nhân:?\s*)+", "• ", l)
+            l = re.sub(r"^[•\-\*]?\s*(?:Hiểu lý:?\s*)+", "• ", l)
+            l = re.sub(r"^[•\-\*]?\s*Giả thuyết:?\s*", "• ", l)
             cleaned_22.append(l)
         part_22 = "\n\n".join(cleaned_22)
+
+    # Nếu part_22 rỗng do bị lọc hết rác -> tạo 2 giả thuyết executive chuẩn mực
+    if not part_22 or len(part_22.split("\n")) < 2:
+        part_22 = (
+            "• **Đặc thù hoạt động**: Nhóm đơn vị dẫn đầu có tính chất cạnh tranh cao, quy mô lớn và đóng góp trực tiếp vào mục tiêu cốt lõi.\n\n"
+            "• **Cơ chế phân bổ**: Sự chênh lệch phản ánh sự khác biệt về định mức phân bổ nguồn lực và điều kiện hoạt động thực tế."
+        )
 
     # 3. Đảm bảo mục Kế hoạch Hành động (part_23) luôn có đủ 3 ý: Cao 🔴, Trung bình 🟡, Thấp 🟢
     if part_23:
         lines_23 = [l.strip() for l in part_23.split("\n") if l.strip()]
         cleaned_23 = []
         for l in lines_23:
+            if is_noise(l):
+                continue
             # Dọn sạch các icon cũ, nhãn cũ và dấu gạch ở đầu câu để định dạng chuẩn
             clean_body = re.sub(r"^[•\-\*]?\s*(?:\*\*)?\s*[🔴🟡🟢]?\s*(?:\*\*)?\s*", "", l).strip()
             clean_body = re.sub(r"^\[?(?:Ưu\s*tiên\s*(?:Cao|Trung\s*bình|Thấp)|High\s*Priority|Medium\s*Priority|Low\s*Priority)[^\]:]*\]?:?\s*", "", clean_body, flags=re.IGNORECASE).strip()
@@ -731,12 +762,12 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         has_low = any("🟢" in l or "ưu tiên thấp" in l.lower() or "dài hạn" in l.lower() for l in cleaned_23)
 
         if not has_high:
-            cleaned_23.insert(0, "• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Rà soát chính sách đãi ngộ và tối ưu ngân sách phân bổ theo hiệu suất thực tế.")
+            cleaned_23.insert(0, "• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Rà soát chính sách phân bổ và tập trung tối ưu hóa các đơn vị chủ lực.")
         if not has_med:
             idx_med = 1 if len(cleaned_23) >= 1 else len(cleaned_23)
-            cleaned_23.insert(idx_med, "• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Chuẩn hóa quy trình đánh giá KPI và cân đối quỹ lương theo quy mô từng phòng ban.")
+            cleaned_23.insert(idx_med, "• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Cân đối định mức ngân sách và chuẩn hóa quy trình đánh giá hiệu suất.")
         if not has_low:
-            cleaned_23.append("• 🟢 **[Ưu tiên Thấp / Dài hạn]**: Xây dựng lộ trình phát triển nhân tài dài hạn và hoàn thiện hệ thống quản trị nhân sự tự động.")
+            cleaned_23.append("• 🟢 **[Ưu tiên Thấp / Dài hạn]**: Hoàn thiện hệ thống quản trị tự động và xây dựng lộ trình phát triển bền vững.")
 
         part_23 = "\n\n".join(cleaned_23)
 
