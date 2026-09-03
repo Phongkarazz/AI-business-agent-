@@ -175,32 +175,80 @@ def generate_starter_prompts(tables: list[str], schema_context: str = "") -> lis
     # 2. Miền HR / Nhân sự / Tiền lương (như CSDL employees)
     if has_hr and not has_sales:
         cards.append({
+            "icon": "⚖️",
+            "title": "So Sánh Lương Nam vs Nữ Theo Chức Danh",
+            "prompt": "So sánh mức lương trung bình giữa nhân viên nam và nữ theo từng chức danh",
+            "desc": "Phân tích đối chuẩn công bằng thu nhập và thu hẹp khoảng cách giới"
+        })
+        cards.append({
             "icon": "💰",
-            "title": "Top 10 Nhân Viên Lương Cao Nhất",
-            "prompt": "Top 10 nhân viên có mức lương cao nhất",
-            "desc": "Danh sách nhân sự có đãi ngộ và thu nhập cao nhất"
+            "title": "Top 10 Lương Cao Nhất Phòng Sales",
+            "prompt": "Top 10 nhân viên có mức lương cao nhất trong phòng ban Sales",
+            "desc": "Danh sách nhân sự xuất sắc có thu nhập cao nhất khối Kinh doanh"
+        })
+        cards.append({
+            "icon": "📅",
+            "title": "Xu Hướng Tuyển Dụng Theo Từng Năm",
+            "prompt": "Thống kê số lượng nhân viên được tuyển dụng theo từng năm từ trước đến nay",
+            "desc": "Phân tích tốc độ tăng trưởng quy mô tổ chức qua các thời kỳ"
+        })
+        cards.append({
+            "icon": "🚻",
+            "title": "Tỷ Lệ Giới Tính Ban Quản Lý (Manager)",
+            "prompt": "Tỷ lệ nam và nữ trong ban quản lý (dept_manager) của từng phòng ban",
+            "desc": "Đo lường cơ cấu đa dạng giới trong đội ngũ lãnh đạo phòng ban"
         })
         cards.append({
             "icon": "🏢",
-            "title": "Mức Lương Trung Bình Theo Phòng Ban",
-            "prompt": "Mức lương trung bình của nhân viên theo từng phòng ban",
-            "desc": "So sánh thu nhập bình quân giữa các đơn vị và phòng ban"
-        })
-        cards.append({
-            "icon": "👥",
-            "title": "Quy Mô Nhân Sự Từng Phòng Ban",
-            "prompt": "Số lượng nhân viên theo từng phòng ban",
-            "desc": "Thống kê số lượng nhân sự đang làm việc tại mỗi phòng ban"
+            "title": "Chênh Lệch Lương Nội Bộ Phòng Ban",
+            "prompt": "Phòng ban nào có mức chênh lệch lương giữa người cao nhất và thấp nhất lớn nhất?",
+            "desc": "Phát hiện khoảng cách phân hóa thu nhập nội bộ từng đơn vị"
         })
         cards.append({
             "icon": "👔",
-            "title": "Mức Lương Theo Chức Danh",
-            "prompt": "Mức lương trung bình theo từng chức danh (Title)",
-            "desc": "So sánh thu nhập bình quân theo các cấp bậc công việc"
+            "title": "Danh Sách Trưởng Phòng & Mức Lương",
+            "prompt": "Danh sách các Manager hiện tại của từng phòng ban kèm mức lương mới nhất",
+            "desc": "Tổng hợp hồ sơ đãi ngộ của toàn bộ ban lãnh đạo quản lý"
         })
 
-    # 3. Miền Giáo dục / Trường học
-    elif has_education:
+    # 3. Miền Bán hàng & Sản phẩm (như CSDL Awesome Chocolates)
+    elif has_sales and has_product:
+        cards.append({
+            "icon": "📦",
+            "title": "Tỷ Lệ Đóng Góp Doanh Thu Nhóm Hàng",
+            "prompt": "Tỷ lệ đóng góp doanh thu của từng nhóm sản phẩm (Category) vào tổng doanh thu",
+            "desc": "Phân tích cơ cấu danh mục hàng hóa và tỷ trọng doanh thu"
+        })
+        cards.append({
+            "icon": "🏆",
+            "title": "So Sánh Hiệu Suất Các Team Bán Hàng",
+            "prompt": "So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh",
+            "desc": "Đánh giá hiệu suất cạnh tranh giữa các đội ngũ bán hàng"
+        })
+        cards.append({
+            "icon": "🌍",
+            "title": "Xu Hướng Doanh Thu Từng Quốc Gia",
+            "prompt": "Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng?",
+            "desc": "Theo dõi biểu đồ tăng trưởng thị trường quốc tế theo chuỗi thời gian"
+        })
+        cards.append({
+            "icon": "🏷️",
+            "title": "Lợi Nhuận Trung Bình Mỗi Hộp Sô-cô-la",
+            "prompt": "Mức lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm",
+            "desc": "Xác định các mặt hàng có biên lợi nhuận cao nhất"
+        })
+        cards.append({
+            "icon": "👥",
+            "title": "Chuyên Viên Đạt Doanh Số > 50,000 USD",
+            "prompt": "Những nhân viên bán hàng có tổng doanh số vượt mức 50,000 USD",
+            "desc": "Vinh danh các chuyên viên kinh doanh đạt mốc doanh số ấn tượng"
+        })
+        cards.append({
+            "icon": "🍫",
+            "title": "Top 10 Sản Phẩm Bán Chạy Nhất",
+            "prompt": "Top 10 sản phẩm có tổng doanh số bán ra cao nhất",
+            "desc": "Xếp hạng các sản phẩm chủ lực mang lại nguồn thu lớn nhất"
+        })
         cards.append({
             "icon": "🎓",
             "title": "Điểm Số Trung Bình Theo Môn Học",

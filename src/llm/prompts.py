@@ -131,7 +131,40 @@ SQL Query:"""
        JOIN titles t ON s.emp_no = t.emp_no
        WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
        GROUP BY t.title
-       ORDER BY AvgSalary DESC;"""
+       ORDER BY AvgSalary DESC;
+
+     + MẪU CHUẨN SO SÁNH LƯƠNG NAM VÀ NỮ THEO CHỨC DANH:
+       SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
+       FROM employees e
+       JOIN titles t ON e.emp_no = t.emp_no
+       JOIN salaries s ON e.emp_no = s.emp_no
+       WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+       GROUP BY t.title, e.gender
+       ORDER BY t.title, e.gender;
+
+     + MẪU CHUẨN TỶ LỆ GIỚI TÍNH TRONG BAN QUẢN LÝ (DEPT_MANAGER):
+       SELECT d.dept_name AS Department, e.gender AS Gender, COUNT(*) AS TotalManagers
+       FROM dept_manager dm
+       JOIN employees e ON dm.emp_no = e.emp_no
+       JOIN departments d ON dm.dept_no = d.dept_no
+       WHERE dm.to_date = '9999-01-01'
+       GROUP BY d.dept_name, e.gender
+       ORDER BY d.dept_name;
+
+     + MẪU CHUẨN XU HƯỚNG TUYỂN DỤNG THEO NĂM:
+       SELECT YEAR(hire_date) AS HireYear, COUNT(*) AS TotalHires
+       FROM employees
+       GROUP BY HireYear
+       ORDER BY HireYear ASC;
+
+     + MẪU CHUẨN DANH SÁCH TRƯỞNG PHÒNG HIỆN TẠI (MANAGER) KÈM LƯƠNG:
+       SELECT d.dept_name AS Department, CONCAT(e.first_name, ' ', e.last_name) AS ManagerName, s.salary AS CurrentSalary
+       FROM dept_manager dm
+       JOIN employees e ON dm.emp_no = e.emp_no
+       JOIN departments d ON dm.dept_no = d.dept_no
+       JOIN salaries s ON e.emp_no = s.emp_no
+       WHERE dm.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
+       ORDER BY s.salary DESC;"""
     elif is_chocolates_db:
         db_specific_rules = """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):
@@ -186,6 +219,7 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
 1. TUÂN THỦ SCHEMA TUYỆT ĐỐI (PURE SCHEMA GROUNDING):
    - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
    - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
+   - TUYỆT ĐỐI CẤM DÙNG CTE (`WITH ...`). Dùng câu lệnh SELECT đơn trực tiếp để tối ưu tốc độ và độ tin cậy!
 {db_specific_rules}
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
    - CSDL doanh nghiệp chứa dữ liệu các năm lịch sử (không phải realtime hôm nay).
@@ -264,11 +298,12 @@ Câu SQL trước đó:
 THÔNG BÁO TỪ HỆ THỐNG:
 {reason_or_error}
 
-HƯỚNG DẪN ĐIỀU CHỈNH:
-1. Nếu kết quả trả về 0 dòng dữ liệu do dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc thời gian quá chặt: Hãy thay thế bằng `(SELECT MAX(date_col) FROM table_name)` làm mốc ngày gần nhất hoặc bỏ điều kiện lọc thời gian để lấy dữ liệu thực tế!
-2. Nếu lỗi 'Table or column doesn't exist': Hãy nhìn kỹ SCHEMA ở trên và CHỈ DÙNG đúng các bảng và cột có thật trong danh sách.
-3. Nếu lỗi cú pháp: Dùng `COUNT(*)`, kiểm tra cân đối dấu ngoặc đơn ().
-4. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (SELECT hoặc WITH), không giải thích, không thêm comment."""
+HƯỚNG DẪN ĐIỀU CHỈNH BẮT BUỘC:
+1. Nếu lỗi 'Table or column doesn't exist': Nhìn kỹ SCHEMA ở trên và CHỈ DÙNG đúng các bảng/cột có trong CSDL này. TUYỆT ĐỐI KHÔNG dùng bảng ngoài schema!
+2. BẢNG EMPLOYEES: Không có cột dept_no! BẮT BUỘC JOIN qua dept_emp de: `FROM employees e JOIN dept_emp de ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no JOIN salaries s ON e.emp_no = s.emp_no`.
+3. TUYỆT ĐỐI CẤM DÙNG CTE (`WITH ...`). BẮT BUỘC dùng duy nhất 1 câu SELECT trực tiếp!
+4. Nếu kết quả trả về 0 dòng dữ liệu do dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc thời gian quá chặt: Hãy thay thế bằng `(SELECT MAX(date_col) FROM table_name)` làm mốc ngày gần nhất hoặc bỏ điều kiện lọc thời gian để lấy dữ liệu thực tế!
+5. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (bắt đầu bằng chữ SELECT), không giải thích, không thêm comment."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str, lang: str = "vi") -> str:
