@@ -5,6 +5,7 @@ automatic business insight discovery with Priority Tagging, bilingual support, a
 """
 
 import json
+import random
 import re
 import concurrent.futures
 import pandas as pd
@@ -287,31 +288,49 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
         # Tier 1: Xu Hướng & Dự Báo (Time-Series & Forecasting)
         tier1_candidates = [
             ("Thống kê số lượng nhân viên được tuyển dụng theo từng năm từ trước đến nay", "Total number of employees hired per year"),
-            ("Mức lương trung bình của toàn công ty thay đổi như thế nào qua các năm?", "Average company-wide salary trend across years")
+            ("Mức lương trung bình của toàn công ty thay đổi như thế nào qua các năm?", "Average company-wide salary trend across years"),
+            ("Xu hướng tuyển dụng của phòng ban Sales qua các năm", "Hiring trend for Sales department over the years"),
+            ("Xu hướng tuyển dụng của phòng ban Development qua các năm", "Hiring trend for Development department over the years"),
+            ("Số lượng nhân viên được bổ nhiệm chức danh mới qua từng năm", "Number of title assignments per year"),
+            ("Biến động tổng quỹ lương toàn công ty qua các năm", "Total company salary expenditure trend over the years")
         ]
 
         # Tier 2: Đối Chuẩn & So Sánh (Comparative / Benchmark)
         tier2_candidates = [
             ("So sánh mức lương trung bình giữa nhân viên nam và nữ theo từng chức danh", "Compare average salary between male and female employees across job titles"),
+            ("Top 10 nhân viên có mức lương cao nhất hiện tại trong toàn công ty", "Top 10 highest paid current employees in the company"),
+            ("Mức lương trung bình của nhân viên theo từng phòng ban", "Average salary of employees by department"),
+            ("So sánh mức lương trung bình giữa các phòng ban Kỹ thuật (Development, Research) và phòng Kinh doanh (Sales, Marketing)", "Compare average salary between Tech and Commercial departments"),
             ("Phòng ban nào có mức chênh lệch lương giữa người cao nhất và thấp nhất lớn nhất?", "Which department has the largest salary spread between highest and lowest earners?"),
-            ("Mức lương trung bình của nhân viên theo từng phòng ban", "Average salary of employees by department")
+            ("Top 5 chức danh có mức lương trung bình cao nhất hiện nay", "Top 5 job titles with highest average current salary"),
+            ("So sánh quy mô nhân sự và mức lương trung bình giữa các phòng ban", "Compare headcount and average salary across departments"),
+            ("Top 10 nhân viên có thâm niên làm việc lâu nhất công ty còn đang công tác", "Top 10 longest tenured active employees")
         ]
 
         # Tier 3: Cơ Cấu Tỷ Lệ & Đào Sâu Quản Trị (Distribution & Executive Share)
         tier3_candidates = [
             ("Tỷ lệ nam và nữ trong ban quản lý (dept_manager) của từng phòng ban", "Gender distribution in management (dept_manager) across departments"),
             ("Danh sách các Manager hiện tại của từng phòng ban kèm mức lương mới nhất", "Current department managers and their latest salary"),
-            ("Số lượng nhân viên theo từng phòng ban", "Total number of employees by department")
+            ("Số lượng nhân viên và tỷ lệ nam nữ trong từng phòng ban", "Total headcount and gender ratio across departments"),
+            ("Tỷ lệ phân bổ nhân sự theo từng chức danh (Senior Staff, Engineer, Staff...)", "Headcount distribution by job title"),
+            ("Tổng quỹ lương hiện tại mà công ty đang chi trả cho từng phòng ban", "Current total payroll expenditure by department"),
+            ("Những ai từng giữ chức vụ Manager lâu nhất trong lịch sử công ty?", "Who served as Manager for the longest duration in company history?"),
+            ("Phòng ban nào có quy mô nhân sự lớn nhất và nhỏ nhất hiện nay?", "Which department has the largest and smallest headcount?"),
+            ("Những nhân viên có từ 5 lần tăng lương trở lên trong lịch sử công ty", "Employees who received 5 or more salary raises")
         ]
 
         # Nếu đang xem 1 phòng ban cụ thể -> Ưu tiên các câu đào sâu theo phòng ban đó
         if dept_sample and dept_sample.lower() not in ["none", "nan", ""]:
             tier2_candidates.insert(0, (f"So sánh mức lương trung bình của phòng ban {dept_sample} so với các phòng ban khác", f"Compare average salary of {dept_sample} department with other departments"))
 
-        # Lọc thông minh: Chọn câu chưa xuất hiện trong current_query
-        p1 = next((item for item in tier1_candidates if item[0].lower() not in q_low), tier1_candidates[0])
-        p2 = next((item for item in tier2_candidates if item[0].lower() not in q_low), tier2_candidates[0])
-        p3 = next((item for item in tier3_candidates if item[0].lower() not in q_low), tier3_candidates[0])
+        # Lọc thông minh: Loại bỏ câu trùng câu hỏi hiện tại và xoay vòng ngẫu nhiên đa dạng
+        avail_tier1 = [it for it in tier1_candidates if it[0].lower() not in q_low] or tier1_candidates
+        avail_tier2 = [it for it in tier2_candidates if it[0].lower() not in q_low] or tier2_candidates
+        avail_tier3 = [it for it in tier3_candidates if it[0].lower() not in q_low] or tier3_candidates
+
+        p1 = random.choice(avail_tier1)
+        p2 = random.choice(avail_tier2)
+        p3 = random.choice(avail_tier3)
 
         selected = [p1, p2, p3]
         return [item[1] if lang == "en" else item[0] for item in selected]
@@ -320,26 +339,42 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
         # Tier 1: Xu Hướng & Dự Báo (Time-Series & Forecasting)
         tier1_candidates = [
             ("Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng năm 2021?", "Monthly revenue trend across countries in 2021"),
-            ("Doanh số toàn công ty theo từng tháng năm 2021", "Monthly company-wide revenue trend in 2021")
+            ("Doanh số toàn công ty theo từng tháng năm 2021", "Monthly company-wide revenue trend in 2021"),
+            ("Xu hướng số lượng hộp socola bán ra qua các tháng năm 2021", "Monthly box sales volume trend in 2021"),
+            ("Doanh thu của Team Yummies thay đổi như thế nào qua các tháng năm 2021?", "Monthly revenue trend for Yummies team in 2021"),
+            ("Doanh số của sản phẩm 85% Dark Bars qua các tháng năm 2021", "Monthly sales of 85% Dark Bars in 2021"),
+            ("Doanh thu thị trường Ấn Độ (India) theo từng quý năm 2021", "Quarterly revenue trend in India in 2021")
         ]
 
         # Tier 2: Đối Chuẩn & So Sánh (Comparative / Benchmark)
         tier2_candidates = [
             ("So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh", "Compare total revenue and boxes sold across sales teams"),
+            ("Top 10 nhân viên bán hàng có doanh số cao nhất năm 2021", "Top 10 sales representatives by revenue in 2021"),
             ("Mức lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm", "Average profit per box across chocolate products"),
-            ("Top 5 sản phẩm có doanh số cao nhất năm 2021", "Top 5 best selling products in 2021")
+            ("Top 5 sản phẩm có doanh số cao nhất năm 2021", "Top 5 best selling products in 2021"),
+            ("So sánh hiệu quả bán hàng giữa thị trường Mỹ (USA) và Ấn Độ (India)", "Compare sales performance between USA and India"),
+            ("Team kinh doanh nào có giá trị đơn hàng trung bình cao nhất?", "Which sales team has the highest average order value?"),
+            ("Top 5 sản phẩm có tỷ suất lợi nhuận trên mỗi hộp cao nhất", "Top 5 products with highest profit per box"),
+            ("So sánh doanh thu giữa các nhóm sản phẩm (Category: Bars, Bites...) trong năm 2021", "Compare revenue across product categories in 2021")
         ]
 
         # Tier 3: Cơ Cấu Tỷ Lệ & Đào Sâu Quản Trị (Distribution & Share)
         tier3_candidates = [
             ("Tỷ lệ đóng góp doanh thu của từng nhóm sản phẩm (Category) vào tổng doanh thu", "Revenue contribution percentage by product category"),
-            ("Những nhân viên bán hàng có tổng doanh số vượt mức 50,000 USD", "Sales representatives with total sales exceeding 50,000 USD"),
-            ("Top 10 nhân sự có doanh số cao nhất trong nhóm Yummies", "Top 10 sales representatives in Yummies team")
+            ("Tỷ lệ phần trăm đóng góp doanh thu của từng quốc gia (Country)", "Revenue contribution share by country"),
+            ("Những nhân viên bán hàng có tổng doanh số vượt mức 500,000 USD", "Sales representatives with total sales exceeding 500,000 USD"),
+            ("Top 5 nhân sự có doanh số cao nhất trong nhóm Yummies", "Top 5 sales representatives in Yummies team"),
+            ("Số lượng nhân viên bán hàng phân bổ theo từng Team kinh doanh", "Number of sales representatives by team"),
+            ("Những sản phẩm có số lượng hộp bán ra trên 10,000 hộp năm 2021", "Products with over 10,000 boxes sold in 2021")
         ]
 
-        p1 = next((item for item in tier1_candidates if item[0].lower() not in q_low), tier1_candidates[0])
-        p2 = next((item for item in tier2_candidates if item[0].lower() not in q_low), tier2_candidates[0])
-        p3 = next((item for item in tier3_candidates if item[0].lower() not in q_low), tier3_candidates[0])
+        avail_tier1 = [it for it in tier1_candidates if it[0].lower() not in q_low] or tier1_candidates
+        avail_tier2 = [it for it in tier2_candidates if it[0].lower() not in q_low] or tier2_candidates
+        avail_tier3 = [it for it in tier3_candidates if it[0].lower() not in q_low] or tier3_candidates
+
+        p1 = random.choice(avail_tier1)
+        p2 = random.choice(avail_tier2)
+        p3 = random.choice(avail_tier3)
 
         selected = [p1, p2, p3]
         return [item[1] if lang == "en" else item[0] for item in selected]
