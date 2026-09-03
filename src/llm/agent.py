@@ -545,12 +545,34 @@ def run_agent(
                     f"You used the same alias 'p' for multiple tables! Please use 'pe' for people, 'pr' for products, 's' for sales, 'g' for geo!"
                 )
 
+            # Bắt lỗi 1111 / Invalid use of group function
+            if "1111" in lowered_err or "invalid use of group function" in lowered_err:
+                augmented_error += (
+                    f"\n\nLỖI CÚ PHÁP 1111 (Invalid use of group function):\n"
+                    f"Bạn đang dùng hàm gộp MAX(), AVG(), SUM() trực tiếp trong mệnh đề WHERE!\n"
+                    f"Trong SQL, để lọc theo ngày gần nhất hoặc lương hiện tại:\n"
+                    f"- Hãy dùng điều kiện: WHERE s.to_date = '9999-01-01' AND de.to_date = '9999-01-01'\n"
+                    f"- Hoặc nếu dùng MAX trong WHERE, BẮT BUỘC bọc trong subquery: WHERE date_col = (SELECT MAX(date_col) FROM table_name)!"
+                    if lang != "en" else
+                    f"\n\nERROR 1111: Invalid use of group function in WHERE clause! Use subquery (SELECT MAX(...)) or use 'WHERE s.to_date = 9999-01-01'!"
+                )
+
+            # Bắt lỗi 1305 / FUNCTION TO_DATE does not exist
+            if "1305" in lowered_err or "to_date does not exist" in lowered_err:
+                augmented_error += (
+                    f"\n\nLỖI HÀM 1305: MySQL không có hàm TO_DATE()!\n"
+                    f"Các cột ngày tháng trong MySQL (from_date, to_date, hire_date) đã là kiểu DATE rồi, hãy so sánh trực tiếp (ví dụ: WHERE s.to_date = '9999-01-01')!"
+                    if lang != "en" else
+                    f"\n\nERROR 1305: MySQL does not have TO_DATE() function. Columns are already DATE type, use direct comparison!"
+                )
+
             # Bắt lỗi 1054 / Unknown column để tự động chỉ ra tên cột chuẩn xác
             if "1054" in lowered_err or "unknown column" in lowered_err or "no such column" in lowered_err:
                 col_m = re.search(r"unknown column '([^']+)'", lowered_err)
                 bad_col = col_m.group(1) if col_m else "tên cột"
                 augmented_error += (
                     f"\n\nLƯU Ý CỘT KHÔNG TỒN TẠI: Cột '{bad_col}' không tồn tại trong CSDL!\n"
+                    f"- Nếu là 'e.dept_no' hoặc 's.dept_no': Bảng employees và salaries KHÔNG có cột dept_no! BẮT BUỘC JOIN qua bảng trung gian dept_emp: FROM salaries s JOIN dept_emp de ON s.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no.\n"
                     f"- Nếu là 'p.Salesperson' hoặc 'pr.Salesperson': Cột 'Salesperson' nằm ở bảng 'people' (pe.Salesperson), KHÔNG nằm ở 'products'! Hãy bỏ cột này nếu câu hỏi không hỏi nhân viên, hoặc JOIN với 'people pe ON s.SPID = pe.SPID' và dùng 'pe.Salesperson'.\n"
                     f"- Nếu là 'ProductCost_per_box': Cột chi phí trong bảng products là 'Cost_per_box'.\n"
                     f"- Nếu là 'p.Product' trong subquery/CTE 'monthly_sales': Bảng 'monthly_sales' không có bí danh 'p'! Hãy bỏ hoàn toàn CTE (WITH ...) và viết SELECT ... FROM products pr JOIN sales s JOIN geo g phẳng đơn giản!\n"
@@ -558,6 +580,7 @@ def run_agent(
                     f"Hãy sửa lại câu SQL dùng đúng các cột có thật trong Schema ở trên!"
                     if lang != "en" else
                     f"\n\nCOLUMN ERROR: Column '{bad_col}' does not exist!\n"
+                    f"- If 'dept_no' on employees/salaries: Join through intermediate table 'dept_emp'!\n"
                     f"- If 'Salesperson': 'Salesperson' belongs to 'people' (pe.Salesperson), NOT 'products'! Drop it or JOIN with people.\n"
                     f"- If 'ProductCost_per_box': The column is 'Cost_per_box'.\n"
                     f"- If 'monthly_sales': Drop CTE and write a flat SELECT query.\n"

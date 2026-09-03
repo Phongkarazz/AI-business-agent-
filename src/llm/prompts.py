@@ -71,9 +71,12 @@ SQL Query:"""
      + Bảng `salaries` (Bí danh bắt buộc: `s`):
        * Cột: `emp_no` (liên kết e.emp_no), `salary`, `from_date`, `to_date`.
        * Khi truy vấn lương cao nhất / hiện tại: BẮT BUỘC dùng `s.to_date = '9999-01-01'` và `MAX(s.salary) AS max_salary` cùng `GROUP BY e.emp_no, full_name`.
-     + Bảng `departments` (Bí danh bắt buộc: `d`): `dept_no`, `dept_name`.
-     + Bảng `dept_emp` (Bí danh bắt buộc: `de`): `emp_no`, `dept_no`, `from_date`, `to_date`.
-     + Bảng `titles` (Bí danh bắt buộc: `t`): `emp_no`, `title`, `from_date`, `to_date`.
+     + Bảng `departments` (Bí danh bắt buộc: `d`): `dept_no` (Khóa chính), `dept_name`.
+     + Bảng liên kết phòng ban `dept_emp` (Bí danh bắt buộc: `de`): `emp_no`, `dept_no`, `from_date`, `to_date`.
+     + Bảng chức danh `titles` (Bí danh bắt buộc: `t`): `emp_no`, `title`, `from_date`, `to_date`.
+     + CẢNH BÁO LIÊN KẾT PHÒNG BAN: Bảng `employees` và `salaries` KHÔNG CÓ cột `dept_no`!
+       Để nối tiền lương hoặc nhân viên với phòng ban (`departments d`), BẮT BUỘC JOIN qua bảng trung gian `dept_emp de`:
+       `FROM salaries s JOIN dept_emp de ON s.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no`
      + MẪU CHUẨN TOP 10 NHÂN VIÊN LƯƠNG CAO NHẤT:
        SELECT e.emp_no, CONCAT(e.first_name, ' ', e.last_name) AS full_name, MAX(s.salary) AS max_salary
        FROM employees e
@@ -81,7 +84,16 @@ SQL Query:"""
        WHERE s.to_date = '9999-01-01'
        GROUP BY e.emp_no, full_name
        ORDER BY max_salary DESC
-       LIMIT 10;"""
+       LIMIT 10;
+
+     + MẪU CHUẨN LƯƠNG THEO PHÒNG BAN:
+       SELECT d.dept_name AS Department, ROUND(AVG(s.salary), 2) AS AvgSalary
+       FROM salaries s
+       JOIN dept_emp de ON s.emp_no = de.emp_no
+       JOIN departments d ON de.dept_no = d.dept_no
+       WHERE s.to_date = '9999-01-01' AND de.to_date = '9999-01-01'
+       GROUP BY d.dept_name
+       ORDER BY AvgSalary DESC;"""
     elif is_chocolates_db:
         db_specific_rules = """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):
@@ -151,6 +163,9 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
+   - CẢNH BÁO CÚ PHÁP WHERE:
+     * TUYỆT ĐỐI KHÔNG dùng hàm gộp `MAX()`, `AVG()`, `SUM()` trực tiếp trong mệnh đề `WHERE` (Lỗi MySQL 1111 Invalid use of group function). BẮT BUỘC bọc trong subquery: `WHERE col = (SELECT MAX(col) FROM tbl)` hoặc dùng `s.to_date = '9999-01-01'`.
+     * TUYỆT ĐỐI KHÔNG dùng hàm `TO_DATE()` trên MySQL (Lỗi 1305). Cột ngày trong MySQL đã là kiểu `DATE` sẵn!
    - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG:
         BẮT BUỘC: Mỗi thực thể chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG HOẶC MAX TÍCH LŨY (`SUM(...)` hoặc `MAX(...)`), `GROUP BY` và `ORDER BY ... DESC LIMIT N`!
         TUYỆT ĐỐI KHÔNG SELECT rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một thực thể nhiều lần!
