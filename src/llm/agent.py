@@ -510,13 +510,20 @@ def run_agent(
                 try:
                     valid_tables = get_table_names(engine)
                     if valid_tables:
+                        table_hint = ""
+                        if "employees" in valid_tables and "salaries" in valid_tables:
+                            table_hint = (
+                                "\nLƯU Ý CSDL EMPLOYEES: CSDL này có bảng 'employees' (cột emp_no, first_name, last_name), "
+                                "bảng 'salaries' (cột emp_no, salary, to_date), bảng 'departments', 'dept_emp', 'titles'. "
+                                "TUYỆT ĐỐI KHÔNG có bảng 'people' hay 'products'!"
+                            )
                         augmented_error += (
                             f"\n\nNOTE: The table you referenced does not exist! "
-                            f"Valid tables in this database are ONLY: {', '.join(valid_tables)}. "
+                            f"Valid tables in this database are ONLY: {', '.join(valid_tables)}. {table_hint}\n"
                             f"Please strictly write SQL using ONLY these tables!"
                             if lang == "en" else
                             f"\n\nLƯU Ý ĐẶC BIỆT: Bảng bạn vừa gọi không tồn tại trong database này! "
-                            f"Database này CHỈ CÓ CÁC BẢNG SAU: {', '.join(valid_tables)}. "
+                            f"Database này CHỈ CÓ CÁC BẢNG SAU: {', '.join(valid_tables)}. {table_hint}\n"
                             f"Hãy nhìn kỹ danh sách trên và viết lại SQL dùng đúng các bảng này!"
                         )
                 except Exception:

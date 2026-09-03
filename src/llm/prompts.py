@@ -59,19 +59,31 @@ MANDATORY RULES (STRICT COMPLIANCE):
 User Query: "{user_query}"
 SQL Query:"""
 
-    return f"""Bạn là chuyên gia SQL hàng đầu thế giới.
+    # Tự động nhận diện ngữ cảnh CSDL từ schema_context để hướng dẫn chính xác 100%
+    is_employees_db = "departments" in schema_context.lower() or "dept_emp" in schema_context.lower() or "hire_date" in schema_context.lower()
+    is_chocolates_db = "people" in schema_context.lower() and "products" in schema_context.lower()
 
-=== SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ===
-{schema_context}
-====================================
-
-Lưu ý Dialect: {dialect_hint}
-
-QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
-1. TUÂN THỦ SCHEMA TUYỆT ĐỐI (PURE SCHEMA GROUNDING):
-   - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
-   - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
-   - BẮT BUỘC KIỂM TRA KỸ TÊN CỘT TRONG SCHEMA KHI TRUY VẤN & JOIN:
+    if is_employees_db:
+        db_specific_rules = """   - QUY TẮC CSDL EMPLOYEES:
+     + Bảng `employees` (Bí danh bắt buộc: `e`):
+       * Cột: `emp_no` (Khóa chính), `first_name`, `last_name`, `gender`, `hire_date`, `birth_date`.
+       * Ghép họ tên đầy đủ: `CONCAT(e.first_name, ' ', e.last_name) AS full_name`.
+     + Bảng `salaries` (Bí danh bắt buộc: `s`):
+       * Cột: `emp_no` (liên kết e.emp_no), `salary`, `from_date`, `to_date`.
+       * Khi truy vấn lương cao nhất / hiện tại: BẮT BUỘC dùng `s.to_date = '9999-01-01'` và `MAX(s.salary) AS max_salary` cùng `GROUP BY e.emp_no, full_name`.
+     + Bảng `departments` (Bí danh bắt buộc: `d`): `dept_no`, `dept_name`.
+     + Bảng `dept_emp` (Bí danh bắt buộc: `de`): `emp_no`, `dept_no`, `from_date`, `to_date`.
+     + Bảng `titles` (Bí danh bắt buộc: `t`): `emp_no`, `title`, `from_date`, `to_date`.
+     + MẪU CHUẨN TOP 10 NHÂN VIÊN LƯƠNG CAO NHẤT:
+       SELECT e.emp_no, CONCAT(e.first_name, ' ', e.last_name) AS full_name, MAX(s.salary) AS max_salary
+       FROM employees e
+       JOIN salaries s ON e.emp_no = s.emp_no
+       WHERE s.to_date = '9999-01-01'
+       GROUP BY e.emp_no, full_name
+       ORDER BY max_salary DESC
+       LIMIT 10;"""
+    elif is_chocolates_db:
+        db_specific_rules = """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):
        * Cột: `PID` (Khóa chính), `Product` (Tên sản phẩm: 'Mint Chip Choco', 'Milk Bars'...), `Category`, `Size`, `Cost_per_box`.
        * CẢNH BÁO: TUYỆT ĐỐI KHÔNG DÙNG `pr.Salesperson` (Salesperson nằm ở bảng people, KHÔNG nằm ở products)! TUYỆT ĐỐI KHÔNG DÙNG `ProductCost_per_box` (cột chi phí là `Cost_per_box`)!
@@ -91,9 +103,40 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
        * `pe.SPID = s.SPID`
        * `g.GeoID = s.GeoID`
      + TUYỆT ĐỐI KHÔNG DÙNG CTE (`WITH ...`) cho các truy vấn đơn giản. Hãy viết câu lệnh SELECT ... JOIN ... GROUP BY phẳng, trực tiếp và chạy siêu tốc!
-     + Để lọc nhân viên trong một nhóm cụ thể (ví dụ nhóm 'Yummies'):
-       Chỉ cần: `FROM people pe JOIN sales s ON pe.SPID = s.SPID WHERE pe.Team = 'Yummies' GROUP BY pe.Salesperson ORDER BY TotalSales DESC LIMIT 5`
-       TUYỆT ĐỐI KHÔNG tự JOIN bảng people 2 lần!
+     + MẪU CHUẨN TOP NHÂN SỰ:
+       SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
+       FROM people pe
+       JOIN sales s ON pe.SPID = s.SPID
+       GROUP BY pe.Salesperson, pe.Team
+       ORDER BY TotalSales DESC
+       LIMIT 10;
+     + MẪU CHUẨN TOP SẢN PHẨM:
+       SELECT pr.Product, SUM(s.Amount) AS TotalSales
+       FROM products pr
+       JOIN sales s ON pr.PID = s.PID
+       JOIN geo g ON s.GeoID = g.GeoID
+       WHERE g.Geo = 'Australia' AND YEAR(s.SaleDate) = 2021
+       GROUP BY pr.Product
+       ORDER BY TotalSales DESC
+       LIMIT 5;"""
+    else:
+        db_specific_rules = """   - QUY TẮC SCHEMA CHUNG:
+     + CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng và cột xuất hiện thực tế trong SCHEMA ở trên.
+     + Mỗi bảng được JOIN phải có bí danh phân biệt, không được trùng nhau."""
+
+    return f"""Bạn là chuyên gia SQL hàng đầu thế giới.
+
+=== SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ===
+{schema_context}
+====================================
+
+Lưu ý Dialect: {dialect_hint}
+
+QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
+1. TUÂN THỦ SCHEMA TUYỆT ĐỐI (PURE SCHEMA GROUNDING):
+   - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
+   - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
+{db_specific_rules}
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
    - CSDL doanh nghiệp chứa dữ liệu các năm lịch sử (không phải realtime hôm nay).
    - Khi người dùng hỏi các mốc thời gian tương đối ('trong năm qua', 'gần đây', '12 tháng gần nhất', 'năm gần nhất'):
@@ -108,49 +151,12 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - Dùng `COUNT(*)` hoặc `COUNT(column)`, TUYỆT ĐỐI KHÔNG dùng `COUNT()`.
    - Cân đối tuyệt đối số lượng dấu mở ngoặc '(' và đóng ngoặc ')'.
    - Bọc tên bảng và tên cột trong dấu backtick ` nếu có chứa ký tự đặc biệt hoặc khoảng trắng.
-   - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG DOANH SỐ / SẢN LƯỢNG:
-       BẮT BUỘC: Mỗi nhân sự/sản phẩm chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG DOANH SỐ TÍCH LŨY.
-       BẮT BUỘC dùng hàm tính tổng `SUM(s.Amount) AS TotalSales`, `GROUP BY` và `ORDER BY TotalSales DESC LIMIT N`!
-       TUYỆT ĐỐI KHÔNG `SELECT s.Amount` rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một thực thể nhiều lần!
-       
-       MẪU CHUẨN TOP NHÂN SỰ:
-       SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
-       FROM people pe
-       JOIN sales s ON pe.SPID = s.SPID
-       GROUP BY pe.Salesperson, pe.Team
-       ORDER BY TotalSales DESC
-       LIMIT 10;
-
-       MẪU CHUẨN TOP SẢN PHẨM CỦA 1 NHÂN VIÊN:
-       SELECT pr.Product, SUM(s.Amount) AS TotalSales, pr.Category
-       FROM people pe
-       JOIN sales s ON pe.SPID = s.SPID
-       JOIN products pr ON s.PID = pr.PID
-       WHERE pe.Salesperson = 'Madelene Upcott'
-       GROUP BY pr.Product, pr.Category
-       ORDER BY TotalSales DESC
-       LIMIT 10;
-
-       MẪU CHUẨN TOP SẢN PHẨM THEO THỊ TRƯỜNG:
-       SELECT pr.Product, SUM(s.Amount) AS TotalSales
-       FROM products pr
-       JOIN sales s ON pr.PID = s.PID
-       JOIN geo g ON s.GeoID = g.GeoID
-       WHERE g.Geo = 'Australia' AND YEAR(s.SaleDate) = 2021
-       GROUP BY pr.Product
-       ORDER BY TotalSales DESC
-       LIMIT 5;
-
+   - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG:
+        BẮT BUỘC: Mỗi thực thể chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG HOẶC MAX TÍCH LŨY (`SUM(...)` hoặc `MAX(...)`), `GROUP BY` và `ORDER BY ... DESC LIMIT N`!
+        TUYỆT ĐỐI KHÔNG SELECT rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một thực thể nhiều lần!
    - VỚI CÂU HỎI THEO THỜI GIAN / THEO THÁNG / THEO QUÝ / XU HƯỚNG:
-       + TUYỆT ĐỐI CẤM DÙNG `LIMIT 10` (Bởi vì 1 năm có đủ 12 tháng, nếu dùng LIMIT 10 sẽ bị cắt mất tháng 6 hoặc tháng 12!).
-       + BẮT BUỘC `ORDER BY Month ASC` (hoặc `ORDER BY s.SaleDate ASC`) để biểu đồ đường vẽ liền mạch, chuẩn xác từ tháng 1 đến tháng 12 theo đúng trình tự thời gian!
-       + MẪU CHUẨN DOANH SỐ THEO TỪNG THÁNG:
-       SELECT DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month, SUM(s.Amount) AS TotalSales
-       FROM people pe
-       JOIN sales s ON pe.SPID = s.SPID
-       WHERE pe.Salesperson = 'Madelene Upcott' AND YEAR(s.SaleDate) = 2021
-       GROUP BY Month
-       ORDER BY Month ASC;
+        + TUYỆT ĐỐI CẤM DÙNG `LIMIT 10` (Bởi vì 1 năm có đủ 12 tháng, nếu dùng LIMIT 10 sẽ bị cắt mất tháng 6 hoặc tháng 12!).
+        + BẮT BUỘC `ORDER BY ... ASC` để biểu đồ đường vẽ liền mạch, chuẩn xác theo đúng trình tự thời gian!
      + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không phải theo chuỗi thời gian: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
