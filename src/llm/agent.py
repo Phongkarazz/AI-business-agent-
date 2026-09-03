@@ -129,6 +129,25 @@ def clean_sql_query(sql: str) -> str:
     return s.strip().strip("`").rstrip(";").strip()
 
 
+def enforce_top_n_limit(sql: str, user_query: str) -> str:
+    """Tự động khóa mệnh đề LIMIT N khi câu hỏi của người dùng có chứa Top N (ví dụ Top 5, Top 10, Top 3)."""
+    if not sql or not user_query:
+        return sql
+    m = re.search(r"\btop\s+(\d+)\b", user_query, re.IGNORECASE)
+    if not m:
+        return sql
+    top_n = int(m.group(1))
+
+    limit_match = re.search(r"\bLIMIT\s+(\d+)\b", sql, re.IGNORECASE)
+    if limit_match:
+        existing_limit = int(limit_match.group(1))
+        if existing_limit != top_n:
+            sql = re.sub(r"\bLIMIT\s+\d+\b", f"LIMIT {top_n}", sql, flags=re.IGNORECASE)
+    else:
+        sql = sql.rstrip(";").strip() + f" LIMIT {top_n}"
+    return sql
+
+
 def is_safe_select(sql: str) -> bool:
     """Kiểm tra câu lệnh SQL có phải là SELECT/WITH hợp lệ và an toàn không."""
     if not sql:
@@ -308,7 +327,7 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
             ("Mức lương trung bình của nhân viên theo từng phòng ban", "Average salary of employees by department"),
             ("So sánh mức lương trung bình giữa các phòng ban Kỹ thuật (Development, Research) và phòng Kinh doanh (Sales, Marketing)", "Compare average salary between Tech and Commercial departments"),
             ("Phòng ban nào có mức chênh lệch lương giữa người cao nhất và thấp nhất lớn nhất?", "Which department has the largest salary spread between highest and lowest earners?"),
-            ("Top 5 chức danh có mức lương trung bình cao nhất hiện nay", "Top 5 job titles with highest average current salary"),
+            ("Top 5 chức danh (Title) có mức lương trung bình cao nhất hiện nay", "Top 5 job titles with highest average current salary"),
             ("So sánh quy mô nhân sự và mức lương trung bình giữa các phòng ban", "Compare headcount and average salary across departments"),
             ("Top 10 nhân viên có thâm niên làm việc lâu nhất công ty còn đang công tác", "Top 10 longest tenured active employees")
         ]
@@ -525,6 +544,7 @@ def run_agent(
     sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=300)
     if sql_query:
         sql_query = clean_sql_query(sql_query)
+        sql_query = enforce_top_n_limit(sql_query, user_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -533,6 +553,7 @@ def run_agent(
     # 2. Vòng lặp thực thi, kiểm định và tự sửa lỗi âm thầm (Silent Self-Healing)
     for attempt in range(1, 4):
         result["attempts"] = attempt
+        sql_query = enforce_top_n_limit(sql_query, user_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):

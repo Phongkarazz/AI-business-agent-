@@ -79,7 +79,7 @@ def get_db_specific_rules(schema_context: str) -> str:
      + CẢNH BÁO BẮT BUỘC TIỀN TỐ BÍ DANH & TÊN CỘT (TRÁNH LỖI 1052, 1054):
         * Cột `emp_no` có trong 3 bảng. BẮT BUỘC viết `e.emp_no` trong SELECT và GROUP BY!
         * Bảng `departments` CHỈ CÓ 2 CỘT: `dept_no` và `dept_name`! TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`!
-        * Khi câu hỏi về Chức Danh (Title) và Lương Nam/Nữ: BẮT BUỘC chỉ JOIN `titles` và `salaries` với `employees`, TUYỆT ĐỐI KHÔNG JOIN bảng `departments`!
+        * Khi câu hỏi về Chức Danh (Title / Chức vụ / Vị trí): BẮT BUỘC dùng bảng `titles t` (cột `t.title`), JOIN `salaries s ON t.emp_no = s.emp_no`, GROUP BY `t.title`, TUYỆT ĐỐI KHÔNG JOIN bảng `departments` và KHÔNG nhầm sang phòng ban!
         * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
         * Thứ tự JOIN bắt buộc khi truy vấn phòng ban:
           FROM employees e
@@ -126,13 +126,15 @@ def get_db_specific_rules(schema_context: str) -> str:
        GROUP BY d.dept_name
        ORDER BY TotalEmployees DESC;
 
-     + MẪU CHUẨN LƯƠNG THEO CHỨC DANH (TITLE):
-       SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
-       FROM salaries s
-       JOIN titles t ON s.emp_no = t.emp_no
-       WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
-       GROUP BY t.title
-       ORDER BY AvgSalary DESC;
+      + MẪU CHUẨN TOP N CHỨC DANH LƯƠNG CAO NHẤT (Ví dụ: Top 5 chức danh):
+        SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
+        FROM salaries s
+        JOIN titles t ON s.emp_no = t.emp_no
+        WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+        GROUP BY t.title
+        ORDER BY AvgSalary DESC
+        LIMIT 5;
+        * QUY TẮC: Khi câu hỏi có chữ 'Top N' (Top 5, Top 10, Top 3): BẮT BUỘC phải có mệnh đề LIMIT N ở cuối câu SQL!
 
      + MẪU CHUẨN SO SÁNH LƯƠNG NAM VÀ NỮ THEO CHỨC DANH:
        SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
