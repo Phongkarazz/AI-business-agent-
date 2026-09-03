@@ -672,7 +672,11 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
                 continue
             if re.search(r"^xu hướng(?:\s*chính)?$", clean_check, re.IGNORECASE):
                 continue
-            # Loại bỏ các dòng đọc vẹt thống kê Min/Max/Mean/Median
+            # Loại bỏ các dòng đọc vẹt thống kê Min/Max/Mean/Median/Bản ghi
+            if re.search(r"tổng\s*(?:thống\s*kê|kết|hợp)?\s*dữ\s*liệu.*(?:mean|median|min|max|bản\s*ghi)", clean_check, re.IGNORECASE):
+                continue
+            if re.search(r"^(?:hai|các|những)?\s*điểm\s*bất\s*thường\s*(?:nhất)?\s*đã\s*được\s*(?:nhận\s*thấy|phát\s*hiện):?$", clean_check, re.IGNORECASE):
+                continue
             if re.search(r"^(?:\d+[\.\)]\s*)?điểm\s+(?:thấp nhất|cao nhất|trung bình|trung vị)\s*\([A-Za-z]+\)\s*:\s*[\d,\.]+\s*-\s*không có dấu hiệu bất thường", clean_check, re.IGNORECASE):
                 continue
             # Loại bỏ các dòng rời rạc giá trị nhỏ nhất / doanh thu thấp nhất
@@ -688,6 +692,14 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         for l in lines_22:
             if re.search(r"^###?\s*2\.2", l, re.IGNORECASE):
                 continue
+            # Loại bỏ các nhãn ưu tiên rò rỉ vào Card 2
+            if re.search(r"\[ưu\s*tiên\s*(?:cao|trung\s*bình|thấp)\]", l, re.IGNORECASE) or any(c in l for c in ["🔴", "🟡", "🟢"]):
+                continue
+            # Loại bỏ câu tiếng Anh lai tạp hoặc từ bịa đặt
+            if re.search(r"\b(?:between|maintained|trajectory|fluctuate|consistent|trajectory)\b", l, re.IGNORECASE):
+                continue
+            if "kinh thuần" in l.lower() or "mùa thu mới" in l.lower():
+                continue
             cleaned_22.append(l)
         part_22 = "\n\n".join(cleaned_22)
 
@@ -696,6 +708,19 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         lines_23 = [l.strip() for l in part_23.split("\n") if l.strip()]
         cleaned_23 = []
         for l in lines_23:
+            # Dọn sạch các icon cũ, nhãn cũ và dấu gạch ở đầu câu để định dạng chuẩn
+            clean_body = re.sub(r"^[•\-\*]?\s*(?:\*\*)?\s*[🔴🟡🟢]?\s*(?:\*\*)?\s*", "", l).strip()
+            clean_body = re.sub(r"^\[?(?:Ưu\s*tiên\s*(?:Cao|Trung\s*bình|Thấp)|High\s*Priority|Medium\s*Priority|Low\s*Priority)[^\]:]*\]?:?\s*", "", clean_body, flags=re.IGNORECASE).strip()
+            clean_body = clean_body.lstrip("•-* :").strip()
+            clean_body = clean_body.replace("**", "").strip()
+
+            if "ưu tiên cao" in l.lower():
+                l = f"• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: {clean_body}"
+            elif "ưu tiên trung bình" in l.lower():
+                l = f"• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: {clean_body}"
+            elif "ưu tiên thấp" in l.lower() or "dài hạn" in l.lower():
+                l = f"• 🟢 **[Ưu tiên Thấp / Dài hạn]**: {clean_body}"
+
             # Sửa câu bị cụt lửng ở đuôi
             if l.startswith("•") and not l.endswith((".", "!", "?", ":")):
                 l += "."
@@ -706,12 +731,12 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         has_low = any("🟢" in l or "ưu tiên thấp" in l.lower() or "dài hạn" in l.lower() for l in cleaned_23)
 
         if not has_high:
-            cleaned_23.insert(0, "• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Tập trung tối ưu quy trình bán hàng và chính sách thúc đẩy các sản phẩm chủ lực trong tháng tới.")
+            cleaned_23.insert(0, "• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Rà soát chính sách đãi ngộ và tối ưu ngân sách phân bổ theo hiệu suất thực tế.")
         if not has_med:
             idx_med = 1 if len(cleaned_23) >= 1 else len(cleaned_23)
-            cleaned_23.insert(idx_med, "• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Tổ chức đào tạo nâng cao kỹ năng bán hàng và tối ưu phân bổ ngân sách theo từng thị trường.")
+            cleaned_23.insert(idx_med, "• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Chuẩn hóa quy trình đánh giá KPI và cân đối quỹ lương theo quy mô từng phòng ban.")
         if not has_low:
-            cleaned_23.append("• 🟢 **[Ưu tiên Thấp / Dài hạn]**: Xây dựng chương trình chăm sóc khách hàng VIP và hoàn thiện hệ thống báo cáo KPI tự động dài hạn.")
+            cleaned_23.append("• 🟢 **[Ưu tiên Thấp / Dài hạn]**: Xây dựng lộ trình phát triển nhân tài dài hạn và hoàn thiện hệ thống quản trị nhân sự tự động.")
 
         part_23 = "\n\n".join(cleaned_23)
 

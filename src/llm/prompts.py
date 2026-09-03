@@ -336,49 +336,32 @@ LƯU Ý KHI KẾT QUẢ TRẢ VỀ 1 BẢN GHI (TỔNG HỢP / TỶ LỆ PHẦN 
     return f"""Bạn là Giám đốc Phân tích Dữ liệu Kinh doanh (Chief BI & Analytics Officer).
 
 Câu hỏi phân tích của người dùng: "{user_query}"
-Tổng quan thống kê dữ liệu:
-- Số bản ghi: {stats.get('count', 0)}
-- Giá trị trung bình (Mean): {stats.get('mean', 0):,.2f}
-- Giá trị trung vị (Median): {stats.get('median', 0):,.2f}
-- Giá trị nhỏ nhất (Min): {stats.get('min', 0):,.2f} | Lớn nhất (Max): {stats.get('max', 0):,.2f} | Tổng (Sum): {stats.get('total', 0):,.2f}
 
-Dữ liệu mẫu từ kết quả truy vấn:
+Dữ liệu kết quả truy vấn thực tế:
 {df_summary_str}
-
-Các điểm bất thường đã được thuật toán thống kê phát hiện:
-- Loại bất thường: {types_text}
-- Chi tiết phát hiện:
-{findings_text}
 {ratio_note}
 
-YÊU CẦU:
-Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sâu sắc và mang tính điều hành thực chiến cao (định dạng Markdown):
+YÊU CẦU PHÂN TÍCH KINH DOANH:
+Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sắc bén và mang tính điều hành thực chiến cao (định dạng Markdown):
 
 ### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính
-(Nêu rõ các điểm đột biến, kỳ tăng/giảm mạnh hoặc rủi ro tập trung nếu có. Đưa ra con số cụ thể).
+(Nêu thẳng nhận định kinh doanh: Đơn vị/thực thể nào dẫn đầu (Top 1) với bao nhiêu, đơn vị nào thấp nhất, khoảng cách chênh lệch bao nhiêu %. TUYỆT ĐỐI CẤM liệt kê máy móc từng dòng Min, Max, Mean, Median, Sum, số bản ghi!).
 
 ### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
-(Đưa ra 2-3 giả thuyết kinh doanh sát thực tế: mùa vụ, chiến dịch marketing, đứt gãy vận hành, khách hàng VIP, chính sách giá,...).
+(Đưa ra 2-3 giả thuyết kinh doanh thực tế giải thích nguyên nhân: Quy mô hoạt động, Chính sách đãi ngộ & cạnh tranh nhân tài, Tính chất chuyên môn phòng ban, Thị trường tiêu thụ,... TUYỆT ĐỐI KHÔNG chèn nhãn [Ưu tiên Cao] hay từ tiếng Anh vào mục này).
 
 ### 2.3. 🎯 Đề xuất Hành động (Action Plan)
-(Đưa ra 2-3 hành động cụ thể, thiết thực cho nhà quản lý / ban lãnh đạo. BẮT BUỘC gắn nhãn mức độ ưu tiên và khung thời gian thực thi cho từng hành động:
-- 🔴 **[Ưu tiên Cao - Thực hiện Ngay / Immediate]**: Hành động khắc phục sự cố hoặc nắm bắt cơ hội cấp bách.
-- 🟡 **[Ưu tiên Trung bình - Quý tiếp theo / Next Quarter]**: Chiến lược tối ưu hóa hoạt động trung hạn.
-- 🟢 **[Ưu tiên Thấp / Dài hạn - Long-term]**: Định hướng chiến lược bền vững dài hạn.
-TUYỆT ĐỐI KHÔNG DÙNG BẢNG (TUYỆT ĐỐI KHÔNG dùng dấu gạch đứng |, không dùng dấu +---+).
-TUYỆT ĐỐI KHÔNG VIẾT CHỮ "Ví dụ chuẩn:" HAY CHÉP LẠI VÍ DỤ VÀO BÀI LÀM!
-BẮT BUỘC chỉ viết 3 dòng hành động tương ứng với 3 mức độ ưu tiên:
-• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: [Hành động cấp bách bám sát kết quả dữ liệu]
+(BẮT BUỘC chỉ viết đúng 3 dòng hành động tương ứng với 3 mức độ ưu tiên, gắn chặt vào câu hỏi người dùng:
+• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: [Hành động cấp bách bám sát dữ liệu]
 • 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: [Chiến lược trung hạn]
-• 🟢 **[Ưu tiên Thấp / Dài hạn]**: [Định hướng dài hạn]
+• 🟢 **[Ưu tiên Thấp / Dài hạn]**: [Kế hoạch bền vững dài hạn]
+TUYỆT ĐỐI KHÔNG DÙNG BẢNG, KHÔNG THÊM GẠCH ĐẦU DÒNG CON).
 
 QUY TẮC ĐỊNH DẠNG & NGÔN NGỮ (BẮT BUỘC):
-- BẮT BUỘC DÙNG TIẾNG VIỆT KINH DOANH CHUẨN MỰC, TỰ NHIÊN (TUYỆT ĐỐI CẤM dùng từ ngữ dịch máy ngô nghê như 'mẫu marketers', 'đòi hỏi sự kỹ năng', 'gian nhà hàng').
-- MỖI Ý PHÂN TÍCH BẮT BUỘC NẰM TRÊN MỘT DÒNG RIÊNG BIỆT (bắt đầu bằng gạch đầu dòng `• `). TUYỆT ĐỐI KHÔNG VIẾT CÁC Ý NỐI LIỀN NHAU TRÊN CÙNG 1 ĐOẠN VĂN!
-- TUYỆT ĐỐI KHÔNG TỰ Ý IN ĐẬM Ở TRONG THÂN CÂU (CẤM dùng ** bên trong câu).
+- 100% TIẾNG VIỆT KINH DOANH CHUẨN MỰC, TỰ NHIÊN (TUYỆT ĐỐI CẤM từ ngữ dịch máy ngô nghê, CẤM pha trộn câu tiếng Anh, CẤM từ bịa như 'Kinh Thuần').
+- MỖI Ý PHÂN TÍCH BẮT BUỘC NẰM TRÊN MỘT DÒNG RIÊNG BIỆT (bắt đầu bằng gạch đầu dòng `• `).
 - CHỈ IN ĐẬM DUY NHẤT TIÊU ĐỀ Ở ĐẦU GẠCH ĐẦU DÒNG TRƯỚC DẤU HAI CHẤM.
-- Tách từ và số chuẩn xác (viết "thấp hơn", "cao hơn", "lớn hơn", "đạt 28,490,175", "11.0% so với", TUYỆT ĐỐI KHÔNG viết dính liền).
-- Phong cách trình bày: Chuyên nghiệp, súc tích, đi thẳng vào trọng tâm kinh doanh, văn phong giám đốc điều hành."""
+- Phong cách trình bày: Sắc bén, súc tích, đi thẳng vào trọng tâm điều hành."""
 
 
 def build_followup_prompt(user_query: str, schema_context: str, df_sample_str: str, lang: str = "vi") -> str:

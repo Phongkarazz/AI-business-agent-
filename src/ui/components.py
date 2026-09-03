@@ -219,22 +219,22 @@ def render_insight_cards(insights_raw: str, is_en: bool = False):
     # Card 1: Phát hiện bất thường & Xu hướng
     if p21:
         with st.container(border=True):
-            title_21 = "🚨 **1. Key Discoveries & Trend Anomalies**" if is_en else "🚨 **1. Phát hiện Bất thường & Xu hướng Chính**"
-            st.markdown(f"<span style='color: #B23C00; font-size: 16px; font-weight: 700;'>{title_21}</span>", unsafe_allow_html=True)
+            title_21 = "🚨 1. Key Discoveries & Trend Anomalies" if is_en else "🚨 1. Phát hiện Bất thường & Xu hướng Chính"
+            st.markdown(f"<h4 style='color: #B23C00; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_21}</h4>", unsafe_allow_html=True)
             st.markdown(p21)
 
     # Card 2: Giả thuyết & Nguyên nhân
     if p22:
         with st.container(border=True):
-            title_22 = "🔍 **2. Potential Root Causes & Hypotheses**" if is_en else "🔍 **2. Giả thuyết & Nguyên nhân Tiềm năng**"
-            st.markdown(f"<span style='color: #01579B; font-size: 16px; font-weight: 700;'>{title_22}</span>", unsafe_allow_html=True)
+            title_22 = "🔍 2. Potential Root Causes & Hypotheses" if is_en else "🔍 2. Giả thuyết & Nguyên nhân Tiềm năng"
+            st.markdown(f"<h4 style='color: #01579B; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
             st.markdown(p22)
 
     # Card 3: Đề xuất hành động
     if p23:
         with st.container(border=True):
-            title_23 = "🎯 **3. Executive Action Plan & Priority Recommendations**" if is_en else "🎯 **3. Kế hoạch Hành động & Đề xuất Ưu tiên**"
-            st.markdown(f"<span style='color: #1B5E20; font-size: 16px; font-weight: 700;'>{title_23}</span>", unsafe_allow_html=True)
+            title_23 = "🎯 3. Executive Action Plan & Priority Recommendations" if is_en else "🎯 3. Kế hoạch Hành động & Đề xuất Ưu tiên"
+            st.markdown(f"<h4 style='color: #1B5E20; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
             st.markdown(p23)
 
 
