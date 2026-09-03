@@ -666,6 +666,8 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         lines_21 = [l.strip() for l in part_21.split("\n") if l.strip()]
         cleaned_21 = []
         for l in lines_21:
+            if l.startswith("#") or "##" in l:
+                continue
             clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
             if is_noise(clean_check):
                 continue
@@ -673,6 +675,8 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
             if re.search(r"^(?:kỹ thuật\s*&\s*)?nguyên nhân(?:\s*tiềm năng)?$", clean_check, re.IGNORECASE):
                 continue
             if re.search(r"^xu hướng(?:\s*chính)?$", clean_check, re.IGNORECASE):
+                continue
+            if re.search(r"^(?:phát hiện bất thường|xu hướng chính|bất thường & xu hướng)", clean_check, re.IGNORECASE):
                 continue
             # Loại bỏ các dòng đọc vẹt thống kê Min/Max/Mean/Median/Bản ghi
             if re.search(r"tổng\s*(?:thống\s*kê|kết|hợp)?\s*dữ\s*liệu.*(?:mean|median|min|max|bản\s*ghi)", clean_check, re.IGNORECASE):
@@ -686,6 +690,8 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
                 continue
             # Làm sạch tiền tố giả thuyết thừa nếu có
             l = re.sub(r"^[•\-\*]?\s*(?:Giả thuyết \d+:?\s*)+", "• ", l)
+            if not l.startswith("•"):
+                l = "• " + l
             cleaned_21.append(l)
         part_21 = "\n\n".join(cleaned_21)
 
@@ -694,9 +700,14 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         lines_22 = [l.strip() for l in part_22.split("\n") if l.strip()]
         cleaned_22 = []
         for l in lines_22:
+            if l.startswith("#") or "##" in l:
+                continue
             if re.search(r"^###?\s*2\.2", l, re.IGNORECASE):
                 continue
             if is_noise(l):
+                continue
+            clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
+            if re.search(r"^(?:giả thuyết|nguyên nhân|nguyên nhân tiềm năng)", clean_check, re.IGNORECASE):
                 continue
             # Loại bỏ các nhãn ưu tiên rò rỉ vào Card 2
             if re.search(r"\[ưu\s*tiên\s*(?:cao|trung\s*bình|thấp)\]", l, re.IGNORECASE) or any(c in l for c in ["🔴", "🟡", "🟢"]):
@@ -712,6 +723,8 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
             l = re.sub(r"^[•\-\*]?\s*(?:Nguyên nhân:?\s*)+", "• ", l)
             l = re.sub(r"^[•\-\*]?\s*(?:Hiểu lý:?\s*)+", "• ", l)
             l = re.sub(r"^[•\-\*]?\s*Giả thuyết:?\s*", "• ", l)
+            if not l.startswith("•"):
+                l = "• " + l
             cleaned_22.append(l)
         part_22 = "\n\n".join(cleaned_22)
 
@@ -727,7 +740,12 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         lines_23 = [l.strip() for l in part_23.split("\n") if l.strip()]
         cleaned_23 = []
         for l in lines_23:
+            if l.startswith("#") or "##" in l:
+                continue
             if is_noise(l):
+                continue
+            clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
+            if re.search(r"^(?:đề xuất|hành động|kế hoạch hành động|action plan)", clean_check, re.IGNORECASE):
                 continue
             # Dọn sạch các icon cũ, nhãn cũ và dấu gạch ở đầu câu để định dạng chuẩn
             clean_body = re.sub(r"^[•\-\*]?\s*(?:\*\*)?\s*[🔴🟡🟢]?\s*(?:\*\*)?\s*", "", l).strip()
@@ -762,7 +780,8 @@ def split_insight_sections(markdown_text: str) -> dict[str, str]:
         part_23 = "\n\n".join(cleaned_23)
 
     if not part_21 and not part_22 and not part_23:
-        part_21 = cleaned
+        lines_fallback = [re.sub(r"^#+\s*", "", l).strip() for l in cleaned.split("\n") if l.strip() and not l.strip().startswith("#")]
+        part_21 = "\n\n".join(lines_fallback)
 
     return {
         "anomaly": part_21,

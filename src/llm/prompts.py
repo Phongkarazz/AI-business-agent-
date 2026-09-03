@@ -77,6 +77,17 @@ SQL Query:"""
      + CẢNH BÁO LIÊN KẾT PHÒNG BAN: Bảng `employees` và `salaries` KHÔNG CÓ cột `dept_no`!
        Để nối tiền lương hoặc nhân viên với phòng ban (`departments d`), BẮT BUỘC JOIN qua bảng trung gian `dept_emp de`:
        `FROM salaries s JOIN dept_emp de ON s.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no`
+     + CẢNH BÁO BẮT BUỘC TIỀN TỐ BÍ DANH & TÊN CỘT (TRÁNH LỖI 1052, 1054):
+       * Cột `emp_no` có trong 3 bảng. BẮT BUỘC viết `e.emp_no` trong SELECT và GROUP BY!
+       * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
+       * Thứ tự JOIN bắt buộc:
+         FROM employees e
+         JOIN salaries s ON e.emp_no = s.emp_no
+         JOIN dept_emp de ON e.emp_no = de.emp_no
+         JOIN departments d ON de.dept_no = d.dept_no
+       * TUYỆT ĐỐI KHÔNG đưa `de.dept_no = d.dept_no` vào mệnh đề ON của dept_emp trước khi JOIN departments d!
+       * TUYỆT ĐỐI KHÔNG dùng CTE (WITH ...), KHÔNG JOIN bảng titles nếu không hỏi chức danh!
+
      + MẪU CHUẨN TOP 10 NHÂN VIÊN LƯƠNG CAO NHẤT:
        SELECT e.emp_no, CONCAT(e.first_name, ' ', e.last_name) AS full_name, MAX(s.salary) AS max_salary
        FROM employees e
