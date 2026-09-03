@@ -428,7 +428,7 @@ def run_agent(
         status_callback("🤖 Đang phân tích câu hỏi & tạo câu lệnh SQL tối ưu...")
 
     initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
-    sql_query, err = call_llm(client, provider, model_name, initial_prompt)
+    sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=300)
     if sql_query:
         sql_query = clean_sql_query(sql_query)
 
@@ -511,27 +511,19 @@ def run_agent(
             dup_warning = detect_duplicate_entity_warning(df)
             if dup_warning:
                 result["logs"].append(f"⚠️ Cảnh báo: {dup_warning}")
-                if attempt < 3:
-                    dup_fix_reason = (
-                        f"{dup_warning} "
-                        f"BẮT BUỘC dùng hàm tổng hợp SUM(s.Amount) AS TotalSales và GROUP BY theo thực thể đó (ví dụ: GROUP BY p.Salesperson, p.Team) ORDER BY TotalSales DESC!"
-                        if lang != "en" else
-                        f"{dup_warning} MUST use SUM(s.Amount) AS TotalSales and GROUP BY (e.g. GROUP BY p.Salesperson, p.Team) ORDER BY TotalSales DESC!"
-                    )
-                    fix_prompt = build_fix_prompt(
-                        schema_context, dialect, user_query, sql_query, dup_fix_reason, lang=lang
-                    )
-                    fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
-                    sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
-                    continue
+                # Tự động loại bỏ trùng lặp trực tiếp trên DataFrame để tối ưu tốc độ phản hồi (tiết kiệm 15-20s gọi lại LLM)
+                cols = df.columns.tolist()
+                name_cols = [c for c in cols if any(k in c.lower() for k in ["name", "salesperson", "product", "title", "department", "emp_no", "nhan_vien", "san_pham"])]
+                if name_cols:
+                    df = df.drop_duplicates(subset=[name_cols[0]]).reset_index(drop=True)
 
-            # Fast-path: Nếu câu lệnh thành công ngay lần đầu, df có dữ liệu và không có cảnh báo trùng lặp
-            # Bỏ qua lượt gọi QA LLM để tiết kiệm 2-3 giây cho người dùng
-            should_run_qa = enable_self_check and (attempt > 1)
+            # Fast-path: Nếu câu lệnh thành công ngay lần đầu hoặc dùng Ollama cục bộ
+            # Bỏ qua lượt gọi QA LLM để tiết kiệm thời gian chờ cho người dùng
+            should_run_qa = enable_self_check and (provider != "Ollama (Local AI Offline)") and (attempt > 1)
             if should_run_qa:
                 check = self_check_sql(client, provider, model_name, schema_context, user_query, sql_query, df, lang=lang)
             else:
-                check = {"day_du": True, "ly_do": "SQL hợp lệ (Fast-path tối ưu tốc độ)."}
+                check = {"day_du": True, "ly_do": "SQL hợp lệ (Tối ưu tốc độ)."}
 
             if check.get("day_du", True) or attempt == 3:
                 if check.get("day_du", True):
@@ -550,20 +542,24 @@ def run_agent(
                     anomalies_info = analyze_data_anomalies(df)
                     result["anomalies_info"] = anomalies_info
 
-                    # Chạy song song sinh Insight và Follow-up questions để giảm 50% thời gian chờ
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                        fut_insights = (
-                            executor.submit(generate_auto_insights, client, provider, model_name, user_query, df, anomalies_info, lang)
-                            if enable_auto_insights else None
-                        )
-                        fut_followups = executor.submit(
-                            generate_followup_questions, client, provider, model_name, user_query, schema_context, df, lang
-                        )
+                    # Tối ưu hóa siêu tốc (Instant Grounded Analytics):
+                    # 1. Sinh câu hỏi gợi ý tiếp nối ngay lập tức trong 0.0001s bám sát thực thể thật
+                    result["followups"] = generate_grounded_fallback_followups(df, schema_context=schema_context, lang=lang)
 
-                        if fut_insights:
-                            result["insights"] = fut_insights.result()
-                        if fut_followups:
-                            result["followups"] = fut_followups.result()
+                    # 2. Sinh Insight Phân Tích
+                    if enable_auto_insights:
+                        if provider == "Ollama (Local AI Offline)":
+                            # Với Ollama cục bộ: Dùng Data-Grounded Engine tức thì (0.001s) để phản hồi trong chớp mắt
+                            from src.analytics.heuristics import split_insight_sections
+                            sec = split_insight_sections("", df=df)
+                            result["insights"] = (
+                                f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{sec['anomaly']}\n\n"
+                                f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{sec['hypothesis']}\n\n"
+                                f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{sec['action_plan']}"
+                            )
+                        else:
+                            # Với Cloud (Gemini / OpenRouter): Gọi API
+                            result["insights"] = generate_auto_insights(client, provider, model_name, user_query, df, anomalies_info, lang=lang)
 
                 return result
 

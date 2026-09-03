@@ -181,7 +181,7 @@ def _call_openai_compatible_impl(client, model_name: str, prompt: str, max_token
     return completion.choices[0].message.content
 
 
-def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: int = 3) -> tuple[str | None, str | None]:
+def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: int = 3, max_tokens: int = 2048) -> tuple[str | None, str | None]:
     """Gọi LLM với cấu hình max_tokens tối ưu, cơ chế Exponential Backoff trên lỗi 429/503 và tự động fallback."""
     if not client:
         return None, "Chưa khởi tạo client AI."
@@ -196,7 +196,7 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
 
     impl = _call_gemini_impl if (provider == "Gemini (Google)" and not is_openrouter) else _call_openai_compatible_impl
 
-    current_max_tokens = 2048
+    current_max_tokens = max_tokens
     last_error = None
 
     for attempt in range(max_retries):
