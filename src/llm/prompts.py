@@ -164,14 +164,30 @@ def get_db_specific_rules(schema_context: str) -> str:
        GROUP BY HireYear
        ORDER BY HireYear ASC;
 
-     + MẪU CHUẨN DANH SÁCH TRƯỞNG PHÒNG HIỆN TẠI (MANAGER) KÈM LƯƠNG:
-       SELECT d.dept_name AS Department, CONCAT(e.first_name, ' ', e.last_name) AS ManagerName, s.salary AS CurrentSalary
-       FROM dept_manager dm
-       JOIN employees e ON dm.emp_no = e.emp_no
-       JOIN departments d ON dm.dept_no = d.dept_no
-       JOIN salaries s ON e.emp_no = s.emp_no
-       WHERE dm.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
-       ORDER BY s.salary DESC;"""
+      + MẪU CHUẨN DANH SÁCH TRƯỞNG PHÒNG HIỆN TẠI (MANAGER) KÈM LƯƠNG:
+        SELECT d.dept_name AS Department, CONCAT(e.first_name, ' ', e.last_name) AS ManagerName, s.salary AS CurrentSalary
+        FROM dept_manager dm
+        JOIN employees e ON dm.emp_no = e.emp_no
+        JOIN departments d ON dm.dept_no = d.dept_no
+        JOIN salaries s ON e.emp_no = s.emp_no
+        WHERE dm.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
+        ORDER BY s.salary DESC;
+
+      + MẪU CHUẨN ĐẾM SỐ LẦN TĂNG LƯƠNG CỦA NHÂN VIÊN:
+        SELECT 
+            e.emp_no,
+            CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+            d.dept_name AS Department,
+            COUNT(s.salary) AS RaiseCount,
+            MAX(s.salary) AS LatestSalary
+        FROM employees e
+        JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+        JOIN departments d ON de.dept_no = d.dept_no
+        JOIN salaries s ON e.emp_no = s.emp_no
+        GROUP BY e.emp_no, FullName, d.dept_name
+        ORDER BY RaiseCount DESC, LatestSalary DESC
+        LIMIT 10;
+        * QUY TẮC BẮT BUỘC: Khi đếm số lần tăng lương / thay đổi lương: BẮT BUỘC dùng COUNT(s.salary) và TUYỆT ĐỐI KHÔNG thêm điều kiện `WHERE s.to_date = '9999-01-01'` (vì mỗi lần tăng lương là 1 dòng lịch sử trong bảng salaries, nếu lọc to_date thì số lần đếm sẽ luôn bằng 1)!"""
     elif is_chocolates_db:
         return """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):

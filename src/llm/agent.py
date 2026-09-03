@@ -120,6 +120,12 @@ def clean_sql_query(sql: str) -> str:
     # 5. Tự động cân bằng dấu ngoặc đơn () nếu bị thiếu dấu đóng ngoặc trước AS/FROM
     s = auto_balance_parentheses(s)
 
+    # 6. Khi đếm số lần tăng lương lịch sử (COUNT s.salary/RaiseCount): Tự động gỡ bỏ s.to_date = '9999-01-01' để đếm đủ lịch sử
+    if re.search(r"COUNT\s*\(\s*s\.salary\s*\)|raisecount", s, re.IGNORECASE):
+        s = re.sub(r"\s*AND\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*WHERE\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*WHERE\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
+
     return s.strip().strip("`").rstrip(";").strip()
 
 
