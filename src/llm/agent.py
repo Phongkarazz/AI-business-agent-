@@ -95,17 +95,17 @@ def clean_sql_query(sql: str) -> str:
     s = re.sub(r"\s*```$", "", s)
     s = s.strip().strip("`").strip()
 
-    # 3. Tự động tách khoảng trắng nếu mô hình AI sinh dính chữ từ khóa SQL
+    # 3. Tự động tách khoảng trắng nếu mô hình AI sinh dính chữ từ khóa SQL (Bảo vệ các cột như from_date, to_date)
     keywords_to_space = [
-        ("FROM", r"\bFROM(?=[a-zA-Z_`])"),
-        ("SELECT", r"\bSELECT(?=[a-zA-Z_`*])"),
-        ("WHERE", r"\bWHERE(?=[a-zA-Z_`])"),
-        ("JOIN", r"\bJOIN(?=[a-zA-Z_`])"),
-        ("GROUP BY", r"\bGROUP\s+BY(?=[a-zA-Z_`])"),
-        ("ORDER BY", r"\bORDER\s+BY(?=[a-zA-Z_`])"),
-        ("HAVING", r"\bHAVING(?=[a-zA-Z_`])"),
-        ("ON", r"\bON(?=[a-zA-Z_`])"),
-        ("LIMIT", r"\bLIMIT(?=\d)"),
+        ("FROM", r"(?<![\._])\bFROM(?=[a-zA-Z`])(?!_)"),
+        ("SELECT", r"(?<![\._])\bSELECT(?=[a-zA-Z`*])(?!_)"),
+        ("WHERE", r"(?<![\._])\bWHERE(?=[a-zA-Z`])(?!_)"),
+        ("JOIN", r"(?<![\._])\bJOIN(?=[a-zA-Z`])(?!_)"),
+        ("GROUP BY", r"(?<![\._])\bGROUP\s+BY(?=[a-zA-Z`])(?!_)"),
+        ("ORDER BY", r"(?<![\._])\bORDER\s+BY(?=[a-zA-Z`])(?!_)"),
+        ("HAVING", r"(?<![\._])\bHAVING(?=[a-zA-Z`])(?!_)"),
+        ("ON", r"(?<![\._])\bON(?=[a-zA-Z`])(?!_)"),
+        ("LIMIT", r"(?<![\._])\bLIMIT(?=\d)"),
     ]
     for kw_name, kw_pattern in keywords_to_space:
         s = re.sub(kw_pattern, kw_name + " ", s, flags=re.IGNORECASE)

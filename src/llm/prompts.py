@@ -187,7 +187,21 @@ def get_db_specific_rules(schema_context: str) -> str:
         GROUP BY e.emp_no, FullName, d.dept_name
         ORDER BY RaiseCount DESC, LatestSalary DESC
         LIMIT 10;
-        * QUY TẮC BẮT BUỘC: Khi đếm số lần tăng lương / thay đổi lương: BẮT BUỘC dùng COUNT(s.salary) và TUYỆT ĐỐI KHÔNG thêm điều kiện `WHERE s.to_date = '9999-01-01'` (vì mỗi lần tăng lương là 1 dòng lịch sử trong bảng salaries, nếu lọc to_date thì số lần đếm sẽ luôn bằng 1)!"""
+        * QUY TẮC BẮT BUỘC: Khi đếm số lần tăng lương / thay đổi lương: BẮT BUỘC dùng COUNT(s.salary) và TUYỆT ĐỐI KHÔNG thêm điều kiện `WHERE s.to_date = '9999-01-01'` (vì mỗi lần tăng lương là 1 dòng lịch sử trong bảng salaries, nếu lọc to_date thì số lần đếm sẽ luôn bằng 1)!
+
+      + MẪU CHUẨN MANAGER GIỮ CHỨC VỤ LÂU NHẤT TOÀN LỊCH SỬ:
+        SELECT 
+            CONCAT(e.first_name, ' ', e.last_name) AS ManagerName,
+            d.dept_name AS Department,
+            dm.from_date AS StartDate,
+            IF(dm.to_date = '9999-01-01', 'Hiện tại', dm.to_date) AS EndDate,
+            ROUND(DATEDIFF(IF(dm.to_date = '9999-01-01', '2002-08-01', dm.to_date), dm.from_date) / 365.25, 1) AS YearsAsManager
+        FROM dept_manager dm
+        JOIN employees e ON dm.emp_no = e.emp_no
+        JOIN departments d ON dm.dept_no = d.dept_no
+        ORDER BY YearsAsManager DESC
+        LIMIT 10;
+        * QUY TẮC: Khi hỏi 'Manager lâu nhất / thâm niên quản lý': BẮT BUỘC tính số năm tại vị dùng DATEDIFF, ORDER BY YearsAsManager DESC LIMIT 10 và TUYỆT ĐỐI KHÔNG thêm điều kiện WHERE lọc ngày (from_date/to_date) để quét toàn bộ các đời Manager trong lịch sử!"""
     elif is_chocolates_db:
         return """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):
