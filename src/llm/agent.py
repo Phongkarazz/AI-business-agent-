@@ -100,9 +100,17 @@ def is_safe_select(sql: str) -> bool:
 
 
 def is_conversational_explanation(text_response: str) -> bool:
-    """Nhận diện khi mô hình AI trả về câu giải thích tự nhiên (ví dụ: schema không có bảng phù hợp) thay vì SQL."""
+    """Nhận diện khi mô hình AI trả về câu giải thích tự nhiên thay vì SQL."""
     if not text_response:
         return False
+
+    # Kiểm tra nếu câu trả lời bị lặp từ rác (ví dụ cùng một từ lặp lại >= 4 lần)
+    words = text_response.lower().replace(",", " ").replace(";", " ").split()
+    if len(words) > 8:
+        from collections import Counter
+        counts = Counter(words)
+        if any(count >= 4 for word, count in counts.items() if len(word) > 3):
+            return False  # Bị lặp từ rác -> Không phải explanation hợp lệ, bắt buộc ép sinh SQL
 
     cleaned = text_response.strip().lower()
     explanation_indicators = [
@@ -428,31 +436,26 @@ def run_agent(
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
         return result
 
-    # 1.1 Kiểm tra nếu AI trả về câu giải thích (ví dụ: schema không có dữ liệu này)
-    if is_conversational_explanation(sql_query):
-        result["explanation"] = sql_query
-        return result
-
     # 2. Vòng lặp thực thi, kiểm định và tự sửa lỗi âm thầm (Silent Self-Healing)
     for attempt in range(1, 4):
         result["attempts"] = attempt
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
-        # Kiểm tra nếu ở các lần thử AI nhận ra không có bảng phù hợp
-        if is_conversational_explanation(sql_query):
-            result["explanation"] = sql_query
-            return result
-
         if not is_safe_select(sql_query):
-            result["logs"].append("❌ Kiểm tra an toàn thất bại: Không phải lệnh SELECT/WITH an toàn.")
+            # Nếu AI trả về câu giải thích hợp lệ sau khi đã thử tự sửa
+            if is_conversational_explanation(sql_query) and attempt == 3:
+                result["explanation"] = sql_query
+                return result
+
+            result["logs"].append("⚠️ Phản hồi chưa phải câu lệnh SQL SELECT/WITH hợp lệ. Đang tự động yêu cầu AI tạo câu lệnh SQL chuẩn xác...")
             if attempt == 3:
-                result["error"] = "Unsafe SQL query (Only single SELECT/WITH statements allowed)." if lang == "en" else "Câu lệnh SQL không an toàn (Chỉ chấp nhận lệnh SELECT/WITH đơn, không nhiều câu lệnh)."
+                result["error"] = "Unsafe SQL query (Only single SELECT/WITH statements allowed)." if lang == "en" else "Câu lệnh SQL không an toàn hoặc AI từ chối tạo SQL sau 3 lần thử."
                 result["sql"] = sql_query
                 return result
 
             fix_prompt = build_fix_prompt(
                 schema_context, dialect, user_query, sql_query,
-                "Query must start with SELECT or WITH and contain no forbidden keywords. Do not use markdown backticks.",
+                "BẮT BUỘC chỉ trả về duy nhất 1 câu lệnh SQL SELECT hoặc WITH trực tiếp, TUYỆT ĐỐI KHÔNG xin lỗi, không giải thích, không dùng markdown!" if lang != "en" else "MUST return raw executable SELECT or WITH statement. Do NOT apologize, do NOT explain!",
                 lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
