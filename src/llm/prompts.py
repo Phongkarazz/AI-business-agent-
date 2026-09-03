@@ -59,12 +59,14 @@ MANDATORY RULES (STRICT COMPLIANCE):
 User Query: "{user_query}"
 SQL Query:"""
 
-    # Tự động nhận diện ngữ cảnh CSDL từ schema_context để hướng dẫn chính xác 100%
-    is_employees_db = "departments" in schema_context.lower() or "dept_emp" in schema_context.lower() or "hire_date" in schema_context.lower()
-    is_chocolates_db = "people" in schema_context.lower() and "products" in schema_context.lower()
+def get_db_specific_rules(schema_context: str) -> str:
+    """Tự động nhận diện CSDL và sinh quy tắc chi tiết theo từng bảng."""
+    schema_low = (schema_context or "").lower()
+    is_employees_db = "departments" in schema_low or "dept_emp" in schema_low or "hire_date" in schema_low or "salaries" in schema_low
+    is_chocolates_db = "people" in schema_low and "products" in schema_low
 
     if is_employees_db:
-        db_specific_rules = """   - QUY TẮC CSDL EMPLOYEES:
+        return """   - QUY TẮC CSDL EMPLOYEES:
      + Bảng `employees` (Bí danh bắt buộc: `e`):
        * Cột: `emp_no` (Khóa chính), `first_name`, `last_name`, `gender`, `hire_date`, `birth_date`.
        * Ghép họ tên đầy đủ: `CONCAT(e.first_name, ' ', e.last_name) AS full_name`.
@@ -74,19 +76,18 @@ SQL Query:"""
      + Bảng `departments` (Bí danh bắt buộc: `d`): `dept_no` (Khóa chính), `dept_name`.
      + Bảng liên kết phòng ban `dept_emp` (Bí danh bắt buộc: `de`): `emp_no`, `dept_no`, `from_date`, `to_date`.
      + Bảng chức danh `titles` (Bí danh bắt buộc: `t`): `emp_no`, `title`, `from_date`, `to_date`.
-     + CẢNH BÁO LIÊN KẾT PHÒNG BAN: Bảng `employees` và `salaries` KHÔNG CÓ cột `dept_no`!
-       Để nối tiền lương hoặc nhân viên với phòng ban (`departments d`), BẮT BUỘC JOIN qua bảng trung gian `dept_emp de`:
-       `FROM salaries s JOIN dept_emp de ON s.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no`
      + CẢNH BÁO BẮT BUỘC TIỀN TỐ BÍ DANH & TÊN CỘT (TRÁNH LỖI 1052, 1054):
-       * Cột `emp_no` có trong 3 bảng. BẮT BUỘC viết `e.emp_no` trong SELECT và GROUP BY!
-       * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
-       * Thứ tự JOIN bắt buộc:
-         FROM employees e
-         JOIN salaries s ON e.emp_no = s.emp_no
-         JOIN dept_emp de ON e.emp_no = de.emp_no
-         JOIN departments d ON de.dept_no = d.dept_no
-       * TUYỆT ĐỐI KHÔNG đưa `de.dept_no = d.dept_no` vào mệnh đề ON của dept_emp trước khi JOIN departments d!
-       * TUYỆT ĐỐI KHÔNG dùng CTE (WITH ...), KHÔNG JOIN bảng titles nếu không hỏi chức danh!
+        * Cột `emp_no` có trong 3 bảng. BẮT BUỘC viết `e.emp_no` trong SELECT và GROUP BY!
+        * Bảng `departments` CHỈ CÓ 2 CỘT: `dept_no` và `dept_name`! TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`!
+        * Khi câu hỏi về Chức Danh (Title) và Lương Nam/Nữ: BẮT BUỘC chỉ JOIN `titles` và `salaries` với `employees`, TUYỆT ĐỐI KHÔNG JOIN bảng `departments`!
+        * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
+        * Thứ tự JOIN bắt buộc khi truy vấn phòng ban:
+          FROM employees e
+          JOIN salaries s ON e.emp_no = s.emp_no
+          JOIN dept_emp de ON e.emp_no = de.emp_no
+          JOIN departments d ON de.dept_no = d.dept_no
+        * TUYỆT ĐỐI KHÔNG đưa `de.dept_no = d.dept_no` vào mệnh đề ON của dept_emp trước khi JOIN departments d!
+        * TUYỆT ĐỐI KHÔNG dùng CTE (WITH ...), KHÔNG JOIN bảng titles nếu không hỏi chức danh!
 
      + MẪU CHUẨN TOP 10 NHÂN VIÊN LƯƠNG CAO NHẤT:
        SELECT e.emp_no, CONCAT(e.first_name, ' ', e.last_name) AS full_name, MAX(s.salary) AS max_salary
@@ -166,26 +167,17 @@ SQL Query:"""
        WHERE dm.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
        ORDER BY s.salary DESC;"""
     elif is_chocolates_db:
-        db_specific_rules = """   - QUY TẮC CSDL AWESOME CHOCOLATES:
+        return """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):
        * Cột: `PID` (Khóa chính), `Product` (Tên sản phẩm: 'Mint Chip Choco', 'Milk Bars'...), `Category`, `Size`, `Cost_per_box`.
-       * CẢNH BÁO: TUYỆT ĐỐI KHÔNG DÙNG `pr.Salesperson` (Salesperson nằm ở bảng people, KHÔNG nằm ở products)! TUYỆT ĐỐI KHÔNG DÙNG `ProductCost_per_box` (cột chi phí là `Cost_per_box`)!
      + Bảng `people` (Bí danh bắt buộc: `pe`):
        * Cột: `SPID` (Khóa chính), `Salesperson` (Tên nhân viên: 'Van Tuxwell'...), `Team` ('Yummies', 'Jucies', 'Delish'...), `Location`.
-       * CẢNH BÁO: Tên nhân viên là cột `Salesperson`, TUYỆT ĐỐI KHÔNG DÙNG `Name` hay `Employee`!
      + Bảng `geo` (Bí danh bắt buộc: `g`):
        * Cột: `GeoID` (Khóa chính), `Geo` (Tên quốc gia/thị trường: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand'), `Region` (Khu vực địa lý lớn: 'APAC', 'Americas').
-       * CẢNH BÁO: Khi lọc thị trường hoặc khu vực Australia, Ấn Độ (India), Mỹ (USA)... BẮT BUỘC DÙNG `g.Geo = 'Australia'` (hoặc `g.Geo = 'India'`)!
      + Bảng `sales` (Bí danh bắt buộc: `s`):
        * Cột: `SPID` (liên kết pe.SPID), `PID` (liên kết pr.PID), `GeoID` (liên kết g.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
      + QUY TẮC BÍ DANH (ALIAS) TUYỆT ĐỐI KHÔNG TRÙNG NHAU:
-       * TUYỆT ĐỐI KHÔNG đặt cùng bí danh `p` cho cả people và products (sẽ gây lỗi MySQL 1066 Not unique table/alias)!
        * Luôn dùng: `pe` cho people, `pr` cho products, `s` cho sales, `g` cho geo.
-     + Mối quan hệ liên kết:
-       * `pr.PID = s.PID`
-       * `pe.SPID = s.SPID`
-       * `g.GeoID = s.GeoID`
-     + TUYỆT ĐỐI KHÔNG DÙNG CTE (`WITH ...`) cho các truy vấn đơn giản. Hãy viết câu lệnh SELECT ... JOIN ... GROUP BY phẳng, trực tiếp và chạy siêu tốc!
      + MẪU CHUẨN TOP NHÂN SỰ:
        SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
        FROM people pe
@@ -197,15 +189,54 @@ SQL Query:"""
        SELECT pr.Product, SUM(s.Amount) AS TotalSales
        FROM products pr
        JOIN sales s ON pr.PID = s.PID
-       JOIN geo g ON s.GeoID = g.GeoID
-       WHERE g.Geo = 'Australia' AND YEAR(s.SaleDate) = 2021
        GROUP BY pr.Product
        ORDER BY TotalSales DESC
-       LIMIT 5;"""
+       LIMIT 10;
+     + MẪU CHUẨN DOANH THU THEO THÁNG:
+       SELECT MONTH(s.SaleDate) AS Month, SUM(s.Amount) AS TotalSales
+       FROM sales s
+       WHERE YEAR(s.SaleDate) = 2021
+       GROUP BY Month
+       ORDER BY Month ASC;"""
     else:
-        db_specific_rules = """   - QUY TẮC SCHEMA CHUNG:
+        return """   - QUY TẮC SCHEMA CHUNG:
      + CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng và cột xuất hiện thực tế trong SCHEMA ở trên.
      + Mỗi bảng được JOIN phải có bí danh phân biệt, không được trùng nhau."""
+
+
+def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: str = "vi") -> str:
+    """Xây dựng prompt tạo câu lệnh SQL với độ chính xác Schema tuyệt đối."""
+    dialect_hint = get_dialect_hints(dialect, lang=lang)
+    db_specific_rules = get_db_specific_rules(schema_context)
+
+    if lang == "en":
+        return f"""You are a world-class SQL engineer.
+=== ACTUAL DATABASE SCHEMA ===
+{schema_context}
+==============================
+
+Dialect Notice: {dialect_hint}
+
+STRICT RULES:
+1. PURE SCHEMA GROUNDING:
+   - ONLY use tables, views, and columns that appear in the SCHEMA above.
+   - NEVER invent or assume table/column names.
+   - NEVER use CTEs (`WITH ...`). Use flat direct SELECT statements!
+{db_specific_rules}
+2. HISTORICAL DATES:
+   - Anchor relative dates to `(SELECT MAX(date_col) FROM table_name)`.
+3. EXACT MATCHING:
+   - Use flexible pattern matching (e.g. `LIKE '%term%'` or exact match) when querying textual categories and names.
+4. SYNTAX PRECISION:
+   - Use `COUNT(*)` or `COUNT(column)`, never `COUNT()`.
+   - Ensure all parentheses () and quotes are balanced.
+   - Wrap identifiers in backticks ` when needed.
+5. CLEAN OUTPUT:
+   - Return ONLY the single executable raw SQL statement (starting with SELECT or WITH).
+   - No markdown code blocks, no explanations, no comments.
+
+User Query: "{user_query}"
+SQL Query:"""
 
     return f"""Bạn là chuyên gia SQL hàng đầu thế giới.
 
@@ -261,6 +292,7 @@ Câu lệnh SQL:"""
 def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str, lang: str = "vi") -> str:
     """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi, kết quả rỗng (0 dòng) hoặc không qua self-check."""
     dialect_hint = get_dialect_hints(dialect, lang=lang)
+    db_specific_rules = get_db_specific_rules(schema_context)
     if lang == "en":
         return f"""You are a senior SQL expert. The SQL query you generated needs adjustments on {dialect}.
 
@@ -276,6 +308,9 @@ Previous SQL:
 
 SYSTEM FEEDBACK:
 {reason_or_error}
+
+SCHEMA GUIDELINES & TEMPLATES:
+{db_specific_rules}
 
 FIX INSTRUCTIONS:
 1. If result returned 0 rows due to CURRENT_DATE(), NOW(), CURDATE() or overly strict date filtering: Anchor to `(SELECT MAX(date_col) FROM table_name)` or remove restrictive date filters to fetch real data!
@@ -298,8 +333,11 @@ Câu SQL trước đó:
 THÔNG BÁO TỪ HỆ THỐNG:
 {reason_or_error}
 
+QUY TẮC & MẪU SQL CHUẨN CỦA CSDL NÀY:
+{db_specific_rules}
+
 HƯỚNG DẪN ĐIỀU CHỈNH BẮT BUỘC:
-1. Nếu lỗi 'Table or column doesn't exist': Nhìn kỹ SCHEMA ở trên và CHỈ DÙNG đúng các bảng/cột có trong CSDL này. TUYỆT ĐỐI KHÔNG dùng bảng ngoài schema!
+1. Nếu lỗi 'Table or column doesn't exist': Nhìn kỹ SCHEMA ở trên và CHỈ DÙNG đúng các bảng/cột có trong CSDL này. TUYỆT ĐỐI KHÔNG dùng bảng hoặc cột ngoài schema!
 2. BẢNG EMPLOYEES: Không có cột dept_no! BẮT BUỘC JOIN qua dept_emp de: `FROM employees e JOIN dept_emp de ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no JOIN salaries s ON e.emp_no = s.emp_no`.
 3. TUYỆT ĐỐI CẤM DÙNG CTE (`WITH ...`). BẮT BUỘC dùng duy nhất 1 câu SELECT trực tiếp!
 4. Nếu kết quả trả về 0 dòng dữ liệu do dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc thời gian quá chặt: Hãy thay thế bằng `(SELECT MAX(date_col) FROM table_name)` làm mốc ngày gần nhất hoặc bỏ điều kiện lọc thời gian để lấy dữ liệu thực tế!

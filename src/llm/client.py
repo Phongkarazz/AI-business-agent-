@@ -50,7 +50,22 @@ def extract_clean_content(raw: str) -> str:
 
     extracted = "\n".join(cleaned_lines).strip().strip("`").strip()
 
-    # 4. Tìm câu lệnh SQL thực sự (phải có SELECT ... FROM hoặc WITH ... SELECT ... FROM)
+    # 4. Tự động tách khoảng trắng nếu mô hình AI sinh dính chữ từ khóa SQL
+    keywords_to_space = [
+        ("FROM", r"\bFROM(?=[a-zA-Z_`])"),
+        ("SELECT", r"\bSELECT(?=[a-zA-Z_`*])"),
+        ("WHERE", r"\bWHERE(?=[a-zA-Z_`])"),
+        ("JOIN", r"\bJOIN(?=[a-zA-Z_`])"),
+        ("GROUP BY", r"\bGROUP\s+BY(?=[a-zA-Z_`])"),
+        ("ORDER BY", r"\bORDER\s+BY(?=[a-zA-Z_`])"),
+        ("HAVING", r"\bHAVING(?=[a-zA-Z_`])"),
+        ("ON", r"\bON(?=[a-zA-Z_`])"),
+        ("LIMIT", r"\bLIMIT(?=\d)"),
+    ]
+    for kw_name, kw_pattern in keywords_to_space:
+        extracted = re.sub(kw_pattern, kw_name + " ", extracted, flags=re.IGNORECASE)
+
+    # 5. Tìm câu lệnh SQL thực sự (phải có SELECT ... FROM hoặc WITH ... SELECT ... FROM)
     # Tránh bắt nhầm các lời thoại bình luận mở đầu như: "Select phần**:", "SELECT mục 1:", "Select câu hỏi..."
     if re.search(r"^\s*SELECT[^\n]*(?:[\*\:]{2,}|phần|mục|đoạn|bước|câu)", extracted, re.IGNORECASE):
         real_sql_match = re.search(r"(?:^|\n)\s*(SELECT\s+[\s\S]*?\bFROM\b[\s\S]*?)(?:;|\n\n|$)", extracted, re.IGNORECASE)

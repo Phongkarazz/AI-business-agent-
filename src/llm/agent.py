@@ -50,7 +50,7 @@ def check_parentheses_balance(sql: str) -> tuple[bool, str]:
 
 
 def clean_sql_query(sql: str) -> str:
-    """Loại bỏ hoàn toàn markdown backtick, code blocks, tiền tố thừa và khoảng trắng trước sau SQL."""
+    """Loại bỏ hoàn toàn markdown backtick, code blocks, tiền tố thừa và tự động sửa dính chữ từ khóa SQL (FROMemployees -> FROM employees)."""
     if not sql:
         return ""
     s = sql.strip()
@@ -64,7 +64,22 @@ def clean_sql_query(sql: str) -> str:
     s = re.sub(r"\s*```$", "", s)
     s = s.strip().strip("`").strip()
 
-    # 3. Tìm vị trí SELECT hoặc WITH đầu tiên nếu có lời dẫn phía trước
+    # 3. Tự động tách khoảng trắng nếu mô hình AI sinh dính chữ từ khóa SQL
+    keywords_to_space = [
+        ("FROM", r"\bFROM(?=[a-zA-Z_`])"),
+        ("SELECT", r"\bSELECT(?=[a-zA-Z_`*])"),
+        ("WHERE", r"\bWHERE(?=[a-zA-Z_`])"),
+        ("JOIN", r"\bJOIN(?=[a-zA-Z_`])"),
+        ("GROUP BY", r"\bGROUP\s+BY(?=[a-zA-Z_`])"),
+        ("ORDER BY", r"\bORDER\s+BY(?=[a-zA-Z_`])"),
+        ("HAVING", r"\bHAVING(?=[a-zA-Z_`])"),
+        ("ON", r"\bON(?=[a-zA-Z_`])"),
+        ("LIMIT", r"\bLIMIT(?=\d)"),
+    ]
+    for kw_name, kw_pattern in keywords_to_space:
+        s = re.sub(kw_pattern, kw_name + " ", s, flags=re.IGNORECASE)
+
+    # 4. Tìm vị trí SELECT hoặc WITH đầu tiên nếu có lời dẫn phía trước
     match_kw = re.search(r"\b(SELECT|WITH)\b", s, re.IGNORECASE)
     if match_kw and match_kw.start() > 0:
         prefix = s[:match_kw.start()].strip()
@@ -608,6 +623,25 @@ def run_agent(
                         )
                 except Exception:
                     pass
+
+            # Bắt lỗi 1054 / Unknown column để tự động sửa cột ảo giác (như d.to_date)
+            if "1054" in lowered_err or "unknown column" in lowered_err or "no such column" in lowered_err:
+                if "d.to_date" in lowered_err or "departments.to_date" in lowered_err or "to_date" in lowered_err:
+                    augmented_error += (
+                        "\n\nLỖI CỘT 1054 (Unknown column 'd.to_date'):\n"
+                        "Bảng 'departments' CHỈ CÓ 2 CỘT: `dept_no` và `dept_name`! TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`!\n"
+                        "- Khi câu hỏi so sánh Chức danh (Title) và Lương Nam/Nữ: BẮT BUỘC chỉ JOIN bảng `titles t` và `salaries s`:\n"
+                        "  SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary\n"
+                        "  FROM employees e\n"
+                        "  JOIN titles t ON e.emp_no = t.emp_no\n"
+                        "  JOIN salaries s ON e.emp_no = s.emp_no\n"
+                        "  WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'\n"
+                        "  GROUP BY t.title, e.gender\n"
+                        "  ORDER BY t.title, e.gender;\n"
+                        "- TUYỆT ĐỐI KHÔNG JOIN bảng `departments`!"
+                        if lang != "en" else
+                        "\n\nERROR 1054: Table 'departments' ONLY has `dept_no` and `dept_name`! It does NOT have `to_date`! Do NOT join departments when querying titles!"
+                    )
 
             # Bắt lỗi 1066 / Not unique table/alias để tự động hướng dẫn đổi bí danh
             if "1066" in lowered_err or "not unique table/alias" in lowered_err:
