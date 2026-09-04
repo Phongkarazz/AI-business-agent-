@@ -528,11 +528,11 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sắc bén và ma
 ### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
 (Đưa ra 2-3 giả thuyết kinh doanh thực tế giải thích nguyên nhân: Quy mô hoạt động, Chính sách đãi ngộ & cạnh tranh nhân tài, Tính chất chuyên môn phòng ban, Thị trường tiêu thụ,... TUYỆT ĐỐI KHÔNG chèn nhãn [Ưu tiên Cao] hay từ tiếng Anh vào mục này).
 
-### 2.3. 🎯 Đề xuất Hành động (Action Plan)
-(BẮT BUỘC chỉ viết đúng 3 dòng hành động tương ứng với 3 mức độ ưu tiên, gắn chặt vào câu hỏi người dùng:
-• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: [Hành động cấp bách bám sát dữ liệu]
-• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: [Chiến lược trung hạn]
-• 🟢 **[Ưu tiên Thấp / Dài hạn]**: [Kế hoạch bền vững dài hạn]
+### 2.3. 🎯 Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)
+(BẮT BUỘC chỉ viết đúng 3 dòng đề xuất tương ứng với 3 cấp độ thời gian, bám sát số liệu cụ thể vừa truy vấn:
+• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: [Can thiệp ngay vào điểm bất thường/sụt giảm sâu nhất hoặc chênh lệch lớn nhất trích dẫn số liệu]
+• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: [Tối ưu quy trình, cân đối nguồn lực và chuẩn hóa ngân sách theo mức trung bình/trung vị]
+• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: [Chính sách đãi ngộ, chuyển đổi số và định hướng quản trị vĩ mô lâu dài]
 TUYỆT ĐỐI KHÔNG DÙNG BẢNG, KHÔNG THÊM GẠCH ĐẦU DÒNG CON).
 
 QUY TẮC ĐỊNH DẠNG & NGÔN NGỮ (BẮT BUỘC):

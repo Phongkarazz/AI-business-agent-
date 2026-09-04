@@ -668,10 +668,119 @@ def sanitize_followup_question(q: str) -> str:
     return q
 
 
+def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False) -> str:
+    """Tự động sinh Đề xuất Chiến lược AI phân cấp 3 bậc (Cấp bách, Trung hạn, Dài hạn) bám chặt vào số liệu thực tế từ DataFrame."""
+    if df is None or df.empty:
+        if is_en:
+            return (
+                "• 🔴 **[High Priority - Immediate Action / 0-30 Days]**: Audit operational anomalies and establish a rapid response taskforce.\n\n"
+                "• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize resource allocation and optimize workflow benchmarks.\n\n"
+                "• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Drive digital transformation and implement sustainable policy frameworks."
+            )
+        return (
+            "• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát các điểm bất thường vận hành và thành lập tổ công tác phản ứng nhanh.\n\n"
+            "• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa quy trình phân bổ nguồn lực và định mức chi phí theo thực tế.\n\n"
+            "• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn."
+        )
+
+    cols = df.columns.tolist()
+    num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+    cat_cols = [c for c in cols if c not in num_cols]
+
+    val_col = num_cols[-1] if num_cols else None
+    name_col = cat_cols[0] if cat_cols else (num_cols[0] if len(num_cols) > 1 else None)
+
+    if not val_col or not name_col:
+        return (
+            "• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Thiết lập cơ chế kiểm soát tức thời và ngăn ngừa rủi ro dữ liệu sai lệch.\n\n"
+            "• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa hệ thống báo cáo và liên kết chỉ tiêu KPI với hiệu quả thực tế.\n\n"
+            "• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Đầu tư mở rộng danh mục chiến lược và xây dựng hệ thống quản trị chủ động."
+        )
+
+    sorted_df = df.sort_values(by=val_col, ascending=False)
+    top_row = sorted_df.iloc[0]
+    bot_row = sorted_df.iloc[-1]
+    top_name, top_val = str(top_row[name_col]), top_row[val_col]
+    bot_name, bot_val = str(bot_row[name_col]), bot_row[val_col]
+
+    mean_val = df[val_col].mean()
+    median_val = df[val_col].median()
+    diff = top_val - bot_val
+    spread_pct = (diff / bot_val * 100) if bot_val != 0 else 0
+
+    cols_str = " ".join(str(c).lower() for c in cols)
+    is_time_series = any(k in cols_str for k in ["year", "month", "date", "năm", "tháng", "ngày", "hire", "hiredate", "hireyear"])
+    is_salary = any(k in cols_str for k in ["salary", "lương", "wage", "pay", "thu_nhập", "raisecount", "raise"])
+
+    if is_en:
+        if is_time_series:
+            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Investigate root causes behind the sharpest volume decline ({bot_name}: {bot_val:,.0f} vs peak {top_name}: {top_val:,.0f}); coordinate with HR/Operations to mitigate operational bottlenecks."
+            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize resource allocation around the benchmark average of {mean_val:,.0f} units per period; build proactive contingency staffing plans."
+            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Transition from reactive hiring to AI-driven predictive workforce planning; strengthen employer branding and long-term talent retention."
+        elif is_salary:
+            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({top_name}: {top_val:,.0f} USD vs {bot_name}: {bot_val:,.0f} USD, spread {spread_pct:.1f}%); curb flight risk among key talent."
+            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands against the median baseline of {median_val:,.0f} USD; rebalance department budget pools for internal equity."
+            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions."
+        else:
+            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Allocate focused resources to protect and scale the market leader {top_name} ({top_val:,.0f}), while remediating underperformance in {bot_name} ({bot_val:,.0f})."
+            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Realign portfolio performance targets around the group average of {mean_val:,.0f}; institutionalize leading practices across all units."
+            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Invest in strategic market expansion, automated analytics infrastructure, and sustained competitive positioning."
+    else:
+        if is_time_series:
+            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát khẩn cấp nguyên nhân kỳ sụt giảm sâu nhất ({bot_name}: {bot_val:,.0f} so với đỉnh {top_name}: {top_val:,.0f}); tổ chức đối thoại với các đơn vị liên quan để kiểm soát rủi ro gián đoạn vận hành."
+            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa kế hoạch tuyển dụng và định mức ngân sách quanh mức trung bình {mean_val:,.0f} nhân sự/kỳ; thiết lập kịch bản dự phòng linh hoạt theo từng quý."
+            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Chuyển đổi mô hình quản trị nhân tài sang hoạch định dự báo bằng AI; xây dựng thương hiệu tuyển dụng bền vững và tối ưu hóa năng suất dài hạn."
+        elif is_salary:
+            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát khung đãi ngộ tại nhóm có chênh lệch lớn nhất ({top_name} đạt {top_val:,.0f} USD so với {bot_name} là {bot_val:,.0f} USD, chênh lệch {spread_pct:.1f}%); ngăn chặn rủi ro chảy máu chất xám ở vị trí chủ chốt."
+            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Thiết lập cơ chế đánh giá năng lực gắn liền với mức trung vị tham chiếu {median_val:,.0f} USD; tái cân bằng quỹ lương giữa các khối để đảm bảo công bằng nội bộ."
+            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp lương cạnh tranh và lộ trình thăng tiến minh bạch để thu hút nhân tài cấp cao."
+        else:
+            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tập trung nguồn lực bảo vệ và mở rộng vị thế dẫn đầu của {top_name} ({top_val:,.0f}), đồng thời đánh giá nguyên nhân kém hiệu quả tại nhóm {bot_name} ({bot_val:,.0f})."
+            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tái cấu trúc quy trình phân bổ nguồn lực dựa trên mức trung bình {mean_val:,.0f}; nhân rộng kinh nghiệm thành công của nhóm dẫn đầu sang toàn hệ thống."
+            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Đầu tư mở rộng danh mục chiến lược, tự động hóa quy trình phân tích và nâng cao năng lực cạnh tranh dài hạn trên thị trường."
+
+    return f"{urgent}\n\n{medium}\n\n{longterm}"
+
+
 def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[str, str]:
     """Bóc tách nội dung insight thành 3 phần riêng biệt để hiển thị dạng 3 Card UI chuyên nghiệp."""
     if not markdown_text:
-        return {"anomaly": "", "hypothesis": "", "action_plan": ""}
+        # Nếu không có text (chạy Ollama cục bộ), tự động sinh đầy đủ 3 phần từ dữ liệu thực tế
+        part_21 = ""
+        part_22 = ""
+        if df is not None and not df.empty:
+            cols = df.columns.tolist()
+            num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+            cat_cols = [c for c in cols if c not in num_cols]
+            if num_cols and cat_cols:
+                val_col = num_cols[-1]
+                name_col = cat_cols[0]
+                sorted_df = df.sort_values(by=val_col, ascending=False)
+                top_row = sorted_df.iloc[0]
+                bot_row = sorted_df.iloc[-1]
+                top_name, top_val = top_row[name_col], top_row[val_col]
+                bot_name, bot_val = bot_row[name_col], bot_row[val_col]
+                spread_diff = top_val - bot_val
+                spread_pct = (spread_diff / bot_val) * 100 if bot_val != 0 else 0
+                median_val = df[val_col].median()
+                part_21 = (
+                    f"• **Dẫn đầu toàn diện**: Nhóm **{top_name}** đạt mức cao nhất ({top_val:,.2f}), thể hiện vai trò nòng cốt.\n\n"
+                    f"• **Khoảng cách phân bổ**: Nhóm **{bot_name}** ở mức {bot_val:,.2f} (chênh lệch {spread_pct:.1f}% tương đương {spread_diff:,.2f} so với nhóm dẫn đầu).\n\n"
+                    f"• **Mức trung vị tham chiếu**: Thu nhập/quy mô trung vị toàn bảng là {median_val:,.2f}, phản ánh mặt bằng chung ổn định."
+                )
+            cols_str = " ".join([str(c).lower() for c in df.columns])
+            if any(k in cols_str for k in ["salary", "department", "emp", "title", "lương", "hire", "tuyển", "nhân_sự", "nhan_vien"]):
+                part_22 = (
+                    "• **Trách nhiệm & Quy mô đơn vị**: Các phòng ban/chức danh dẫn đầu có tính chất cạnh tranh cao, quy mô lớn và đóng góp trực tiếp vào mục tiêu cốt lõi nên có mức đãi ngộ vượt trội.\n\n"
+                    "• **Chính sách đãi ngộ & Cạnh tranh nhân tài**: Sự chênh lệch thu nhập phản ánh định hướng của tổ chức trong việc thu hút nhân sự chuyên môn giỏi và giữ chân các vị trí nòng cốt."
+                )
+            else:
+                part_22 = (
+                    "• **Nhu cầu thị trường & Mùa vụ**: Nhóm sản phẩm/thị trường dẫn đầu đáp ứng tốt thị hiếu tiêu dùng và đón đầu hiệu quả các đợt cao điểm mua sắm.\n\n"
+                    "• **Hiệu quả kênh phân phối**: Doanh số cao là kết quả của chiến lược xúc tiến thương mại mạnh mẽ và độ phủ sóng rộng khắp của đội ngũ bán hàng."
+                )
+        part_23 = generate_data_grounded_action_plan(df)
+        return {"anomaly": part_21, "hypothesis": part_22, "action_plan": part_23}
 
     cleaned = sanitize_insight_markdown(markdown_text)
 
@@ -832,7 +941,7 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
         is_hr = False
         if df is not None and not df.empty:
             cols_str = " ".join([str(c).lower() for c in df.columns])
-            if any(k in cols_str for k in ["salary", "department", "emp", "title", "lương"]):
+            if any(k in cols_str for k in ["salary", "department", "emp", "title", "lương", "hire", "tuyển", "nhân_sự", "nhan_vien"]):
                 is_hr = True
 
         if is_hr:
@@ -864,30 +973,35 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
             clean_body = clean_body.lstrip("•-* :").strip()
             clean_body = clean_body.replace("**", "").strip()
 
-            if "ưu tiên cao" in l.lower():
+            if "ưu tiên cao" in l.lower() or "cấp bách" in l.lower() or "thực hiện ngay" in l.lower():
                 if any(c in clean_body for c in ["🟡", "🟢"]) or len(clean_body) < 15:
-                    clean_body = "Rà soát chính sách đãi ngộ của các nhóm nhân sự chủ lực và chuẩn hóa khung lương theo năng lực thực tế."
-                l = f"• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: {clean_body}"
-            elif "ưu tiên trung bình" in l.lower():
+                    clean_body = "Rà soát chính sách đãi ngộ và kiểm soát tức thời các điểm bất thường vận hành."
+                l = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: {clean_body}"
+            elif "ưu tiên trung bình" in l.lower() or "trung hạn" in l.lower() or "quý tiếp theo" in l.lower():
                 if any(c in clean_body for c in ["🔴", "🟢"]) or len(clean_body) < 15:
-                    clean_body = "Xây dựng lộ trình đào tạo nâng bậc cho nhóm nhân sự cấp dưới để thu hẹp khoảng cách thu nhập và tăng năng suất."
-                l = f"• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: {clean_body}"
-            elif "ưu tiên thấp" in l.lower() or "dài hạn" in l.lower():
+                    clean_body = "Tối ưu hóa quy trình phân bổ nguồn lực và chuẩn hóa định mức ngân sách theo thực tế."
+                l = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: {clean_body}"
+            elif "ưu tiên thấp" in l.lower() or "dài hạn" in l.lower() or "chiến lược" in l.lower():
                 if any(c in clean_body for c in ["🔴", "🟡"]) or len(clean_body) < 15:
-                    clean_body = "Hoàn thiện hệ thống quản trị tự động và gắn liền đánh giá KPI với hiệu quả đóng góp để phân bổ ngân sách bền vững."
-                l = f"• 🟢 **[Ưu tiên Thấp / Dài hạn]**: {clean_body}"
+                    clean_body = "Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn."
+                l = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: {clean_body}"
 
             # Sửa câu bị cụt lửng ở đuôi
             if l.startswith("•") and not l.endswith((".", "!", "?", ":")):
                 l += "."
             cleaned_23.append(l)
 
-        # Luôn đảm bảo đúng 3 gạch đầu dòng chuẩn mực
-        high_item = next((l for l in cleaned_23 if "🔴" in l), "• 🔴 **[Ưu tiên Cao - Thực hiện Ngay]**: Rà soát chính sách đãi ngộ của các nhóm nhân sự chủ lực và chuẩn hóa khung lương theo năng lực thực tế.")
-        med_item = next((l for l in cleaned_23 if "🟡" in l), "• 🟡 **[Ưu tiên Trung bình - Quý tiếp theo]**: Xây dựng lộ trình đào tạo nâng bậc cho nhóm nhân sự cấp dưới để thu hẹp khoảng cách thu nhập và tăng năng suất.")
-        low_item = next((l for l in cleaned_23 if "🟢" in l), "• 🟢 **[Ưu tiên Thấp / Dài hạn]**: Hoàn thiện hệ thống quản trị tự động và gắn liền đánh giá KPI với hiệu quả đóng góp để phân bổ ngân sách bền vững.")
+        # Luôn đảm bảo đúng 3 gạch đầu dòng chuẩn mực hoặc fallback sang data-grounded engine
+        if len(cleaned_23) >= 2:
+            high_item = next((l for l in cleaned_23 if "🔴" in l), "• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách đãi ngộ và kiểm soát tức thời các điểm bất thường vận hành.")
+            med_item = next((l for l in cleaned_23 if "🟡" in l), "• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tối ưu hóa quy trình phân bổ nguồn lực và chuẩn hóa định mức ngân sách theo thực tế.")
+            low_item = next((l for l in cleaned_23 if "🟢" in l), "• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn.")
+            part_23 = f"{high_item}\n\n{med_item}\n\n{low_item}"
+        elif df is not None and not df.empty:
+            part_23 = generate_data_grounded_action_plan(df)
 
-        part_23 = f"{high_item}\n\n{med_item}\n\n{low_item}"
+    if not part_23 and df is not None and not df.empty:
+        part_23 = generate_data_grounded_action_plan(df)
 
     if not part_21 and not part_22 and not part_23:
         lines_fallback = [re.sub(r"^#+\s*", "", l).strip() for l in cleaned.split("\n") if l.strip() and not l.strip().startswith("#")]

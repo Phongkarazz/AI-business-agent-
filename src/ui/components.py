@@ -204,11 +204,11 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
 
 
 def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool = False):
-    """Render 3 Thẻ Giao Diện Độc Lập (Cards) cho Insight: Bất thường, Nguyên nhân, Kế hoạch hành động."""
-    if not insights_raw:
+    """Render 3 Thẻ Giao Diện Độc Lập (Cards) cho Insight: Bất thường, Nguyên nhân, Đề xuất chiến lược phân cấp 3 bậc."""
+    if not insights_raw and (df is None or df.empty):
         return
 
-    sections = split_insight_sections(insights_raw, df=df)
+    sections = split_insight_sections(insights_raw or "", df=df)
     p21 = sections.get("anomaly", "").strip()
     p22 = sections.get("hypothesis", "").strip()
     p23 = sections.get("action_plan", "").strip()
@@ -230,10 +230,14 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             st.markdown(f"<h4 style='color: #01579B; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
             st.markdown(p22)
 
-    # Card 3: Đề xuất hành động
+    # Card 3: Đề xuất chiến lược phân cấp (Cấp bách | Trung hạn | Dài hạn)
+    if not p23 and df is not None and not df.empty:
+        from src.analytics.heuristics import generate_data_grounded_action_plan
+        p23 = generate_data_grounded_action_plan(df, is_en=is_en)
+
     if p23:
         with st.container(border=True):
-            title_23 = "🎯 3. Executive Action Plan & Priority Recommendations" if is_en else "🎯 3. Kế hoạch Hành động & Đề xuất Ưu tiên"
+            title_23 = "🎯 3. Executive Strategic Recommendations (Urgent | Medium | Long-term)" if is_en else "🎯 3. Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)"
             st.markdown(f"<h4 style='color: #1B5E20; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
             st.markdown(p23)
 
