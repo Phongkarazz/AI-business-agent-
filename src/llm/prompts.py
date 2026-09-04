@@ -146,6 +146,17 @@ def get_db_specific_rules(schema_context: str) -> str:
         ORDER BY t.title, e.gender;
         * QUY TẮC BẮT BUỘC: Khi hỏi về 'chức danh' (Title): BẮT BUỘC JOIN bảng `titles t` (cột `t.title`), TUYỆT ĐỐI KHÔNG JOIN `departments` hay `dept_emp`!
 
+      + MẪU CHUẨN TỶ LỆ PHÂN BỐ NHÂN SỰ THEO TỪNG CHỨC DANH:
+        SELECT 
+            t.title AS JobTitle,
+            COUNT(t.emp_no) AS EmployeeCount,
+            ROUND(COUNT(t.emp_no) * 100.0 / (SELECT COUNT(*) FROM titles WHERE to_date = '9999-01-01'), 2) AS Percentage
+        FROM titles t
+        WHERE t.to_date = '9999-01-01'
+        GROUP BY t.title
+        ORDER BY EmployeeCount DESC;
+        * QUY TẮC BẮT BUỘC: Khi hỏi về 'Tỷ lệ phân bố nhân sự theo từng chức danh' hoặc 'Số lượng / tỷ lệ nhân sự theo chức danh': BẮT BUỘC dùng bảng `titles t` (cột `t.title`), đếm `COUNT(t.emp_no) AS EmployeeCount`, tính `Percentage`, lọc `WHERE t.to_date = '9999-01-01'` và `GROUP BY t.title` (TUYỆT ĐỐI KHÔNG JOIN `salaries` hay `departments`, KHÔNG LỌC THEO PHÒNG BAN SALES)!
+
       + MẪU CHUẨN TỶ LỆ GIỚI TÍNH TRONG BAN QUẢN LÝ (DEPT_MANAGER):
         SELECT 
             d.dept_name AS Department,
@@ -271,16 +282,14 @@ def get_db_specific_rules(schema_context: str) -> str:
      + Mỗi bảng được JOIN phải có bí danh phân biệt, không được trùng nhau."""
 
 
-def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: str = "vi") -> str:
-    """Xây dựng prompt tạo câu lệnh SQL với độ chính xác Schema tuyệt đối."""
-    dialect_hint = get_dialect_hints(dialect, lang=lang)
-    db_specific_rules = get_db_specific_rules(schema_context)
-
+def get_targeted_hint(user_query: str, schema_context: str = "") -> str:
+    """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) cho câu hỏi cụ thể, áp dụng cho cả prompt gốc và prompt sửa lỗi."""
     q_low = (user_query or "").lower()
-    targeted_hint = ""
-    if any(k in q_low for k in ["chức danh", "title", "vị trí"]):
+
+    # 1. Câu hỏi liên quan đến chức danh (Title)
+    if any(k in q_low for k in ["chức danh", "title", "vị trí", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
         if any(k in q_low for k in ["nam", "nữ", "gender", "giới tính"]):
-            targeted_hint = """
+            return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH LƯƠNG NAM NỮ THEO CHỨC DANH):
 SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
 FROM employees e
@@ -291,8 +300,21 @@ GROUP BY t.title, e.gender
 ORDER BY t.title, e.gender;
 (BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
 """
+        elif any(k in q_low for k in ["phân bố", "tỷ lệ", "tỷ trọng", "cơ cấu", "số lượng", "bao nhiêu nhân sự", "nhân viên theo", "nhân sự theo"]):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHÂN BỐ NHÂN SỰ THEO TỪNG CHỨC DANH):
+SELECT 
+    t.title AS JobTitle,
+    COUNT(t.emp_no) AS EmployeeCount,
+    ROUND(COUNT(t.emp_no) * 100.0 / (SELECT COUNT(*) FROM titles WHERE to_date = '9999-01-01'), 2) AS Percentage
+FROM titles t
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY EmployeeCount DESC;
+(BẮT BUỘC dùng bảng titles t, đếm EmployeeCount và tính Percentage, TUYỆT ĐỐI KHÔNG JOIN salaries hay departments, KHÔNG LỌC THEO PHÒNG BAN SALES!)
+"""
         elif any(k in q_low for k in ["top", "cao nhất", "lương trung bình"]):
-            targeted_hint = """
+            return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP CHỨC DANH LƯƠNG CAO NHẤT):
 SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
 FROM salaries s
@@ -303,8 +325,10 @@ ORDER BY AvgSalary DESC
 LIMIT 5;
 (BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
 """
+
+    # 2. Thâm niên nhân sự
     elif any(k in q_low for k in ["thâm niên", "cống hiến"]) or ("lâu nhất" in q_low and any(k in q_low for k in ["nhân viên", "công tác", "làm việc"])):
-        targeted_hint = """
+        return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN THÂM NIÊN LÂU NHẤT CÒN CÔNG TÁC):
 SELECT 
     e.emp_no,
@@ -317,15 +341,17 @@ JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
 JOIN departments d ON de.dept_no = d.dept_no
 ORDER BY e.hire_date ASC, YearsOfService DESC
 LIMIT 10;
-(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, BẮT BUỘC DÙNG e.hire_date ASC!)
+(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI CẤM DÙNG YEAR(de.to_date) hay tạo cột mang giá trị 9999, BẮT BUỘC TÍNH CỘT YearsOfService DÙNG DATEDIFF và ORDER BY e.hire_date ASC!)
 """
-    elif any(k in q_low for k in ["tuyển dụng", "tuyển"]) and any(k in q_low for k in ["năm", "tháng"]) and any(k in q_low for k in ["phòng ban", "phòng", "department", "development", "sales", "marketing", "research", "finance", "production"]):
+
+    # 3. Xu hướng tuyển dụng theo phòng ban qua các năm
+    elif any(k in q_low for k in ["tuyển dụng", "tuyển"]) and any(k in q_low for k in ["năm", "tháng"]) and any(k in q_low for k in ["phòng ban", "phòng", "department", "development", "sales", "marketing", "research", "finance", "production", "human resources", "customer service", "quality management"]):
         dept_target = "Development"
         for d_name in ["Development", "Sales", "Marketing", "Research", "Finance", "Production", "Human Resources", "Quality Management", "Customer Service"]:
             if d_name.lower() in q_low:
                 dept_target = d_name
                 break
-        targeted_hint = f"""
+        return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XU HƯỚNG TUYỂN DỤNG PHÒNG BAN {dept_target.upper()} QUA CÁC NĂM):
 SELECT 
     YEAR(e.hire_date) AS HireYear, 
@@ -336,8 +362,17 @@ JOIN departments d ON de.dept_no = d.dept_no
 WHERE d.dept_name = '{dept_target}'
 GROUP BY HireYear
 ORDER BY HireYear ASC;
-(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, BẮT BUỘC DÙNG ĐÚNG PHÒNG BAN '{dept_target}' VÀ ORDER BY HireYear ASC!)
+(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI KHÔNG SO SÁNH LƯƠNG CHỨC DANH NAM NỮ, BẮT BUỘC DÙNG ĐÚNG PHÒNG BAN '{dept_target}' VÀ ORDER BY HireYear ASC!)
 """
+
+    return ""
+
+
+def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: str = "vi") -> str:
+    """Xây dựng prompt tạo câu lệnh SQL với độ chính xác Schema tuyệt đối."""
+    dialect_hint = get_dialect_hints(dialect, lang=lang)
+    db_specific_rules = get_db_specific_rules(schema_context)
+    targeted_hint = get_targeted_hint(user_query, schema_context)
 
     if lang == "en":
         return f"""You are a world-class SQL engineer.
@@ -423,6 +458,8 @@ def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_que
     """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi, kết quả rỗng (0 dòng) hoặc không qua self-check."""
     dialect_hint = get_dialect_hints(dialect, lang=lang)
     db_specific_rules = get_db_specific_rules(schema_context)
+    targeted_hint = get_targeted_hint(user_query, schema_context)
+
     if lang == "en":
         return f"""You are a senior SQL expert. The SQL query you generated needs adjustments on {dialect}.
 
@@ -441,7 +478,7 @@ SYSTEM FEEDBACK:
 
 SCHEMA GUIDELINES & TEMPLATES:
 {db_specific_rules}
-
+{targeted_hint}
 FIX INSTRUCTIONS:
 1. If result returned 0 rows due to CURRENT_DATE(), NOW(), CURDATE() or overly strict date filtering: Anchor to `(SELECT MAX(date_col) FROM table_name)` or remove restrictive date filters to fetch real data!
 2. If 'Table or column doesn't exist': Carefully check the SCHEMA above and ONLY use tables and columns that exist in the Schema.
@@ -465,7 +502,7 @@ THÔNG BÁO TỪ HỆ THỐNG:
 
 QUY TẮC & MẪU SQL CHUẨN CỦA CSDL NÀY:
 {db_specific_rules}
-
+{targeted_hint}
 HƯỚNG DẪN ĐIỀU CHỈNH BẮT BUỘC:
 1. Nếu lỗi 'Table or column doesn't exist': Nhìn kỹ SCHEMA ở trên và CHỈ DÙNG đúng các bảng/cột có trong CSDL này. TUYỆT ĐỐI KHÔNG dùng bảng hoặc cột ngoài schema!
 2. BẢNG EMPLOYEES: Không có cột dept_no! BẮT BUỘC JOIN qua dept_emp de: `FROM employees e JOIN dept_emp de ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no JOIN salaries s ON e.emp_no = s.emp_no`.

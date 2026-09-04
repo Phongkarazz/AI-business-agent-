@@ -150,13 +150,19 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
 
     measure_cols, label_cols, _ = get_axis_columns(df)
     if not measure_cols:
-        measure_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and not is_id_like(c)]
+        measure_cols = [
+            c for c in df.columns
+            if pd.api.types.is_numeric_dtype(df[c]) and not is_id_like(c)
+            and not (any(k in str(c).lower() for k in ["year", "hireyear", "nam"]) and not any(k in str(c).lower() for k in ["service", "thâm_niên"]))
+        ]
         label_cols = [c for c in df.columns if c not in measure_cols]
 
     total_rows = len(df)
 
     if measure_cols and total_rows > 1:
-        m_col = measure_cols[0]
+        # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị Tổng trên thẻ KPI
+        count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
+        m_col = count_like_cols[0] if count_like_cols else measure_cols[0]
         m_clean = str(m_col).replace("_", " ").title()
 
         valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()

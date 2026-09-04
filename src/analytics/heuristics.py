@@ -63,10 +63,14 @@ def find_time_column(df: pd.DataFrame):
     if dt_cols:
         return dt_cols[0]
 
-    # 2. Cột tên khớp từ khóa thời gian, không phải ID, và parse được thành ngày
+    # 2. Cột tên khớp từ khóa thời gian, không phải ID, và parse được thành ngày hoặc là số nguyên biểu diễn năm (1900 - 2100)
     candidates = [c for c in df.columns if any(k in str(c).lower() for k in TIME_KEYWORDS) and not is_id_like(c)]
     for c in candidates:
         try:
+            if pd.api.types.is_numeric_dtype(df[c]):
+                vals = pd.to_numeric(df[c], errors="coerce").dropna()
+                if not vals.empty and vals.min() >= 1900 and vals.max() <= 2100:
+                    return c
             parsed = pd.to_datetime(df[c], errors="coerce")
             if parsed.notna().mean() >= 0.8:
                 return c
@@ -82,14 +86,26 @@ def has_time_dimension(df: pd.DataFrame) -> bool:
 
 def get_axis_columns(df: pd.DataFrame):
     """Phân loại cột:
-    - measure_cols: cột số đo lường (đã loại bỏ ID)
+    - measure_cols: cột số đo lường (đã loại bỏ ID và các cột năm lịch sử/to_date)
     - cat_cols: cột danh mục/text
     - time_col: cột thời gian
     """
-    all_num_cols = df.select_dtypes(include="number").columns.tolist()
-    measure_cols = [c for c in all_num_cols if not is_id_like(c)]
-    cat_cols = [c for c in df.columns if c not in measure_cols]
     time_col = find_time_column(df)
+    all_num_cols = df.select_dtypes(include="number").columns.tolist()
+    
+    # Loại bỏ ID-like và các cột biểu diễn năm thuần túy (e.g. HireYear, Year, Nam, hoặc cột có toàn giá trị 9999)
+    measure_cols = []
+    for c in all_num_cols:
+        if is_id_like(c):
+            continue
+        c_low = str(c).strip().lower()
+        if any(k in c_low for k in ["year", "hireyear", "nam"]) and not any(k in c_low for k in ["of_service", "service", "experience", "thâm_niên", "kinh_nghiệm"]):
+            vals = pd.to_numeric(df[c], errors="coerce").dropna()
+            if not vals.empty and (vals.min() >= 1900 or (vals == 9999).all()):
+                continue
+        measure_cols.append(c)
+
+    cat_cols = [c for c in df.columns if c not in measure_cols and c != time_col]
 
     if time_col in measure_cols:
         measure_cols.remove(time_col)
@@ -969,6 +985,9 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
                 continue
             # Dọn sạch các icon cũ, nhãn cũ và dấu gạch ở đầu câu để định dạng chuẩn
             clean_body = re.sub(r"^[•\-\*]?\s*(?:\*\*)?\s*[🔴🟡🟢]?\s*(?:\*\*)?\s*", "", l).strip()
+            # Bóc sạch mọi nhãn trong ngoặc vuông (kể cả lặp lại nhiều lần hoặc lồng nhau như [Cấp Bách...]: [Cấp Bách...]:)
+            while re.match(r"^(?:\*\*)?\[[^\]]+\](?:\*\*)?:?\s*", clean_body):
+                clean_body = re.sub(r"^(?:\*\*)?\[[^\]]+\](?:\*\*)?:?\s*", "", clean_body).strip()
             clean_body = re.sub(r"^\[?(?:Ưu\s*tiên\s*(?:Cao|Trung\s*bình|Thấp)|High\s*Priority|Medium\s*Priority|Low\s*Priority)[^\]:]*\]?:?\s*", "", clean_body, flags=re.IGNORECASE).strip()
             clean_body = clean_body.lstrip("•-* :").strip()
             clean_body = clean_body.replace("**", "").strip()

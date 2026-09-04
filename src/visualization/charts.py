@@ -37,10 +37,27 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
         n_time = df[time_col].nunique(dropna=True) if (time_col and time_col in df.columns) else 0
 
         if chart_override == "Tự động":
-            # Chỉ chọn Line/Area khi có ít nhất 2 mốc thời gian khác nhau để tạo thành đường xu hướng
-            if time_col and measure_cols and n_time > 1:
+            # 1. Nếu mỗi dòng là một cá nhân/thực thể độc lập (có row_identity_col hoặc có tên người FullName, Salesperson, Employee)
+            # -> ĐÂY LÀ BẢNG XẾP HẠNG CÁ NHÂN, BẮT BUỘC dùng Bar Chart để so sánh giữa các cá nhân, TUYỆT ĐỐI KHÔNG DÙNG Line Chart!
+            is_individual_entity = (
+                row_identity_col is not None
+                or any(INDIVIDUAL_ENTITY_REGEX.search(str(c)) for c in label_cols)
+            )
+
+            # 2. Nếu có cột tỷ lệ/phần trăm/cơ cấu và số lượng danh mục từ 2 đến 10 (ví dụ: 7 chức danh)
+            # -> Tự động chọn Pie (Donut Chart) để xem cơ cấu phân bố
+            has_pct_col = any(any(k in str(col).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "share", "ratio"]) for col in measure_cols)
+            is_distribution_breakdown = (
+                has_pct_col and (2 <= len(df) <= 10)
+            )
+
+            if is_distribution_breakdown:
+                chosen = "Pie"
+            elif is_individual_entity and measure_cols:
+                chosen = "Bar"
+            elif time_col and measure_cols and n_time > 1:
                 chosen = "Line"
-            elif len(df) == 1 and measure_cols and any(k in measure_cols[0].lower() for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram", "%"]):
+            elif len(df) == 1 and measure_cols and any(k in str(measure_cols[0]).lower() for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram", "%"]):
                 chosen = "Pie"
             elif measure_cols:
                 chosen = "Bar"
