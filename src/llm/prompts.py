@@ -167,6 +167,18 @@ def get_db_specific_rules(schema_context: str) -> str:
        GROUP BY HireYear
        ORDER BY HireYear ASC;
 
+     + MẪU CHUẨN XU HƯỚNG TUYỂN DỤNG CỦA PHÒNG BAN CỤ THỂ QUA CÁC NĂM (Ví dụ: Development / Sales):
+       SELECT 
+           YEAR(e.hire_date) AS HireYear, 
+           COUNT(DISTINCT e.emp_no) AS TotalHires
+       FROM employees e
+       JOIN dept_emp de ON e.emp_no = de.emp_no
+       JOIN departments d ON de.dept_no = d.dept_no
+       WHERE d.dept_name = 'Development'
+       GROUP BY HireYear
+       ORDER BY HireYear ASC;
+       * QUY TẮC BẮT BUỘC: Khi hỏi 'Xu hướng tuyển dụng của phòng ban [Tên] qua các năm': BẮT BUỘC dùng `YEAR(e.hire_date) AS HireYear`, `COUNT(DISTINCT e.emp_no) AS TotalHires`, `WHERE d.dept_name = '[Tên phòng ban]'` và `ORDER BY HireYear ASC` (TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG VÀ KHÔNG GÁN CỨNG PHÒNG BAN KHÁC)!
+
       + MẪU CHUẨN DANH SÁCH TRƯỞNG PHÒNG HIỆN TẠI (MANAGER) KÈM LƯƠNG:
         SELECT d.dept_name AS Department, CONCAT(e.first_name, ' ', e.last_name) AS ManagerName, s.salary AS CurrentSalary
         FROM dept_manager dm
@@ -306,6 +318,25 @@ JOIN departments d ON de.dept_no = d.dept_no
 ORDER BY e.hire_date ASC, YearsOfService DESC
 LIMIT 10;
 (TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, BẮT BUỘC DÙNG e.hire_date ASC!)
+"""
+    elif any(k in q_low for k in ["tuyển dụng", "tuyển"]) and any(k in q_low for k in ["năm", "tháng"]) and any(k in q_low for k in ["phòng ban", "phòng", "department", "development", "sales", "marketing", "research", "finance", "production"]):
+        dept_target = "Development"
+        for d_name in ["Development", "Sales", "Marketing", "Research", "Finance", "Production", "Human Resources", "Quality Management", "Customer Service"]:
+            if d_name.lower() in q_low:
+                dept_target = d_name
+                break
+        targeted_hint = f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XU HƯỚNG TUYỂN DỤNG PHÒNG BAN {dept_target.upper()} QUA CÁC NĂM):
+SELECT 
+    YEAR(e.hire_date) AS HireYear, 
+    COUNT(DISTINCT e.emp_no) AS TotalHires
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no
+JOIN departments d ON de.dept_no = d.dept_no
+WHERE d.dept_name = '{dept_target}'
+GROUP BY HireYear
+ORDER BY HireYear ASC;
+(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, BẮT BUỘC DÙNG ĐÚNG PHÒNG BAN '{dept_target}' VÀ ORDER BY HireYear ASC!)
 """
 
     if lang == "en":
