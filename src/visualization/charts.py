@@ -288,6 +288,17 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         active_measures = measure_cols
                         chart_title = f"So sánh các chỉ số ({', '.join(measure_cols)}) theo {label_name}"
 
+                    # Kiểm tra độ tương thích về thang đo (tránh vẽ lương 150,000 chung trục với số lần 18)
+                    if len(active_measures) >= 2:
+                        numeric_ms = [m for m in active_measures if pd.api.types.is_numeric_dtype(plot_df[m])]
+                        max_vals = [float(plot_df[m].abs().max()) for m in numeric_ms if float(plot_df[m].abs().max()) > 0]
+                        if len(max_vals) >= 2 and (max(max_vals) / min(max_vals)) > 20:
+                            # Chênh lệch trên 20 lần: Ưu tiên cột có độ lệch chuẩn và giá trị lớn nhất (ví dụ CurrentSalary)
+                            primary_m = max(numeric_ms, key=lambda m: (float(plot_df[m].std() or 0), float(plot_df[m].max() or 0)))
+                            active_measures = [primary_m]
+                            chart_title = f"{primary_m} theo {label_name}"
+
+
                     if total_rows > 30:
                         max_display = st.slider(
                             f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
@@ -345,6 +356,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     # Tự động đo độ dài tên lớn nhất để quyết định góc xoay nghiêng chống đè chữ
                     max_label_len = max((len(str(v)) for v in plot_df[label_name]), default=0)
                     tick_angle = -35 if (max_label_len > 8 or len(plot_df) > 5) else 0
+
+                    if pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]) and plot_df[measure_cols[0]].nunique(dropna=True) == 1 and len(plot_df) > 1:
+                        st.caption(f"ℹ️ Lưu ý: Tất cả {len(plot_df)} đối tượng hiển thị đều có cùng giá trị `{measure_cols[0]}` = {plot_df[measure_cols[0]].iloc[0]:,}.")
 
                     fig = px.bar(
                         plot_df, x=label_name, y=measure_cols[0],

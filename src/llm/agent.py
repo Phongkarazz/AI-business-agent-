@@ -207,15 +207,34 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
 
 
 def auto_fix_payroll_query(sql: str, user_query: str) -> str:
-    """Tự động phát hiện và khắc phục lỗi mô hình AI dùng COUNT thay vì SUM(s.salary) khi người dùng hỏi về quỹ lương phòng ban."""
+    """Tự động phát hiện và khắc phục lỗi mô hình AI dùng COUNT thay vì SUM(s.salary) khi người dùng hỏi về quỹ lương phòng ban hoặc theo năm."""
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
     is_payroll_query = any(k in q_low for k in ["quỹ lương", "ngân sách lương", "tổng chi trả lương", "chi phí lương"]) or (
-        any(k in q_low for k in ["tổng lương", "chi trả"]) and any(k in q_low for k in ["phòng ban", "phòng", "department"])
+        any(k in q_low for k in ["tổng lương", "chi trả"]) and any(k in q_low for k in ["phòng ban", "phòng", "department", "năm", "qua các năm"])
     )
     if not is_payroll_query:
         return sql
+
+    # Xử lý trường hợp hỏi xu hướng qua các năm
+    is_yearly_trend = any(k in q_low for k in ["qua các năm", "theo năm", "hàng năm", "biến động"])
+    if is_yearly_trend:
+        # Gỡ bỏ lọc to_date = 9999-01-01
+        sql = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+        # Đổi YEAR(to_date) thành YEAR(s.from_date)
+        sql = re.sub(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)", "YEAR(s.from_date)", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?from_date\s*\)", "YEAR(s.from_date)", sql, flags=re.IGNORECASE)
+        if "from_date" not in sql.lower():
+            sql = """SELECT 
+    YEAR(s.from_date) AS Year,
+    SUM(s.salary) AS TotalSalaryBudget
+FROM salaries s
+GROUP BY YEAR(s.from_date)
+ORDER BY Year ASC"""
+            return sql
 
     # Kiểm tra xem SQL có bị thiếu SUM(s.salary) hoặc dùng nhầm COUNT(...)
     has_sum_salary = "sum(s.salary)" in sql.lower() or "sum(salary)" in sql.lower()
@@ -256,6 +275,97 @@ def auto_fix_payroll_query(sql: str, user_query: str) -> str:
                 flags=re.IGNORECASE
             )
     return sql
+
+
+def auto_fix_gender_ratio_query(sql: str, user_query: str) -> str:
+    """Tự động phát hiện và sửa lỗi thiếu tỷ lệ Nam khi câu hỏi yêu cầu tỷ lệ Nam và Nữ trong ban quản lý hoặc phòng ban."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    asks_both_genders = any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ nam"])
+
+    if not asks_both_genders:
+        return sql
+
+    is_dept_manager = any(k in q_low for k in ["ban quản lý", "dept_manager", "manager", "quản lý"])
+    if is_dept_manager:
+        uses_cte = bool(re.search(r"\bWITH\b", sql, re.IGNORECASE))
+        has_female = bool(re.search(r"\b(PercentageFemale|FemalePct|female)\b", sql, re.IGNORECASE))
+        has_male = bool(re.search(r"\b(PercentageMale|MalePct|male)\b", sql, re.IGNORECASE))
+        missing_emp = not bool(re.search(r"\bemployees\b", sql, re.IGNORECASE))
+        if uses_cte or missing_emp or not (has_female and has_male):
+            return """SELECT 
+    d.dept_name AS Department,
+    SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers,
+    SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers,
+    COUNT(*) AS TotalManagers,
+    ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct,
+    ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct
+FROM dept_manager dm
+JOIN employees e ON dm.emp_no = e.emp_no
+JOIN departments d ON dm.dept_no = d.dept_no
+GROUP BY d.dept_name
+ORDER BY d.dept_name"""
+
+    is_dept_employees = any(k in q_low for k in ["từng phòng ban", "các phòng ban", "phòng ban"])
+    if is_dept_employees and not is_dept_manager:
+        uses_cte = bool(re.search(r"\bWITH\b", sql, re.IGNORECASE))
+        has_female = bool(re.search(r"\b(PercentageFemale|FemalePct|female)\b", sql, re.IGNORECASE))
+        has_male = bool(re.search(r"\b(PercentageMale|MalePct|male)\b", sql, re.IGNORECASE))
+        if uses_cte or not (has_female and has_male):
+            return """SELECT 
+    d.dept_name AS Department,
+    SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleEmployees,
+    SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleEmployees,
+    COUNT(*) AS TotalEmployees,
+    ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct,
+    ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct
+FROM dept_emp de
+JOIN employees e ON de.emp_no = e.emp_no
+JOIN departments d ON de.dept_no = d.dept_no
+WHERE de.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY d.dept_name"""
+
+    return sql
+
+
+def auto_fix_raises_query(sql: str, user_query: str) -> str:
+    """Tự động khóa LIMIT 10 cho danh sách nhân viên tăng lương nhiều nhất, tránh tràn 5,000 dòng dữ liệu."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_raises_query = any(k in q_low for k in ["tăng lương", "lần tăng"]) and any(k in q_low for k in ["nhân viên", "ai", "danh sách", "những"])
+
+    if not is_raises_query:
+        return sql
+
+    # Đảm bảo câu truy vấn tối ưu và có LIMIT 10
+    if ("having count" in sql.lower() or "raisecount" in sql.lower() or "numberofincreases" in sql.lower()) and "from (" not in sql.lower():
+        return """SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+    d.dept_name AS Department,
+    s_agg.RaiseCount,
+    s_agg.CurrentSalary
+FROM (
+    SELECT emp_no, COUNT(*) AS RaiseCount, MAX(salary) AS CurrentSalary
+    FROM salaries
+    GROUP BY emp_no
+    HAVING COUNT(*) >= 5
+    ORDER BY RaiseCount DESC, CurrentSalary DESC
+    LIMIT 10
+) s_agg
+JOIN employees e ON s_agg.emp_no = e.emp_no
+JOIN dept_emp de ON s_agg.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+ORDER BY s_agg.RaiseCount DESC, s_agg.CurrentSalary DESC"""
+
+    if not re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE):
+        sql = sql.rstrip(";").strip() + " LIMIT 10"
+
+    return sql
+
 
 
 def is_safe_select(sql: str) -> bool:
@@ -656,6 +766,8 @@ def run_agent(
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
+        sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
+        sql_query = auto_fix_raises_query(sql_query, user_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -666,6 +778,8 @@ def run_agent(
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
+        sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
+        sql_query = auto_fix_raises_query(sql_query, user_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):

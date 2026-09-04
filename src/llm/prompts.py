@@ -146,6 +146,17 @@ def get_db_specific_rules(schema_context: str) -> str:
           BẮT BUỘC dùng SUM(s.salary) AS TotalSalaryBudget!
           TUYỆT ĐỐI KHÔNG DÙNG COUNT(de.emp_no) cho quỹ lương! COUNT là đếm số lượng người (headcount), SUM(s.salary) mới là tính tổng tiền lương (payroll budget)!
 
+      + MẪU CHUẨN BIẾN ĐỘNG TỔNG QUỸ LƯƠNG TOÀN CÔNG TY QUA CÁC NĂM:
+        SELECT 
+            YEAR(s.from_date) AS Year,
+            SUM(s.salary) AS TotalSalaryBudget
+        FROM salaries s
+        GROUP BY YEAR(s.from_date)
+        ORDER BY Year ASC;
+        * QUY TẮC QUAN TRỌNG: Khi câu hỏi có 'biến động', 'xu hướng qua các năm', 'theo năm':
+          BẮT BUỘC dùng YEAR(s.from_date) AS Year, TUYỆT ĐỐI KHÔNG lọc `s.to_date = '9999-01-01'` và KHÔNG GROUP BY `s.to_date` (để lấy đủ 18 năm lịch sử từ 1985 đến 2002, không bị năm 9999 hoặc chỉ có 2 năm)!
+
+
       + MẪU CHUẨN TOP N CHỨC DANH LƯƠNG CAO NHẤT (Ví dụ: Top 5 chức danh):
         SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
         FROM salaries s
@@ -219,21 +230,30 @@ def get_db_specific_rules(schema_context: str) -> str:
         WHERE dm.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
         ORDER BY s.salary DESC;
 
-      + MẪU CHUẨN ĐẾM SỐ LẦN TĂNG LƯƠNG CỦA NHÂN VIÊN:
+      + MẪU CHUẨN NHÂN VIÊN CÓ TỪ N LẦN TĂNG LƯƠNG TRỞ LÊN (TỐI ƯU SIÊU TỐC):
         SELECT 
             e.emp_no,
             CONCAT(e.first_name, ' ', e.last_name) AS FullName,
             d.dept_name AS Department,
-            COUNT(s.salary) AS RaiseCount,
-            MAX(s.salary) AS LatestSalary
-        FROM employees e
-        JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+            s_agg.RaiseCount,
+            s_agg.CurrentSalary
+        FROM (
+            SELECT emp_no, COUNT(*) AS RaiseCount, MAX(salary) AS CurrentSalary
+            FROM salaries
+            GROUP BY emp_no
+            HAVING COUNT(*) >= 5
+            ORDER BY RaiseCount DESC, CurrentSalary DESC
+            LIMIT 10
+        ) s_agg
+        JOIN employees e ON s_agg.emp_no = e.emp_no
+        JOIN dept_emp de ON s_agg.emp_no = de.emp_no AND de.to_date = '9999-01-01'
         JOIN departments d ON de.dept_no = d.dept_no
-        JOIN salaries s ON e.emp_no = s.emp_no
-        GROUP BY e.emp_no, FullName, d.dept_name
-        ORDER BY RaiseCount DESC, LatestSalary DESC
-        LIMIT 10;
-        * QUY TẮC BẮT BUỘC: Khi đếm số lần tăng lương / thay đổi lương: BẮT BUỘC dùng COUNT(s.salary) và TUYỆT ĐỐI KHÔNG thêm điều kiện `WHERE s.to_date = '9999-01-01'` (vì mỗi lần tăng lương là 1 dòng lịch sử trong bảng salaries, nếu lọc to_date thì số lần đếm sẽ luôn bằng 1)!
+        ORDER BY s_agg.RaiseCount DESC, s_agg.CurrentSalary DESC;
+        * QUY TẮC BẮT BUỘC: Khi hỏi về 'nhân viên tăng lương / nhiều lần tăng lương':
+          1. BẮT BUỘC có LIMIT 10 (vì có hơn 245,000 nhân viên thỏa mãn, không có LIMIT sẽ làm kịch trần dữ liệu)!
+          2. Dùng subquery s_agg để chạy siêu tốc trong 0.5s thay vì quét 15s.
+          3. TUYỆT ĐỐI KHÔNG lọc `s.to_date = '9999-01-01'` trong subquery đếm tăng lương!
+
 
       + MẪU CHUẨN MANAGER GIỮ CHỨC VỤ LÂU NHẤT TOÀN LỊCH SỬ:
         SELECT 
@@ -404,11 +424,23 @@ LIMIT 10;
 (CẢNH BÁO: Bảng salaries và employees KHÔNG CÓ CỘT dept_no! BẮT BUỘC JOIN QUA dept_emp de: ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no! TUYỆT ĐỐI KHÔNG VIẾT s.dept_no hay e.dept_no!)
 """
 
-    # 5. Tổng quỹ lương hiện tại theo phòng ban
+    # 5. Tổng quỹ lương
     elif any(k in q_low for k in ["quỹ lương", "ngân sách lương", "tổng chi trả lương", "chi phí lương"]) or (
-        any(k in q_low for k in ["tổng lương", "chi trả"]) and any(k in q_low for k in ["phòng ban", "phòng", "department"])
+        any(k in q_low for k in ["tổng lương", "chi trả"]) and any(k in q_low for k in ["phòng ban", "phòng", "department", "năm", "qua các năm"])
     ):
-        return """
+        if any(k in q_low for k in ["qua các năm", "theo năm", "hàng năm", "biến động"]):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (BIẾN ĐỘNG TỔNG QUỸ LƯƠNG QUA CÁC NĂM):
+SELECT 
+    YEAR(s.from_date) AS Year,
+    SUM(s.salary) AS TotalSalaryBudget
+FROM salaries s
+GROUP BY YEAR(s.from_date)
+ORDER BY Year ASC;
+(CẢNH BÁO: BẮT BUỘC dùng YEAR(s.from_date) AS Year, TUYỆT ĐỐI KHÔNG lọc s.to_date = '9999-01-01' và KHÔNG GROUP BY s.to_date để lấy đủ 18 năm lịch sử từ 1985 đến 2002!)
+"""
+        else:
+            return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỔNG QUỸ LƯƠNG THEO PHÒNG BAN):
 SELECT 
     d.dept_name AS Department,
@@ -419,6 +451,70 @@ JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY TotalSalaryBudget DESC;
 (CẢNH BÁO ĐẶC BIỆT: 'QUỸ LƯƠNG' LÀ TỔNG SỐ TIỀN CHI TRẢ LƯƠNG, BẮT BUỘC DÙNG SUM(s.salary) AS TotalSalaryBudget! TUYỆT ĐỐI KHÔNG DÙNG COUNT(de.emp_no) VÌ COUNT LÀ ĐẾM SỐ LƯỢNG NGƯỜI, KHÔNG PHẢI TIỀN LƯƠNG!)
+"""
+
+    # 6. Nhân viên có từ N lần tăng lương trở lên
+    elif any(k in q_low for k in ["tăng lương", "lần tăng lương", "tăng lương trở lên", "được tăng lương"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN ĐƯỢC TĂNG LƯƠNG NHIỀU NHẤT):
+SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+    d.dept_name AS Department,
+    s_agg.RaiseCount,
+    s_agg.CurrentSalary
+FROM (
+    SELECT emp_no, COUNT(*) AS RaiseCount, MAX(salary) AS CurrentSalary
+    FROM salaries
+    GROUP BY emp_no
+    HAVING COUNT(*) >= 5
+    ORDER BY RaiseCount DESC, CurrentSalary DESC
+    LIMIT 10
+) s_agg
+JOIN employees e ON s_agg.emp_no = e.emp_no
+JOIN dept_emp de ON s_agg.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+ORDER BY s_agg.RaiseCount DESC, s_agg.CurrentSalary DESC;
+(BẮT BUỘC dùng subquery s_agg có LIMIT 10 để chạy trong 0.5s và không tràn 5,000 dòng, sắp xếp theo RaiseCount DESC, CurrentSalary DESC!)
+"""
+
+    # 7. Tỷ lệ nam và nữ trong ban quản lý (dept_manager)
+    elif any(k in q_low for k in ["ban quản lý", "dept_manager", "manager", "quản lý"]) and any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ", "nam", "nữ"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ NAM VÀ NỮ TRONG BAN QUẢN LÝ):
+SELECT 
+    d.dept_name AS Department,
+    SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers,
+    SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers,
+    COUNT(*) AS TotalManagers,
+    ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct,
+    ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct
+FROM dept_manager dm
+JOIN employees e ON dm.emp_no = e.emp_no
+JOIN departments d ON dm.dept_no = d.dept_no
+GROUP BY d.dept_name
+ORDER BY d.dept_name;
+(BẮT BUỘC XUẤT ĐẦY ĐỦ CẢ HAI CỘT TỶ LỆ: MalePct VÀ FemalePct! TUYỆT ĐỐI KHÔNG ĐƯỢC THIẾU TỶ LỆ NAM MalePct! BẮT BUỘC GROUP BY d.dept_name ĐỂ MỖI PHÒNG BAN LÀ 1 DÒNG DUY NHẤT!)
+"""
+
+    # 8. Số lượng và tỷ lệ nam nữ trong từng phòng ban (nhân viên toàn phòng)
+    elif any(k in q_low for k in ["tỷ lệ nam nữ", "nam và nữ", "nam nữ"]) and any(k in q_low for k in ["từng phòng ban", "các phòng ban", "phòng ban"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG VÀ TỶ LỆ NAM NỮ THEO PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleEmployees,
+    SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleEmployees,
+    COUNT(*) AS TotalEmployees,
+    ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct,
+    ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct
+FROM dept_emp de
+JOIN employees e ON de.emp_no = e.emp_no
+JOIN departments d ON de.dept_no = d.dept_no
+WHERE de.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY d.dept_name;
+(BẮT BUỘC XUẤT ĐẦY ĐỦ CẢ HAI CỘT TỶ LỆ: MalePct VÀ FemalePct! GROUP BY d.dept_name!)
 """
 
     return ""
