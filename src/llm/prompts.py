@@ -79,7 +79,7 @@ def get_db_specific_rules(schema_context: str) -> str:
      + CẢNH BÁO BẮT BUỘC TIỀN TỐ BÍ DANH & TÊN CỘT (TRÁNH LỖI 1052, 1054):
         * Cột `emp_no` có trong 3 bảng. BẮT BUỘC viết `e.emp_no` trong SELECT và GROUP BY!
         * Bảng `departments` CHỈ CÓ 2 CỘT: `dept_no` và `dept_name`! TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`!
-        * Khi câu hỏi về Chức Danh (Title / Chức vụ / Vị trí): BẮT BUỘC dùng bảng `titles t` (cột `t.title`), JOIN `salaries s ON t.emp_no = s.emp_no`, GROUP BY `t.title`, TUYỆT ĐỐI KHÔNG JOIN bảng `departments` và KHÔNG nhầm sang phòng ban!
+        * QUY TẮC BẮT BUỘC VỀ CHỨC DANH (TITLE): Khi câu hỏi có từ 'chức danh', 'vị trí', 'title' hoặc 'lương nam nữ theo chức danh': BẮT BUỘC dùng bảng `titles t` (cột `t.title`), JOIN `employees e` và `salaries s`, GROUP BY `t.title`. TUYỆT ĐỐI KHÔNG JOIN bảng `departments` hay `dept_emp`!
         * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
         * Thứ tự JOIN bắt buộc khi truy vấn phòng ban:
           FROM employees e
@@ -136,14 +136,15 @@ def get_db_specific_rules(schema_context: str) -> str:
         LIMIT 5;
         * QUY TẮC: Khi câu hỏi có chữ 'Top N' (Top 5, Top 10, Top 3): BẮT BUỘC phải có mệnh đề LIMIT N ở cuối câu SQL!
 
-     + MẪU CHUẨN SO SÁNH LƯƠNG NAM VÀ NỮ THEO CHỨC DANH:
-       SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
-       FROM employees e
-       JOIN titles t ON e.emp_no = t.emp_no
-       JOIN salaries s ON e.emp_no = s.emp_no
-       WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
-       GROUP BY t.title, e.gender
-       ORDER BY t.title, e.gender;
+      + MẪU CHUẨN SO SÁNH LƯƠNG NAM VÀ NỮ THEO TỪNG CHỨC DANH:
+        SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
+        FROM employees e
+        JOIN titles t ON e.emp_no = t.emp_no
+        JOIN salaries s ON e.emp_no = s.emp_no
+        WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+        GROUP BY t.title, e.gender
+        ORDER BY t.title, e.gender;
+        * QUY TẮC BẮT BUỘC: Khi hỏi về 'chức danh' (Title): BẮT BUỘC JOIN bảng `titles t` (cột `t.title`), TUYỆT ĐỐI KHÔNG JOIN `departments` hay `dept_emp`!
 
       + MẪU CHUẨN TỶ LỆ GIỚI TÍNH TRONG BAN QUẢN LÝ (DEPT_MANAGER):
         SELECT 
@@ -247,6 +248,34 @@ def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: s
     dialect_hint = get_dialect_hints(dialect, lang=lang)
     db_specific_rules = get_db_specific_rules(schema_context)
 
+    q_low = (user_query or "").lower()
+    targeted_hint = ""
+    if any(k in q_low for k in ["chức danh", "title", "vị trí"]):
+        if any(k in q_low for k in ["nam", "nữ", "gender", "giới tính"]):
+            targeted_hint = """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH LƯƠNG NAM NỮ THEO CHỨC DANH):
+SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM employees e
+JOIN titles t ON e.emp_no = t.emp_no
+JOIN salaries s ON e.emp_no = s.emp_no
+WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+GROUP BY t.title, e.gender
+ORDER BY t.title, e.gender;
+(BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
+"""
+        elif any(k in q_low for k in ["top", "cao nhất", "lương trung bình"]):
+            targeted_hint = """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP CHỨC DANH LƯƠNG CAO NHẤT):
+SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM salaries s
+JOIN titles t ON s.emp_no = t.emp_no
+WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY AvgSalary DESC
+LIMIT 5;
+(BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
+"""
+
     if lang == "en":
         return f"""You are a world-class SQL engineer.
 === ACTUAL DATABASE SCHEMA ===
@@ -322,7 +351,7 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng chữ SELECT hoặc WITH).
    - TUYỆT ĐỐI KHÔNG bọc trong markdown code block (```sql hoặc ```), TUYỆT ĐỐI KHÔNG đặt dấu backtick ` ở đầu hay cuối câu lệnh (`SELECT...).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích nào bên ngoài.
-
+{targeted_hint}
 Câu hỏi của người dùng: "{user_query}"
 Câu lệnh SQL:"""
 

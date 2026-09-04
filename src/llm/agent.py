@@ -120,7 +120,17 @@ def clean_sql_query(sql: str) -> str:
     # 5. Tự động cân bằng dấu ngoặc đơn () nếu bị thiếu dấu đóng ngoặc trước AS/FROM
     s = auto_balance_parentheses(s)
 
-    # 6. Khi đếm số lần tăng lương lịch sử (COUNT s.salary/RaiseCount): Tự động gỡ bỏ s.to_date = '9999-01-01' để đếm đủ lịch sử
+    # 6. Tự động sửa các lỗi cú pháp phổ biến của Small LLMs
+    # 6.1 Xóa dấu phẩy thừa trước các mệnh đề ORDER BY, GROUP BY, FROM, WHERE, HAVING, LIMIT
+    s = re.sub(r",\s*(ORDER\s+BY|GROUP\s+BY|FROM|WHERE|HAVING|LIMIT)\b", r" \1", s, flags=re.IGNORECASE)
+
+    # 6.2 Sửa lỗi bí danh bảng de.dept_name -> d.dept_name (dept_emp không có cột dept_name)
+    s = re.sub(r"\bde\.dept_name\b", "d.dept_name", s, flags=re.IGNORECASE)
+
+    # 6.3 Sửa lỗi tên bảng thiếu s: FROM/JOIN department -> FROM/JOIN departments
+    s = re.sub(r"\b(FROM|JOIN)\s+department\b(?!\s+(?:AS\s+)?departments\b)", r"\1 departments", s, flags=re.IGNORECASE)
+
+    # 6.4 Khi đếm số lần tăng lương lịch sử (COUNT s.salary/RaiseCount): Tự động gỡ bỏ s.to_date = '9999-01-01' để đếm đủ lịch sử
     if re.search(r"COUNT\s*\(\s*s\.salary\s*\)|raisecount", s, re.IGNORECASE):
         s = re.sub(r"\s*AND\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
         s = re.sub(r"\s*WHERE\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", s, flags=re.IGNORECASE)
