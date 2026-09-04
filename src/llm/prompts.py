@@ -124,13 +124,27 @@ def get_db_specific_rules(schema_context: str) -> str:
        ORDER BY max_salary DESC
        LIMIT 10;
 
-     + MẪU CHUẨN SỐ LƯỢNG NHÂN VIÊN THEO PHÒNG BAN:
-       SELECT d.dept_name AS Department, COUNT(de.emp_no) AS TotalEmployees
-       FROM departments d
-       JOIN dept_emp de ON d.dept_no = de.dept_no
-       WHERE de.to_date = '9999-01-01'
-       GROUP BY d.dept_name
-       ORDER BY TotalEmployees DESC;
+      + MẪU CHUẨN SỐ LƯỢNG NHÂN VIÊN THEO PHÒNG BAN:
+        SELECT d.dept_name AS Department, COUNT(de.emp_no) AS TotalEmployees
+        FROM departments d
+        JOIN dept_emp de ON d.dept_no = de.dept_no
+        WHERE de.to_date = '9999-01-01'
+        GROUP BY d.dept_name
+        ORDER BY TotalEmployees DESC;
+
+      + MẪU CHUẨN TỔNG QUỸ LƯƠNG HIỆN TẠI THEO PHÒNG BAN:
+        SELECT 
+            d.dept_name AS Department,
+            SUM(s.salary) AS TotalSalaryBudget
+        FROM departments d
+        JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+        JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+        GROUP BY d.dept_name
+        ORDER BY TotalSalaryBudget DESC;
+        * CẢNH BÁO CỰC KỲ QUAN TRỌNG VỀ QUỸ LƯƠNG:
+          Khi câu hỏi có từ 'quỹ lương', 'tổng quỹ lương', 'ngân sách lương', 'tổng chi trả lương', 'chi phí lương':
+          BẮT BUỘC dùng SUM(s.salary) AS TotalSalaryBudget!
+          TUYỆT ĐỐI KHÔNG DÙNG COUNT(de.emp_no) cho quỹ lương! COUNT là đếm số lượng người (headcount), SUM(s.salary) mới là tính tổng tiền lương (payroll budget)!
 
       + MẪU CHUẨN TOP N CHỨC DANH LƯƠNG CAO NHẤT (Ví dụ: Top 5 chức danh):
         SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
@@ -388,6 +402,23 @@ WHERE s.to_date = '9999-01-01'
 ORDER BY CurrentSalary DESC
 LIMIT 10;
 (CẢNH BÁO: Bảng salaries và employees KHÔNG CÓ CỘT dept_no! BẮT BUỘC JOIN QUA dept_emp de: ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no! TUYỆT ĐỐI KHÔNG VIẾT s.dept_no hay e.dept_no!)
+"""
+
+    # 5. Tổng quỹ lương hiện tại theo phòng ban
+    elif any(k in q_low for k in ["quỹ lương", "ngân sách lương", "tổng chi trả lương", "chi phí lương"]) or (
+        any(k in q_low for k in ["tổng lương", "chi trả"]) and any(k in q_low for k in ["phòng ban", "phòng", "department"])
+    ):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỔNG QUỸ LƯƠNG THEO PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    SUM(s.salary) AS TotalSalaryBudget
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY TotalSalaryBudget DESC;
+(CẢNH BÁO ĐẶC BIỆT: 'QUỸ LƯƠNG' LÀ TỔNG SỐ TIỀN CHI TRẢ LƯƠNG, BẮT BUỘC DÙNG SUM(s.salary) AS TotalSalaryBudget! TUYỆT ĐỐI KHÔNG DÙNG COUNT(de.emp_no) VÌ COUNT LÀ ĐẾM SỐ LƯỢNG NGƯỜI, KHÔNG PHẢI TIỀN LƯƠNG!)
 """
 
     return ""

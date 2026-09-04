@@ -158,6 +158,32 @@ def clean_sql_query(sql: str) -> str:
                 flags=re.IGNORECASE
             )
 
+    # 6.7 Sửa lỗi mô hình dùng COUNT để tính total_salary / salary (COUNT đếm người, không phải lương)
+    if re.search(r"COUNT\s*\([^)]*\)\s*AS\s+[a-zA-Z0-9_]*(?:salary|budget)\b", s, re.IGNORECASE):
+        s = re.sub(
+            r"COUNT\s*\([^)]*\)\s*AS\s+([a-zA-Z0-9_]*(?:salary|budget)\b)",
+            r"SUM(s.salary) AS \1",
+            s,
+            flags=re.IGNORECASE
+        )
+        if not re.search(r"\b(?:JOIN|FROM)\s+salaries\b", s, re.IGNORECASE):
+            if re.search(r"\bJOIN\s+dept_emp\s+de\b[^\n]*", s, re.IGNORECASE):
+                s = re.sub(
+                    r"(\bJOIN\s+dept_emp\s+de\b[^\n]*)",
+                    r"\1\nJOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'",
+                    s,
+                    count=1,
+                    flags=re.IGNORECASE
+                )
+            elif re.search(r"\bFROM\s+departments\s+d\b", s, re.IGNORECASE):
+                s = re.sub(
+                    r"(\bFROM\s+departments\s+d\b)",
+                    r"\1\nJOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'\nJOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'",
+                    s,
+                    count=1,
+                    flags=re.IGNORECASE
+                )
+
     return s.strip().strip("`").rstrip(";").strip()
 
 
@@ -177,6 +203,58 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
             sql = re.sub(r"\bLIMIT\s+\d+\b", f"LIMIT {top_n}", sql, flags=re.IGNORECASE)
     else:
         sql = sql.rstrip(";").strip() + f" LIMIT {top_n}"
+    return sql
+
+
+def auto_fix_payroll_query(sql: str, user_query: str) -> str:
+    """Tự động phát hiện và khắc phục lỗi mô hình AI dùng COUNT thay vì SUM(s.salary) khi người dùng hỏi về quỹ lương phòng ban."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_payroll_query = any(k in q_low for k in ["quỹ lương", "ngân sách lương", "tổng chi trả lương", "chi phí lương"]) or (
+        any(k in q_low for k in ["tổng lương", "chi trả"]) and any(k in q_low for k in ["phòng ban", "phòng", "department"])
+    )
+    if not is_payroll_query:
+        return sql
+
+    # Kiểm tra xem SQL có bị thiếu SUM(s.salary) hoặc dùng nhầm COUNT(...)
+    has_sum_salary = "sum(s.salary)" in sql.lower() or "sum(salary)" in sql.lower()
+    if not has_sum_salary:
+        # Nếu có COUNT(...) thì thay bằng SUM(s.salary) AS TotalSalaryBudget
+        if re.search(r"COUNT\s*\([^)]*\)", sql, re.IGNORECASE):
+            sql = re.sub(
+                r"COUNT\s*\([^)]*\)\s*(?:AS\s+[a-zA-Z0-9_]+)?",
+                "SUM(s.salary) AS TotalSalaryBudget",
+                sql,
+                count=1,
+                flags=re.IGNORECASE
+            )
+        # Đảm bảo có JOIN salaries s
+        if not re.search(r"\b(?:JOIN|FROM)\s+salaries\b", sql, re.IGNORECASE):
+            if re.search(r"\bJOIN\s+dept_emp\s+de\b[^\n]*", sql, re.IGNORECASE):
+                sql = re.sub(
+                    r"(\bJOIN\s+dept_emp\s+de\b[^\n]*)",
+                    r"\1\nJOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'",
+                    sql,
+                    count=1,
+                    flags=re.IGNORECASE
+                )
+            elif re.search(r"\bFROM\s+departments\s+d\b", sql, re.IGNORECASE):
+                sql = re.sub(
+                    r"(\bFROM\s+departments\s+d\b)",
+                    r"\1\nJOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'\nJOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'",
+                    sql,
+                    count=1,
+                    flags=re.IGNORECASE
+                )
+        # Cập nhật ORDER BY nếu ORDER BY theo alias cũ hoặc count
+        if re.search(r"ORDER\s+BY\s+[a-zA-Z0-9_.]+(?:\([^)]*\))?\s+DESC", sql, re.IGNORECASE):
+            sql = re.sub(
+                r"ORDER\s+BY\s+[a-zA-Z0-9_.]+(?:\([^)]*\))?\s+DESC",
+                "ORDER BY TotalSalaryBudget DESC",
+                sql,
+                flags=re.IGNORECASE
+            )
     return sql
 
 
@@ -577,6 +655,7 @@ def run_agent(
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_payroll_query(sql_query, user_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -586,6 +665,7 @@ def run_agent(
     for attempt in range(1, 4):
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_payroll_query(sql_query, user_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):
