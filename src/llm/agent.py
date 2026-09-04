@@ -136,6 +136,28 @@ def clean_sql_query(sql: str) -> str:
         s = re.sub(r"\s*WHERE\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", s, flags=re.IGNORECASE)
         s = re.sub(r"\s*WHERE\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
 
+    # 6.5 Tự động sửa lỗi tính thâm niên trừ năm to_date 9999 (gây ra lỗi 8,014 năm phi lý) và xóa cột HireYear = 9999
+    if re.search(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)\s*-\s*YEAR\s*\(", s, re.IGNORECASE):
+        s = re.sub(
+            r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)\s*-\s*YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?hire_date\s*\)\s*(?:AS\s+[a-zA-Z0-9_]+)?",
+            "ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService",
+            s,
+            flags=re.IGNORECASE
+        )
+    s = re.sub(r",?\s*YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)\s*AS\s+[a-zA-Z0-9_]*HireYear\b", "", s, flags=re.IGNORECASE)
+
+    # 6.6 Sửa lỗi Unknown column 's.dept_no' hoặc 'e.dept_no' (salaries và employees không có dept_no, phải qua dept_emp)
+    if re.search(r"\b[se]\.dept_no\b", s, re.IGNORECASE):
+        s = re.sub(r"\b[se]\.dept_no\b", "de.dept_no", s, flags=re.IGNORECASE)
+        if not re.search(r"\bdept_emp\b", s, re.IGNORECASE) and re.search(r"\bJOIN\s+departments\s+d\b", s, re.IGNORECASE):
+            s = re.sub(
+                r"(\bJOIN\s+departments\s+d\s+ON\b)",
+                r"JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01' \1",
+                s,
+                count=1,
+                flags=re.IGNORECASE
+            )
+
     return s.strip().strip("`").rstrip(";").strip()
 
 

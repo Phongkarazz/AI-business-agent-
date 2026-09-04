@@ -89,14 +89,20 @@ def get_db_specific_rules(schema_context: str) -> str:
         * TUYỆT ĐỐI KHÔNG đưa `de.dept_no = d.dept_no` vào mệnh đề ON của dept_emp trước khi JOIN departments d!
         * TUYỆT ĐỐI KHÔNG dùng CTE (WITH ...), KHÔNG JOIN bảng titles nếu không hỏi chức danh!
 
-     + MẪU CHUẨN TOP 10 NHÂN VIÊN LƯƠNG CAO NHẤT:
-       SELECT e.emp_no, CONCAT(e.first_name, ' ', e.last_name) AS full_name, MAX(s.salary) AS max_salary
-       FROM employees e
-       JOIN salaries s ON e.emp_no = s.emp_no
+     + MẪU CHUẨN TOP 10 NHÂN VIÊN LƯƠNG CAO NHẤT HIỆN TẠI (KÈM PHÒNG BAN):
+       SELECT 
+           e.emp_no, 
+           CONCAT(e.first_name, ' ', e.last_name) AS FullName, 
+           d.dept_name AS Department, 
+           s.salary AS CurrentSalary
+       FROM salaries s
+       JOIN employees e ON s.emp_no = e.emp_no
+       JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+       JOIN departments d ON de.dept_no = d.dept_no
        WHERE s.to_date = '9999-01-01'
-       GROUP BY e.emp_no, full_name
-       ORDER BY max_salary DESC
+       ORDER BY CurrentSalary DESC
        LIMIT 10;
+       * CẢNH BÁO ĐẶC BIỆT: Cả hai bảng `salaries` và `employees` ĐỀU KHÔNG CÓ CỘT `dept_no`! BẮT BUỘC phải JOIN qua `dept_emp de` (`ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no`)! TUYỆT ĐỐI KHÔNG VIẾT `s.dept_no` hay `e.dept_no`!
 
      + MẪU CHUẨN LƯƠNG THEO PHÒNG BAN:
        SELECT d.dept_name AS Department, ROUND(AVG(s.salary), 2) AS AvgSalary
@@ -363,6 +369,25 @@ WHERE d.dept_name = '{dept_target}'
 GROUP BY HireYear
 ORDER BY HireYear ASC;
 (TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI KHÔNG SO SÁNH LƯƠNG CHỨC DANH NAM NỮ, BẮT BUỘC DÙNG ĐÚNG PHÒNG BAN '{dept_target}' VÀ ORDER BY HireYear ASC!)
+"""
+
+    # 4. Top nhân viên lương cao nhất hiện tại toàn công ty
+    elif any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "toàn công ty", "công ty", "người", "ai"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP NHÂN VIÊN LƯƠNG CAO NHẤT HIỆN TẠI):
+SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+    d.dept_name AS Department,
+    s.salary AS CurrentSalary
+FROM salaries s
+JOIN employees e ON s.emp_no = e.emp_no
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+WHERE s.to_date = '9999-01-01'
+ORDER BY CurrentSalary DESC
+LIMIT 10;
+(CẢNH BÁO: Bảng salaries và employees KHÔNG CÓ CỘT dept_no! BẮT BUỘC JOIN QUA dept_emp de: ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no! TUYỆT ĐỐI KHÔNG VIẾT s.dept_no hay e.dept_no!)
 """
 
     return ""
