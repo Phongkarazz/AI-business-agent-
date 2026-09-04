@@ -580,7 +580,7 @@ def run_agent(
 
             fix_prompt = build_fix_prompt(
                 schema_context, dialect, user_query, sql_query,
-                "BẮT BUỘC chỉ trả về duy nhất 1 câu lệnh SQL SELECT hoặc WITH trực tiếp, TUYỆT ĐỐI KHÔNG xin lỗi, không giải thích, không dùng markdown!" if lang != "en" else "MUST return raw executable SELECT or WITH statement. Do NOT apologize, do NOT explain!",
+                "BẮT BUỘC chỉ trả về duy nhất 1 câu lệnh SQL SELECT đơn trực tiếp, TUYỆT ĐỐI CẤM DÙNG CTE (WITH ...), TUYỆT ĐỐI KHÔNG xin lỗi, không giải thích, không dùng markdown!" if lang != "en" else "MUST return raw executable SELECT statement. Do NOT use CTE (WITH ...), do NOT apologize, do NOT explain!",
                 lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)

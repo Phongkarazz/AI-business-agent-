@@ -204,7 +204,23 @@ def get_db_specific_rules(schema_context: str) -> str:
         JOIN departments d ON dm.dept_no = d.dept_no
         ORDER BY YearsAsManager DESC
         LIMIT 10;
-        * QUY TẮC: Khi hỏi 'Manager lâu nhất / thâm niên quản lý': BẮT BUỘC tính số năm tại vị dùng DATEDIFF, ORDER BY YearsAsManager DESC LIMIT 10 và TUYỆT ĐỐI KHÔNG thêm điều kiện WHERE lọc ngày (from_date/to_date) để quét toàn bộ các đời Manager trong lịch sử!"""
+        * QUY TẮC: Khi hỏi 'Manager lâu nhất / thâm niên quản lý': BẮT BUỘC tính số năm tại vị dùng DATEDIFF, ORDER BY YearsAsManager DESC LIMIT 10 và TUYỆT ĐỐI KHÔNG thêm điều kiện WHERE lọc ngày (from_date/to_date) để quét toàn bộ các đời Manager trong lịch sử!
+
+      + MẪU CHUẨN TOP NHÂN VIÊN THÂM NIÊN LÂU NHẤT CÒN ĐANG CÔNG TÁC:
+        SELECT 
+            e.emp_no,
+            CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+            d.dept_name AS Department,
+            e.hire_date AS HireDate,
+            ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+        FROM employees e
+        JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+        JOIN departments d ON de.dept_no = d.dept_no
+        ORDER BY e.hire_date ASC, YearsOfService DESC
+        LIMIT 10;
+        * QUY TẮC BẮT BUỘC:
+          - Khi hỏi 'Thâm niên làm việc lâu nhất / cống hiến lâu nhất': BẮT BUỘC dùng ngày tuyển dụng `e.hire_date` và `ORDER BY e.hire_date ASC` (TUYỆT ĐỐI KHÔNG DÙNG MAX(s.salary) LƯƠNG CAO NHẤT)!
+          - Khi hỏi 'Còn đang công tác / còn làm việc': BẮT BUỘC lọc `de.to_date = '9999-01-01'`!"""
     elif is_chocolates_db:
         return """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):
@@ -274,6 +290,22 @@ GROUP BY t.title
 ORDER BY AvgSalary DESC
 LIMIT 5;
 (BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
+"""
+    elif any(k in q_low for k in ["thâm niên", "cống hiến"]) or ("lâu nhất" in q_low and any(k in q_low for k in ["nhân viên", "công tác", "làm việc"])):
+        targeted_hint = """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN THÂM NIÊN LÂU NHẤT CÒN CÔNG TÁC):
+SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+    d.dept_name AS Department,
+    e.hire_date AS HireDate,
+    ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+ORDER BY e.hire_date ASC, YearsOfService DESC
+LIMIT 10;
+(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, BẮT BUỘC DÙNG e.hire_date ASC!)
 """
 
     if lang == "en":
