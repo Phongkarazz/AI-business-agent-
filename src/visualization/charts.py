@@ -8,7 +8,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from src.config import MAX_BAR_CATEGORIES
+from src.config import MAX_BAR_CATEGORIES, INDIVIDUAL_ENTITY_REGEX
 from src.analytics.heuristics import (
     get_axis_columns,
     get_row_identity_column,
