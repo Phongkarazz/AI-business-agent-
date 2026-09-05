@@ -257,6 +257,11 @@ else:
     history = st.session_state.get("history", [])
     focused_turn_idx = st.session_state.get("focused_turn_idx", None)
 
+    # Tiếp nhận câu hỏi từ Chat Input hoặc Pending Prompt (từ Thẻ Starter / Gợi ý tiếp nối)
+    pending_prompt = st.session_state.get("pending_prompt")
+    user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
+    prompt_to_run = pending_prompt or user_input
+
     # 4.2 Hiển thị câu hỏi được chọn trực tiếp (Direct Focus View) hoặc toàn bộ hội thoại
     if focused_turn_idx is not None and 0 <= focused_turn_idx < len(history):
         turn = history[focused_turn_idx]
@@ -278,8 +283,8 @@ else:
             with st.chat_message("assistant"):
                 render_result(turn, turn_id=f"hist{i}")
 
-    # 4.3 Hiển thị Thẻ Gợi ý Câu hỏi Nhanh (Starter Cards) khi chưa có tin nhắn nào
-    if not history and focused_turn_idx is None:
+    # 4.3 Hiển thị Thẻ Gợi ý Câu hỏi Nhanh (Starter Cards) khi chưa có tin nhắn nào VÀ không có câu hỏi đang chạy
+    if not history and focused_turn_idx is None and not prompt_to_run:
         st.markdown("""
         <div class="hero-container">
             <div class="hero-badge">
@@ -372,12 +377,8 @@ else:
             render_voice_input_button()
             st.caption("💡 *Mẹo: Nhấp vào thẻ bất kỳ ở trên, gõ câu hỏi vào khung chat hoặc bấm micro để nói tiếng Việt.*")
         st.markdown("</div>", unsafe_allow_html=True)
-    else:
+    elif not prompt_to_run:
         render_voice_input_button()
-    pending_prompt = st.session_state.get("pending_prompt")
-    user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
-
-    prompt_to_run = pending_prompt or user_input
 
     if prompt_to_run:
         # Xóa pending prompt và reset focus view
@@ -394,9 +395,32 @@ else:
             with st.chat_message("assistant"):
                 status_placeholder = st.empty()
                 def update_status(text: str):
-                    status_placeholder.markdown(f"🟡 **{text}**")
+                    status_placeholder.markdown(
+                        f"""
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 18px; background: linear-gradient(135deg, #EFF6FF 0%, #F8FAFC 100%); border: 1px solid #BFDBFE; border-radius: 12px; margin: 8px 0; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.06);">
+                            <div class="agent-spinner"></div>
+                            <span style="color: #1E40AF; font-weight: 600; font-size: 0.93rem; letter-spacing: -0.01em;">{text}</span>
+                        </div>
+                        <style>
+                            .agent-spinner {{
+                                width: 20px;
+                                height: 20px;
+                                border: 2.5px solid #DBEAFE;
+                                border-top: 2.5px solid #2563EB;
+                                border-radius: 50%;
+                                animation: agent-spin 0.85s linear infinite;
+                                flex-shrink: 0;
+                            }}
+                            @keyframes agent-spin {{
+                                0% {{ transform: rotate(0deg); }}
+                                100% {{ transform: rotate(360deg); }}
+                            }}
+                        </style>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
-                update_status("Đang chuẩn bị truy vấn & phân tích...")
+                update_status("🤖 Đang phân tích câu hỏi & tạo câu lệnh SQL tối ưu...")
                 current_engine = st.session_state.get("engine")
                 current_schema = st.session_state.get("schema_context", "")
                 if current_engine and (not current_schema or not current_schema.strip()):
