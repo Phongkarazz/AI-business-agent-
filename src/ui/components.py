@@ -162,7 +162,9 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
     if measure_cols and total_rows > 1:
         # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị Tổng trên thẻ KPI
         count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
-        m_col = count_like_cols[0] if count_like_cols else measure_cols[0]
+        # Ưu tiên cột tổng thể (Total/Tổng/All) nếu có
+        total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
+        m_col = total_like_cols[0] if total_like_cols else (count_like_cols[0] if count_like_cols else measure_cols[0])
         m_clean = str(m_col).replace("_", " ").title()
 
         valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()

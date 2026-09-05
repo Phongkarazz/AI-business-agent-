@@ -41,7 +41,7 @@ NAME_LIKE_REGEX = re.compile(
 
 # Specific individual entity pattern (highest priority for X-axis labels over group categories)
 INDIVIDUAL_ENTITY_REGEX = re.compile(
-    r'(salesperson|employee|rep|nhan_vien|nhan vien|nhan_su|nhan su|person|customer|khach_hang|khach hang|product|san_pham|item)',
+    r'(salesperson|employee|rep|nhan_vien|nhan vien|nhan_su|nhan su|person|customer|khach_hang|khach hang|product|san_pham|item|first_name|last_name|full_name|fullname|manager|leader|truong_phong|quan_ly)',
     re.IGNORECASE
 )
 

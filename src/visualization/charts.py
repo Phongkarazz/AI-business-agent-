@@ -37,24 +37,33 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
         n_time = df[time_col].nunique(dropna=True) if (time_col and time_col in df.columns) else 0
 
         if chart_override == "Tự động":
-            # 1. Nếu mỗi dòng là một cá nhân/thực thể độc lập (có row_identity_col hoặc có tên người FullName, Salesperson, Employee)
-            # -> ĐÂY LÀ BẢNG XẾP HẠNG CÁ NHÂN, BẮT BUỘC dùng Bar Chart để so sánh giữa các cá nhân, TUYỆT ĐỐI KHÔNG DÙNG Line Chart!
+            # 1. Nếu mỗi dòng là một cá nhân/thực thể độc lập (có row_identity_col hoặc có tên người first_name/last_name/FullName, Salesperson, Employee, Manager)
+            # -> ĐÂY LÀ BẢNG XẾP HẠNG/SO SÁNH CÁ NHÂN, BẮT BUỘC dùng Bar Chart để so sánh giữa các cá nhân, TUYỆT ĐỐI KHÔNG DÙNG Line Chart!
+            lbl_low = [str(c).lower() for c in label_cols]
+            has_person_names = (
+                ("first_name" in lbl_low and "last_name" in lbl_low)
+                or any(k in lbl_low for k in ["fullname", "full_name", "họ và tên", "ho_va_ten", "ten_nhan_vien"])
+            )
             is_individual_entity = (
                 row_identity_col is not None
                 or any(INDIVIDUAL_ENTITY_REGEX.search(str(c)) for c in label_cols)
+                or has_person_names
             )
 
-            # 2. Nếu có cột tỷ lệ/phần trăm/cơ cấu và số lượng danh mục từ 2 đến 10 (ví dụ: 7 chức danh)
-            # -> Tự động chọn Pie (Donut Chart) để xem cơ cấu phân bố
-            has_pct_col = any(any(k in str(col).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "share", "ratio"]) for col in measure_cols)
+            # 2. Nếu có cột tỷ lệ/phần trăm/cơ cấu và số lượng danh mục từ 2 đến 10
+            # CHÚ Ý: CHỈ chọn Pie khi có ĐÚNG 1 cột đo lường phân rã thành phần.
+            # Nếu có từ 2 cột tỷ lệ/số đo trở lên (ví dụ: MalePct & FemalePct, hoặc MaleManagers & FemaleManagers),
+            # BẮT BUỘC dùng Bar Chart (Grouped Bar Chart) để so sánh song song giữa các nhóm!
+            pct_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "share", "ratio"])]
+            has_single_pct_col = len(pct_cols) == 1
             is_distribution_breakdown = (
-                has_pct_col and (2 <= len(df) <= 10)
+                has_single_pct_col and (2 <= len(df) <= 10) and len(measure_cols) == 1
             )
 
-            if is_distribution_breakdown:
-                chosen = "Pie"
-            elif is_individual_entity and measure_cols:
+            if is_individual_entity and measure_cols:
                 chosen = "Bar"
+            elif is_distribution_breakdown:
+                chosen = "Pie"
             elif time_col and measure_cols and n_time > 1:
                 chosen = "Line"
             elif len(df) == 1 and measure_cols and any(k in str(measure_cols[0]).lower() for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram", "%"]):
@@ -90,9 +99,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
         if chosen in ("Line", "Area") and len(measure_cols) == 1 and label_cols:
             other_labels = [c for c in label_cols if c != time_col]
             if other_labels:
-                candidate_col, _, _ = pick_label_column(df, other_labels)
-                if candidate_col and candidate_col != time_col and 1 < df[candidate_col].nunique(dropna=True) <= 20:
-                    time_color_col = candidate_col
+                candidate_col, candidate_series, _ = pick_label_column(df, other_labels)
+                if candidate_col and candidate_col != time_col:
+                    if candidate_col not in df.columns and candidate_series is not None:
+                        df = df.copy()
+                        df[candidate_col] = candidate_series.values
+                    if candidate_col in df.columns and 1 < df[candidate_col].nunique(dropna=True) <= 20:
+                        time_color_col = candidate_col
 
         if chosen == "Line" and time_col and measure_cols:
             sorted_df = df.sort_values(time_col)
