@@ -215,6 +215,12 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
 
             # Lấy nhãn đối tượng đầy đủ
             _, label_series, _ = pick_label_column(df, label_cols)
+            if label_series is None:
+                # Nếu không có cột nhãn text/danh mục, tìm cột thời gian/chiều còn lại (Year, Date...)
+                other_cols = [c for c in df.columns if c != m_col]
+                if other_cols:
+                    label_series = df[other_cols[0]]
+
             if label_series is not None and max_idx in label_series.index:
                 peak_label = str(label_series.loc[max_idx])
             elif label_cols:
@@ -247,6 +253,10 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 "avg", "average", "mean", "trung_bình", "rate", "ratio", "pct", "percent", "tỷ_lệ", "max", "min"
             ])
 
+            # Kiểm tra xem có phải là chuỗi thời gian (Time-series: Year, Month, Date...)
+            dim_cols = [c for c in df.columns if c != m_col]
+            is_time_dim = any(any(k in str(c).lower() for k in ["year", "thang", "month", "quy", "quarter", "date", "nam"]) for c in dim_cols)
+
             # Kiểm tra xem người dùng có hỏi về một đối tượng cụ thể (ví dụ Customer Service) không
             target_idx = None
             target_name = None
@@ -261,7 +271,23 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
 
             col1, col2, col3, col4 = st.columns(4)
 
-            if is_avg_or_rate:
+            if is_time_dim:
+                # CHUỖI THỜI GIAN THEO NĂM/THÁNG:
+                dim_c = dim_cols[0] if dim_cols else "Year"
+                dim_vals = df[dim_c].dropna()
+                min_dim = str(dim_vals.min()) if not dim_vals.empty else ""
+                max_dim = str(dim_vals.max()) if not dim_vals.empty else ""
+                is_year_unit = any(k in str(dim_c).lower() for k in ["year", "nam"])
+                dim_unit = "Năm" if is_year_unit else "Kỳ"
+                with col1:
+                    st.metric("📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"), f"{total_rows} {dim_unit}" + (f" ({min_dim} – {max_dim})" if min_dim != max_dim else ""))
+                with col2:
+                    st.metric("📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg)
+                with col3:
+                    st.metric(f"🏆 " + (f"Đỉnh cao nhất ({dim_unit} {peak_label})" if not is_en else f"Peak ({peak_label})"), fmt_peak)
+                with col4:
+                    st.metric(f"📉 " + (f"Thấp nhất ({dim_unit} {min_label})" if not is_en else f"Lowest ({min_label})"), fmt_min)
+            elif is_avg_or_rate:
                 # CỘT TRUNG BÌNH/TỶ LỆ: Hiển thị Thống kê tổng hợp khoa học, KHÔNG cộng dồn!
                 with col1:
                     st.metric("📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities"), f"{total_rows:,}")

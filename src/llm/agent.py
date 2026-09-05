@@ -130,11 +130,15 @@ def clean_sql_query(sql: str) -> str:
     # 6.3 Sửa lỗi tên bảng thiếu s: FROM/JOIN department -> FROM/JOIN departments
     s = re.sub(r"\b(FROM|JOIN)\s+department\b(?!\s+(?:AS\s+)?departments\b)", r"\1 departments", s, flags=re.IGNORECASE)
 
-    # 6.4 Khi đếm số lần tăng lương lịch sử (COUNT s.salary/RaiseCount): Tự động gỡ bỏ s.to_date = '9999-01-01' để đếm đủ lịch sử
-    if re.search(r"COUNT\s*\(\s*s\.salary\s*\)|raisecount", s, re.IGNORECASE):
-        s = re.sub(r"\s*AND\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
-        s = re.sub(r"\s*WHERE\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", s, flags=re.IGNORECASE)
-        s = re.sub(r"\s*WHERE\s+s\.to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
+    # 6.4 Khi đếm số lần tăng lương lịch sử hoặc nhóm theo năm/thời gian (GROUP BY YEAR/from_date):
+    # Tự động gỡ bỏ triệt để to_date = '9999-01-01' để lấy đủ toàn bộ lịch sử (tránh lỗi chỉ ra 2 năm 2001-2002)
+    if re.search(r"GROUP\s+BY\s+.*(?:YEAR|from_date|hire_date|hireyear)", s, re.IGNORECASE) or re.search(r"COUNT\s*\(\s*s\.salary\s*\)|raisecount", s, re.IGNORECASE):
+        s = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", s, flags=re.IGNORECASE)
+        s = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
+
+    # 6.5 Sửa lỗi tên cột không tồn tại s.salary_date -> s.from_date
+    s = re.sub(r"\b(?:[a-zA-Z0-9_]+\.)?salary_date\b", "s.from_date", s, flags=re.IGNORECASE)
 
     # 6.5 Tự động sửa lỗi tính thâm niên trừ năm to_date 9999 (gây ra lỗi 8,014 năm phi lý) và xóa cột HireYear = 9999
     if re.search(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)\s*-\s*YEAR\s*\(", s, re.IGNORECASE):
@@ -233,6 +237,10 @@ def auto_fix_top_employee_salary_query(sql: str, user_query: str) -> str:
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
+    is_yearly = any(k in q_low for k in ["qua các năm", "theo năm", "hàng năm", "từng năm", "qua từng năm", "thay đổi như thế nào", "xu hướng", "biến động", "lịch sử", "theo thời gian"])
+    if is_yearly:
+        return sql
+
     is_top_salary = (
         any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất"])
         and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "sales", "phòng"])
@@ -260,6 +268,39 @@ def auto_fix_top_employee_salary_query(sql: str, user_query: str) -> str:
         if "dept_emp" in lowered_sql and not re.search(r"\bde\.to_date\s*=\s*'9999-01-01'", sql, re.IGNORECASE):
             if "where" in sql.lower():
                 sql = re.sub(r"\bWHERE\b", "WHERE de.to_date = '9999-01-01' AND ", sql, count=1, flags=re.IGNORECASE)
+
+    return sql
+
+
+def auto_fix_yearly_salary_trend_query(sql: str, user_query: str) -> str:
+    """Tự động phát hiện và loại bỏ triệt để điều kiện to_date = '9999-01-01' khi người dùng hỏi về xu hướng/biến động qua các năm (tránh lỗi chỉ ra 2 năm 2001-2002)."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_yearly_trend = any(k in q_low for k in ["qua các năm", "theo năm", "hàng năm", "từng năm", "qua từng năm", "thay đổi như thế nào", "xu hướng", "biến động", "lịch sử", "theo thời gian"])
+    is_salary_or_hire = any(k in q_low for k in ["lương", "thu nhập", "salary", "quỹ lương", "tuyển dụng", "nhân sự", "chi trả"])
+    grouped_by_year = bool(re.search(r"GROUP\s+BY\s+.*(?:YEAR|hireyear|from_date)", sql, re.IGNORECASE))
+
+    if (is_yearly_trend and is_salary_or_hire) or grouped_by_year:
+        # 1. Gỡ bỏ triệt để mọi điều kiện lọc to_date = 9999-01-01 (nguyên nhân cốt lõi khiến dữ liệu lịch sử chỉ còn 2 năm 2001 và 2002)
+        sql = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+
+        # 2. Đổi YEAR(to_date) thành YEAR(s.from_date) để không bị năm 9999
+        sql = re.sub(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)", "YEAR(s.from_date)", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"\b(?:[a-zA-Z0-9_]+\.)?salary_date\b", "s.from_date", sql, flags=re.IGNORECASE)
+
+        # 3. Trường hợp hỏi mức lương trung bình toàn công ty qua các năm
+        is_avg_salary = any(k in q_low for k in ["lương trung bình", "mức lương", "lương bình quân"]) and any(k in q_low for k in ["công ty", "toàn công ty", "tất cả", "nhân viên", "qua các năm", "theo năm", "hàng năm"])
+        if is_avg_salary:
+            if "salaries" not in sql.lower() or "avg" not in sql.lower() or not re.search(r"GROUP\s+BY\s+.*YEAR", sql, re.IGNORECASE):
+                return """SELECT 
+    YEAR(s.from_date) AS Year,
+    ROUND(AVG(s.salary), 2) AS AverageSalary
+FROM salaries s
+GROUP BY YEAR(s.from_date)
+ORDER BY Year ASC"""
 
     return sql
 
@@ -979,6 +1020,7 @@ def run_agent(
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)
@@ -997,6 +1039,7 @@ def run_agent(
     for attempt in range(1, 4):
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)

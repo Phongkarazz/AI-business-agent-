@@ -420,6 +420,19 @@ LIMIT {req_limit};
 (TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI CẤM DÙNG YEAR(de.to_date) hay tạo cột mang giá trị 9999, BẮT BUỘC TÍNH CỘT YearsOfService DÙNG DATEDIFF và ORDER BY e.hire_date ASC LIMIT {req_limit}!)
 """
 
+    # 2.5 Xu hướng mức lương trung bình của toàn công ty qua các năm
+    elif any(k in q_low for k in ["lương trung bình", "mức lương", "lương bình quân"]) and any(k in q_low for k in ["qua các năm", "theo năm", "hàng năm", "từng năm", "qua từng năm", "thay đổi như thế nào", "xu hướng", "biến động"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XU HƯỚNG MỨC LƯƠNG TRUNG BÌNH TOÀN CÔNG TY QUA CÁC NĂM):
+SELECT 
+    YEAR(s.from_date) AS Year,
+    ROUND(AVG(s.salary), 2) AS AverageSalary
+FROM salaries s
+GROUP BY YEAR(s.from_date)
+ORDER BY Year ASC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC dùng YEAR(s.from_date) AS Year, TUYỆT ĐỐI KHÔNG lọc `s.to_date = '9999-01-01'` và KHÔNG GROUP BY s.to_date để lấy đủ 18 năm lịch sử từ 1985 đến 2002! Nếu lọc to_date = '9999-01-01' sẽ bị sai nghiêm trọng chỉ ra 2 năm 2001-2002!)
+"""
+
     # 3. Xu hướng tuyển dụng theo phòng ban qua các năm
     elif any(k in q_low for k in ["tuyển dụng", "tuyển"]) and any(k in q_low for k in ["năm", "tháng"]) and any(k in q_low for k in ["phòng ban", "phòng", "department", "development", "sales", "marketing", "research", "finance", "production", "human resources", "customer service", "quality management"]):
         dept_target = "Development"
