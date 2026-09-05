@@ -5,6 +5,7 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 1-Click Copy Error button, and conversational AI explanation handling.
 """
 
+import re
 import streamlit as st
 import pandas as pd
 from src.analytics.heuristics import get_axis_columns, sanitize_insight_markdown, pick_label_column, is_id_like, sanitize_followup_question, split_insight_sections
