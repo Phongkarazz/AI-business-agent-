@@ -132,6 +132,21 @@ def get_db_specific_rules(schema_context: str) -> str:
         GROUP BY d.dept_name
         ORDER BY TotalEmployees DESC;
 
+      + MẪU CHUẨN SO SÁNH QUY MÔ NHÂN SỰ VÀ LƯƠNG TRUNG BÌNH THEO PHÒNG BAN:
+        SELECT 
+            d.dept_name AS Department,
+            COUNT(DISTINCT de.emp_no) AS Headcount,
+            ROUND(AVG(s.salary), 2) AS AvgSalary
+        FROM departments d
+        JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+        JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+        GROUP BY d.dept_name
+        ORDER BY Headcount DESC;
+        * CẢNH BÁO ĐẶC BIỆT: Khi hỏi 'so sánh quy mô nhân sự và lương trung bình phòng ban':
+          BẮT BUỘC có cả 2 chỉ số: COUNT(DISTINCT de.emp_no) AS Headcount VÀ ROUND(AVG(s.salary), 2) AS AvgSalary!
+          TUYỆT ĐỐI KHÔNG JOIN bảng `dept_manager`! Bảng `dept_manager` CHỈ DÀNH RIÊNG cho câu hỏi hỏi riêng về Trưởng phòng!
+
+
       + MẪU CHUẨN TỔNG QUỸ LƯƠNG HIỆN TẠI THEO PHÒNG BAN:
         SELECT 
             d.dept_name AS Department,
@@ -515,6 +530,22 @@ WHERE de.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY d.dept_name;
 (BẮT BUỘC XUẤT ĐẦY ĐỦ CẢ HAI CỘT TỶ LỆ: MalePct VÀ FemalePct! GROUP BY d.dept_name!)
+"""
+
+    # 9. So sánh quy mô nhân sự và mức lương trung bình phòng ban
+    elif any(k in q_low for k in ["quy mô", "số lượng nhân sự", "số nhân sự", "số nhân viên"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"]) and any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH QUY MÔ NHÂN SỰ VÀ MỨC LƯƠNG TRUNG BÌNH THEO PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY Headcount DESC;
+(CẢNH BÁO ĐẶC BIỆT: BẮT BUỘC có cả 2 chỉ số: COUNT(DISTINCT de.emp_no) AS Headcount VÀ ROUND(AVG(s.salary), 2) AS AvgSalary! TUYỆT ĐỐI KHÔNG JOIN bảng dept_manager, TUYỆT ĐỐI KHÔNG LẤY TÊN TRƯỞNG PHÒNG ManagerName!)
 """
 
     return ""

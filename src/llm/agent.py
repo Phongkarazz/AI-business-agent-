@@ -367,6 +367,34 @@ ORDER BY s_agg.RaiseCount DESC, s_agg.CurrentSalary DESC"""
     return sql
 
 
+def auto_fix_department_comparison_query(sql: str, user_query: str) -> str:
+    """Tự động phát hiện và sửa lỗi nhầm lẫn sang bảng dept_manager khi hỏi so sánh quy mô nhân sự và mức lương trung bình phòng ban."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_dept_comp = any(k in q_low for k in ["quy mô", "số lượng nhân sự", "số nhân sự", "số nhân viên"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"]) and any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng"])
+
+    if not is_dept_comp:
+        return sql
+
+    has_manager = bool(re.search(r"\b(dept_manager|ManagerName|dm\.)\b", sql, re.IGNORECASE))
+    missing_headcount = not bool(re.search(r"\b(Headcount|TotalEmployees|COUNT\s*\()\b", sql, re.IGNORECASE))
+    missing_avg = not bool(re.search(r"\b(AVG\s*\(|AvgSalary)\b", sql, re.IGNORECASE))
+
+    if has_manager or missing_headcount or missing_avg:
+        return """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY Headcount DESC"""
+
+    return sql
+
+
 
 def is_safe_select(sql: str) -> bool:
     """Kiểm tra câu lệnh SQL có phải là SELECT/WITH hợp lệ và an toàn không."""
@@ -768,6 +796,7 @@ def run_agent(
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)
+        sql_query = auto_fix_department_comparison_query(sql_query, user_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -780,6 +809,7 @@ def run_agent(
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)
+        sql_query = auto_fix_department_comparison_query(sql_query, user_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):
