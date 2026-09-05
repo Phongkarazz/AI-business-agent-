@@ -17,6 +17,46 @@ from src.analytics.heuristics import (
     is_id_like,
 )
 
+VI_COLUMN_MAP = {
+    "yearsofservice": "Thâm Niên (Năm)",
+    "years_of_service": "Thâm Niên (Năm)",
+    "year_of_service": "Thâm Niên (Năm)",
+    "tenure": "Thâm Niên (Năm)",
+    "experience": "Kinh Nghiệm (Năm)",
+    "fullname": "Họ và Tên",
+    "full_name": "Họ và Tên",
+    "emp_name": "Họ và Tên",
+    "employee_name": "Họ và Tên",
+    "salary": "Mức Lương",
+    "current_salary": "Mức Lương Hiện Tại",
+    "avg_salary": "Lương Trung Bình",
+    "department": "Phòng Ban",
+    "dept_name": "Phòng Ban",
+    "department_name": "Phòng Ban",
+    "title": "Chức Danh",
+    "job_title": "Chức Danh",
+    "gender": "Giới Tính",
+    "hire_date": "Ngày Vào Làm",
+    "birth_date": "Ngày Sinh",
+    "age": "Tuổi",
+    "headcount": "Số Lượng Nhân Viên",
+    "emp_count": "Số Lượng Nhân Viên",
+    "total_employees": "Tổng Số Nhân Viên",
+    "count": "Số Lượng",
+}
+
+
+def format_col_title(col_name: str) -> str:
+    """Chuyển đổi tên cột kỹ thuật (e.g. YearsOfService, FullName) sang tên tiếng Việt dễ hiểu cho người dùng."""
+    if not col_name:
+        return ""
+    norm = re.sub(r"[^a-zA-Z0-9]", "", str(col_name)).lower()
+    if norm in VI_COLUMN_MAP:
+        return VI_COLUMN_MAP[norm]
+    # Fallback to readable title case
+    clean = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(col_name)).replace("_", " ").strip().title()
+    return clean
+
 
 def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user_query: str = ""):
     """Tự động phân loại cột và render biểu đồ phù hợp nhất:
@@ -393,20 +433,35 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]) and plot_df[measure_cols[0]].nunique(dropna=True) == 1 and len(plot_df) > 1:
                         st.caption(f"ℹ️ Lưu ý: Tất cả {len(plot_df)} đối tượng hiển thị đều có cùng giá trị `{measure_cols[0]}` = {plot_df[measure_cols[0]].iloc[0]:,}.")
 
-                    curr_sym = "$" if any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue"]) else ""
-                    clean_m = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(measure_cols[0])).replace("_", " ").title()
-                    clean_lbl = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(label_name)).replace("_", " ").title()
+                    m_lower = str(measure_cols[0]).lower()
+                    is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
+                    is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu"])
+                    is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "người", "count", "số lượng", "so_luong"])
+
+                    curr_sym = "$" if is_salary else ""
+                    clean_m = format_col_title(measure_cols[0])
+                    clean_lbl = format_col_title(label_name)
 
                     fig = px.bar(
                         plot_df, x=label_name, y=measure_cols[0],
                         color=color_col,
                         barmode="group" if color_col else "relative",
-                        title=f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {color_col})" if color_col else ""),
+                        title=f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {format_col_title(color_col)})" if color_col else ""),
                         category_orders={label_name: category_order},
                         template="plotly_white"
                     )
+
+                    if is_years:
+                        ttemplate = "%{y:.1f} năm"
+                    elif is_headcount:
+                        ttemplate = "%{y:,.0f} người"
+                    elif any('.' in str(v) for v in plot_df[measure_cols[0]]):
+                        ttemplate = f"{curr_sym}%{{y:,.2f}}"
+                    else:
+                        ttemplate = f"{curr_sym}%{{y:,.0f}}"
+
                     trace_kwargs = {
-                        "texttemplate": f"{curr_sym}%{{y:,.2f}}" if any('.' in str(v) for v in plot_df[measure_cols[0]]) else f"{curr_sym}%{{y:,.0f}}",
+                        "texttemplate": ttemplate,
                         "textposition": 'outside',
                     }
                     if not color_col:
@@ -435,16 +490,34 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     # Bổ sung đường trung bình chuẩn Benchmark Line nếu là so sánh giữa các thực thể và có ít nhất 3 dòng
                     if not color_col and len(plot_df) >= 3 and pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]):
                         mean_benchmark = float(plot_df[measure_cols[0]].mean())
-                        fig.add_hline(
-                            y=mean_benchmark,
-                            line_dash="dash",
-                            line_color="#EF4444",
-                            annotation_text=f"Benchmark TB: {mean_benchmark:,.0f}" if mean_benchmark > 100 else f"Benchmark TB: {mean_benchmark:,.2f}",
-                            annotation_position="top right"
-                        )
+                        max_y = float(plot_df[measure_cols[0]].max())
+                        min_y = float(plot_df[measure_cols[0]].min())
+                        spread_y = max_y - min_y
+                        # CHỈ vẽ đường benchmark khi có sự phân tán ý nghĩa (> 5% so với TB)
+                        if mean_benchmark > 0 and (spread_y / mean_benchmark) > 0.05:
+                            if is_years:
+                                bench_lbl = f"Benchmark TB: {mean_benchmark:,.1f} năm"
+                            elif is_headcount:
+                                bench_lbl = f"Benchmark TB: {mean_benchmark:,.0f} người"
+                            elif mean_benchmark > 100:
+                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.0f}"
+                            else:
+                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.2f}"
+
+                            fig.add_hline(
+                                y=mean_benchmark,
+                                line_dash="dash",
+                                line_color="#EF4444",
+                                annotation_text=bench_lbl,
+                                annotation_position="top left"
+                            )
+                        if max_y > 0:
+                            fig.update_yaxes(range=[0, max_y * 1.18])
 
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
+                        xaxis_title=clean_lbl,
+                        yaxis_title=clean_m,
                         margin=dict(l=20, r=20, t=50, b=90 if tick_angle != 0 else 50)
                     )
             elif len(df) == 1 and len(measure_cols) == 1:
@@ -573,9 +646,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 # Sắp xếp tăng dần để khi vẽ từ dưới lên thì người cao nhất nằm trên cùng
                 plot_df = plot_df.sort_values(measure_cols[0], ascending=True)
 
-                curr_sym = "$" if any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue"]) else ""
-                clean_m = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(measure_cols[0])).replace("_", " ").title()
-                clean_lbl = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(label_name)).replace("_", " ").title()
+                m_lower = str(measure_cols[0]).lower()
+                is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
+                is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu"])
+                is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "người", "count", "số lượng", "so_luong"])
+
+                curr_sym = "$" if is_salary else ""
+                clean_m = format_col_title(measure_cols[0])
+                clean_lbl = format_col_title(label_name)
 
                 fig = px.bar(
                     plot_df,
@@ -596,28 +674,62 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                 h_colors = ['#F59E0B' if str(v).strip().lower() == (target_entity or "").lower() else '#1F4E78' for v in plot_df[label_name]] if target_entity else "#1F4E78"
 
+                if is_years:
+                    h_ttemplate = "%{x:.1f} năm"
+                elif is_headcount:
+                    h_ttemplate = "%{x:,.0f} người"
+                elif any('.' in str(v) for v in plot_df[measure_cols[0]]):
+                    h_ttemplate = f"{curr_sym}%{{x:,.2f}}"
+                else:
+                    h_ttemplate = f"{curr_sym}%{{x:,.0f}}"
+
                 fig.update_traces(
                     marker_color=h_colors,
-                    texttemplate=f'{curr_sym}%{{x:,.2f}}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else f'{curr_sym}%{{x:,.0f}}',
+                    texttemplate=h_ttemplate,
                     textposition='outside',
                     width=0.45 if len(plot_df) <= 3 else None
                 )
 
+                max_val = float(plot_df[measure_cols[0]].max()) if not plot_df.empty else 0
+                min_val = float(plot_df[measure_cols[0]].min()) if not plot_df.empty else 0
+                val_spread = max_val - min_val
+
                 if len(plot_df) >= 3 and pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]):
                     mean_benchmark = float(plot_df[measure_cols[0]].mean())
-                    fig.add_vline(
-                        x=mean_benchmark,
-                        line_dash="dash",
-                        line_color="#EF4444",
-                        annotation_text=f"Benchmark TB: {mean_benchmark:,.0f}" if mean_benchmark > 100 else f"Benchmark TB: {mean_benchmark:,.2f}",
-                        annotation_position="top right"
-                    )
+                    # CHỈ vẽ đường benchmark khi có sự phân tán ý nghĩa (> 5% so với TB)
+                    # Tránh vẽ khi tất cả giá trị đều bằng/xấp xỉ nhau gây đè chữ
+                    if mean_benchmark > 0 and (val_spread / mean_benchmark) > 0.05:
+                        if is_years:
+                            bench_lbl = f"Benchmark TB: {mean_benchmark:,.1f} năm"
+                        elif is_headcount:
+                            bench_lbl = f"Benchmark TB: {mean_benchmark:,.0f} người"
+                        elif mean_benchmark > 100:
+                            bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.0f}"
+                        else:
+                            bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.2f}"
+
+                        fig.add_vline(
+                            x=mean_benchmark,
+                            line_dash="dash",
+                            line_color="#EF4444",
+                            annotation_text=bench_lbl,
+                            annotation_position="top left"
+                        )
+
+                # Dành không gian bên phải để nhãn text outside không bị cắt hay chạm biên
+                if max_val > 0:
+                    fig.update_xaxes(range=[0, max_val * 1.22])
+
+                max_name_len = max((len(str(v)) for v in plot_df[label_name]), default=10)
+                margin_left = max(130, min(250, max_name_len * 9))
+                chart_height = max(400, len(plot_df) * 38 + 100)
 
                 fig.update_layout(
                     yaxis=dict(type="category", automargin=True),
-                    xaxis_title=measure_cols[0],
+                    xaxis_title=clean_m,
                     yaxis_title="",
-                    margin=dict(l=20, r=40, t=50, b=50)
+                    height=chart_height,
+                    margin=dict(l=margin_left, r=60, t=60, b=50)
                 )
             else:
                 st.info("Không tìm thấy cột phù hợp để làm nhãn biểu đồ.")

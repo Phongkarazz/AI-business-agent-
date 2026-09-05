@@ -64,13 +64,21 @@ def find_time_column(df: pd.DataFrame):
         return dt_cols[0]
 
     # 2. Cột tên khớp từ khóa thời gian, không phải ID, và parse được thành ngày hoặc là số nguyên biểu diễn năm (1900 - 2100)
-    candidates = [c for c in df.columns if any(k in str(c).lower() for k in TIME_KEYWORDS) and not is_id_like(c)]
+    duration_keywords = ["service", "tenure", "thâm niên", "tham_nien", "experience", "kinh nghiệm", "kinh_nghiem", "duration", "tuoi", "age", "spent", "count", "so_luong"]
+    candidates = [
+        c for c in df.columns
+        if any(k in str(c).lower() for k in TIME_KEYWORDS)
+        and not any(k in str(c).lower() for k in duration_keywords)
+        and not is_id_like(c)
+    ]
     for c in candidates:
         try:
             if pd.api.types.is_numeric_dtype(df[c]):
                 vals = pd.to_numeric(df[c], errors="coerce").dropna()
                 if not vals.empty and vals.min() >= 1900 and vals.max() <= 2100:
                     return c
+                # Cột số nhưng không phải năm 1900-2100 -> KHÔNG PHẢI cột thời gian lịch
+                continue
             parsed = pd.to_datetime(df[c], errors="coerce")
             if parsed.notna().mean() >= 0.8:
                 return c
