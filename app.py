@@ -5,7 +5,13 @@ Smart Starter Cards (1-Click), and Follow-up Question Suggestions.
 """
 
 import re
+import sys
 import streamlit as st
+
+# Tự động giải phóng cache submodules trong src/ để Python luôn tải mã nguồn mới nhất từ ổ đĩa
+for _mod in list(sys.modules.keys()):
+    if _mod.startswith("src.") or _mod == "src":
+        del sys.modules[_mod]
 
 try:
     from dotenv import load_dotenv
@@ -308,13 +314,23 @@ else:
 
         st.chat_message("user").write(turn["query"])
         with st.chat_message("assistant"):
-            render_result(turn, turn_id=f"focused_{focused_turn_idx}")
+            try:
+                render_result(turn, turn_id=f"focused_{focused_turn_idx}")
+            except Exception as e:
+                st.error(f"⚠️ Có lỗi nhỏ khi hiển thị kết quả lượt này: {e}")
+                if st.button("🔄 Tải lại lượt này", key=f"retry_focus_{focused_turn_idx}"):
+                    st.rerun()
     else:
         # Hiển thị toàn bộ lịch sử hội thoại
         for i, turn in enumerate(history):
             st.chat_message("user").write(turn["query"])
             with st.chat_message("assistant"):
-                render_result(turn, turn_id=f"hist{i}")
+                try:
+                    render_result(turn, turn_id=f"hist{i}")
+                except Exception as e:
+                    st.error(f"⚠️ Có lỗi nhỏ khi hiển thị kết quả lượt này: {e}")
+                    if st.button("🔄 Tải lại lượt này", key=f"retry_hist_{i}"):
+                        st.rerun()
 
     # 4.3 Hiển thị Thẻ Gợi ý Câu hỏi Nhanh (Starter Cards) khi chưa có tin nhắn nào VÀ không có câu hỏi đang chạy
     if not history and focused_turn_idx is None and not prompt_to_run:

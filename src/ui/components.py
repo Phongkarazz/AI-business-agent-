@@ -171,7 +171,11 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         m_col = total_like_cols[0] if total_like_cols else (count_like_cols[0] if count_like_cols else measure_cols[0])
         
         # Tách camelCase và chuẩn hóa tên chỉ số hiển thị chuyên nghiệp
-        raw_m = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(m_col)).replace("_", " ").strip()
+        try:
+            import re
+            raw_m = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(m_col)).replace("_", " ").strip()
+        except Exception:
+            raw_m = str(m_col).replace("_", " ").strip()
         m_low = raw_m.lower()
         if not is_en:
             if any(k in m_low for k in ["current salary", "currentsalary", "lương mới nhất", "lương hiện tại"]):
@@ -421,42 +425,44 @@ def render_result(result: dict, turn_id: str):
     # 4. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
     display_df = df.copy()
 
-    # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N
-    is_ranking = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất"])
-    if is_ranking and len(display_df) <= 50:
-        medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
-        display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
-        display_df.index.name = "Xếp hạng" if not is_en else "Rank"
+    try:
+        # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N
+        is_ranking = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất"])
+        if is_ranking and len(display_df) <= 50:
+            medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
+            display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
+            display_df.index.name = "Xếp hạng" if not is_en else "Rank"
 
-    column_config = {}
-    for col in display_df.columns:
-        c_low = str(col).lower()
-        if is_id_like(col):
-            column_config[col] = st.column_config.NumberColumn(col, format="%d")
-        elif any(k in c_low for k in ["salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí"]):
-            # Format tiền tệ thông minh: hiển thị $%,d nếu số nguyên, $%,.2f nếu có số lẻ
-            has_decimals = False
-            try:
-                numeric_vals = pd.to_numeric(display_df[col], errors="coerce").dropna()
-                has_decimals = any(not float(v).is_integer() for v in numeric_vals)
-            except Exception:
-                pass
-            column_config[col] = st.column_config.NumberColumn(
-                col,
-                format="$%,.2f" if has_decimals else "$%,d"
-            )
-        elif any(k in c_low for k in ["pct", "percent", "tỷ lệ", "rate", "ratio"]):
-            column_config[col] = st.column_config.NumberColumn(
-                col,
-                format="%.2f%%"
-            )
-        elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số"]):
-            column_config[col] = st.column_config.NumberColumn(
-                col,
-                format="%,d"
-            )
+        column_config = {}
+        for col in display_df.columns:
+            c_low = str(col).lower()
+            if is_id_like(col):
+                column_config[col] = st.column_config.NumberColumn(col, format="%d")
+            elif any(k in c_low for k in ["salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí"]):
+                has_decimals = False
+                try:
+                    numeric_vals = pd.to_numeric(display_df[col], errors="coerce").dropna()
+                    has_decimals = any(not float(v).is_integer() for v in numeric_vals)
+                except Exception:
+                    pass
+                column_config[col] = st.column_config.NumberColumn(
+                    col,
+                    format="$%,.2f" if has_decimals else "$%,d"
+                )
+            elif any(k in c_low for k in ["pct", "percent", "tỷ lệ", "rate", "ratio"]):
+                column_config[col] = st.column_config.NumberColumn(
+                    col,
+                    format="%.2f%%"
+                )
+            elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số"]):
+                column_config[col] = st.column_config.NumberColumn(
+                    col,
+                    format="%,d"
+                )
 
-    st.dataframe(display_df, column_config=column_config, width='stretch')
+        st.dataframe(display_df, column_config=column_config, width='stretch')
+    except Exception:
+        st.dataframe(df, width='stretch')
 
     c_csv, c_excel, c_pdf, _ = st.columns([2, 2.5, 2.5, 3])
     with c_csv:
