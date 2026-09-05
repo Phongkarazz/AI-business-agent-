@@ -395,6 +395,41 @@ ORDER BY Headcount DESC"""
     return sql
 
 
+def auto_fix_title_gender_salary_query(sql: str, user_query: str) -> str:
+    """Tự động chuẩn hóa câu hỏi so sánh mức lương trung bình giữa nam và nữ theo từng chức danh sang dạng Pivot 2 cột."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_title_gender_salary = (
+        any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"])
+        and any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính"])
+        and any(k in q_low for k in ["chức danh", "vị trí", "title", "công việc"])
+    )
+
+    if not is_title_gender_salary:
+        return sql
+
+    has_concat_gender = bool(re.search(r"CONCAT\s*\([^)]*gender[^)]*\)", sql, re.IGNORECASE))
+    missing_pivoted_salary = not (
+        bool(re.search(r"\bMaleAvgSalary\b", sql, re.IGNORECASE))
+        and bool(re.search(r"\bFemaleAvgSalary\b", sql, re.IGNORECASE))
+    )
+
+    if has_concat_gender or missing_pivoted_salary:
+        return """SELECT 
+    t.title AS Title,
+    ROUND(AVG(CASE WHEN e.gender = 'M' THEN s.salary END), 2) AS MaleAvgSalary,
+    ROUND(AVG(CASE WHEN e.gender = 'F' THEN s.salary END), 2) AS FemaleAvgSalary
+FROM titles t
+JOIN employees e ON t.emp_no = e.emp_no
+JOIN salaries s ON t.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY MaleAvgSalary DESC"""
+
+    return sql
+
+
 
 def is_safe_select(sql: str) -> bool:
     """Kiểm tra câu lệnh SQL có phải là SELECT/WITH hợp lệ và an toàn không."""
@@ -797,6 +832,7 @@ def run_agent(
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)
         sql_query = auto_fix_department_comparison_query(sql_query, user_query)
+        sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -810,6 +846,7 @@ def run_agent(
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)
         sql_query = auto_fix_department_comparison_query(sql_query, user_query)
+        sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):

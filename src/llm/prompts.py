@@ -146,6 +146,21 @@ def get_db_specific_rules(schema_context: str) -> str:
           BẮT BUỘC có cả 2 chỉ số: COUNT(DISTINCT de.emp_no) AS Headcount VÀ ROUND(AVG(s.salary), 2) AS AvgSalary!
           TUYỆT ĐỐI KHÔNG JOIN bảng `dept_manager`! Bảng `dept_manager` CHỈ DÀNH RIÊNG cho câu hỏi hỏi riêng về Trưởng phòng!
 
+      + MẪU CHUẨN SO SÁNH MỨC LƯƠNG TRUNG BÌNH NAM VÀ NỮ THEO TỪNG CHỨC DANH:
+        SELECT 
+            t.title AS Title,
+            ROUND(AVG(CASE WHEN e.gender = 'M' THEN s.salary END), 2) AS MaleAvgSalary,
+            ROUND(AVG(CASE WHEN e.gender = 'F' THEN s.salary END), 2) AS FemaleAvgSalary
+        FROM titles t
+        JOIN employees e ON t.emp_no = e.emp_no
+        JOIN salaries s ON t.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+        WHERE t.to_date = '9999-01-01'
+        GROUP BY t.title
+        ORDER BY MaleAvgSalary DESC;
+        * CẢNH BÁO ĐẶC BIỆT: Khi hỏi 'so sánh mức lương trung bình giữa nam và nữ theo chức danh':
+          BẮT BUỘC dùng mẫu PIVOT 2 cột: MaleAvgSalary và FemaleAvgSalary!
+          TUYỆT ĐỐI KHÔNG nối chuỗi CONCAT(t.title, ' - ', e.gender) thành 14 dòng riêng rẽ!
+
 
       + MẪU CHUẨN TỔNG QUỸ LƯƠNG HIỆN TẠI THEO PHÒNG BAN:
         SELECT 
@@ -546,6 +561,23 @@ JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY Headcount DESC;
 (CẢNH BÁO ĐẶC BIỆT: BẮT BUỘC có cả 2 chỉ số: COUNT(DISTINCT de.emp_no) AS Headcount VÀ ROUND(AVG(s.salary), 2) AS AvgSalary! TUYỆT ĐỐI KHÔNG JOIN bảng dept_manager, TUYỆT ĐỐI KHÔNG LẤY TÊN TRƯỞNG PHÒNG ManagerName!)
+"""
+
+    # 10. So sánh mức lương trung bình giữa nam và nữ theo từng chức danh
+    elif any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"]) and any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính"]) and any(k in q_low for k in ["chức danh", "vị trí", "title", "công việc"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH MỨC LƯƠNG TRUNG BÌNH NAM VÀ NỮ THEO TỪNG CHỨC DANH):
+SELECT 
+    t.title AS Title,
+    ROUND(AVG(CASE WHEN e.gender = 'M' THEN s.salary END), 2) AS MaleAvgSalary,
+    ROUND(AVG(CASE WHEN e.gender = 'F' THEN s.salary END), 2) AS FemaleAvgSalary
+FROM titles t
+JOIN employees e ON t.emp_no = e.emp_no
+JOIN salaries s ON t.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY MaleAvgSalary DESC;
+(CẢNH BÁO ĐẶC BIỆT: BẮT BUỘC dùng Pivot 2 cột MaleAvgSalary và FemaleAvgSalary trên 7 chức danh! TUYỆT ĐỐI KHÔNG dùng CONCAT(title, gender) thành 14 dòng xé lẻ!)
 """
 
     return ""
