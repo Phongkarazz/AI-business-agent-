@@ -558,11 +558,18 @@ def render_result(result: dict, turn_id: str):
         cols = st.columns(len(followups))
         for col_f, q_text in zip(cols, followups):
             clean_q = sanitize_followup_question(q_text)
+            def _on_fup_click(q_target=clean_q):
+                st.session_state["pending_prompt"] = q_target
+
             with col_f:
                 help_text = f"Run query: {clean_q}" if is_en else f"Chạy tiếp câu hỏi: {clean_q}"
-                if st.button(f"👉 {clean_q}", key=f"btn_fup_{turn_id}_{abs(hash(clean_q))}", use_container_width=True, help=help_text):
-                    st.session_state["pending_prompt"] = clean_q
-                    st.rerun()
+                st.button(
+                    f"👉 {clean_q}",
+                    key=f"btn_fup_{turn_id}_{abs(hash(clean_q))}",
+                    use_container_width=True,
+                    help=help_text,
+                    on_click=_on_fup_click
+                )
 
     # 6. Chi tiết Kỹ thuật & SQL Playground (Expander thu gọn ở cuối cùng)
     exp_tech = "🛠️ Technical Details & SQL Query Playground" if is_en else "🛠️ Chi tiết Kỹ thuật & SQL Playground (Sửa & Chạy trực tiếp)"

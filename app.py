@@ -166,6 +166,38 @@ st.markdown("""
         color: #0F172A;
         font-weight: 700;
     }
+
+    /* Agent Loading Spinner */
+    .agent-loading-card {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 20px;
+        background: linear-gradient(135deg, #EFF6FF 0%, #F8FAFC 100%);
+        border: 1.5px solid #BFDBFE;
+        border-radius: 12px;
+        margin: 8px 0;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+    }
+    .agent-spinner {
+        width: 20px;
+        height: 20px;
+        border: 2.5px solid #DBEAFE;
+        border-top: 2.5px solid #2563EB;
+        border-radius: 50%;
+        animation: agent-spin 0.8s linear infinite;
+        flex-shrink: 0;
+    }
+    .agent-spinner-text {
+        color: #1E40AF;
+        font-weight: 600;
+        font-size: 0.94rem;
+        letter-spacing: -0.01em;
+    }
+    @keyframes agent-spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -367,9 +399,16 @@ else:
                         unsafe_allow_html=True
                     )
 
-                    if st.button("⚡ Khám phá ngay ↗", key=f"btn_starter_card_{idx}", use_container_width=True, type="secondary"):
-                        st.session_state["pending_prompt"] = card["prompt"]
-                        st.rerun()
+                    def _on_starter_click(p_text=card["prompt"]):
+                        st.session_state["pending_prompt"] = p_text
+
+                    st.button(
+                        "⚡ Khám phá ngay ↗",
+                        key=f"btn_starter_card_{idx}",
+                        use_container_width=True,
+                        type="secondary",
+                        on_click=_on_starter_click
+                    )
 
         st.markdown("<div style='margin-top: 14px; margin-bottom: 4px;'>", unsafe_allow_html=True)
         col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
@@ -397,25 +436,10 @@ else:
                 def update_status(text: str):
                     status_placeholder.markdown(
                         f"""
-                        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 18px; background: linear-gradient(135deg, #EFF6FF 0%, #F8FAFC 100%); border: 1px solid #BFDBFE; border-radius: 12px; margin: 8px 0; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.06);">
+                        <div class="agent-loading-card">
                             <div class="agent-spinner"></div>
-                            <span style="color: #1E40AF; font-weight: 600; font-size: 0.93rem; letter-spacing: -0.01em;">{text}</span>
+                            <span class="agent-spinner-text">{text}</span>
                         </div>
-                        <style>
-                            .agent-spinner {{
-                                width: 20px;
-                                height: 20px;
-                                border: 2.5px solid #DBEAFE;
-                                border-top: 2.5px solid #2563EB;
-                                border-radius: 50%;
-                                animation: agent-spin 0.85s linear infinite;
-                                flex-shrink: 0;
-                            }}
-                            @keyframes agent-spin {{
-                                0% {{ transform: rotate(0deg); }}
-                                100% {{ transform: rotate(360deg); }}
-                            }}
-                        </style>
                         """,
                         unsafe_allow_html=True
                     )
