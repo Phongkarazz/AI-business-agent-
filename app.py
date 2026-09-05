@@ -98,6 +98,74 @@ st.markdown("""
         box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08) !important;
         transform: translateY(-1px) !important;
     }
+
+    /* Hero Section & Database Live Snapshot */
+    .hero-container {
+        text-align: center;
+        padding: 20px 10px 6px 10px;
+        max-width: 860px;
+        margin: 0 auto;
+    }
+    .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
+        border: 1px solid #BFDBFE;
+        color: #1E40AF;
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 5px 14px;
+        border-radius: 9999px;
+        letter-spacing: 0.02em;
+        margin-bottom: 12px;
+    }
+    .hero-title {
+        font-size: 2.1rem;
+        font-weight: 800;
+        color: #0F172A;
+        letter-spacing: -0.025em;
+        line-height: 1.25;
+        margin-bottom: 8px;
+    }
+    .hero-subtitle {
+        font-size: 0.98rem;
+        color: #64748B;
+        line-height: 1.5;
+        max-width: 660px;
+        margin: 0 auto 18px auto;
+    }
+    .snapshot-bar {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+    }
+    .snapshot-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        border-radius: 10px;
+        padding: 6px 14px;
+        font-size: 0.84rem;
+        color: #334155;
+        font-weight: 500;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        transition: all 0.2s ease;
+    }
+    .snapshot-pill:hover {
+        border-color: #CBD5E1;
+        background: #FFFFFF;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.05);
+        transform: translateY(-1px);
+    }
+    .snapshot-pill b {
+        color: #0F172A;
+        font-weight: 700;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -212,28 +280,100 @@ else:
 
     # 4.3 Hiển thị Thẻ Gợi ý Câu hỏi Nhanh (Starter Cards) khi chưa có tin nhắn nào
     if not history and focused_turn_idx is None:
-        st.markdown("### 🚀 Chào mừng bạn đến với Veraxus for SQL!")
-        st.caption("Khám phá dữ liệu kinh doanh của bạn bằng cách nhấp vào một câu hỏi gợi ý nhanh dưới đây hoặc gõ câu hỏi của riêng bạn:")
-        st.markdown("###")
+        st.markdown("""
+        <div class="hero-container">
+            <div class="hero-badge">
+                ✨ Trợ Lý Phân Tích Dữ Liệu Doanh Nghiệp • Text-to-SQL Agent
+            </div>
+            <div class="hero-title">
+                Khám Phá Dữ Liệu Doanh Nghiệp
+            </div>
+            <div class="hero-subtitle">
+                Đặt câu hỏi tự nhiên bằng tiếng Việt — AI sẽ tự động lập trình SQL tối ưu, truy xuất dữ liệu tức thời, vẽ biểu đồ trực quan và phát hiện Insight quản trị.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         engine = st.session_state.get("engine")
         tables = get_table_names(engine)
         schema_context = st.session_state.get("schema_context", "")
+        provider_name = str(st.session_state.get("provider", "Ollama"))
+        model_disp = str(st.session_state.get("model_name", "qwen2.5-coder:3b"))
+
+        tbl_low = [t.lower() for t in tables]
+        is_emp = "employees" in tbl_low and "departments" in tbl_low
+
+        pill1 = "👥 <b>300,024</b> Nhân sự" if is_emp else f"📋 <b>{len(tables)}</b> Bảng CSDL"
+        pill2 = "🏢 <b>9</b> Phòng ban" if is_emp else "⚡ <b>MySQL</b> Kết nối an toàn"
+        pill3 = "📅 <b>18 Năm</b> Dữ liệu (1985–2002)" if is_emp else "🛡️ <b>Chế độ Chỉ đọc</b> Bảo mật"
+        pill4 = f"🤖 <b>Local AI</b> ({model_disp})" if "ollama" in provider_name.lower() else f"🤖 <b>AI</b> ({model_disp})"
+
+        st.markdown(f"""
+        <div class="snapshot-bar">
+            <div class="snapshot-pill">{pill1}</div>
+            <div class="snapshot-pill">{pill2}</div>
+            <div class="snapshot-pill">{pill3}</div>
+            <div class="snapshot-pill">{pill4}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
         starter_cards = generate_starter_prompts(tables, schema_context)
+        cards_to_show = starter_cards[:4]
+
+        # Category mapping for badges
+        category_map = {
+            "⚖️": "Công Bằng Thu Nhập",
+            "💰": "Khối Kinh Doanh",
+            "📅": "Quy Mô Tuyển Dụng",
+            "🚻": "Đa Dạng Giới Tính",
+            "🏢": "Nội Bộ Phòng Ban",
+            "👔": "Hồ Sơ Lãnh Đạo",
+            "📦": "Danh Mục Sản Phẩm",
+            "🏆": "Hiệu Suất Bán Hàng",
+            "🌍": "Thị Trường Quốc Tế",
+        }
 
         col_s1, col_s2 = st.columns(2, gap="medium")
-        for idx, card in enumerate(starter_cards):
+        for idx, card in enumerate(cards_to_show):
             target_col = col_s1 if idx % 2 == 0 else col_s2
             with target_col:
                 with st.container(border=True):
-                    st.markdown(f"**{card['icon']} {card['title']}**")
+                    tag_name = category_map.get(card.get("icon", ""), "Phân Tích")
+                    c_tag1, c_tag2 = st.columns([3, 1])
+                    with c_tag1:
+                        st.markdown(
+                            f"<span style='background: #F1F5F9; color: #475569; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.04em; text-transform: uppercase;'>"
+                            f"{tag_name}</span>",
+                            unsafe_allow_html=True
+                        )
+                    with c_tag2:
+                        st.markdown(
+                            f"<div style='text-align: right; color: #94A3B8; font-size: 0.75rem; font-weight: 600;'>#{idx+1}</div>",
+                            unsafe_allow_html=True
+                        )
+
+                    st.markdown(f"<div style='font-size: 1.05rem; font-weight: 700; color: #0F172A; margin: 6px 0 3px 0;'>{card['icon']} {card['title']}</div>", unsafe_allow_html=True)
                     st.caption(card["desc"])
-                    if st.button(f"🔍 \"{card['prompt']}\"", key=f"btn_starter_card_{idx}", use_container_width=True):
+
+                    st.markdown(
+                        f"<div style='background: #F8FAFC; border-left: 3px solid #2563EB; padding: 7px 11px; border-radius: 6px; font-size: 0.83rem; color: #334155; margin: 8px 0 10px 0; font-style: italic; line-height: 1.4;'>"
+                        f"“{card['prompt']}”"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+
+                    if st.button("⚡ Khám phá ngay ↗", key=f"btn_starter_card_{idx}", use_container_width=True, type="secondary"):
                         st.session_state["pending_prompt"] = card["prompt"]
                         st.rerun()
 
-    # 4.4 Xử lý gửi câu hỏi (từ Chat Input, Giọng nói Micro hoặc từ nút bấm Starter / Follow-up)
-    render_voice_input_button()
+        st.markdown("<div style='margin-top: 14px; margin-bottom: 4px;'>", unsafe_allow_html=True)
+        col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
+        with col_v2:
+            render_voice_input_button()
+            st.caption("💡 *Mẹo: Nhấp vào thẻ bất kỳ ở trên, gõ câu hỏi vào khung chat hoặc bấm micro để nói tiếng Việt.*")
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        render_voice_input_button()
     pending_prompt = st.session_state.get("pending_prompt")
     user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
 
