@@ -4,6 +4,7 @@ multi-series color grouping for line/area charts, multi-metric benchmark compari
 full category display (no skipped months), and straight horizontal ticks.
 """
 
+import re
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -61,7 +62,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             )
 
             if is_individual_entity and measure_cols:
-                chosen = "Bar"
+                uq_low = (user_query or "").lower()
+                is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "danh sách"])
+                if is_top_ranking and len(df) <= 15 and len(measure_cols) == 1:
+                    chosen = "Bar Ngang"
+                else:
+                    chosen = "Bar"
             elif is_distribution_breakdown:
                 chosen = "Pie"
             elif time_col and measure_cols and n_time > 1:
@@ -387,16 +393,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]) and plot_df[measure_cols[0]].nunique(dropna=True) == 1 and len(plot_df) > 1:
                         st.caption(f"ℹ️ Lưu ý: Tất cả {len(plot_df)} đối tượng hiển thị đều có cùng giá trị `{measure_cols[0]}` = {plot_df[measure_cols[0]].iloc[0]:,}.")
 
+                    curr_sym = "$" if any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue"]) else ""
+                    clean_m = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(measure_cols[0])).replace("_", " ").title()
+                    clean_lbl = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(label_name)).replace("_", " ").title()
+
                     fig = px.bar(
                         plot_df, x=label_name, y=measure_cols[0],
                         color=color_col,
                         barmode="group" if color_col else "relative",
-                        title=f"{measure_cols[0]} theo {label_name}" + (f" (Phân loại theo {color_col})" if color_col else ""),
+                        title=f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {color_col})" if color_col else ""),
                         category_orders={label_name: category_order},
                         template="plotly_white"
                     )
                     trace_kwargs = {
-                        "texttemplate": '%{y:,.2f}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else '%{y:,.0f}',
+                        "texttemplate": f"{curr_sym}%{{y:,.2f}}" if any('.' in str(v) for v in plot_df[measure_cols[0]]) else f"{curr_sym}%{{y:,.0f}}",
                         "textposition": 'outside',
                     }
                     if not color_col:
@@ -563,12 +573,16 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 # Sắp xếp tăng dần để khi vẽ từ dưới lên thì người cao nhất nằm trên cùng
                 plot_df = plot_df.sort_values(measure_cols[0], ascending=True)
 
+                curr_sym = "$" if any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue"]) else ""
+                clean_m = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(measure_cols[0])).replace("_", " ").title()
+                clean_lbl = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(label_name)).replace("_", " ").title()
+
                 fig = px.bar(
                     plot_df,
                     x=measure_cols[0],
                     y=label_name,
                     orientation='h',
-                    title=f"Xếp hạng {measure_cols[0]} theo {label_name}",
+                    title=f"Xếp hạng {clean_m} theo {clean_lbl}",
                     template="plotly_white"
                 )
                 target_entity = None
@@ -584,7 +598,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                 fig.update_traces(
                     marker_color=h_colors,
-                    texttemplate='%{x:,.2f}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else '%{x:,.0f}',
+                    texttemplate=f'{curr_sym}%{{x:,.2f}}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else f'{curr_sym}%{{x:,.0f}}',
                     textposition='outside',
                     width=0.45 if len(plot_df) <= 3 else None
                 )

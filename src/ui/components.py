@@ -167,7 +167,37 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         # Ưu tiên cột tổng thể (Total/Tổng/All) nếu có
         total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
         m_col = total_like_cols[0] if total_like_cols else (count_like_cols[0] if count_like_cols else measure_cols[0])
-        m_clean = str(m_col).replace("_", " ").title()
+        
+        # Tách camelCase và chuẩn hóa tên chỉ số hiển thị chuyên nghiệp
+        raw_m = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(m_col)).replace("_", " ").strip()
+        m_low = raw_m.lower()
+        if not is_en:
+            if any(k in m_low for k in ["current salary", "currentsalary", "lương mới nhất", "lương hiện tại"]):
+                m_clean = "Lương Hiện Tại"
+            elif any(k in m_low for k in ["avg salary", "avgsalary"]):
+                m_clean = "Lương Trung Bình"
+            elif "salary" in m_low or "lương" in m_low:
+                m_clean = "Mức Lương"
+            elif any(k in m_low for k in ["headcount", "totalemployees", "số lượng nhân sự"]):
+                m_clean = "Quy Mô Nhân Sự"
+            elif any(k in m_low for k in ["totalsalarybudget", "salarybudget", "quỹ lương"]):
+                m_clean = "Quỹ Lương"
+            elif any(k in m_low for k in ["yearsofservice", "years of service", "thâm niên"]):
+                m_clean = "Thâm Niên"
+            elif "raisecount" in m_low:
+                m_clean = "Số Lần Tăng Lương"
+            else:
+                m_clean = raw_m.title()
+        else:
+            m_clean = raw_m.title()
+
+        # Kiểm tra truy vấn xếp hạng Top N
+        is_top_query = any(k in (user_query or "").lower() for k in ["top", "danh sách", "hàng đầu", "cao nhất", "thấp nhất"])
+        scope_suffix = f" (Top {total_rows})" if is_top_query and total_rows <= 30 else ""
+
+        # Ký hiệu tiền tệ
+        is_currency = any(k in str(m_col).lower() for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "thu nhập"])
+        curr_symbol = "$" if is_currency else ""
 
         valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()
         if not valid_vals.empty:
@@ -193,9 +223,18 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             else:
                 min_label = f"#{min_idx + 1}"
 
-            fmt_avg = f"{avg_val:,.0f}" if isinstance(avg_val, (int, float)) and avg_val > 100 else f"{avg_val:,.2f}"
-            fmt_peak = f"{peak_val:,.0f}" if isinstance(peak_val, (int, float)) and peak_val > 100 else f"{peak_val:,.2f}"
-            fmt_min = f"{min_val:,.0f}" if isinstance(min_val, (int, float)) and min_val > 100 else f"{min_val:,.2f}"
+            def _fmt_kpi_val(v):
+                try:
+                    fv = float(v)
+                    if fv.is_integer() or fv > 100:
+                        return f"{curr_symbol}{fv:,.0f}"
+                    return f"{curr_symbol}{fv:,.2f}"
+                except Exception:
+                    return str(v)
+
+            fmt_avg = _fmt_kpi_val(avg_val)
+            fmt_peak = _fmt_kpi_val(peak_val)
+            fmt_min = _fmt_kpi_val(min_val)
 
             # Kiểm tra xem m_col có phải là giá trị trung bình/tỷ lệ/min/max không (để tránh lỗi cộng dồn thống kê)
             is_avg_or_rate = any(k in m_col.lower() for k in [
@@ -227,7 +266,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 with col4:
                     if target_idx is not None and target_idx in valid_vals.index:
                         t_val = df.loc[target_idx, m_col]
-                        fmt_t_val = f"{t_val:,.0f}" if isinstance(t_val, (int, float)) and t_val > 100 else f"{t_val:,.2f}"
+                        fmt_t_val = _fmt_kpi_val(t_val)
                         rank = int((valid_vals > t_val).sum()) + 1
                         st.metric(f"🎯 {target_name}", fmt_t_val, delta=f"Hạng {rank}/{total_rows}")
                     else:
@@ -235,11 +274,14 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             else:
                 # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
                 total_val = valid_vals.sum()
-                fmt_total = f"{total_val:,.0f}" if isinstance(total_val, (int, float)) and total_val > 100 else f"{total_val:,.2f}"
+                fmt_total = _fmt_kpi_val(total_val)
                 with col1:
-                    st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
+                    if is_top_query and total_rows <= 30:
+                        st.metric("🏆 " + ("Quy mô Top" if not is_en else "Top Size"), f"Top {total_rows}")
+                    else:
+                        st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
                 with col2:
-                    st.metric(f"💰 " + ("Tổng " if not is_en else "Total ") + m_clean, fmt_total)
+                    st.metric(f"💰 " + ("Tổng " if not is_en else "Total ") + m_clean + scope_suffix, fmt_total)
                 with col3:
                     st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
                 with col4:
@@ -375,7 +417,44 @@ def render_result(result: dict, turn_id: str):
     render_executive_kpi_cards(df, is_en=is_en, user_query=user_query)
 
     # 4. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
-    st.dataframe(df, width='stretch')
+    display_df = df.copy()
+
+    # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N
+    is_ranking = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất"])
+    if is_ranking and len(display_df) <= 50:
+        medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
+        display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
+        display_df.index.name = "Xếp hạng" if not is_en else "Rank"
+
+    column_config = {}
+    for col in display_df.columns:
+        c_low = str(col).lower()
+        if is_id_like(col):
+            column_config[col] = st.column_config.NumberColumn(col, format="%d")
+        elif any(k in c_low for k in ["salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí"]):
+            # Format tiền tệ thông minh: hiển thị $%,d nếu số nguyên, $%,.2f nếu có số lẻ
+            has_decimals = False
+            try:
+                numeric_vals = pd.to_numeric(display_df[col], errors="coerce").dropna()
+                has_decimals = any(not float(v).is_integer() for v in numeric_vals)
+            except Exception:
+                pass
+            column_config[col] = st.column_config.NumberColumn(
+                col,
+                format="$%,.2f" if has_decimals else "$%,d"
+            )
+        elif any(k in c_low for k in ["pct", "percent", "tỷ lệ", "rate", "ratio"]):
+            column_config[col] = st.column_config.NumberColumn(
+                col,
+                format="%.2f%%"
+            )
+        elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số"]):
+            column_config[col] = st.column_config.NumberColumn(
+                col,
+                format="%,d"
+            )
+
+    st.dataframe(display_df, column_config=column_config, width='stretch')
 
     c_csv, c_excel, c_pdf, _ = st.columns([2, 2.5, 2.5, 3])
     with c_csv:
