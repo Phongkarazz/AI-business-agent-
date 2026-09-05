@@ -143,8 +143,10 @@ def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: b
                 st.code(detail)
 
 
-def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
-    """Hiển thị cụm thẻ tóm tắt chỉ số điều hành (Executive KPI Summary Cards) trên đầu kết quả."""
+def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query: str = ""):
+    """Hiển thị cụm thẻ tóm tắt chỉ số điều hành (Executive KPI Summary Cards) trên đầu kết quả.
+    Tự động nhận diện cột trung bình/tỷ lệ để tránh lỗi cộng dồn (Sum of averages fallacy) và làm nổi bật đối tượng mục tiêu.
+    """
     if df is None or df.empty:
         return
 
@@ -160,7 +162,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
     total_rows = len(df)
 
     if measure_cols and total_rows > 1:
-        # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị Tổng trên thẻ KPI
+        # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị trên thẻ KPI
         count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
         # Ưu tiên cột tổng thể (Total/Tổng/All) nếu có
         total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
@@ -169,12 +171,13 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
 
         valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()
         if not valid_vals.empty:
-            total_val = valid_vals.sum()
             avg_val = valid_vals.mean()
             max_idx = valid_vals.idxmax()
+            min_idx = valid_vals.idxmin()
             peak_val = df.loc[max_idx, m_col]
+            min_val = df.loc[min_idx, m_col]
 
-            # Lấy tên đối tượng đầy đủ (ưu tiên Họ và Tên nếu có)
+            # Lấy nhãn đối tượng đầy đủ
             _, label_series, _ = pick_label_column(df, label_cols)
             if label_series is not None and max_idx in label_series.index:
                 peak_label = str(label_series.loc[max_idx])
@@ -183,19 +186,64 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False):
             else:
                 peak_label = f"#{max_idx + 1}"
 
-            fmt_total = f"{total_val:,.0f}" if isinstance(total_val, (int, float)) and total_val > 100 else f"{total_val:,.2f}"
+            if label_series is not None and min_idx in label_series.index:
+                min_label = str(label_series.loc[min_idx])
+            elif label_cols:
+                min_label = str(df.loc[min_idx, label_cols[0]])
+            else:
+                min_label = f"#{min_idx + 1}"
+
             fmt_avg = f"{avg_val:,.0f}" if isinstance(avg_val, (int, float)) and avg_val > 100 else f"{avg_val:,.2f}"
             fmt_peak = f"{peak_val:,.0f}" if isinstance(peak_val, (int, float)) and peak_val > 100 else f"{peak_val:,.2f}"
+            fmt_min = f"{min_val:,.0f}" if isinstance(min_val, (int, float)) and min_val > 100 else f"{min_val:,.2f}"
+
+            # Kiểm tra xem m_col có phải là giá trị trung bình/tỷ lệ/min/max không (để tránh lỗi cộng dồn thống kê)
+            is_avg_or_rate = any(k in m_col.lower() for k in [
+                "avg", "average", "mean", "trung_bình", "rate", "ratio", "pct", "percent", "tỷ_lệ", "max", "min"
+            ])
+
+            # Kiểm tra xem người dùng có hỏi về một đối tượng cụ thể (ví dụ Customer Service) không
+            target_idx = None
+            target_name = None
+            if user_query and label_series is not None:
+                uq_low = user_query.lower()
+                for idx, lbl in label_series.items():
+                    lbl_str = str(lbl).strip()
+                    if len(lbl_str) >= 3 and lbl_str.lower() in uq_low:
+                        target_idx = idx
+                        target_name = lbl_str
+                        break
 
             col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
-            with col2:
-                st.metric(f"💰 " + ("Tổng " if not is_en else "Total ") + m_clean, fmt_total)
-            with col3:
-                st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
-            with col4:
-                st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
+
+            if is_avg_or_rate:
+                # CỘT TRUNG BÌNH/TỶ LỆ: Hiển thị Thống kê tổng hợp khoa học, KHÔNG cộng dồn!
+                with col1:
+                    st.metric("📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities"), f"{total_rows:,}")
+                with col2:
+                    st.metric(f"📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg)
+                with col3:
+                    st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
+                with col4:
+                    if target_idx is not None and target_idx in valid_vals.index:
+                        t_val = df.loc[target_idx, m_col]
+                        fmt_t_val = f"{t_val:,.0f}" if isinstance(t_val, (int, float)) and t_val > 100 else f"{t_val:,.2f}"
+                        rank = int((valid_vals > t_val).sum()) + 1
+                        st.metric(f"🎯 {target_name}", fmt_t_val, delta=f"Hạng {rank}/{total_rows}")
+                    else:
+                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
+            else:
+                # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
+                total_val = valid_vals.sum()
+                fmt_total = f"{total_val:,.0f}" if isinstance(total_val, (int, float)) and total_val > 100 else f"{total_val:,.2f}"
+                with col1:
+                    st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
+                with col2:
+                    st.metric(f"💰 " + ("Tổng " if not is_en else "Total ") + m_clean, fmt_total)
+                with col3:
+                    st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
+                with col4:
+                    st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
             st.write("")
 
     elif total_rows == 1 and measure_cols:
@@ -322,10 +370,9 @@ def render_result(result: dict, turn_id: str):
                 lambda val: unassigned_label if pd.isna(val) or (isinstance(val, str) and not val.strip()) else val
             )
     df = cleaned_df
-    result["df"] = df
-
     # 3. Thẻ Tóm tắt Chỉ số Điều hành (Executive KPI Summary Cards)
-    render_executive_kpi_cards(df, is_en=is_en)
+    user_query = result.get("query", "")
+    render_executive_kpi_cards(df, is_en=is_en, user_query=user_query)
 
     # 4. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
     st.dataframe(df, width='stretch')
@@ -482,7 +529,7 @@ def render_result(result: dict, turn_id: str):
         else:
             norm_override = "Tự động"
 
-        chart_fig = render_smart_chart(df, norm_override, turn_id)
+        chart_fig = render_smart_chart(df, norm_override, turn_id, user_query=user_query)
 
         if chart_fig:
             st.caption("💡 **Mẹo:** Rê chuột vào góc trên bên phải biểu đồ và bấm biểu tượng máy ảnh 📷 để tải ngay ảnh PNG độ nét cao (HD)." if not is_en else "💡 **Tip:** Hover over the top-right of the chart and click the camera icon 📷 to download HD PNG image instantly.")

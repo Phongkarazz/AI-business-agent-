@@ -17,7 +17,7 @@ from src.analytics.heuristics import (
 )
 
 
-def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
+def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user_query: str = ""):
     """Tự động phân loại cột và render biểu đồ phù hợp nhất:
     - Line/Area: Nếu có cột thời gian -> biểu đồ xu hướng theo thời gian, hiển thị đầy đủ 100% các tháng với số nằm ngang thẳng.
     - Bar:
@@ -290,13 +290,27 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     # Lọc các chỉ số có cùng thang đo (tránh vẽ lẫn lộn số lượng 1,2 và phần trăm 100% trên cùng 1 trục)
                     pct_cols = [c for c in measure_cols if any(k in c.lower() for k in ["pct", "percent", "rate", "tỷ lệ", "%"])]
                     non_total_cols = [c for c in measure_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])]
+                    non_pct_cols = [c for c in measure_cols if c not in pct_cols]
 
-                    if pct_cols:
+                    # Kiểm tra xem người dùng có thực sự yêu cầu vẽ tỷ lệ/phần trăm không
+                    uq_low = (user_query or "").lower()
+                    user_asked_pct = any(k in uq_low for k in ["tỷ lệ", "phần trăm", "percent", "pct", "%", "share", "cơ cấu"])
+
+                    if pct_cols and (user_asked_pct or not non_pct_cols):
                         active_measures = pct_cols
                         chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
-                    elif len(non_total_cols) >= 2:
-                        active_measures = non_total_cols
-                        chart_title = f"So sánh ({', '.join(non_total_cols)}) theo {label_name}"
+                    elif non_pct_cols:
+                        # Ưu tiên các cột giá trị thực tế (lương thực, quy mô...) thay vì phần trăm ảo
+                        clean_non_pct = [c for c in non_pct_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])] or non_pct_cols
+                        if len(clean_non_pct) >= 2:
+                            active_measures = clean_non_pct
+                            chart_title = f"So sánh ({', '.join(clean_non_pct)}) theo {label_name}"
+                        else:
+                            active_measures = clean_non_pct
+                            chart_title = f"{clean_non_pct[0]} theo {label_name}"
+                    elif pct_cols:
+                        active_measures = pct_cols
+                        chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
                     else:
                         active_measures = measure_cols
                         chart_title = f"So sánh các chỉ số ({', '.join(measure_cols)}) theo {label_name}"
@@ -386,11 +400,39 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                         "textposition": 'outside',
                     }
                     if not color_col:
-                        trace_kwargs["marker_color"] = "#1F4E78"
+                        # Kiểm tra xem người dùng có hỏi về một thực thể cụ thể không (Target Entity Accent Color)
+                        target_entity = None
+                        if user_query:
+                            uq_low = user_query.lower()
+                            for v in plot_df[label_name]:
+                                v_str = str(v).strip()
+                                if len(v_str) >= 3 and v_str.lower() in uq_low:
+                                    target_entity = v_str
+                                    break
+
+                        if target_entity:
+                            # Tô màu nổi bật Cam Đậm #F59E0B cho đối tượng được hỏi, màu Xanh #3B82F6 cho các đối tượng khác
+                            colors = ['#F59E0B' if str(v).strip().lower() == target_entity.lower() else '#3B82F6' for v in plot_df[label_name]]
+                            trace_kwargs["marker_color"] = colors
+                        else:
+                            trace_kwargs["marker_color"] = "#1F4E78"
+
                     if len(plot_df) <= 2:
                         trace_kwargs["width"] = 0.35
 
                     fig.update_traces(**trace_kwargs)
+
+                    # Bổ sung đường trung bình chuẩn Benchmark Line nếu là so sánh giữa các thực thể và có ít nhất 3 dòng
+                    if not color_col and len(plot_df) >= 3 and pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]):
+                        mean_benchmark = float(plot_df[measure_cols[0]].mean())
+                        fig.add_hline(
+                            y=mean_benchmark,
+                            line_dash="dash",
+                            line_color="#EF4444",
+                            annotation_text=f"Benchmark TB: {mean_benchmark:,.0f}" if mean_benchmark > 100 else f"Benchmark TB: {mean_benchmark:,.2f}",
+                            annotation_position="top right"
+                        )
+
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         margin=dict(l=20, r=20, t=50, b=90 if tick_angle != 0 else 50)
@@ -529,12 +571,34 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str):
                     title=f"Xếp hạng {measure_cols[0]} theo {label_name}",
                     template="plotly_white"
                 )
+                target_entity = None
+                if user_query:
+                    uq_low = user_query.lower()
+                    for v in plot_df[label_name]:
+                        v_str = str(v).strip()
+                        if len(v_str) >= 3 and v_str.lower() in uq_low:
+                            target_entity = v_str
+                            break
+
+                h_colors = ['#F59E0B' if str(v).strip().lower() == (target_entity or "").lower() else '#1F4E78' for v in plot_df[label_name]] if target_entity else "#1F4E78"
+
                 fig.update_traces(
-                    marker_color="#1F4E78",
+                    marker_color=h_colors,
                     texttemplate='%{x:,.2f}' if any('.' in str(v) for v in plot_df[measure_cols[0]]) else '%{x:,.0f}',
                     textposition='outside',
                     width=0.45 if len(plot_df) <= 3 else None
                 )
+
+                if len(plot_df) >= 3 and pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]):
+                    mean_benchmark = float(plot_df[measure_cols[0]].mean())
+                    fig.add_vline(
+                        x=mean_benchmark,
+                        line_dash="dash",
+                        line_color="#EF4444",
+                        annotation_text=f"Benchmark TB: {mean_benchmark:,.0f}" if mean_benchmark > 100 else f"Benchmark TB: {mean_benchmark:,.2f}",
+                        annotation_position="top right"
+                    )
+
                 fig.update_layout(
                     yaxis=dict(type="category", automargin=True),
                     xaxis_title=measure_cols[0],

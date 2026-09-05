@@ -519,7 +519,53 @@ ORDER BY s_agg.RaiseCount DESC, s_agg.CurrentSalary DESC;
 (BẮT BUỘC dùng subquery s_agg có LIMIT 10 để chạy trong 0.5s và không tràn 5,000 dòng, sắp xếp theo RaiseCount DESC, CurrentSalary DESC!)
 """
 
-    # 7. Tỷ lệ nam và nữ trong ban quản lý (dept_manager)
+    # 7. Danh sách Manager hiện tại của từng phòng ban kèm mức lương mới nhất
+    elif any(k in q_low for k in ["manager", "trưởng phòng", "ban quản lý", "lãnh đạo phòng"]) and any(k in q_low for k in ["lương", "thu nhập", "salary"]) and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DANH SÁCH MANAGER HIỆN TẠI CỦA TỪNG PHÒNG BAN KÈM LƯƠNG MỚI NHẤT):
+SELECT 
+    d.dept_name AS Department,
+    CONCAT(e.first_name, ' ', e.last_name) AS ManagerName,
+    s.salary AS CurrentSalary
+FROM dept_manager dm
+JOIN departments d ON dm.dept_no = d.dept_no
+JOIN employees e ON dm.emp_no = e.emp_no
+JOIN salaries s ON dm.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE dm.to_date = '9999-01-01'
+ORDER BY CurrentSalary DESC;
+(BẮT BUỘC lọc dm.to_date = '9999-01-01' VÀ s.to_date = '9999-01-01' để lấy đúng 9 Trưởng phòng hiện tại! TUYỆT ĐỐI KHÔNG DÙNG SUM(salary) toàn công ty hay sinh cột TotalCompanyValue!)
+"""
+
+    # 8. So sánh mức lương trung bình của một phòng ban cụ thể so với các phòng ban khác (hoặc so sánh lương giữa các phòng)
+    elif any(k in q_low for k in ["so sánh", "so voi", "so với"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH MỨC LƯƠNG TRUNG BÌNH GIỮA CÁC PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY AvgSalary DESC;
+(CẢNH BÁO ĐẶC BIỆT: CHỈ CẦN 2 CỘT: Department VÀ AvgSalary! TUYỆT ĐỐI KHÔNG TÍNH THÊM CỘT PercentOfTotal HAY TỶ LỆ TRÊN TỔNG VÌ SẼ LÀM BIỂU ĐỒ BỊ PHẲNG LÌ!)
+"""
+
+    # 9. Quy mô các phòng ban lớn nhất và nhỏ nhất
+    elif any(k in q_low for k in ["quy mô", "nhân sự", "số lượng"]) and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất"]) and any(k in q_low for k in ["phòng ban", "phòng"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (QUY MÔ CÁC PHÒNG BAN TỪ LỚN NHẤT ĐẾN NHỎ NHẤT):
+SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY Headcount DESC;
+(CẢNH BÁO ĐẶC BIỆT: Sắp xếp ORDER BY Headcount DESC để thấy rõ ràng phòng ban lớn nhất ở đầu và nhỏ nhất ở cuối! TUYỆT ĐỐI KHÔNG DÙNG SUBQUERY TÍNH Max_size / Min_size lặp lại trên từng dòng!)
+"""
+
+    # 10. Tỷ lệ nam và nữ trong ban quản lý (dept_manager)
     elif any(k in q_low for k in ["ban quản lý", "dept_manager", "manager", "quản lý"]) and any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ", "nam", "nữ"]):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ NAM VÀ NỮ TRONG BAN QUẢN LÝ):
