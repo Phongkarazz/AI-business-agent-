@@ -148,6 +148,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
     """Hiển thị cụm thẻ tóm tắt chỉ số điều hành (Executive KPI Summary Cards) trên đầu kết quả.
     Tự động nhận diện cột trung bình/tỷ lệ để tránh lỗi cộng dồn (Sum of averages fallacy) và làm nổi bật đối tượng mục tiêu.
     """
+    import re
     if df is None or df.empty:
         return
 

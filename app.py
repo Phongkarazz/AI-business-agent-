@@ -4,6 +4,7 @@ Featuring standalone Onboarding, interactive Explorer Sidebar, direct History In
 Smart Starter Cards (1-Click), and Follow-up Question Suggestions.
 """
 
+import re
 import streamlit as st
 
 try:
