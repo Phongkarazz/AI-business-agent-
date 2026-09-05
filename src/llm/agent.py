@@ -187,22 +187,80 @@ def clean_sql_query(sql: str) -> str:
     return s.strip().strip("`").rstrip(";").strip()
 
 
+def extract_requested_limit(user_query: str) -> int | None:
+    """Trích xuất số lượng N mà người dùng yêu cầu (ví dụ: Top 10, Top 5, 10 nhân viên, danh sách 10...)."""
+    if not user_query:
+        return None
+    # 1. Khớp Top N, TopN (VD: Top 10, top 5, top10, top3)
+    m = re.search(r"\btop\s*(\d+)\b", user_query, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    # 2. Khớp các biến thể tiếng Việt: '10 nhân viên', '10 người', '10 chức danh', '10 sản phẩm'
+    m2 = re.search(r"\b(\d+)\s+(?:nhân viên|người|chức danh|vị trí|phòng ban|sản phẩm|khách hàng|đơn hàng|món)\b", user_query, re.IGNORECASE)
+    if m2:
+        return int(m2.group(1))
+
+    # 3. Khớp 'danh sách 10', 'lấy 10', 'cho tôi 10'
+    m3 = re.search(r"\b(?:danh\s+sách|lấy|cho\s+tôi|xem)\s+(\d+)\b", user_query, re.IGNORECASE)
+    if m3:
+        return int(m3.group(1))
+
+    return None
+
+
 def enforce_top_n_limit(sql: str, user_query: str) -> str:
     """Tự động khóa mệnh đề LIMIT N khi câu hỏi của người dùng có chứa Top N (ví dụ Top 5, Top 10, Top 3)."""
     if not sql or not user_query:
         return sql
-    m = re.search(r"\btop\s+(\d+)\b", user_query, re.IGNORECASE)
-    if not m:
+    top_n = extract_requested_limit(user_query)
+    if not top_n:
         return sql
-    top_n = int(m.group(1))
 
-    limit_match = re.search(r"\bLIMIT\s+(\d+)\b", sql, re.IGNORECASE)
+    # Khóa LIMIT ở câu query ngoài cùng
+    limit_match = re.search(r"\bLIMIT\s+(\d+)\b(?=[^)]*$)", sql, re.IGNORECASE)
     if limit_match:
         existing_limit = int(limit_match.group(1))
         if existing_limit != top_n:
-            sql = re.sub(r"\bLIMIT\s+\d+\b", f"LIMIT {top_n}", sql, flags=re.IGNORECASE)
+            sql = re.sub(r"\bLIMIT\s+\d+\b(?=[^)]*$)", f"LIMIT {top_n}", sql, flags=re.IGNORECASE)
     else:
         sql = sql.rstrip(";").strip() + f" LIMIT {top_n}"
+    return sql
+
+
+def auto_fix_top_employee_salary_query(sql: str, user_query: str) -> str:
+    """Tự động sửa câu hỏi Top N lương cao nhất của nhân viên để luôn lọc đúng lương hiện tại (to_date = '9999-01-01') tránh trùng lặp năm lịch sử gây hao hụt số dòng."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_top_salary = (
+        any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất"])
+        and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "sales", "phòng"])
+        and not any(k in q_low for k in ["chức danh", "title", "nam và nữ", "quỹ lương"])
+    )
+    if not is_top_salary:
+        return sql
+
+    lowered_sql = sql.lower()
+    # Kiểm tra xem câu SQL có JOIN salaries và employees không
+    if "salaries" in lowered_sql and "employees" in lowered_sql:
+        # Đảm bảo có lọc s.to_date = '9999-01-01' để không bị lặp 1 nhân viên nhiều năm lương
+        if not re.search(r"\bs\.to_date\s*=\s*'9999-01-01'", sql, re.IGNORECASE) and not re.search(r"GROUP\s+BY\s+.*emp_no", sql, re.IGNORECASE):
+            if "where" in lowered_sql:
+                sql = re.sub(r"\bWHERE\b", "WHERE s.to_date = '9999-01-01' AND ", sql, count=1, flags=re.IGNORECASE)
+            else:
+                if re.search(r"\bORDER\s+BY\b", sql, re.IGNORECASE):
+                    sql = re.sub(r"\bORDER\s+BY\b", "WHERE s.to_date = '9999-01-01' ORDER BY", sql, count=1, flags=re.IGNORECASE)
+                elif re.search(r"\bLIMIT\b", sql, re.IGNORECASE):
+                    sql = re.sub(r"\bLIMIT\b", "WHERE s.to_date = '9999-01-01' LIMIT", sql, count=1, flags=re.IGNORECASE)
+                else:
+                    sql = sql.rstrip(";").strip() + " WHERE s.to_date = '9999-01-01'"
+
+        # Nếu có dept_emp, đảm bảo de.to_date = '9999-01-01'
+        if "dept_emp" in lowered_sql and not re.search(r"\bde\.to_date\s*=\s*'9999-01-01'", sql, re.IGNORECASE):
+            if "where" in sql.lower():
+                sql = re.sub(r"\bWHERE\b", "WHERE de.to_date = '9999-01-01' AND ", sql, count=1, flags=re.IGNORECASE)
+
     return sql
 
 
@@ -833,6 +891,7 @@ def run_agent(
         sql_query = auto_fix_raises_query(sql_query, user_query)
         sql_query = auto_fix_department_comparison_query(sql_query, user_query)
         sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
+        sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -847,6 +906,7 @@ def run_agent(
         sql_query = auto_fix_raises_query(sql_query, user_query)
         sql_query = auto_fix_department_comparison_query(sql_query, user_query)
         sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
+        sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):

@@ -4,6 +4,8 @@ automatic business insights with Executive Priority Tagging, and intelligent bil
 Strictly grounded in provided database schema with relative historical time-handling to prevent 0-row results.
 """
 
+import re
+
 
 def get_dialect_hints(dialect: str, lang: str = "vi") -> str:
     """Trả về hướng dẫn cú pháp SQL theo từng hệ quản trị cơ sở dữ liệu và ngôn ngữ."""
@@ -187,15 +189,15 @@ def get_db_specific_rules(schema_context: str) -> str:
           BẮT BUỘC dùng YEAR(s.from_date) AS Year, TUYỆT ĐỐI KHÔNG lọc `s.to_date = '9999-01-01'` và KHÔNG GROUP BY `s.to_date` (để lấy đủ 18 năm lịch sử từ 1985 đến 2002, không bị năm 9999 hoặc chỉ có 2 năm)!
 
 
-      + MẪU CHUẨN TOP N CHỨC DANH LƯƠNG CAO NHẤT (Ví dụ: Top 5 chức danh):
+      + MẪU CHUẨN TOP N CHỨC DANH LƯƠNG CAO NHẤT (Ví dụ: Top 10 chức danh):
         SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
         FROM salaries s
         JOIN titles t ON s.emp_no = t.emp_no
         WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
         GROUP BY t.title
         ORDER BY AvgSalary DESC
-        LIMIT 5;
-        * QUY TẮC: Khi câu hỏi có chữ 'Top N' (Top 5, Top 10, Top 3): BẮT BUỘC phải có mệnh đề LIMIT N ở cuối câu SQL!
+        LIMIT 10;
+        * QUY TẮC BẮT BUỘC: Khi câu hỏi có chữ 'Top N' (Top 10, Top 5, Top 3): BẮT BUỘC phải dùng đúng mệnh đề LIMIT N tương ứng theo đúng số N người dùng yêu cầu! TUYỆT ĐỐI KHÔNG tự ý giảm xuống LIMIT 5 nếu người dùng hỏi Top 10!
 
       + MẪU CHUẨN SO SÁNH LƯƠNG NAM VÀ NỮ THEO TỪNG CHỨC DANH:
         SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
@@ -356,6 +358,10 @@ def get_targeted_hint(user_query: str, schema_context: str = "") -> str:
     """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) cho câu hỏi cụ thể, áp dụng cho cả prompt gốc và prompt sửa lỗi."""
     q_low = (user_query or "").lower()
 
+    # Trích xuất số lượng N linh hoạt từ câu hỏi (VD: Top 10, top 5, 10 nhân viên, danh sách 10...)
+    top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
+    req_limit = int(top_m.group(1)) if top_m else 10
+
     # 1. Câu hỏi liên quan đến chức danh (Title)
     if any(k in q_low for k in ["chức danh", "title", "vị trí", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
         if any(k in q_low for k in ["nam", "nữ", "gender", "giới tính"]):
@@ -384,7 +390,7 @@ ORDER BY EmployeeCount DESC;
 (BẮT BUỘC dùng bảng titles t, đếm EmployeeCount và tính Percentage, TUYỆT ĐỐI KHÔNG JOIN salaries hay departments, KHÔNG LỌC THEO PHÒNG BAN SALES!)
 """
         elif any(k in q_low for k in ["top", "cao nhất", "lương trung bình"]):
-            return """
+            return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP CHỨC DANH LƯƠNG CAO NHẤT):
 SELECT t.title AS Title, ROUND(AVG(s.salary), 2) AS AvgSalary
 FROM salaries s
@@ -392,13 +398,13 @@ JOIN titles t ON s.emp_no = t.emp_no
 WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
 GROUP BY t.title
 ORDER BY AvgSalary DESC
-LIMIT 5;
-(BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
+LIMIT {req_limit};
+(BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp! BẮT BUỘC dùng đúng LIMIT {req_limit} theo yêu cầu người dùng!)
 """
 
     # 2. Thâm niên nhân sự
     elif any(k in q_low for k in ["thâm niên", "cống hiến"]) or ("lâu nhất" in q_low and any(k in q_low for k in ["nhân viên", "công tác", "làm việc"])):
-        return """
+        return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN THÂM NIÊN LÂU NHẤT CÒN CÔNG TÁC):
 SELECT 
     e.emp_no,
@@ -410,8 +416,8 @@ FROM employees e
 JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
 JOIN departments d ON de.dept_no = d.dept_no
 ORDER BY e.hire_date ASC, YearsOfService DESC
-LIMIT 10;
-(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI CẤM DÙNG YEAR(de.to_date) hay tạo cột mang giá trị 9999, BẮT BUỘC TÍNH CỘT YearsOfService DÙNG DATEDIFF và ORDER BY e.hire_date ASC!)
+LIMIT {req_limit};
+(TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI CẤM DÙNG YEAR(de.to_date) hay tạo cột mang giá trị 9999, BẮT BUỘC TÍNH CỘT YearsOfService DÙNG DATEDIFF và ORDER BY e.hire_date ASC LIMIT {req_limit}!)
 """
 
     # 3. Xu hướng tuyển dụng theo phòng ban qua các năm
@@ -435,10 +441,15 @@ ORDER BY HireYear ASC;
 (TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI KHÔNG SO SÁNH LƯƠNG CHỨC DANH NAM NỮ, BẮT BUỘC DÙNG ĐÚNG PHÒNG BAN '{dept_target}' VÀ ORDER BY HireYear ASC!)
 """
 
-    # 4. Top nhân viên lương cao nhất hiện tại toàn công ty
-    elif any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "toàn công ty", "công ty", "người", "ai"]):
-        return """
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP NHÂN VIÊN LƯƠNG CAO NHẤT HIỆN TẠI):
+    # 4. Top nhân viên lương cao nhất hiện tại toàn công ty hoặc theo phòng ban
+    elif any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "toàn công ty", "công ty", "người", "ai", "sales", "phòng"]):
+        dept_filter = ""
+        for d_name in ["Sales", "Development", "Marketing", "Research", "Finance", "Production", "Human Resources", "Quality Management", "Customer Service"]:
+            if d_name.lower() in q_low:
+                dept_filter = f" AND d.dept_name = '{d_name}'"
+                break
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP NHÂN VIÊN LƯƠNG CAO NHẤT):
 SELECT 
     e.emp_no,
     CONCAT(e.first_name, ' ', e.last_name) AS FullName,
@@ -448,10 +459,10 @@ FROM salaries s
 JOIN employees e ON s.emp_no = e.emp_no
 JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
 JOIN departments d ON de.dept_no = d.dept_no
-WHERE s.to_date = '9999-01-01'
+WHERE s.to_date = '9999-01-01'{dept_filter}
 ORDER BY CurrentSalary DESC
-LIMIT 10;
-(CẢNH BÁO: Bảng salaries và employees KHÔNG CÓ CỘT dept_no! BẮT BUỘC JOIN QUA dept_emp de: ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no! TUYỆT ĐỐI KHÔNG VIẾT s.dept_no hay e.dept_no!)
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC: Lọc đúng s.to_date = '9999-01-01' và de.to_date = '9999-01-01' để lấy đúng lương hiện tại của từng nhân viên duy nhất, không bị trùng lặp lịch sử nhiều năm, và BẮT BUỘC dùng đúng LIMIT {req_limit} theo câu hỏi người dùng!)
 """
 
     # 5. Tổng quỹ lương
@@ -655,7 +666,7 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - VỚI CÂU HỎI THEO THỜI GIAN / THEO THÁNG / THEO QUÝ / XU HƯỚNG:
         + TUYỆT ĐỐI CẤM DÙNG `LIMIT 10` (Bởi vì 1 năm có đủ 12 tháng, nếu dùng LIMIT 10 sẽ bị cắt mất tháng 6 hoặc tháng 12!).
         + BẮT BUỘC `ORDER BY ... ASC` để biểu đồ đường vẽ liền mạch, chuẩn xác theo đúng trình tự thời gian!
-     + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top...', 'Những...', 'Các...') mà không phải theo chuỗi thời gian: BẮT BUỘC dùng `LIMIT 10` (hoặc `LIMIT 5`), TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` để trả về đầy đủ danh sách trực quan cho người dùng.
+      + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top N...', 'Những...', 'Các...'): BẮT BUỘC tuân thủ đúng số N trong câu hỏi (Ví dụ: 'Top 10' -> BẮT BUỘC `LIMIT 10`, 'Top 5' -> `LIMIT 5`). Nếu không ghi rõ số N, mặc định dùng `LIMIT 10`. TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` hoặc tự ý giảm số lượng xuống 5 khi người dùng yêu cầu Top 10!
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
      + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):
