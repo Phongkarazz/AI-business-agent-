@@ -30,6 +30,8 @@ from .prompts import (
     build_anomaly_prompt,
     build_auto_insight_prompt,
     build_followup_prompt,
+    match_chocolates_specific_product,
+    match_chocolates_specific_person,
 )
 
 
@@ -901,6 +903,90 @@ JOIN geo g ON s.GeoID = g.GeoID
 GROUP BY Month
 ORDER BY Month ASC"""
 
+    specific_product = match_chocolates_specific_product(q_low) or match_chocolates_specific_product(sql_low)
+    specific_person = match_chocolates_specific_person(q_low) or match_chocolates_specific_person(sql_low)
+
+    # 0.14 Doanh thu của Sản phẩm cụ thể kết hợp với Nhân viên cụ thể qua các tháng
+    if specific_product and specific_person and has_monthly:
+        escaped_prod = specific_product.replace("'", "''")
+        escaped_pers = specific_person.replace("'", "''")
+        conds = [f"pr.Product = '{escaped_prod}'", f"pe.Salesperson = '{escaped_pers}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+        return f"""SELECT 
+    {date_expr} AS Month,
+    {metric_expr}
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY Month
+ORDER BY Month ASC"""
+
+    # 0.15 Doanh thu của một Sản phẩm cụ thể (ví dụ 85% Dark Bars, Mint Chip Choco...) qua các tháng
+    if specific_product and has_monthly and not any(k in q_low for k in ["nhân viên", "salesperson", "quốc gia", "country"]):
+        escaped_prod = specific_product.replace("'", "''")
+        conds = [f"pr.Product = '{escaped_prod}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+        clean_prod_name = specific_product.lower().replace("'", "")
+        clean_sql = sql_low.replace("'", "").replace("''", "")
+        needs_fix = (
+            "with " in sql_low
+            or "pr.pid" not in sql_low
+            or "products" not in sql_low
+            or clean_prod_name not in clean_sql
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+            or "group by month, product" in sql_low
+            or "group by month" not in sql_low
+            or (year_val and f"{year_val}" not in sql_low)
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    {metric_expr}
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{where_clause}
+GROUP BY Month
+ORDER BY Month ASC"""
+
+    # 0.16 Doanh thu của một Nhân viên cụ thể (ví dụ Ches Bonnell, Brijesh Shah...) qua các tháng
+    if specific_person and has_monthly and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country"]):
+        escaped_pers = specific_person.replace("'", "''")
+        conds = [f"pe.Salesperson = '{escaped_pers}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+        clean_pers_name = specific_person.lower().replace("'", "")
+        clean_sql = sql_low.replace("'", "").replace("''", "")
+        needs_fix = (
+            "with " in sql_low
+            or "pe.spid" not in sql_low
+            or "people" not in sql_low
+            or clean_pers_name not in clean_sql
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+            or "group by month, salesperson" in sql_low
+            or "group by month" not in sql_low
+            or (year_val and f"{year_val}" not in sql_low)
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    {metric_expr}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY Month
+ORDER BY Month ASC"""
+
     # 0.2 Doanh thu theo từng Team qua các tháng
     is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng"]) or "team" in sql_low
     if is_team and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country", "nhân viên", "salesperson"]):
@@ -956,7 +1042,7 @@ ORDER BY Month ASC, TotalSales DESC"""
 
     # 2. Doanh thu theo từng sản phẩm qua các tháng
     is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola", "chocolate"])
-    if is_product and not any(k in q_low for k in ["quốc gia", "country", "nhân viên", "salesperson", "team", "yummies", "delish", "jucies"]):
+    if is_product and not specific_product and not any(k in q_low for k in ["quốc gia", "country", "nhân viên", "salesperson", "team", "yummies", "delish", "jucies"]):
         needs_fix = (
             "with " in sql_low
             or ("year(" in sql_low and "month(" in sql_low)
@@ -977,7 +1063,7 @@ ORDER BY Month ASC, TotalSales DESC"""
 
     # 3. Doanh thu theo nhân viên bán hàng qua các tháng
     is_person = any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán"]) or "people" in sql_low or "spid" in sql_low
-    if is_person and not any(k in q_low for k in ["quốc gia", "country", "sản phẩm", "product"]):
+    if is_person and not specific_person and not any(k in q_low for k in ["quốc gia", "country", "sản phẩm", "product"]):
         needs_fix = (
             "with " in sql_low
             or ("year(" in sql_low and "month(" in sql_low)

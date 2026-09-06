@@ -368,6 +368,57 @@ def get_db_specific_rules(schema_context: str) -> str:
      + Mỗi bảng được JOIN phải có bí danh phân biệt, không được trùng nhau."""
 
 
+CHOCOLATES_PRODUCTS = [
+    '50% Dark Bites', '70% Dark Bites', '85% Dark Bars', '99% Dark & Pure',
+    'After Nines', 'Almond Choco', "Baker's Choco Chips", 'Caramel Stuffed Bars',
+    'Choco Coated Almonds', 'Drinking Coco', 'Eclairs', 'Fruit & Nut Bars',
+    'Manuka Honey Choco', 'Milk Bars', 'Mint Chip Choco', 'Orange Choco',
+    'Organic Choco Syrup', 'Peanut Butter Cubes', 'Raspberry Choco',
+    'Smooth Sliky Salty', 'Spicy Special Slims', 'White Choc'
+]
+
+CHOCOLATES_PEOPLE = [
+    'Andria Kimpton', 'Barr Faughny', 'Benny Karolovsky', 'Beverie Moffet', 'Brien Boise',
+    'Camilla Castle', 'Ches Bonnell', 'Curtice Advani', 'Dennison Crosswaite', 'Dotty Strutley',
+    'Dyna Doucette', 'Ebonee Roxburgh', 'Gigi Bohling', 'Gray Seamon', 'Gunar Cockshoot',
+    'Husein Augar', 'Jan Morforth', 'Janene Hairsine', 'Jehu Rudeforth', 'Kaine Padly',
+    'Karlen McCaffrey', 'Kelci Walkden', 'Madelene Upcott', 'Mallorie Waber', "Marney O'Breen",
+    'Niall Selesnick', 'Oby Sorrel', 'Orton Livick', 'Rafaelita Blaksland', 'Roddy Speechley',
+    'Van Tuxwell', "Wilone O'Kielt", 'Zach Polon'
+]
+
+
+def match_chocolates_specific_product(text: str):
+    """Khớp tên sản phẩm cụ thể trong CSDL Chocolates từ văn bản người dùng hoặc SQL."""
+    if not text:
+        return None
+    t_clean = re.sub(r"['’\"`]", "", text.lower())
+    for prod in sorted(CHOCOLATES_PRODUCTS, key=len, reverse=True):
+        p_clean = re.sub(r"['’\"`]", "", prod.lower())
+        if p_clean in t_clean:
+            return prod
+    for pct, prod in [("85%", "85% Dark Bars"), ("70%", "70% Dark Bites"), ("50%", "50% Dark Bites"), ("99%", "99% Dark & Pure")]:
+        if pct in text:
+            return prod
+    return None
+
+
+def match_chocolates_specific_person(text: str):
+    """Khớp tên nhân viên bán hàng cụ thể trong CSDL Chocolates."""
+    if not text:
+        return None
+    t_clean = re.sub(r"['’\"`]", "", text.lower())
+    for person in sorted(CHOCOLATES_PEOPLE, key=len, reverse=True):
+        p_clean = re.sub(r"['’\"`]", "", person.lower())
+        if p_clean in t_clean:
+            return person
+        parts = person.split()
+        for part in parts:
+            if len(part) >= 5 and re.search(rf"\b{re.escape(part.lower())}\b", t_clean):
+                return person
+    return None
+
+
 def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = "") -> str:
     """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) cho câu hỏi cụ thể, áp dụng cho cả prompt gốc và prompt sửa lỗi."""
     q_low = (user_query or "").lower()
@@ -506,6 +557,62 @@ JOIN geo g ON s.GeoID = g.GeoID
 ORDER BY Month ASC, TotalSales DESC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! BẮT BUỘC dùng SELECT trực tiếp JOIN giữa sales s và geo g ON s.GeoID = g.GeoID! Dùng {date_expr} AS Month làm trục thời gian và g.Geo AS Country để vẽ biểu đồ đa đường so sánh!)
 """
+        # 0.18 Doanh số của một sản phẩm cụ thể (ví dụ: 85% Dark Bars, Mint Chip Choco...) qua các tháng
+        elif match_chocolates_specific_product(q_low) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian", "xu hướng", "thay đổi", "biến động"]):
+            specific_prod = match_chocolates_specific_product(q_low)
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"])
+            metric_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+            escaped_prod = specific_prod.replace("'", "''")
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE pr.Product = '{escaped_prod}' AND strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE pr.Product = '{escaped_prod}' AND YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+            else:
+                yr_filter = f"WHERE pr.Product = '{escaped_prod}'\n"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH SỐ SẢN PHẨM {specific_prod.upper()} QUA CÁC THÁNG{yr_label}):
+SELECT 
+    {date_expr} AS Month,
+    {metric_col}
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{yr_filter}GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: Lọc đúng sản phẩm bằng pr.Product = '{escaped_prod}'! BẮT BUỘC CHỈ GROUP BY Month, TUYỆT ĐỐI KHÔNG GROUP BY Product! ORDER BY Month ASC để trả về đúng 12 tháng liên tục của sản phẩm này và vẽ biểu đồ đường Line chart!)
+"""
+
+        # 0.19 Doanh số của một nhân viên cụ thể (ví dụ: Ches Bonnell, Brijesh Shah...) qua các tháng
+        elif match_chocolates_specific_person(q_low) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian", "xu hướng", "thay đổi", "biến động"]):
+            specific_pers = match_chocolates_specific_person(q_low)
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"])
+            metric_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+            escaped_pers = specific_pers.replace("'", "''")
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE pe.Salesperson = '{escaped_pers}' AND strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE pe.Salesperson = '{escaped_pers}' AND YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+            else:
+                yr_filter = f"WHERE pe.Salesperson = '{escaped_pers}'\n"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH SỐ CỦA NHÂN VIÊN {specific_pers.upper()} QUA CÁC THÁNG{yr_label}):
+SELECT 
+    {date_expr} AS Month,
+    {metric_col}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{yr_filter}GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: Lọc đúng nhân viên bằng pe.Salesperson = '{escaped_pers}'! BẮT BUỘC CHỈ GROUP BY Month, TUYỆT ĐỐI KHÔNG GROUP BY Salesperson! ORDER BY Month ASC để trả về đúng 12 tháng liên tục của nhân viên này và vẽ biểu đồ đường Line chart!)
+"""
+
         # 0.2 Doanh thu theo từng sản phẩm qua các tháng
         elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
