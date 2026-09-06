@@ -384,43 +384,67 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     if is_choco_context or (any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
         # 0.1 Doanh thu theo từng quốc gia (Country) qua các tháng
         if any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thay đổi", "xu hướng", "biến động"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+
             return f"""
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO TỪNG QUỐC GIA QUA CÁC THÁNG):
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO TỪNG QUỐC GIA QUA CÁC THÁNG{yr_label}):
 SELECT 
     {date_expr} AS Month,
     g.Geo AS Country,
     SUM(s.Amount) AS TotalSales
 FROM sales s
 JOIN geo g ON s.GeoID = g.GeoID
-GROUP BY Month, Country
+{yr_filter}GROUP BY Month, Country
 ORDER BY Month ASC, TotalSales DESC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! BẮT BUỘC dùng SELECT trực tiếp JOIN giữa sales s và geo g ON s.GeoID = g.GeoID! Dùng {date_expr} AS Month làm trục thời gian và g.Geo AS Country để vẽ biểu đồ đa đường so sánh!)
 """
         # 0.2 Doanh thu theo từng sản phẩm qua các tháng
         elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+
             return f"""
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU TỪNG SẢN PHẨM QUA CÁC THÁNG):
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU TỪNG SẢN PHẨM QUA CÁC THÁNG{yr_label}):
 SELECT 
     {date_expr} AS Month,
     pr.Product AS Product,
     SUM(s.Amount) AS TotalSales
 FROM sales s
 JOIN products pr ON s.PID = pr.PID
-GROUP BY Month, Product
+{yr_filter}GROUP BY Month, Product
 ORDER BY Month ASC, TotalSales DESC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! Dùng SELECT trực tiếp JOIN giữa sales s và products pr ON s.PID = pr.PID!)
 """
         # 0.3 Doanh thu theo nhân viên qua các tháng
         elif any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+
             return f"""
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO NHÂN VIÊN QUA CÁC THÁNG):
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO NHÂN VIÊN QUA CÁC THÁNG{yr_label}):
 SELECT 
     {date_expr} AS Month,
     pe.Salesperson AS Salesperson,
     SUM(s.Amount) AS TotalSales
 FROM sales s
 JOIN people pe ON s.SPID = pe.SPID
-GROUP BY Month, Salesperson
+{yr_filter}GROUP BY Month, Salesperson
 ORDER BY Month ASC, TotalSales DESC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! Dùng SELECT trực tiếp JOIN giữa sales s và people pe ON s.SPID = pe.SPID!)
 """

@@ -925,15 +925,17 @@ ORDER BY Month ASC, {order_col} DESC"""
             or not re.search(r"join\s+geo", sql_low)
             or ("date_format" not in sql_low and not is_sqlite)
             or ("strftime" not in sql_low and is_sqlite)
+            or (year_val and f"{year_val}" not in sql_low)
         )
         if needs_fix:
+            year_clause = f"WHERE {year_cond}\n" if year_cond else ""
             return f"""SELECT 
     {date_expr} AS Month,
     g.Geo AS Country,
     SUM(s.Amount) AS TotalSales
 FROM sales s
 JOIN geo g ON s.GeoID = g.GeoID
-GROUP BY Month, Country
+{year_clause}GROUP BY Month, Country
 ORDER BY Month ASC, TotalSales DESC"""
 
     # 2. Doanh thu theo từng sản phẩm qua các tháng
@@ -944,15 +946,17 @@ ORDER BY Month ASC, TotalSales DESC"""
             or ("year(" in sql_low and "month(" in sql_low)
             or ("date_format" not in sql_low and not is_sqlite)
             or ("strftime" not in sql_low and is_sqlite)
+            or (year_val and f"{year_val}" not in sql_low)
         )
         if needs_fix:
+            year_clause = f"WHERE {year_cond}\n" if year_cond else ""
             return f"""SELECT 
     {date_expr} AS Month,
     pr.Product AS Product,
     SUM(s.Amount) AS TotalSales
 FROM sales s
 JOIN products pr ON s.PID = pr.PID
-GROUP BY Month, Product
+{year_clause}GROUP BY Month, Product
 ORDER BY Month ASC, TotalSales DESC"""
 
     # 3. Doanh thu theo nhân viên bán hàng qua các tháng
@@ -963,15 +967,17 @@ ORDER BY Month ASC, TotalSales DESC"""
             or ("year(" in sql_low and "month(" in sql_low)
             or ("date_format" not in sql_low and not is_sqlite)
             or ("strftime" not in sql_low and is_sqlite)
+            or (year_val and f"{year_val}" not in sql_low)
         )
         if needs_fix:
+            year_clause = f"WHERE {year_cond}\n" if year_cond else ""
             return f"""SELECT 
     {date_expr} AS Month,
     pe.Salesperson AS Salesperson,
     SUM(s.Amount) AS TotalSales
 FROM sales s
 JOIN people pe ON s.SPID = pe.SPID
-GROUP BY Month, Salesperson
+{year_clause}GROUP BY Month, Salesperson
 ORDER BY Month ASC, TotalSales DESC"""
 
     # 4. Số lượng thùng / hộp bán ra qua các tháng (không phân nhóm)
