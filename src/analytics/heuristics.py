@@ -84,6 +84,12 @@ def find_time_column(df: pd.DataFrame):
                     return c
                 # Cột số nhưng không phải năm/tháng/quý -> KHÔNG PHẢI cột thời gian lịch
                 continue
+
+            # Nhận diện chuỗi Quý: 2021-Q1, 2021-Q2... hoặc Q1, Q2, Q3, Q4
+            c_str = df[c].astype(str).str.strip().str.upper()
+            if any(k in str(c).lower() for k in ["quy", "quarter", "quý"]) and c_str.str.contains(r'Q[1-4]').mean() >= 0.8:
+                return c
+
             parsed = pd.to_datetime(df[c], errors="coerce")
             if parsed.notna().mean() >= 0.8:
                 return c
@@ -171,6 +177,89 @@ def ensure_full_twelve_months(df: pd.DataFrame, user_query: str = "") -> pd.Data
             all_yms = [f"{yr}-{m:02d}" for m in range(1, 13)]
             all_months_df = pd.DataFrame({month_col: all_yms})
             merged_df = pd.merge(all_months_df, df, on=month_col, how="left")
+            
+            if year_col:
+                merged_df[year_col] = merged_df[year_col].fillna(int(yr)).astype(int)
+
+            for c in num_cols:
+                merged_df[c] = merged_df[c].fillna(0)
+                if pd.api.types.is_integer_dtype(df[c]):
+                    merged_df[c] = merged_df[c].astype(int)
+            return merged_df[df.columns]
+
+    return df
+
+
+def ensure_full_four_quarters(df: pd.DataFrame, user_query: str = "") -> pd.DataFrame:
+    """Tự động đảm bảo đủ 4 quý (từ Q1 đến Q4) khi người dùng truy vấn theo các quý trong năm.
+    Nếu dữ liệu thực tế bị thiếu một số quý do quý đó chưa có dữ liệu bán hàng,
+    tự động bù đắp các quý còn thiếu với giá trị 0 để biểu đồ và bảng hiển thị trọn vẹn 4 quý."""
+    if df is None or df.empty:
+        return df
+
+    # 1. Tìm cột Quarter (hoặc quy)
+    qtr_col = None
+    for c in df.columns:
+        c_low = str(c).strip().lower()
+        if any(k in c_low for k in ["quarter", "quarteryear", "quy", "quý", "qtr"]):
+            qtr_col = c
+            break
+
+    if not qtr_col:
+        return df
+
+    # Tìm cột Year nếu có
+    year_col = None
+    for c in df.columns:
+        if c == qtr_col:
+            continue
+        c_low = str(c).strip().lower()
+        if any(k in c_low for k in ["year", "nam"]) and not any(k in c_low for k in ["service", "tenure", "experience"]):
+            vals_yr = pd.to_numeric(df[c], errors="coerce").dropna()
+            if not vals_yr.empty and vals_yr.min() >= 1900 and vals_yr.max() <= 2100 and vals_yr.nunique() == 1:
+                year_col = c
+                break
+
+    non_time_cols = [c for c in df.columns if c not in (qtr_col, year_col)]
+    num_cols = df[non_time_cols].select_dtypes(include="number").columns.tolist()
+
+    # Chỉ áp dụng khi là chuỗi thời gian đơn (không có cột phân loại thứ 2)
+    if len(num_cols) != len(non_time_cols) or len(non_time_cols) == 0:
+        return df
+
+    q_low = (user_query or "").lower()
+    is_qtr_query = any(k in q_low for k in ["quý", "quarter", "từng quý", "theo quý", "qua các quý", "năm", "xu hướng"]) or not user_query
+    if not is_qtr_query:
+        return df
+
+    # Trường hợp A: Cột Quarter là số nguyên 1..4
+    vals_num = pd.to_numeric(df[qtr_col], errors="coerce")
+    if vals_num.notna().all() and (vals_num >= 1).all() and (vals_num <= 4).all() and len(df) < 4:
+        df_temp = df.copy()
+        df_temp[qtr_col] = vals_num.astype(int)
+        all_qtrs_df = pd.DataFrame({qtr_col: [1, 2, 3, 4]})
+        merged_df = pd.merge(all_qtrs_df, df_temp, on=qtr_col, how="left")
+        
+        if year_col:
+            fixed_year = int(pd.to_numeric(df[year_col], errors="coerce").dropna().iloc[0])
+            merged_df[year_col] = merged_df[year_col].fillna(fixed_year).astype(int)
+
+        for c in num_cols:
+            merged_df[c] = merged_df[c].fillna(0)
+            if pd.api.types.is_integer_dtype(df[c]):
+                merged_df[c] = merged_df[c].astype(int)
+        return merged_df[df.columns]
+
+    # Trường hợp B: Cột Quarter là chuỗi 'YYYY-Q1'..'YYYY-Q4'
+    sample_vals = df[qtr_col].astype(str).str.strip().tolist()
+    yq_matches = [re.match(r"^(\d{4})[-_ ]?[Qq]([1-4])$", s) for s in sample_vals]
+    if all(m is not None for m in yq_matches) and len(df) < 4:
+        years = {m.group(1) for m in yq_matches}
+        if len(years) == 1:
+            yr = list(years)[0]
+            all_yqs = [f"{yr}-Q{q}" for q in range(1, 5)]
+            all_qtrs_df = pd.DataFrame({qtr_col: all_yqs})
+            merged_df = pd.merge(all_qtrs_df, df, on=qtr_col, how="left")
             
             if year_col:
                 merged_df[year_col] = merged_df[year_col].fillna(int(yr)).astype(int)

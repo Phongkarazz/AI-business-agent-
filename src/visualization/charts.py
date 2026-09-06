@@ -17,6 +17,7 @@ from src.analytics.heuristics import (
     is_id_like,
     unify_year_month_columns,
     ensure_full_twelve_months,
+    ensure_full_four_quarters,
 )
 
 VI_COLUMN_MAP = {
@@ -121,6 +122,9 @@ VI_COLUMN_MAP = {
     "team": "Đội Ngũ",
     "location": "Vị Trí/Khu Vực",
     "month": "Tháng",
+    "quarter": "Quý",
+    "quarteryear": "Quý",
+    "quy": "Quý",
 }
 
 
@@ -150,6 +154,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
         return None
 
     df = ensure_full_twelve_months(df, user_query)
+    df = ensure_full_four_quarters(df, user_query)
     df = unify_year_month_columns(df)
 
     measure_cols, label_cols, time_col = get_axis_columns(df)

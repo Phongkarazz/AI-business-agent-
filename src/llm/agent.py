@@ -19,6 +19,7 @@ from src.analytics.heuristics import (
     sanitize_insight_markdown,
     sanitize_followup_question,
     ensure_full_twelve_months,
+    ensure_full_four_quarters,
     ensure_ratio_column_if_requested,
     ensure_efficiency_columns_if_requested,
 )
@@ -1151,6 +1152,153 @@ ORDER BY Month ASC"""
     return sql
 
 
+def auto_fix_chocolates_quarterly_sales_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo quý (theo Quốc gia, Sản phẩm, Team, hoặc Toàn công ty)
+    trên CSDL Awesome Chocolates. Đảm bảo GROUP BY đúng Quarter và ORDER BY Quarter ASC để vẽ biểu đồ đường xu hướng."""
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    # Kiểm tra xem có phải câu hỏi theo quý không
+    is_quarterly = any(k in q_low for k in ["quý", "quarter", "từng quý", "theo quý", "qua các quý", "quarterly"])
+    if not is_quarterly:
+        return sql
+
+    is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "thị trường", "quốc gia", "country", "geo", "ấn độ", "india", "mỹ", "usa", "team", "yummies"])
+    if not is_chocolates:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    qtr_expr = (
+        "strftime('%Y', s.SaleDate) || '-Q' || ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3)"
+        if is_sqlite else
+        "CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate))"
+    )
+
+    year_match = re.search(r'\b(20\d{2})\b', q_low)
+    year_val = year_match.group(1) if year_match else None
+    year_cond = (f"strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {year_val}") if year_val else ""
+
+    has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"])
+    metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+
+    # 1. Doanh thu của một Quốc gia cụ thể qua từng quý (ví dụ: Ấn Độ / India năm 2021)
+    specific_country = None
+    country_patterns = {
+        "india": "India", "ấn độ": "India", "an do": "India",
+        "usa": "USA", "mỹ": "USA", "hoa kỳ": "USA", "united states": "USA",
+        "canada": "Canada",
+        "new zealand": "New Zealand",
+        "australia": "Australia", "úc": "Australia",
+        "uk": "UK", "nước anh": "UK", "vương quốc anh": "UK", "united kingdom": "UK"
+    }
+    for cp_key, cp_val in country_patterns.items():
+        if re.search(rf"\b{re.escape(cp_key)}\b", q_low):
+            specific_country = cp_val
+            break
+
+    if specific_country and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
+        conds = [f"g.Geo = '{specific_country}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        needs_fix = (
+            "with " in sql_low
+            or "max(" in sql_low
+            or "group by quarter" not in sql_low
+            or "quarteryear" in sql_low
+            or "g.geoid" not in sql_low
+            or f"'{specific_country.lower()}'" not in sql_low
+            or ("concat" not in sql_low and not is_sqlite)
+            or (is_sqlite and "strftime" not in sql_low)
+            or "group by g.geo" in sql_low
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {qtr_expr} AS Quarter,
+    {metric_expr}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{where_clause}
+GROUP BY Quarter
+ORDER BY Quarter ASC"""
+
+    # 2. Doanh thu theo từng Quốc gia qua các quý (so sánh đa quốc gia)
+    elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["từng quốc gia", "từng thị trường", "các quốc gia", "mỗi quốc gia"]):
+        where_clause = f"WHERE {year_cond}\n" if year_cond else ""
+        needs_fix = (
+            "with " in sql_low
+            or "max(" in sql_low
+            or "quarter" not in sql_low
+            or "group by quarter, country" not in sql_low
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {qtr_expr} AS Quarter,
+    g.Geo AS Country,
+    {metric_expr}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{where_clause}GROUP BY Quarter, Country
+ORDER BY Quarter ASC, TotalSales DESC"""
+
+    # 3. Doanh thu của một Team cụ thể qua từng quý (ví dụ: Yummies theo từng quý)
+    specific_team = None
+    if "yummies" in q_low:
+        specific_team = "Yummies"
+    elif "delish" in q_low:
+        specific_team = "Delish"
+    elif "jucies" in q_low:
+        specific_team = "Jucies"
+
+    if specific_team:
+        conds = [f"pe.Team = '{specific_team}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        return f"""SELECT 
+    {qtr_expr} AS Quarter,
+    {metric_expr}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY Quarter
+ORDER BY Quarter ASC"""
+
+    # 4. Doanh thu của một Sản phẩm cụ thể qua từng quý (ví dụ: 85% Dark Bars theo từng quý)
+    specific_prod = match_chocolates_specific_product(q_low)
+    if specific_prod:
+        escaped_prod = specific_prod.replace("'", "''")
+        conds = [f"pr.Product = '{escaped_prod}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        return f"""SELECT 
+    {qtr_expr} AS Quarter,
+    {metric_expr}
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{where_clause}
+GROUP BY Quarter
+ORDER BY Quarter ASC"""
+
+    # 5. Doanh thu toàn công ty / tổng hợp theo từng quý
+    if any(k in q_low for k in ["doanh thu", "doanh số", "sales", "số lượng", "hộp", "thùng"]):
+        where_clause = f"WHERE {year_cond}\n" if year_cond else ""
+        needs_fix = "with " in sql_low or "max(" in sql_low or "group by quarter" not in sql_low
+        if needs_fix:
+            return f"""SELECT 
+    {qtr_expr} AS Quarter,
+    {metric_expr}
+FROM sales s
+{where_clause}GROUP BY Quarter
+ORDER BY Quarter ASC"""
+
+    return sql
+
+
 def auto_fix_datetime_year_filters(sql: str, dialect: str = "MySQL") -> str:
     """Tự động chuyển đổi các biểu thức so sánh trực tiếp cột ngày tháng với năm dạng số hoặc chuỗi năm (e.g. SaleDate = 2021 hoặc SaleDate = '2021')
     thành hàm YEAR(SaleDate) = 2021 (MySQL) hoặc strftime('%Y', SaleDate) = '2021' (SQLite).
@@ -1215,8 +1363,8 @@ def auto_fix_contribution_percentage_query(sql: str, user_query: str, dialect: s
     q_low = user_query.lower()
     sql_low = sql.lower()
 
-    # Không can thiệp nếu là câu hỏi xu hướng theo tháng
-    if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]):
+    # Không can thiệp nếu là câu hỏi xu hướng theo tháng / quý
+    if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "quý", "quarter", "từng quý", "theo quý", "qua các quý"]):
         return sql
 
     is_ratio_question = any(k in q_low for k in [
@@ -1412,8 +1560,8 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     q_low = user_query.lower()
     sql_low = sql.lower()
 
-    # Không can thiệp nếu là câu hỏi xu hướng theo tháng (đã có auto_fix_chocolates_monthly_sales_query xử lý)
-    if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng"]):
+    # Không can thiệp nếu là câu hỏi xu hướng theo tháng / quý (đã có auto_fix_chocolates_monthly_sales_query & auto_fix_chocolates_quarterly_sales_query xử lý)
+    if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng", "quý", "quarter", "từng quý", "theo quý", "qua các quý"]):
         return sql
 
     # Không can thiệp nếu là câu hỏi tỷ lệ / đóng góp / phần trăm (đã có auto_fix_contribution_percentage_query xử lý)
@@ -1974,6 +2122,7 @@ def run_agent(
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
@@ -2003,6 +2152,7 @@ def run_agent(
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
@@ -2114,6 +2264,7 @@ def run_agent(
                     result["logs"].append(f"⚠️ Chấp nhận kết quả sau {attempt} lần thử: {check.get('ly_do', '')}")
 
                 df = ensure_full_twelve_months(df, user_query)
+                df = ensure_full_four_quarters(df, user_query)
                 df = ensure_ratio_column_if_requested(df, user_query)
                 df = ensure_efficiency_columns_if_requested(df, user_query)
                 result["df"] = df

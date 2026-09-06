@@ -357,11 +357,25 @@ def get_db_specific_rules(schema_context: str) -> str:
          1. TUYỆT ĐỐI CẤM DÙNG CTE (`WITH ...`). Dùng câu lệnh SELECT đơn trực tiếp để tối ưu tốc độ!
          2. Định dạng tháng dạng 'YYYY-MM' (DATE_FORMAT trên MySQL hoặc strftime trên SQLite) để làm trục thời gian liên tục.
          3. g.Geo AS Country làm phân loại quốc gia, GROUP BY Month, Country và ORDER BY Month ASC để vẽ biểu đồ đa đường (Multi-line chart) so sánh xu hướng các nước.
-     + MẪU CHUẨN DOANH THU TOÀN BỘ THEO THÁNG:
-       SELECT DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month, SUM(s.Amount) AS TotalSales
-       FROM sales s
-       GROUP BY Month
-       ORDER BY Month ASC;"""
+      + MẪU CHUẨN DOANH THU TOÀN BỘ THEO THÁNG:
+        SELECT DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month, SUM(s.Amount) AS TotalSales
+        FROM sales s
+        GROUP BY Month
+        ORDER BY Month ASC;
+      + MẪU CHUẨN DOANH THU THEO QUÝ (QUARTER - BẮT BUỘC GROUP BY QUARTER):
+        * Toàn công ty theo từng quý:
+        SELECT CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate)) AS Quarter, SUM(s.Amount) AS TotalSales
+        FROM sales s
+        GROUP BY Quarter
+        ORDER BY Quarter ASC;
+        * Thị trường cụ thể (ví dụ Ấn Độ / India năm 2021) theo từng quý:
+        SELECT CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate)) AS Quarter, SUM(s.Amount) AS TotalSales
+        FROM sales s
+        JOIN geo g ON s.GeoID = g.GeoID
+        WHERE g.Geo = 'India' AND YEAR(s.SaleDate) = 2021
+        GROUP BY Quarter
+        ORDER BY Quarter ASC;
+        (BẮT BUỘC: GROUP BY Quarter để trả về đủ các quý, TUYỆT ĐỐI CẤM dùng MAX(s.SaleDate) khiến kết quả chỉ còn 1 quý đơn lẻ!)"""
     else:
         return """   - QUY TẮC SCHEMA CHUNG:
      + CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng và cột xuất hiện thực tế trong SCHEMA ở trên.
@@ -607,6 +621,95 @@ GROUP BY pr.Product, pr.Category
 ORDER BY ProfitPerBox DESC
 LIMIT {req_limit};
 (CẢNH BÁO BẮT BUỘC: Lợi nhuận mỗi hộp = ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox! BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID!)
+"""
+
+        # 0.08 Doanh thu theo từng quý (Quarterly Trend) - theo Quốc gia cụ thể, theo Team, theo Sản phẩm, hoặc Toàn công ty
+        elif any(k in q_low for k in ["quý", "quarter", "từng quý", "theo quý", "qua các quý", "quarterly"]):
+            specific_country = None
+            country_patterns = {
+                "india": "India", "ấn độ": "India", "an do": "India",
+                "usa": "USA", "mỹ": "USA", "hoa kỳ": "USA", "united states": "USA",
+                "canada": "Canada",
+                "new zealand": "New Zealand",
+                "australia": "Australia", "úc": "Australia",
+                "uk": "UK", "nước anh": "UK", "vương quốc anh": "UK", "united kingdom": "UK"
+            }
+            for cp_key, cp_val in country_patterns.items():
+                if re.search(rf"\b{re.escape(cp_key)}\b", q_low):
+                    specific_country = cp_val
+                    break
+
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_match.group(1) if yr_match else None
+            yr_filter = (f" AND strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f" AND YEAR(s.SaleDate) = {yr_val}") if yr_val else ""
+            yr_where = (f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}") if yr_val else ""
+            yr_label = f" NĂM {yr_val}" if yr_val else ""
+            qtr_expr = (
+                "strftime('%Y', s.SaleDate) || '-Q' || ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3)"
+                if is_sqlite else
+                "CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate))"
+            )
+
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"])
+            metric_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+
+            if specific_country and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THỊ TRƯỜNG {specific_country.upper()} THEO TỪNG QUÝ{yr_label}):
+SELECT 
+    {qtr_expr} AS Quarter,
+    {metric_col}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+WHERE g.Geo = '{specific_country}'{yr_filter}
+GROUP BY Quarter
+ORDER BY Quarter ASC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC dùng {qtr_expr} AS Quarter! Lọc quốc gia bằng g.Geo = '{specific_country}'! GROUP BY Quarter và ORDER BY Quarter ASC để trả về đầy đủ các quý và vẽ biểu đồ đường Line chart! TUYỆT ĐỐI KHÔNG dùng MAX(s.SaleDate)!)
+"""
+            elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["từng quốc gia", "từng thị trường", "các quốc gia", "mỗi quốc gia"]):
+                where_clause = f"{yr_where}\n" if yr_where else ""
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO TỪNG QUỐC GIA QUA CÁC QUÝ{yr_label}):
+SELECT 
+    {qtr_expr} AS Quarter,
+    g.Geo AS Country,
+    {metric_col}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{where_clause}GROUP BY Quarter, Country
+ORDER BY Quarter ASC, TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC dùng {qtr_expr} AS Quarter và g.Geo AS Country! GROUP BY Quarter, Country!)
+"""
+            elif any(k in q_low for k in ["team", "đội ngũ", "yummies", "delish", "jucies"]):
+                specific_team = "Yummies" if "yummies" in q_low else ("Delish" if "delish" in q_low else ("Jucies" if "jucies" in q_low else None))
+                if specific_team:
+                    team_filter = f"WHERE pe.Team = '{specific_team}'{yr_filter}"
+                    team_label = f"TEAM {specific_team.upper()}"
+                else:
+                    team_filter = f"WHERE pe.Team != ''{yr_filter}"
+                    team_label = "TỪNG TEAM"
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU {team_label} THEO TỪNG QUÝ{yr_label}):
+SELECT 
+    {qtr_expr} AS Quarter,
+    {metric_col}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{team_filter}
+GROUP BY Quarter
+ORDER BY Quarter ASC;
+"""
+            else:
+                where_clause = f"{yr_where}\n" if yr_where else ""
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU TOÀN CÔNG TY THEO TỪNG QUÝ{yr_label}):
+SELECT 
+    {qtr_expr} AS Quarter,
+    {metric_col}
+FROM sales s
+{where_clause}GROUP BY Quarter
+ORDER BY Quarter ASC;
+(CẢNH BÁO BẮT BUỘC: Dùng {qtr_expr} AS Quarter! GROUP BY Quarter và ORDER BY Quarter ASC!)
 """
 
         # 0.1 Doanh thu theo từng quốc gia (Country) qua các tháng
