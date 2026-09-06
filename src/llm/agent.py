@@ -648,6 +648,49 @@ ORDER BY CurrentSalary DESC"""
     return sql
 
 
+def auto_fix_department_group_salary_query(sql: str, user_query: str) -> str:
+    """Tự động chuẩn hóa câu hỏi so sánh mức lương giữa các phòng ban Kỹ thuật (Development, Research) và phòng Kinh doanh (Sales, Marketing)."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_tech_vs_comm = (
+        (
+            any(k in q_low for k in ["kỹ thuật", "tech"])
+            and any(k in q_low for k in ["kinh doanh", "commercial", "sales"])
+            and any(k in q_low for k in ["lương", "thu nhập", "salary"])
+        ) or (
+            ("development" in q_low or "research" in q_low)
+            and ("sales" in q_low or "marketing" in q_low)
+            and any(k in q_low for k in ["so sánh", "đối chiếu", "compare", "vs"])
+        )
+    )
+    if not is_tech_vs_comm:
+        return sql
+
+    lowered_sql = sql.lower()
+    has_filter_4 = all(d in lowered_sql for d in ["development", "research", "sales", "marketing"])
+    has_group = "departmentgroup" in lowered_sql or "nhóm" in lowered_sql or "case when" in lowered_sql
+    has_unwanted = any(d in lowered_sql for d in ["human resources", "customer service", "quality management", "finance", "production"])
+
+    if not (has_filter_4 and has_group) or has_unwanted:
+        return """SELECT 
+    CASE 
+        WHEN d.dept_name IN ('Sales', 'Marketing') THEN 'Kinh doanh (Sales, Marketing)'
+        WHEN d.dept_name IN ('Development', 'Research') THEN 'Kỹ thuật (Development, Research)'
+    END AS DepartmentGroup,
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing')
+GROUP BY DepartmentGroup, d.dept_name
+ORDER BY DepartmentGroup, AvgSalary DESC"""
+
+    return sql
+
+
 def auto_fix_department_single_vs_others_salary_query(sql: str, user_query: str) -> str:
     """Tự động chuẩn hóa câu hỏi so sánh mức lương trung bình phòng ban với các phòng khác, loại bỏ cột phần trăm ảo làm phẳng biểu đồ và bỏ bộ lọc phòng ban đơn lẻ."""
     if not sql or not user_query:
@@ -658,6 +701,14 @@ def auto_fix_department_single_vs_others_salary_query(sql: str, user_query: str)
         and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary", "avg salary"])
         and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung", "công ty"])
         and not any(k in q_low for k in ["quy mô", "headcount", "số lượng nhân sự", "số nhân sự", "số lượng nhân viên", "số nhân viên"])
+        and not (
+            any(k in q_low for k in ["kỹ thuật", "tech"])
+            and any(k in q_low for k in ["kinh doanh", "commercial", "sales"])
+        )
+        and not (
+            ("development" in q_low or "research" in q_low)
+            and ("sales" in q_low or "marketing" in q_low)
+        )
     )
     if not is_dept_salary_comp:
         return sql
@@ -1134,6 +1185,7 @@ def run_agent(
         sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
         sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
         sql_query = auto_fix_current_manager_salary_query(sql_query, user_query)
+        sql_query = auto_fix_department_group_salary_query(sql_query, user_query)
         sql_query = auto_fix_department_single_vs_others_salary_query(sql_query, user_query)
         sql_query = auto_fix_department_single_vs_others_headcount_query(sql_query, user_query)
         sql_query = auto_fix_dept_size_min_max_query(sql_query, user_query)
@@ -1157,6 +1209,7 @@ def run_agent(
         sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
         sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
         sql_query = auto_fix_current_manager_salary_query(sql_query, user_query)
+        sql_query = auto_fix_department_group_salary_query(sql_query, user_query)
         sql_query = auto_fix_department_single_vs_others_salary_query(sql_query, user_query)
         sql_query = auto_fix_department_single_vs_others_headcount_query(sql_query, user_query)
         sql_query = auto_fix_dept_size_min_max_query(sql_query, user_query)

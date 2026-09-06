@@ -597,6 +597,35 @@ LIMIT {req_limit};
 (BẮT BUỘC tính YearsAsManager bằng DATEDIFF, ORDER BY YearsAsManager DESC LIMIT {req_limit}, TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01' để lấy đủ lịch sử các Manager tiền nhiệm!)
 """
 
+    # 7.9 So sánh mức lương trung bình giữa các phòng ban Kỹ thuật (Development, Research) và phòng Kinh doanh (Sales, Marketing)
+    elif (
+        any(k in q_low for k in ["kỹ thuật", "tech"])
+        and any(k in q_low for k in ["kinh doanh", "commercial", "sales"])
+        and any(k in q_low for k in ["lương", "thu nhập", "salary"])
+    ) or (
+        ("development" in q_low or "research" in q_low)
+        and ("sales" in q_low or "marketing" in q_low)
+        and any(k in q_low for k in ["so sánh", "đối chiếu", "compare", "vs"])
+    ):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH LƯƠNG KHỐI KỸ THUẬT VS KHỐI KINH DOANH):
+SELECT 
+    CASE 
+        WHEN d.dept_name IN ('Sales', 'Marketing') THEN 'Kinh doanh (Sales, Marketing)'
+        WHEN d.dept_name IN ('Development', 'Research') THEN 'Kỹ thuật (Development, Research)'
+    END AS DepartmentGroup,
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing')
+GROUP BY DepartmentGroup, d.dept_name
+ORDER BY DepartmentGroup, AvgSalary DESC;
+(CẢNH BÁO TỐI QUAN TRỌNG: TUYỆT ĐỐI KHÔNG LẤY TẤT CẢ 9 PHÒNG BAN! CHỈ LỌC ĐÚNG 4 PHÒNG BAN ĐƯỢC HỎI: WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing') VÀ PHÂN LOẠI CASE WHEN RA CỘT DepartmentGroup ĐỂ SO SÁNH TRỰC QUAN 2 KHỐI!)
+"""
+
     # 8. So sánh mức lương trung bình của một phòng ban cụ thể so với các phòng ban khác (hoặc so sánh lương giữa các phòng)
     elif any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung", "công ty"]):
         return """

@@ -279,6 +279,131 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             st.write("")
             return
 
+    # KIỂM TRA BÀI TOÁN SO SÁNH KHỐI / NHÓM PHÒNG BAN (VD: KỸ THUẬT VS KINH DOANH)
+    group_col_cand = [
+        c for c in df.columns
+        if any(k in str(c).lower() for k in ["group", "nhóm", "khối"])
+        and not is_id_like(c)
+    ]
+    uq_low_comp = (user_query or "").lower()
+    is_tech_vs_comm_query = (
+        (any(k in uq_low_comp for k in ["kỹ thuật", "tech"]) and any(k in uq_low_comp for k in ["kinh doanh", "commercial", "sales"]))
+        or (("development" in uq_low_comp or "research" in uq_low_comp) and ("sales" in uq_low_comp or "marketing" in uq_low_comp))
+    ) and any(k in uq_low_comp for k in ["so sánh", "đối chiếu", "compare", "vs"])
+
+    is_dept_group_comp = (
+        (len(group_col_cand) > 0 or is_tech_vs_comm_query)
+        and any(any(k in str(c).lower() for k in ["salary", "lương", "thu nhập", "amount", "budget"]) for c in measure_cols)
+        and total_rows >= 2
+    )
+    if is_dept_group_comp:
+        sal_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập", "amount", "budget"])]
+        sal_col = sal_cols[0] if sal_cols else measure_cols[0]
+        hc_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["headcount", "totalemployees", "nhân sự", "nhân viên", "emp"])]
+        hc_col = hc_cols[0] if hc_cols else None
+
+        df_work = df.copy()
+        if group_col_cand:
+            grp_col = group_col_cand[0]
+        else:
+            dim_candidate = label_cols[0] if label_cols else df.columns[0]
+            def _assign_group(val):
+                v_low = str(val).lower()
+                if any(k in v_low for k in ["sale", "market", "kinh doanh"]):
+                    return "Kinh doanh"
+                elif any(k in v_low for k in ["develop", "research", "kỹ thuật", "tech"]):
+                    return "Kỹ thuật"
+                return "Khác"
+            df_work["_DeptGroup"] = df_work[dim_candidate].apply(_assign_group)
+            grp_col = "_DeptGroup"
+
+        groups = [g for g in df_work[grp_col].dropna().unique() if str(g).lower() != "khác"]
+        if len(groups) >= 2:
+            group_stats = []
+            for g in groups:
+                sub = df_work[df_work[grp_col] == g]
+                sub_sal = pd.to_numeric(sub[sal_col], errors="coerce").dropna()
+                if hc_col and hc_col in sub.columns:
+                    sub_hc = pd.to_numeric(sub[hc_col], errors="coerce").fillna(0)
+                    tot_hc = int(sub_hc.sum())
+                    tot_prod = (sub_sal * sub_hc).sum()
+                    avg_sal = float(tot_prod / tot_hc) if tot_hc > 0 else float(sub_sal.mean() or 0)
+                else:
+                    tot_hc = len(sub)
+                    avg_sal = float(sub_sal.mean() or 0)
+
+                g_str = str(g)
+                # Tách tên ngắn gọn hiển thị
+                g_short = g_str.split("(")[0].strip()
+                group_stats.append({
+                    "raw_name": g_str,
+                    "short_name": g_short,
+                    "avg_sal": avg_sal,
+                    "tot_hc": tot_hc,
+                    "count": len(sub)
+                })
+
+            group_stats.sort(key=lambda x: x["avg_sal"], reverse=True)
+            g_high = group_stats[0]
+            g_low = group_stats[1]
+
+            diff_val = g_high["avg_sal"] - g_low["avg_sal"]
+            diff_pct = (diff_val / g_low["avg_sal"] * 100.0) if g_low["avg_sal"] > 0 else 0.0
+
+            # Tìm phòng ban cao nhất trong bảng
+            detail_dim_cols = [c for c in label_cols if c != grp_col and c in df.columns]
+            detail_col = detail_dim_cols[0] if detail_dim_cols else grp_col
+            max_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmax()
+            min_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmin()
+            max_dept = str(df.loc[max_idx, detail_col]) if max_idx in df.index else "N/A"
+            max_val = float(df.loc[max_idx, sal_col]) if max_idx in df.index else 0
+            min_dept = str(df.loc[min_idx, detail_col]) if min_idx in df.index else "N/A"
+            min_val = float(df.loc[min_idx, sal_col]) if min_idx in df.index else 0
+
+            icon_high = "💼" if any(k in g_high["short_name"].lower() for k in ["kinh doanh", "sales", "commercial"]) else "💻"
+            icon_low = "💻" if any(k in g_low["short_name"].lower() for k in ["kỹ thuật", "tech", "dev"]) else "🏢"
+
+            delta_high = f"{g_high['tot_hc']:,} nhân sự" if hc_col else f"{g_high['count']} phòng ban"
+            delta_low = f"{g_low['tot_hc']:,} nhân sự" if hc_col else f"{g_low['count']} phòng ban"
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    f"{icon_high} " + (f"TB Khối {g_high['short_name']}" if not is_en else f"Avg {g_high['short_name']}"),
+                    f"${g_high['avg_sal']:,.0f}",
+                    delta=delta_high
+                )
+            with c2:
+                st.metric(
+                    f"{icon_low} " + (f"TB Khối {g_low['short_name']}" if not is_en else f"Avg {g_low['short_name']}"),
+                    f"${g_low['avg_sal']:,.0f}",
+                    delta=delta_low
+                )
+            with c3:
+                st.metric(
+                    "⚖️ " + ("Chênh lệch Thu nhập" if not is_en else "Pay Difference"),
+                    f"+${diff_val:,.0f}",
+                    delta=f"+{diff_pct:.1f}% nghiêng về {g_high['short_name']}" if not is_en else f"+{diff_pct:.1f}% higher in {g_high['short_name']}"
+                )
+            with c4:
+                st.metric(
+                    "🏆 " + (f"Cao nhất ({max_dept})" if not is_en else f"Top Entity ({max_dept})"),
+                    f"${max_val:,.0f}",
+                    delta=f"Thấp nhất: {min_dept} (${min_val:,.0f})" if not is_en else f"Lowest: {min_dept} (${min_val:,.0f})"
+                )
+
+            st.caption(
+                f"ℹ️ **Đối chiếu Thu nhập Khối {g_high['short_name']} vs Khối {g_low['short_name']}**: "
+                f"Khối {g_high['short_name']} có mức thu nhập trung bình cao hơn Khối {g_low['short_name']} **${diff_val:,.0f} (+{diff_pct:.1f}%)**, "
+                f"trong đó phòng ban **{max_dept}** dẫn đầu với **${max_val:,.0f}**."
+                if not is_en else
+                f"ℹ️ **Compensation Comparison: {g_high['short_name']} vs {g_low['short_name']}**: "
+                f"{g_high['short_name']} averages **${diff_val:,.0f} (+{diff_pct:.1f}%)** higher than {g_low['short_name']}, "
+                f"led by **{max_dept}** at **${max_val:,.0f}**."
+            )
+            st.write("")
+            return
+
     # KIỂM TRA BÀI TOÁN SO SÁNH ĐA CHIỀU: QUY MÔ NHÂN SỰ & MỨC LƯƠNG TRUNG BÌNH
     is_hc_sal_comp = (
         any(any(k in str(c).lower() for k in ["headcount", "totalemployees", "số lượng nhân sự", "nhân sự", "nhân viên"]) for c in measure_cols) and

@@ -18,6 +18,10 @@ from src.analytics.heuristics import (
 )
 
 VI_COLUMN_MAP = {
+    "departmentgroup": "Nhóm Phòng Ban",
+    "department_group": "Nhóm Phòng Ban",
+    "deptgroup": "Nhóm Phòng Ban",
+    "dept_group": "Nhóm Phòng Ban",
     "headcount": "Quy Mô Nhân Sự",
     "yearsofservice": "Thâm Niên (Năm)",
     "years_of_service": "Thâm Niên (Năm)",
@@ -374,6 +378,21 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if plot_df[cand].nunique(dropna=True) <= 20:
                         color_col = cand
 
+                # Nếu có cột phân nhóm (DepartmentGroup) và người dùng hỏi so sánh một chỉ số cụ thể (VD: Lương),
+                # ưu tiên vẽ chỉ số đó phân nhóm theo color_col thay vì vẽ gộp nhiều chỉ số khác thang đo
+                if color_col and len(measure_cols) >= 2:
+                    uq_low = (user_query or "").lower()
+                    user_asked_salary = any(k in uq_low for k in ["lương", "salary", "thu nhập"])
+                    user_asked_headcount = any(k in uq_low for k in ["quy mô", "headcount", "số lượng nhân sự", "số nhân sự", "số lượng nhân viên"])
+                    if user_asked_salary and not user_asked_headcount:
+                        sal_cols = [c for c in measure_cols if any(k in c.lower() for k in ["salary", "lương", "thu nhập"])]
+                        if sal_cols:
+                            measure_cols = [sal_cols[0]]
+                    elif user_asked_headcount and not user_asked_salary:
+                        hc_cols = [c for c in measure_cols if any(k in c.lower() for k in ["headcount", "nhân sự", "nhân viên", "quy mô"])]
+                        if hc_cols:
+                            measure_cols = [hc_cols[0]]
+
                 # Phát hiện dữ liệu thô chưa GROUP BY cần tổng hợp (chỉ khi không có cột phân nhóm màu)
                 needs_aggregation = (
                     color_col is None
@@ -674,14 +693,30 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     clean_m = format_col_title(measure_cols[0])
                     clean_lbl = format_col_title(label_name)
 
-                    fig = px.bar(
-                        plot_df, x=label_name, y=measure_cols[0],
+                    bar_kwargs = dict(
+                        data_frame=plot_df, x=label_name, y=measure_cols[0],
                         color=color_col,
                         barmode="group" if color_col else "relative",
                         title=f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {format_col_title(color_col)})" if color_col else ""),
                         category_orders={label_name: category_order},
                         template="plotly_white"
                     )
+
+                    # Nếu phân nhóm theo Khối / Nhóm phòng ban, sử dụng bảng màu tương phản trực quan
+                    if color_col and any(k in color_col.lower() for k in ["group", "nhóm", "khối"]):
+                        group_color_map = {}
+                        for g in plot_df[color_col].dropna().unique():
+                            g_str = str(g).lower()
+                            if any(k in g_str for k in ["kinh doanh", "sales", "commercial"]):
+                                group_color_map[g] = "#2563EB"  # Xanh dương cho Kinh doanh
+                            elif any(k in g_str for k in ["kỹ thuật", "tech", "development"]):
+                                group_color_map[g] = "#10B981"  # Xanh ngọc cho Kỹ thuật
+                        if group_color_map:
+                            bar_kwargs["color_discrete_map"] = group_color_map
+                        else:
+                            bar_kwargs["color_discrete_sequence"] = ["#2563EB", "#10B981", "#F59E0B", "#8B5CF6"]
+
+                    fig = px.bar(**bar_kwargs)
 
                     # Kiểm tra xem có cần format rút gọn tiền tệ (Tỷ / Tr) trên nhãn cột để không bị tràn chữ không
                     max_numeric_val = 0.0
@@ -730,9 +765,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         ttemplate = f"{curr_sym}%{{y:,.0f}}"
                         trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
 
+                    target_entity = None
                     if not color_col:
                         # Kiểm tra xem người dùng có hỏi về một thực thể cụ thể không (Target Entity Accent Color)
-                        target_entity = None
                         if user_query:
                             uq_low = user_query.lower()
                             for v in plot_df[label_name]:
@@ -771,16 +806,35 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         dyn_title = f"📊 So Sánh {clean_m}: {target_entity} vs Các {clean_lbl} Khác"
                     elif target_entity:
                         dyn_title = f"{clean_m} theo {clean_lbl} (Làm nổi bật: {target_entity})"
+                    elif color_col and any(k in (user_query or "").lower() for k in ["so sánh", "so voi", "so với", "đối chiếu", "compare", "vs"]):
+                        unique_groups = [str(g) for g in plot_df[color_col].unique() if pd.notna(g)]
+                        if len(unique_groups) == 2:
+                            g1_clean = unique_groups[0].split("(")[0].strip()
+                            g2_clean = unique_groups[1].split("(")[0].strip()
+                            dyn_title = f"📊 So Sánh {clean_m}: {g1_clean} vs {g2_clean}"
+                        else:
+                            dyn_title = f"📊 So Sánh {clean_m} theo {clean_lbl} (Phân loại theo {format_col_title(color_col)})"
                     else:
                         dyn_title = f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {format_col_title(color_col)})" if color_col else "")
 
-                    fig.update_layout(
+                    layout_updates = dict(
                         title=dyn_title,
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         xaxis_title=clean_lbl,
                         yaxis_title=clean_m,
                         margin=dict(l=40, r=25, t=50, b=90 if tick_angle != 0 else 50)
                     )
+                    if color_col:
+                        layout_updates["legend"] = dict(
+                            title=None, orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+                        )
+                        try:
+                            max_val = float(pd.to_numeric(plot_df[measure_cols[0]], errors="coerce").max() or 0)
+                            if max_val > 0:
+                                layout_updates["yaxis"] = dict(title=clean_m, range=[0, max_val * 1.18])
+                        except Exception:
+                            pass
+                    fig.update_layout(**layout_updates)
             elif len(df) == 1 and len(measure_cols) == 1:
                 val = df[measure_cols[0]].iloc[0]
                 val_num = 0 if pd.isna(val) else val

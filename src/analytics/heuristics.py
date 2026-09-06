@@ -135,6 +135,11 @@ def get_row_identity_column(df: pd.DataFrame):
 def get_best_name_column(df: pd.DataFrame, exclude_cols: list = None):
     """Tìm cột tên người/sản phẩm/danh mục để làm nhãn hiển thị trực quan."""
     exclude = set(exclude_cols or [])
+    # Ưu tiên các cột tên thực thể chi tiết (không chứa từ khóa group/nhóm/khối)
+    for c in df.columns:
+        c_low = str(c).lower()
+        if c not in exclude and not any(k in c_low for k in ["group", "nhóm", "khối"]) and NAME_LIKE_REGEX.search(str(c)):
+            return c
     for c in df.columns:
         if c not in exclude and NAME_LIKE_REGEX.search(str(c)):
             return c
