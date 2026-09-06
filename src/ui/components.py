@@ -294,9 +294,11 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             raw_m = str(m_col).replace("_", " ").strip()
         m_low = raw_m.lower()
         if not is_en:
-            if any(k in m_low for k in ["current salary", "currentsalary", "lương mới nhất", "lương hiện tại"]):
+            if any(k in m_low for k in ["totalsalarybudget", "total salary budget", "total_salary_budget", "salarybudget", "salary_budget", "quỹ lương"]):
+                m_clean = "Quỹ Lương"
+            elif any(k in m_low for k in ["current salary", "currentsalary", "lương mới nhất", "lương hiện tại"]):
                 m_clean = "Lương Hiện Tại"
-            elif any(k in m_low for k in ["avg salary", "avgsalary"]):
+            elif any(k in m_low for k in ["avg salary", "avgsalary", "average salary"]):
                 m_clean = "Lương Trung Bình"
             elif "salary" in m_low or "lương" in m_low:
                 m_clean = "Mức Lương"
@@ -304,8 +306,6 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Quy Mô Nhân Sự"
             elif any(k in m_low for k in ["totalmanagers", "total managers", "quản lý"]):
                 m_clean = "Số Lượng Quản Lý"
-            elif any(k in m_low for k in ["totalsalarybudget", "salarybudget", "quỹ lương"]):
-                m_clean = "Quỹ Lương"
             elif any(k in m_low for k in ["years as manager", "yearsasmanager", "manager tenure", "managertenure", "manager years", "manageryears"]):
                 m_clean = "Thâm Niên Quản Lý (Năm)"
             elif any(k in m_low for k in ["yearsofservice", "years of service", "thâm niên", "tenure"]):
@@ -620,7 +620,24 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         if is_top_query and total_rows <= 30:
                             st.metric("🏆 " + ("Quy mô Top" if not is_en else "Top Size"), f"Top {total_rows}")
                         else:
-                            st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
+                            _dim_col = label_cols[0] if label_cols else "Department"
+                            _dim_low = str(_dim_col).lower()
+                            if any(k in _dim_low for k in ["dept", "phòng", "department"]):
+                                _card1_title = "🏢 " + ("Số phòng ban" if not is_en else "Departments")
+                                _card1_val = f"{total_rows} Phòng"
+                            elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
+                                _card1_title = "💼 " + ("Số chức danh" if not is_en else "Job Titles")
+                                _card1_val = f"{total_rows} Chức danh"
+                            elif any(k in _dim_low for k in ["year", "năm", "hireyear"]):
+                                _card1_title = "📅 " + ("Giai đoạn" if not is_en else "Period")
+                                _card1_val = f"{total_rows} Năm"
+                            elif any(k in _dim_low for k in ["name", "tên", "employee", "nhân viên"]):
+                                _card1_title = "👥 " + ("Số nhân sự" if not is_en else "Employees")
+                                _card1_val = f"{total_rows:,} Người"
+                            else:
+                                _card1_title = "📋 " + ("Tổng số đối tượng" if not is_en else "Total Entities")
+                                _card1_val = f"{total_rows:,}"
+                            st.metric(_card1_title, _card1_val)
                     with col2:
                         st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
                     with col3:

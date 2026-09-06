@@ -645,19 +645,45 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         template="plotly_white"
                     )
 
+                    # Kiểm tra xem có cần format rút gọn tiền tệ (Tỷ / Tr) trên nhãn cột để không bị tràn chữ không
+                    max_numeric_val = 0.0
+                    try:
+                        max_numeric_val = float(pd.to_numeric(plot_df[measure_cols[0]], errors="coerce").max() or 0)
+                    except Exception:
+                        pass
+
+                    use_compact_currency = is_salary and max_numeric_val >= 10_000_000
+
                     if is_years:
                         ttemplate = "%{y:.1f} năm"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
                     elif is_headcount:
                         ttemplate = "%{y:,.0f} người"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
+                    elif use_compact_currency:
+                        def _compact_currency_str(v):
+                            try:
+                                fv = float(v)
+                                if abs(fv) >= 1_000_000_000:
+                                    return f"${fv / 1_000_000_000:,.2f} Tỷ"
+                                elif abs(fv) >= 1_000_000:
+                                    return f"${fv / 1_000_000:,.2f} Tr"
+                                return f"${fv:,.0f}"
+                            except Exception:
+                                return str(v)
+                        compact_labels = [_compact_currency_str(v) for v in plot_df[measure_cols[0]]]
+                        trace_kwargs = {
+                            "text": compact_labels,
+                            "textposition": "outside",
+                            "hovertemplate": "%{x}<br><b>" + clean_m + "</b>: " + curr_sym + "%{y:,.2f}<extra></extra>",
+                        }
                     elif any('.' in str(v) for v in plot_df[measure_cols[0]]):
                         ttemplate = f"{curr_sym}%{{y:,.2f}}"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
                     else:
                         ttemplate = f"{curr_sym}%{{y:,.0f}}"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
 
-                    trace_kwargs = {
-                        "texttemplate": ttemplate,
-                        "textposition": 'outside',
-                    }
                     if not color_col:
                         # Kiểm tra xem người dùng có hỏi về một thực thể cụ thể không (Target Entity Accent Color)
                         target_entity = None
@@ -693,6 +719,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 bench_lbl = f"Benchmark TB: {mean_benchmark:,.1f} năm"
                             elif is_headcount:
                                 bench_lbl = f"Benchmark TB: {mean_benchmark:,.0f} người"
+                            elif mean_benchmark >= 1_000_000_000 and is_salary:
+                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark / 1_000_000_000:,.2f} Tỷ"
+                            elif mean_benchmark >= 1_000_000 and is_salary:
+                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark / 1_000_000:,.2f} Tr"
                             elif mean_benchmark > 100:
                                 bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.0f}"
                             else:
