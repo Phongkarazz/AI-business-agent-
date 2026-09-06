@@ -807,9 +807,114 @@ def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: 
     is_sqlite = "sqlite" in (dialect or "").lower()
     date_expr = "strftime('%Y-%m', s.SaleDate)" if is_sqlite else "DATE_FORMAT(s.SaleDate, '%Y-%m')"
 
+    year_match = re.search(r'\b(20\d{2})\b', q_low)
+    year_val = year_match.group(1) if year_match else None
+    year_cond = (f"strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {year_val}") if year_val else ""
+
+    # 0. Doanh thu của một Team cụ thể (Yummies, Delish, Jucies) qua các tháng
+    specific_team = None
+    if "yummies" in q_low:
+        specific_team = "Yummies"
+    elif "delish" in q_low:
+        specific_team = "Delish"
+    elif "jucies" in q_low:
+        specific_team = "Jucies"
+
+    if specific_team and has_monthly:
+        conds = [f"pe.Team = '{specific_team}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+        needs_fix = (
+            "with " in sql_low
+            or "products" in sql_low
+            or "pr." in sql_low
+            or "pe.spid" not in sql_low
+            or f"'{specific_team.lower()}'" not in sql_low
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+            or "group by month" not in sql_low
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    {metric_expr}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY Month
+ORDER BY Month ASC"""
+
+    # 0.1 Doanh thu của một Quốc gia cụ thể (India, USA, Canada, New Zealand, Australia, UK) qua các tháng
+    specific_country = None
+    country_patterns = {
+        "india": "India", "ấn độ": "India", "an do": "India",
+        "usa": "USA", "mỹ": "USA", "hoa kỳ": "USA", "united states": "USA",
+        "canada": "Canada",
+        "new zealand": "New Zealand",
+        "australia": "Australia", "úc": "Australia",
+        "uk": "UK", "nước anh": "UK", "vương quốc anh": "UK", "united kingdom": "UK"
+    }
+    for cp_key, cp_val in country_patterns.items():
+        if re.search(rf"\b{re.escape(cp_key)}\b", q_low):
+            specific_country = cp_val
+            break
+
+    if specific_country and has_monthly and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
+        conds = [f"g.Geo = '{specific_country}'"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+        needs_fix = (
+            "with " in sql_low
+            or "g.geoid" not in sql_low
+            or f"'{specific_country.lower()}'" not in sql_low
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+            or "group by month" not in sql_low
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    {metric_expr}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{where_clause}
+GROUP BY Month
+ORDER BY Month ASC"""
+
+    # 0.2 Doanh thu theo từng Team qua các tháng
+    is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng"]) or "team" in sql_low
+    if is_team and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country", "nhân viên", "salesperson"]):
+        conds = ["pe.Team != ''"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+        metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+        order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
+        needs_fix = (
+            "with " in sql_low
+            or "pe.spid" not in sql_low
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+            or "group by month, team" not in sql_low
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    pe.Team AS Team,
+    {metric_expr}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY Month, Team
+ORDER BY Month ASC, {order_col} DESC"""
+
     # 1. Doanh thu theo từng quốc gia / thị trường qua các tháng
     is_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) or any(k in sql_low for k in ["country", "country_sales", "geo", "geoid"])
-    if is_country and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
+    if is_country and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson", "team", "yummies", "delish", "jucies"]):
         needs_fix = (
             "with " in sql_low
             or "country_sales" in sql_low
@@ -832,8 +937,8 @@ GROUP BY Month, Country
 ORDER BY Month ASC, TotalSales DESC"""
 
     # 2. Doanh thu theo từng sản phẩm qua các tháng
-    is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"]) or "products" in sql_low or "pid" in sql_low
-    if is_product and not any(k in q_low for k in ["quốc gia", "country", "nhân viên", "salesperson"]):
+    is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola", "chocolate"])
+    if is_product and not any(k in q_low for k in ["quốc gia", "country", "nhân viên", "salesperson", "team", "yummies", "delish", "jucies"]):
         needs_fix = (
             "with " in sql_low
             or ("year(" in sql_low and "month(" in sql_low)

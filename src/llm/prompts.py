@@ -424,6 +424,55 @@ GROUP BY Month, Salesperson
 ORDER BY Month ASC, TotalSales DESC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! Dùng SELECT trực tiếp JOIN giữa sales s và people pe ON s.SPID = pe.SPID!)
 """
+        # 0.35 Doanh thu của Team / Đội ngũ (hoặc Team cụ thể như Yummies, Delish, Jucies) qua các tháng
+        elif any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "yummies", "delish", "jucies"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng", "thay đổi"]):
+            specific_team = None
+            if "yummies" in q_low:
+                specific_team = "Yummies"
+            elif "delish" in q_low:
+                specific_team = "Delish"
+            elif "jucies" in q_low:
+                specific_team = "Jucies"
+
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}"
+
+            if specific_team:
+                conds = [f"pe.Team = '{specific_team}'"]
+                if yr_filter:
+                    conds.append(yr_filter)
+                where_clause = "WHERE " + " AND ".join(conds)
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU CỦA TEAM {specific_team.upper()} QUA CÁC THÁNG):
+SELECT 
+    {date_expr} AS Month,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Lọc đội ngũ bằng pe.Team = '{specific_team}'! BẮT BUỘC ORDER BY Month ASC để vẽ biểu đồ đường 12 tháng!)
+"""
+            else:
+                where_clause = f"WHERE pe.Team != '' AND {yr_filter}" if yr_filter else "WHERE pe.Team != ''"
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO TỪNG TEAM QUA CÁC THÁNG):
+SELECT 
+    {date_expr} AS Month,
+    pe.Team AS Team,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY Month, Team
+ORDER BY Month ASC, TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Cột đội ngũ là pe.Team!)
+"""
+
         # 0.4 Doanh thu tổng hợp qua các tháng
         elif any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]) and any(k in q_low for k in ["doanh thu", "doanh số", "sales"]):
             return f"""
