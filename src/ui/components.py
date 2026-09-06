@@ -537,16 +537,49 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         pass
             elif is_avg_or_rate:
                 # CỘT TRUNG BÌNH/TỶ LỆ/DURATION: Hiển thị Thống kê tổng hợp khoa học, KHÔNG cộng dồn!
-                if _is_years_measure and is_top_query and total_rows <= 30:
-                    # --- LAYOUT ĐẶC BIỆT: XẾP HẠNG THÂM NIÊN (Top N Manager/Service) ---
+                if is_top_query and total_rows <= 30:
+                    # --- LAYOUT ĐẶC BIỆT: XẾP HẠNG TOP N (Chức danh / Quản lý / Phòng ban / Nhân sự) ---
+                    _dim_col = label_cols[0] if label_cols else (dim_cols[0] if dim_cols else "")
+                    _dim_low = str(_dim_col).lower()
+                    if any(k in _dim_low for k in ["title", "chức danh", "job"]):
+                        entity_name = "Chức danh" if not is_en else "Job Titles"
+                    elif any(k in _dim_low for k in ["dept", "phòng", "department"]):
+                        entity_name = "Phòng ban" if not is_en else "Departments"
+                    elif any(k in _dim_low for k in ["manager", "quản lý", "trưởng phòng"]):
+                        entity_name = "Quản lý" if not is_en else "Managers"
+                    elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "emp", "name"]):
+                        entity_name = "Nhân sự" if not is_en else "Employees"
+                    else:
+                        entity_name = ""
+
+                    card1_title = "🏆 " + ("Xếp hạng" if not is_en else "Ranking")
+                    card1_val = f"Top {total_rows}" + (f" {entity_name}" if entity_name else "")
+
+                    # Tính delta so với giá trị trung bình chuẩn của Top N
+                    try:
+                        diff_peak = float(peak_val) - float(avg_val)
+                        pct_peak = (diff_peak / float(avg_val) * 100) if float(avg_val) > 0 else 0
+                        sign_p = "+" if diff_peak >= 0 else ""
+                        delta_peak = f"{sign_p}{pct_peak:.1f}% vs TB"
+                    except Exception:
+                        delta_peak = None
+
+                    try:
+                        diff_min = float(min_val) - float(avg_val)
+                        pct_min = (diff_min / float(avg_val) * 100) if float(avg_val) > 0 else 0
+                        sign_m = "+" if diff_min >= 0 else ""
+                        delta_min = f"{sign_m}{pct_min:.1f}% vs TB"
+                    except Exception:
+                        delta_min = None
+
                     with col1:
-                        st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {total_rows}")
+                        st.metric(card1_title, card1_val)
                     with col2:
-                        st.metric("📊 " + (f"TB {m_clean}" if not is_en else f"Avg {m_clean}"), fmt_avg)
+                        st.metric("📊 " + (f"TB Top {total_rows}" if not is_en else f"Avg Top {total_rows}"), fmt_avg)
                     with col3:
-                        st.metric(f"🥇 " + ("#1 " + peak_label if not is_en else f"#1 {peak_label}"), fmt_peak)
+                        st.metric(f"🥇 " + (f"#1 {peak_label}" if not is_en else f"#1 {peak_label}"), fmt_peak, delta=delta_peak)
                     with col4:
-                        st.metric(f"🥉 " + (f"#{total_rows} " + min_label if not is_en else f"#{total_rows} {min_label}"), fmt_min)
+                        st.metric(f"🏅 " + (f"#{total_rows} {min_label}" if not is_en else f"#{total_rows} {min_label}"), fmt_min, delta=delta_min)
                 elif target_idx is not None and target_idx in valid_vals.index:
                     # --- LAYOUT ĐẶC BIỆT: ĐỐI TƯỢNG MỤC TIÊU VS CÁC ĐỐI TƯỢNG KHÁC ---
                     t_val = df.loc[target_idx, m_col]
@@ -566,8 +599,26 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     with col4:
                         st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
                 else:
+                    _dim_col = label_cols[0] if label_cols else (dim_cols[0] if dim_cols else "")
+                    _dim_low = str(_dim_col).lower()
+                    if any(k in _dim_low for k in ["dept", "phòng", "department"]):
+                        _card1_title = "🏢 " + ("Số phòng ban" if not is_en else "Departments")
+                        _card1_val = f"{total_rows} Phòng"
+                    elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
+                        _card1_title = "💼 " + ("Số chức danh" if not is_en else "Job Titles")
+                        _card1_val = f"{total_rows} Chức danh"
+                    elif any(k in _dim_low for k in ["manager", "quản lý", "trưởng phòng"]):
+                        _card1_title = "👔 " + ("Số quản lý" if not is_en else "Managers")
+                        _card1_val = f"{total_rows:,} Người"
+                    elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "emp", "name"]):
+                        _card1_title = "👥 " + ("Số nhân sự" if not is_en else "Employees")
+                        _card1_val = f"{total_rows:,} Người"
+                    else:
+                        _card1_title = "📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities")
+                        _card1_val = f"{total_rows:,}"
+
                     with col1:
-                        st.metric("📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities"), f"{total_rows:,}")
+                        st.metric(_card1_title, _card1_val)
                     with col2:
                         st.metric(f"📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg)
                     with col3:
@@ -618,7 +669,19 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 else:
                     with col1:
                         if is_top_query and total_rows <= 30:
-                            st.metric("🏆 " + ("Quy mô Top" if not is_en else "Top Size"), f"Top {total_rows}")
+                            _dim_col = label_cols[0] if label_cols else "Department"
+                            _dim_low = str(_dim_col).lower()
+                            if any(k in _dim_low for k in ["dept", "phòng", "department"]):
+                                _entity_top = " Phòng ban" if not is_en else " Departments"
+                            elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
+                                _entity_top = " Chức danh" if not is_en else " Job Titles"
+                            elif any(k in _dim_low for k in ["manager", "quản lý"]):
+                                _entity_top = " Quản lý" if not is_en else " Managers"
+                            elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "name", "tên"]):
+                                _entity_top = " Nhân sự" if not is_en else " Employees"
+                            else:
+                                _entity_top = ""
+                            st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {total_rows}{_entity_top}")
                         else:
                             _dim_col = label_cols[0] if label_cols else "Department"
                             _dim_low = str(_dim_col).lower()

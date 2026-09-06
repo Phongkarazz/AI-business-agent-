@@ -622,7 +622,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     # Tự động đo độ dài tên lớn nhất để quyết định góc xoay nghiêng chống đè chữ
                     max_label_len = max((len(str(v)) for v in plot_df[label_name]), default=0)
-                    tick_angle = -35 if (max_label_len > 8 or len(plot_df) > 5) else 0
+                    if len(plot_df) <= 6:
+                        tick_angle = 0
+                    else:
+                        tick_angle = -35 if (max_label_len > 8 or len(plot_df) > 8) else 0
 
                     if pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]) and plot_df[measure_cols[0]].nunique(dropna=True) == 1 and len(plot_df) > 1:
                         st.caption(f"ℹ️ Lưu ý: Tất cả {len(plot_df)} đối tượng hiển thị đều có cùng giá trị `{measure_cols[0]}` = {plot_df[measure_cols[0]].iloc[0]:,}.")
@@ -677,6 +680,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             "textposition": "outside",
                             "hovertemplate": "%{x}<br><b>" + clean_m + "</b>: " + curr_sym + "%{y:,.2f}<extra></extra>",
                         }
+                    elif is_salary and max_numeric_val >= 100:
+                        # Mức lương/ngân sách trên $100: làm tròn số nguyên trên nhãn cột để giao diện gọn gàng, chi tiết lẻ xem khi hover
+                        ttemplate = f"{curr_sym}%{{y:,.0f}}"
+                        trace_kwargs = {
+                            "texttemplate": ttemplate,
+                            "textposition": "outside",
+                            "hovertemplate": "%{x}<br><b>" + clean_m + "</b>: " + curr_sym + "%{y:,.2f}<extra></extra>",
+                        }
                     elif any('.' in str(v) for v in plot_df[measure_cols[0]]):
                         ttemplate = f"{curr_sym}%{{y:,.2f}}"
                         trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
@@ -700,7 +711,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             colors = ['#F59E0B' if str(v).strip().lower() == target_entity.lower() else '#3B82F6' for v in plot_df[label_name]]
                             trace_kwargs["marker_color"] = colors
                         else:
-                            trace_kwargs["marker_color"] = "#1F4E78"
+                            # Kiểm tra xem có phải truy vấn xếp hạng Top N không
+                            uq_low = (user_query or "").lower()
+                            is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "dẫn đầu", "nhiều nhất", "ít nhất"])
+                            if is_top_ranking and 2 <= len(plot_df) <= 15:
+                                # Highlight đối tượng dẫn đầu #1 bằng màu Vàng Gold #F59E0B, các đối tượng còn lại màu Xanh Hiện Đại #2563EB
+                                colors = ['#F59E0B'] + ['#2563EB'] * (len(plot_df) - 1)
+                                trace_kwargs["marker_color"] = colors
+                            else:
+                                trace_kwargs["marker_color"] = "#1F4E78"
 
                     if len(plot_df) <= 2:
                         trace_kwargs["width"] = 0.35
@@ -728,12 +747,24 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             else:
                                 bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.2f}"
 
+                            first_val = float(plot_df[measure_cols[0]].iloc[0]) if len(plot_df) > 0 else 0
+                            # Đặt nhãn ở phía có khoảng trống (nếu cột đầu cao hơn TB thì đặt bên phải để không đè lên cột đầu)
+                            annot_pos = "top right" if first_val >= mean_benchmark else "top left"
+
                             fig.add_hline(
                                 y=mean_benchmark,
                                 line_dash="dash",
                                 line_color="#EF4444",
                                 annotation_text=bench_lbl,
-                                annotation_position="top left"
+                                annotation_position=annot_pos,
+                                annotation=dict(
+                                    font_size=11,
+                                    font_color="#DC2626",
+                                    bgcolor="rgba(255, 255, 255, 0.88)",
+                                    bordercolor="#EF4444",
+                                    borderwidth=1,
+                                    borderpad=3
+                                )
                             )
                         if max_y > 0:
                             fig.update_yaxes(range=[0, max_y * 1.18])
@@ -750,7 +781,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         xaxis_title=clean_lbl,
                         yaxis_title=clean_m,
-                        margin=dict(l=20, r=20, t=50, b=90 if tick_angle != 0 else 50)
+                        margin=dict(l=40, r=25, t=50, b=90 if tick_angle != 0 else 50)
                     )
             elif len(df) == 1 and len(measure_cols) == 1:
                 val = df[measure_cols[0]].iloc[0]
