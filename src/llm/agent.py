@@ -13,7 +13,13 @@ import pandas as pd
 from src.config import FORBIDDEN_KEYWORDS, MAX_ROWS_CAP, INDIVIDUAL_ENTITY_REGEX
 from src.database.query_runner import read_sql_capped, sanitize_error
 from src.database.schema import get_table_names
-from src.analytics.heuristics import is_id_like, detect_query_language, sanitize_insight_markdown, sanitize_followup_question
+from src.analytics.heuristics import (
+    is_id_like,
+    detect_query_language,
+    sanitize_insight_markdown,
+    sanitize_followup_question,
+    ensure_full_twelve_months,
+)
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
 from .prompts import (
@@ -214,11 +220,16 @@ def extract_requested_limit(user_query: str) -> int | None:
 
 
 def enforce_top_n_limit(sql: str, user_query: str) -> str:
-    """Tự động khóa mệnh đề LIMIT N khi câu hỏi của người dùng có chứa Top N (ví dụ Top 5, Top 10, Top 3)."""
+    """Tự động khóa mệnh đề LIMIT N khi câu hỏi của người dùng có chứa Top N (ví dụ Top 5, Top 10, Top 3).
+    Nếu là câu hỏi chuỗi thời gian qua các tháng/năm mà không yêu cầu Top N, tự động gỡ bỏ LIMIT để không bị cắt xén dữ liệu."""
     if not sql or not user_query:
         return sql
     top_n = extract_requested_limit(user_query)
     if not top_n:
+        q_low = user_query.lower()
+        is_time_trend = any(k in q_low for k in ["qua các tháng", "từng tháng", "theo tháng", "xu hướng", "biến động theo thời gian", "qua các năm", "theo từng năm"])
+        if is_time_trend:
+            sql = re.sub(r"\s+LIMIT\s+\d+\s*;?$", "", sql, flags=re.IGNORECASE).rstrip(";").strip()
         return sql
 
     # Khóa LIMIT ở câu query ngoài cùng
@@ -777,8 +788,8 @@ ORDER BY Headcount DESC"""
 
 
 def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
-    """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo tháng (theo Quốc gia, Sản phẩm, Nhân viên) trên CSDL Awesome Chocolates.
-    Loại bỏ triệt để CTE bị vỡ (WITH ...), JOIN trùng lặp và chuyển thành câu SELECT đơn trực tiếp định dạng YYYY-MM."""
+    """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo tháng (theo Quốc gia, Sản phẩm, Nhân viên, hoặc Số lượng hộp/thùng bán ra) trên CSDL Awesome Chocolates.
+    Loại bỏ triệt để CTE bị vỡ (WITH ...), JOIN trùng lặp và chuyển thành câu SELECT đơn trực tiếp định dạng YYYY-MM hoặc Month số."""
     if not sql or not user_query:
         return sql
 
@@ -788,8 +799,9 @@ def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: 
     # Kiểm tra xem có phải câu hỏi theo tháng / thời gian trên Chocolates DB không
     has_monthly = any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian", "xu hướng", "thay đổi", "biến động"])
     has_sales = any(k in q_low for k in ["doanh thu", "doanh số", "sales", "tiền bán", "amount", "bán hàng"]) or any(k in sql_low for k in ["sales", "totalsales", "amount"])
+    has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"]) or any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
 
-    if not (has_monthly and (has_sales or "sales" in sql_low or "amount" in sql_low)):
+    if not (has_monthly and (has_sales or has_boxes or "sales" in sql_low or "amount" in sql_low or "boxes" in sql_low)):
         return sql
 
     is_sqlite = "sqlite" in (dialect or "").lower()
@@ -857,22 +869,70 @@ JOIN people pe ON s.SPID = pe.SPID
 GROUP BY Month, Salesperson
 ORDER BY Month ASC, TotalSales DESC"""
 
-    # 4. Doanh thu tổng hợp toàn bộ qua các tháng (không phân nhóm)
-    is_general_monthly = not (is_country or is_product or is_person)
-    if is_general_monthly and any(k in q_low for k in ["doanh thu", "doanh số", "sales"]):
-        needs_fix = (
-            "with " in sql_low
-            or ("year(" in sql_low and "month(" in sql_low)
-            or ("date_format" not in sql_low and not is_sqlite)
-            or ("strftime" not in sql_low and is_sqlite)
-        )
-        if needs_fix:
+    # 4. Số lượng thùng / hộp bán ra qua các tháng (không phân nhóm)
+    is_general_boxes = has_boxes and not (is_country or is_product or is_person)
+    if is_general_boxes:
+        year_match = re.search(r'\b(20\d{2})\b', q_low)
+        if year_match:
+            yr = year_match.group(1)
+            year_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr}"
+            month_expr = "CAST(strftime('%m', s.SaleDate) AS INTEGER)" if is_sqlite else "MONTH(s.SaleDate)"
             return f"""SELECT 
+    {month_expr} AS Month,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+{year_filter}
+GROUP BY Month
+ORDER BY Month ASC"""
+        else:
+            needs_fix = (
+                "with " in sql_low
+                or ("year(" in sql_low and "month(" in sql_low)
+                or ("date_format" not in sql_low and not is_sqlite)
+                or ("strftime" not in sql_low and is_sqlite)
+                or "limit" in sql_low
+            )
+            if needs_fix or "boxes" not in sql_low:
+                return f"""SELECT 
+    {date_expr} AS Month,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+GROUP BY Month
+ORDER BY Month ASC"""
+
+    # 5. Doanh thu tổng hợp toàn bộ qua các tháng (không phân nhóm)
+    is_general_monthly = not (is_country or is_product or is_person or has_boxes)
+    if is_general_monthly and any(k in q_low for k in ["doanh thu", "doanh số", "sales", "tiền"]):
+        year_match = re.search(r'\b(20\d{2})\b', q_low)
+        if year_match:
+            yr = year_match.group(1)
+            year_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr}"
+            month_expr = "CAST(strftime('%m', s.SaleDate) AS INTEGER)" if is_sqlite else "MONTH(s.SaleDate)"
+            return f"""SELECT 
+    {month_expr} AS Month,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+{year_filter}
+GROUP BY Month
+ORDER BY Month ASC"""
+        else:
+            needs_fix = (
+                "with " in sql_low
+                or ("year(" in sql_low and "month(" in sql_low)
+                or ("date_format" not in sql_low and not is_sqlite)
+                or ("strftime" not in sql_low and is_sqlite)
+                or "limit" in sql_low
+            )
+            if needs_fix:
+                return f"""SELECT 
     {date_expr} AS Month,
     SUM(s.Amount) AS TotalSales
 FROM sales s
 GROUP BY Month
 ORDER BY Month ASC"""
+
+    if has_monthly and not extract_requested_limit(user_query):
+        sql = re.sub(r"\s+LIMIT\s+\d+\s*;?$", "", sql, flags=re.IGNORECASE).rstrip(";").strip()
 
     return sql
 
@@ -1408,6 +1468,7 @@ def run_agent(
                 else:
                     result["logs"].append(f"⚠️ Chấp nhận kết quả sau {attempt} lần thử: {check.get('ly_do', '')}")
 
+                df = ensure_full_twelve_months(df, user_query)
                 result["df"] = df
                 result["sql"] = sql_query
 

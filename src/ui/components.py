@@ -496,6 +496,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Thâm Niên Quản Lý (Năm)"
             elif any(k in m_low for k in ["yearsofservice", "years of service", "thâm niên", "tenure"]):
                 m_clean = "Thâm Niên (Năm)"
+            elif any(k in m_low for k in ["boxes", "boxessold", "totalboxessold", "total_boxes", "hộp", "thùng"]):
+                m_clean = "Tổng Số Hộp Bán Ra"
             elif "raisecount" in m_low:
                 m_clean = "Số Lần Tăng Lương"
             else:
@@ -691,7 +693,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 min_dim = str(dim_vals.min()) if not dim_vals.empty else ""
                 max_dim = str(dim_vals.max()) if not dim_vals.empty else ""
                 is_year_unit = any(k in str(dim_c).lower() for k in ["year", "nam"])
-                dim_unit = "Năm" if is_year_unit else "Kỳ"
+                is_month_unit = any(k in str(dim_c).lower() for k in ["month", "thang", "tháng"])
+                dim_unit = ("Năm" if not is_en else "Years") if is_year_unit else (("Tháng" if not is_en else "Months") if is_month_unit else ("Kỳ" if not is_en else "Periods"))
                 with col1:
                     st.metric("📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"), f"{total_rows} {dim_unit}" + (f" ({min_dim} – {max_dim})" if min_dim != max_dim else ""))
                 with col2:

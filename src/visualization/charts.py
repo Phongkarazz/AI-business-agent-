@@ -16,6 +16,7 @@ from src.analytics.heuristics import (
     pick_label_column,
     is_id_like,
     unify_year_month_columns,
+    ensure_full_twelve_months,
 )
 
 VI_COLUMN_MAP = {
@@ -103,6 +104,10 @@ VI_COLUMN_MAP = {
     "boxes": "Số Thùng",
     "totalboxes": "Tổng Số Thùng",
     "total_boxes": "Tổng Số Thùng",
+    "totalboxessold": "Tổng Số Hộp Bán Ra",
+    "total_boxes_sold": "Tổng Số Hộp Bán Ra",
+    "boxessold": "Số Hộp Bán Ra",
+    "boxes_sold": "Số Hộp Bán Ra",
     "customers": "Khách Hàng",
     "totalcustomers": "Tổng Số Khách Hàng",
     "total_customers": "Tổng Số Khách Hàng",
@@ -144,6 +149,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
         st.info("Không có dữ liệu để vẽ biểu đồ.")
         return None
 
+    df = ensure_full_twelve_months(df, user_query)
     df = unify_year_month_columns(df)
 
     measure_cols, label_cols, time_col = get_axis_columns(df)
@@ -393,8 +399,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     showlegend=False
                 )
 
-            elif label_cols:
-                label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
+            elif label_cols or time_col:
+                effective_label_cols = label_cols if label_cols else ([time_col] if time_col else [])
+                label_name, label_series, consumed_cols = pick_label_column(df, effective_label_cols)
                 if label_name is None:
                     st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
                     return None
@@ -983,8 +990,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 return None
 
         elif chosen in ("Bar Ngang", "Bar Cột Ngang", "Bar Ngang (Xếp hạng)", "Horizontal Bar") and measure_cols:
-            if label_cols:
-                label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
+            if label_cols or time_col:
+                effective_label_cols = label_cols if label_cols else ([time_col] if time_col else [])
+                label_name, label_series, consumed_cols = pick_label_column(df, effective_label_cols)
                 if label_name is None:
                     st.info("Không tìm thấy cột phù hợp để làm nhãn.")
                     return None

@@ -436,6 +436,35 @@ GROUP BY Month
 ORDER BY Month ASC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! Dùng SELECT trực tiếp từ sales s!)
 """
+        # 0.5 Số lượng hộp / thùng (Boxes) bán ra qua các tháng
+        elif any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}"
+                m_expr = "CAST(strftime('%m', s.SaleDate) AS INTEGER)" if is_sqlite else "MONTH(s.SaleDate)"
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG HỘP BÁN RA QUA CÁC THÁNG NĂM {yr_val}):
+SELECT 
+    {m_expr} AS Month,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+{yr_filter}
+GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG `LIMIT 10`! 1 năm có 12 tháng, bắt buộc để đầy đủ các tháng không được giới hạn LIMIT. Dùng {m_expr} AS Month và SUM(s.Boxes) AS TotalBoxesSold!)
+"""
+            else:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG HỘP BÁN RA QUA CÁC THÁNG):
+SELECT 
+    {date_expr} AS Month,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG `LIMIT 10`! Bắt buộc ORDER BY Month ASC!)
+"""
 
     # 1. Câu hỏi liên quan đến chức danh (Title)
     if any(k in q_low for k in ["chức danh", "title", "vị trí", "bổ nhiệm", "thăng chức", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
@@ -886,10 +915,11 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
    - VỚI CÂU HỎI TOP N / DANH SÁCH / XẾP HẠNG:
         BẮT BUỘC: Mỗi thực thể chỉ được xuất hiện DUY NHẤT 1 LẦN với TỔNG HOẶC MAX TÍCH LŨY (`SUM(...)` hoặc `MAX(...)`), `GROUP BY` và `ORDER BY ... DESC LIMIT N`!
         TUYỆT ĐỐI KHÔNG SELECT rời rạc mà không `GROUP BY` vì sẽ bị lặp lại cùng một thực thể nhiều lần!
-   - VỚI CÂU HỎI THEO THỜI GIAN / THEO THÁNG / THEO QUÝ / XU HƯỚNG:
-        + TUYỆT ĐỐI CẤM DÙNG `LIMIT 10` (Bởi vì 1 năm có đủ 12 tháng, nếu dùng LIMIT 10 sẽ bị cắt mất tháng 6 hoặc tháng 12!).
-        + BẮT BUỘC `ORDER BY ... ASC` để biểu đồ đường vẽ liền mạch, chuẩn xác theo đúng trình tự thời gian!
-      + Khi người dùng hỏi dạng danh sách số nhiều ('Danh sách...', 'Top N...', 'Những...', 'Các...'): BẮT BUỘC tuân thủ đúng số N trong câu hỏi (Ví dụ: 'Top 10' -> BẮT BUỘC `LIMIT 10`, 'Top 5' -> `LIMIT 5`). Nếu không ghi rõ số N, mặc định dùng `LIMIT 10`. TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` hoặc tự ý giảm số lượng xuống 5 khi người dùng yêu cầu Top 10!
+    - VỚI CÂU HỎI THEO THỜI GIAN / THEO THÁNG / THEO QUÝ / XU HƯỚNG:
+         + TUYỆT ĐỐI CẤM DÙNG `LIMIT 10` (Bởi vì 1 năm có đủ 12 tháng, nếu dùng LIMIT 10 sẽ bị cắt mất tháng 6 hoặc tháng 12!).
+         + BẮT BUỘC `ORDER BY ... ASC` để biểu đồ đường vẽ liền mạch, chuẩn xác theo đúng trình tự thời gian!
+      + Khi người dùng hỏi dạng danh sách số nhiều thực thể đối tượng ('Danh sách...', 'Top N...', 'Những nhân viên/sản phẩm...', 'Các khách hàng/quốc gia...'): BẮT BUỘC tuân thủ đúng số N trong câu hỏi (Ví dụ: 'Top 10' -> BẮT BUỘC `LIMIT 10`, 'Top 5' -> `LIMIT 5`). Nếu không ghi rõ số N, mặc định dùng `LIMIT 10`. TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` hoặc tự ý giảm số lượng xuống 5 khi người dùng yêu cầu Top 10!
+      + TUYỆT ĐỐI KHÔNG áp dụng `LIMIT 10` cho câu hỏi thời gian, chuỗi xu hướng qua các tháng/năm ('qua các tháng', 'theo tháng', 'biến động theo thời gian') vì 1 năm phải có đủ 12 tháng!
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
      + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):

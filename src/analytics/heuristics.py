@@ -77,7 +77,12 @@ def find_time_column(df: pd.DataFrame):
                 vals = pd.to_numeric(df[c], errors="coerce").dropna()
                 if not vals.empty and vals.min() >= 1900 and vals.max() <= 2100:
                     return c
-                # Cột số nhưng không phải năm 1900-2100 -> KHÔNG PHẢI cột thời gian lịch
+                # Nhận diện cột Month dạng số (1..12) hoặc Quý dạng số (1..4)
+                if any(k in str(c).lower() for k in ["month", "thang", "tháng"]) and not vals.empty and vals.min() >= 1 and vals.max() <= 12:
+                    return c
+                if any(k in str(c).lower() for k in ["quy", "quarter"]) and not vals.empty and vals.min() >= 1 and vals.max() <= 4:
+                    return c
+                # Cột số nhưng không phải năm/tháng/quý -> KHÔNG PHẢI cột thời gian lịch
                 continue
             parsed = pd.to_datetime(df[c], errors="coerce")
             if parsed.notna().mean() >= 0.8:
@@ -85,6 +90,98 @@ def find_time_column(df: pd.DataFrame):
         except Exception:
             continue
     return None
+
+
+def ensure_full_twelve_months(df: pd.DataFrame, user_query: str = "") -> pd.DataFrame:
+    """Tự động đảm bảo đủ 12 tháng (từ tháng 1 đến tháng 12) khi người dùng truy vấn theo các tháng trong năm.
+    Nếu dữ liệu thực tế bị thiếu một số tháng (ví dụ chỉ có tháng 3-12 do quý 1 chưa bán hoặc bị cắt xén),
+    tự động bù đắp các tháng còn thiếu với giá trị 0 để biểu đồ và bảng hiển thị trọn vẹn 12 tháng."""
+    if df is None or df.empty:
+        return df
+
+    # 1. Tìm cột Month (hoặc thang)
+    month_col = None
+    for c in df.columns:
+        c_low = str(c).strip().lower()
+        if any(k in c_low for k in ["month", "thang", "tháng"]):
+            month_col = c
+            break
+
+    if not month_col:
+        return df
+
+    # Tìm cột Year nếu có duy nhất 1 năm (ví dụ câu lệnh SELECT YEAR(...) AS Year, MONTH(...) AS Month)
+    year_col = None
+    for c in df.columns:
+        if c == month_col:
+            continue
+        c_low = str(c).strip().lower()
+        if any(k in c_low for k in ["year", "nam"]) and not any(k in c_low for k in ["service", "tenure", "experience"]):
+            vals_yr = pd.to_numeric(df[c], errors="coerce").dropna()
+            if not vals_yr.empty and vals_yr.min() >= 1900 and vals_yr.max() <= 2100 and vals_yr.nunique() == 1:
+                year_col = c
+                break
+
+    non_time_cols = [c for c in df.columns if c not in (month_col, year_col)]
+    num_cols = df[non_time_cols].select_dtypes(include="number").columns.tolist()
+
+    # Chỉ áp dụng khi là chuỗi thời gian đơn (không có cột phân loại thứ 2)
+    if len(num_cols) != len(non_time_cols) or len(non_time_cols) == 0:
+        return df
+
+    q_low = (user_query or "").lower()
+    is_monthly_query = any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "năm", "12 tháng", "xu hướng"]) or not user_query
+    if not is_monthly_query:
+        return df
+
+    # Trường hợp A: Cột Month là số nguyên 1..12 (hoặc dạng chuỗi số '1'..'12')
+    vals_num = pd.to_numeric(df[month_col], errors="coerce")
+    if vals_num.notna().all() and (vals_num >= 1).all() and (vals_num <= 12).all() and len(df) < 12:
+        orig_dtype = df[month_col].dtype
+        df_temp = df.copy()
+        df_temp[month_col] = vals_num.astype(int)
+        all_months_df = pd.DataFrame({month_col: list(range(1, 13))})
+        merged_df = pd.merge(all_months_df, df_temp, on=month_col, how="left")
+        
+        if year_col:
+            fixed_year = int(pd.to_numeric(df[year_col], errors="coerce").dropna().iloc[0])
+            merged_df[year_col] = merged_df[year_col].fillna(fixed_year).astype(int)
+
+        for c in num_cols:
+            merged_df[c] = merged_df[c].fillna(0)
+            if pd.api.types.is_integer_dtype(df[c]):
+                merged_df[c] = merged_df[c].astype(int)
+                
+        if str(orig_dtype) not in ("int64", "int32", "int16", "int8"):
+            try:
+                merged_df[month_col] = merged_df[month_col].astype(orig_dtype)
+            except Exception:
+                pass
+
+        # Giữ nguyên thứ tự cột ban đầu
+        return merged_df[df.columns]
+
+    # Trường hợp B: Cột Month là chuỗi 'YYYY-MM' (cùng 1 năm và số tháng < 12)
+    sample_vals = df[month_col].astype(str).tolist()
+    ym_matches = [re.match(r"^(\d{4})[-/](0?[1-9]|1[0-2])$", s.strip()) for s in sample_vals]
+    if all(m is not None for m in ym_matches) and len(df) < 12:
+        years = {m.group(1) for m in ym_matches}
+        if len(years) == 1:
+            yr = list(years)[0]
+            all_yms = [f"{yr}-{m:02d}" for m in range(1, 13)]
+            all_months_df = pd.DataFrame({month_col: all_yms})
+            merged_df = pd.merge(all_months_df, df, on=month_col, how="left")
+            
+            if year_col:
+                merged_df[year_col] = merged_df[year_col].fillna(int(yr)).astype(int)
+
+            for c in num_cols:
+                merged_df[c] = merged_df[c].fillna(0)
+                if pd.api.types.is_integer_dtype(df[c]):
+                    merged_df[c] = merged_df[c].astype(int)
+            return merged_df[df.columns]
+
+    return df
 
 
 def unify_year_month_columns(df: pd.DataFrame) -> pd.DataFrame:

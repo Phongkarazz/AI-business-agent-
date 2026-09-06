@@ -14,6 +14,7 @@ from .heuristics import (
     generate_starter_prompts,
     detect_query_language,
     unify_year_month_columns,
+    ensure_full_twelve_months,
 )
 from .forecasting import forecast_series
 from .anomaly import detect_outliers, analyze_data_anomalies
@@ -30,6 +31,7 @@ __all__ = [
     "generate_starter_prompts",
     "detect_query_language",
     "unify_year_month_columns",
+    "ensure_full_twelve_months",
     "forecast_series",
     "detect_outliers",
     "analyze_data_anomalies",
