@@ -176,10 +176,18 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             # CHÚ Ý: CHỈ chọn Pie khi có ĐÚNG 1 cột đo lường phân rã thành phần.
             # Nếu có từ 2 cột tỷ lệ/số đo trở lên (ví dụ: MalePct & FemalePct, hoặc MaleManagers & FemaleManagers),
             # BẮT BUỘC dùng Bar Chart (Grouped Bar Chart) để so sánh song song giữa các nhóm!
-            pct_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "share", "ratio"])]
+            pct_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phan_tram", "share", "ratio"])]
             has_single_pct_col = len(pct_cols) == 1
+            uq_low = (user_query or "").lower()
+            user_asked_pct = any(k in uq_low for k in [
+                "tỷ lệ", "tỉ lệ", "phần trăm", "percent", "percentage", "pct", "%", 
+                "share", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp"
+            ])
             is_distribution_breakdown = (
-                has_single_pct_col and (2 <= len(df) <= 10) and len(measure_cols) == 1
+                (has_single_pct_col or user_asked_pct)
+                and (2 <= len(df) <= 10)
+                and (len(pct_cols) <= 1)
+                and (not time_col or n_time <= 1)
             )
 
             if is_individual_entity and measure_cols:
@@ -479,13 +487,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                 elif len(measure_cols) >= 2:
                     # Lọc các chỉ số có cùng thang đo (tránh vẽ lẫn lộn số lượng 1,2 và phần trăm 100% trên cùng 1 trục)
-                    pct_cols = [c for c in measure_cols if any(k in c.lower() for k in ["pct", "percent", "rate", "tỷ lệ", "%"])]
+                    pct_cols = [c for c in measure_cols if any(k in c.lower() for k in ["pct", "percent", "rate", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "%"])]
                     non_total_cols = [c for c in measure_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])]
                     non_pct_cols = [c for c in measure_cols if c not in pct_cols]
 
                     # Kiểm tra xem người dùng có thực sự yêu cầu vẽ tỷ lệ/phần trăm hay số lượng không
                     uq_low = (user_query or "").lower()
-                    user_asked_pct = any(k in uq_low for k in ["tỷ lệ", "phần trăm", "percent", "pct", "%", "share", "cơ cấu"])
+                    user_asked_pct = any(k in uq_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "percent", "pct", "%", "share", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp"])
                     user_asked_count = any(k in uq_low for k in ["số lượng", "quy mô", "bao nhiêu", "count", "headcount", "nhân viên"])
 
                     # Tìm các cặp số lượng nhân sự Nam - Nữ tuyệt đối
@@ -684,6 +692,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         )
                         fig.update_layout(**layout_kwargs)
 
+                    is_pure_pct = len(active_measures) == 1 and any(k in str(active_measures[0]).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "%", "share", "ratio"])
+                    if is_pure_pct:
+                        fig.update_traces(texttemplate="%{y:.2f}%", textposition="outside")
+                        try:
+                            max_val = float(plot_df[active_measures[0]].max() or 0)
+                        except Exception:
+                            max_val = 100.0
+                        fig.update_layout(yaxis=dict(title=format_col_title(active_measures[0]), ticksuffix="%", range=[0, max(100.0, max_val * 1.18)]))
+
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         margin=dict(l=40, r=25, t=50, b=90 if tick_angle != 0 else 50)
@@ -771,7 +788,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     use_compact_currency = is_salary and max_numeric_val >= 10_000_000
 
-                    if is_years:
+                    is_pct = any(k in m_lower for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "%", "share", "ratio"])
+                    if is_pct:
+                        ttemplate = "%{y:.2f}%"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
+                    elif is_years:
                         ttemplate = "%{y:.1f} năm"
                         trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
                     elif is_headcount:
@@ -941,19 +962,27 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     other_row = pd.DataFrame([{label_name: "Các đối tượng khác", measure_cols[0]: other_sum}])
                     plot_df = pd.concat([top_df, other_row], ignore_index=True)
 
+                is_val_pct = any(k in str(measure_cols[0]).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "%"])
                 fig = px.pie(
                     plot_df,
                     names=label_name,
                     values=measure_cols[0],
                     hole=0.38,
-                    title=f"Tỷ trọng {measure_cols[0]} theo {label_name}",
+                    title=f"Tỷ trọng {format_col_title(measure_cols[0])} theo {format_col_title(label_name)}",
                     template="plotly_white"
                 )
-                fig.update_traces(
-                    textposition='inside',
-                    textinfo='percent+label',
-                    hovertemplate="<b>%{label}</b><br>" + f"{measure_cols[0]}: " + "%{value:,.0f} (%{percent})<extra></extra>"
-                )
+                if is_val_pct:
+                    fig.update_traces(
+                        textposition='inside',
+                        textinfo='percent+label',
+                        hovertemplate="<b>%{label}</b><br>" + f"{format_col_title(measure_cols[0])}: " + "%{value:,.2f}%<extra></extra>"
+                    )
+                else:
+                    fig.update_traces(
+                        textposition='inside',
+                        textinfo='percent+label',
+                        hovertemplate="<b>%{label}</b><br>" + f"{format_col_title(measure_cols[0])}: " + "%{value:,.0f} (%{percent})<extra></extra>"
+                    )
                 fig.update_layout(
                     margin=dict(l=20, r=20, t=50, b=50),
                     legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)

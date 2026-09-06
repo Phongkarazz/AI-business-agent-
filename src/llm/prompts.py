@@ -379,9 +379,111 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
     req_limit = int(top_m.group(1)) if top_m else 10
 
-    # 0. CSDL Awesome Chocolates - Doanh thu theo thời gian / tháng
+    # 0. CSDL Awesome Chocolates - Doanh thu theo thời gian / tháng & Tỷ lệ đóng góp
     is_choco_context = any(k in schema_low for k in ["geo", "products", "sales", "spid", "geoid"]) or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo"])
     if is_choco_context or (any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
+        # 0.01 Tỷ lệ đóng góp doanh thu theo nhóm sản phẩm (Category)
+        if any(k in q_low for k in ["category", "nhóm sản phẩm", "nhóm hàng", "danh mục"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_inner = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_inner = f" WHERE strftime('%Y', SaleDate) = '{yr_val}'" if is_sqlite else f" WHERE YEAR(SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ ĐÓNG GÓP DOANH THU CỦA TỪNG NHÓM SẢN PHẨM / CATEGORY{yr_label}):
+SELECT 
+    pr.Category AS Category,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{yr_filter}GROUP BY pr.Category
+ORDER BY TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID! BẮT BUỘC tính cột Percentage bằng ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage! Nhóm theo pr.Category!)
+"""
+
+        # 0.02 Tỷ lệ đóng góp doanh thu theo quốc gia / thị trường (Country / Geo)
+        elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_inner = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_inner = f" WHERE strftime('%Y', SaleDate) = '{yr_val}'" if is_sqlite else f" WHERE YEAR(SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ ĐÓNG GÓP DOANH THU CỦA TỪNG QUỐC GIA / COUNTRY{yr_label}):
+SELECT 
+    g.Geo AS Country,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{yr_filter}GROUP BY g.Geo
+ORDER BY TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và geo g ON s.GeoID = g.GeoID! BẮT BUỘC tính cột Percentage bằng ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage! Nhóm theo g.Geo!)
+"""
+
+        # 0.03 Tỷ lệ đóng góp doanh thu theo đội ngũ (Team)
+        elif any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_inner = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f" AND strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f" AND YEAR(s.SaleDate) = {yr_val}"
+                yr_inner = f" AND strftime('%Y', s2.SaleDate) = '{yr_val}'" if is_sqlite else f" AND YEAR(s2.SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ ĐÓNG GÓP DOANH THU CỦA TỪNG ĐỘI NGŨ / TEAM{yr_label}):
+SELECT 
+    pe.Team AS Team,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales s2 JOIN people pe2 ON s2.SPID = pe2.SPID WHERE pe2.Team != '' AND pe2.Team IS NOT NULL{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL{yr_filter}
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! BẮT BUỘC tính cột Percentage! Nhóm theo pe.Team!)
+"""
+
+        # 0.04 Tỷ lệ đóng góp doanh thu theo sản phẩm (Product)
+        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "kẹo", "socola", "chocolate"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_inner = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_inner = f" WHERE strftime('%Y', SaleDate) = '{yr_val}'" if is_sqlite else f" WHERE YEAR(SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ ĐÓNG GÓP DOANH THU CỦA TỪNG SẢN PHẨM / PRODUCT{yr_label}):
+SELECT 
+    pr.Product AS Product,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{yr_filter}GROUP BY pr.Product
+ORDER BY TotalSales DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID! BẮT BUỘC tính cột Percentage! LIMIT {req_limit}!)
+"""
+
         # 0.1 Doanh thu theo từng quốc gia (Country) qua các tháng
         if any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thay đổi", "xu hướng", "biến động"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
@@ -669,7 +771,7 @@ GROUP BY t.title, e.gender
 ORDER BY t.title, e.gender;
 (BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
 """
-        elif any(k in q_low for k in ["phân bố", "tỷ lệ", "tỷ trọng", "cơ cấu", "số lượng", "bao nhiêu nhân sự", "nhân viên theo", "nhân sự theo"]) and not any(k in q_low for k in ["qua từng năm", "qua các năm", "theo năm", "hàng năm", "từng năm", "bổ nhiệm"]):
+        elif any(k in q_low for k in ["phân bố", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "phần trăm", "cơ cấu", "số lượng", "bao nhiêu nhân sự", "nhân viên theo", "nhân sự theo"]) and not any(k in q_low for k in ["qua từng năm", "qua các năm", "theo năm", "hàng năm", "từng năm", "bổ nhiệm"]):
             return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHÂN BỐ NHÂN SỰ THEO TỪNG CHỨC DANH):
 SELECT 
@@ -947,7 +1049,7 @@ ORDER BY Headcount DESC;
 """
 
     # 10. Tỷ lệ nam và nữ trong ban quản lý (dept_manager)
-    elif any(k in q_low for k in ["ban quản lý", "dept_manager", "manager", "quản lý"]) and any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ", "nam", "nữ"]):
+    elif any(k in q_low for k in ["ban quản lý", "dept_manager", "manager", "quản lý"]) and any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ", "tỉ lệ", "nam", "nữ"]):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ NAM VÀ NỮ TRONG BAN QUẢN LÝ):
 SELECT 
@@ -966,7 +1068,7 @@ ORDER BY d.dept_name;
 """
 
     # 8. Số lượng và tỷ lệ nam nữ trong từng phòng ban (nhân viên toàn phòng)
-    elif any(k in q_low for k in ["tỷ lệ nam nữ", "nam và nữ", "nam nữ"]) and any(k in q_low for k in ["từng phòng ban", "các phòng ban", "phòng ban"]):
+    elif any(k in q_low for k in ["tỷ lệ nam nữ", "tỉ lệ nam nữ", "nam và nữ", "nam nữ"]) and any(k in q_low for k in ["từng phòng ban", "các phòng ban", "phòng ban"]):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG VÀ TỶ LỆ NAM NỮ THEO PHÒNG BAN):
 SELECT 
@@ -983,6 +1085,20 @@ WHERE de.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY d.dept_name;
 (BẮT BUỘC XUẤT ĐẦY ĐỦ CẢ HAI CỘT TỶ LỆ: MalePct VÀ FemalePct! GROUP BY d.dept_name!)
+"""
+
+    # 8.1 Tỷ lệ nam nữ toàn công ty (Company-wide gender ratio)
+    elif any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính"]) and any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu", "tỉ trọng", "tỷ trọng", "share", "ratio"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ NAM NỮ TOÀN CÔNG TY):
+SELECT 
+    gender AS Gender,
+    COUNT(*) AS EmployeeCount,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage
+FROM employees
+GROUP BY gender
+ORDER BY EmployeeCount DESC;
+(BẮT BUỘC tính cột Percentage bằng ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage!)
 """
 
     # 9. So sánh quy mô nhân sự và mức lương trung bình phòng ban

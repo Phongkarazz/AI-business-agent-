@@ -184,6 +184,65 @@ def ensure_full_twelve_months(df: pd.DataFrame, user_query: str = "") -> pd.Data
     return df
 
 
+def ensure_ratio_column_if_requested(df: pd.DataFrame, user_query: str = "") -> pd.DataFrame:
+    """Đảm bảo kết quả DataFrame luôn có cột tỷ lệ / phần trăm khi người dùng yêu cầu bài toán tỷ lệ, tỷ trọng, cơ cấu.
+    Nếu SQL chỉ trả về các số đo tuyệt đối (TotalSales, Headcount...), hàm này tự động bổ sung cột Tỷ lệ (%) chuẩn xác."""
+    if df is None or df.empty or len(df) <= 1:
+        return df
+
+    q_low = (user_query or "").lower()
+    ratio_keywords = [
+        "tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "percent", "tỷ trọng", "tỉ trọng", 
+        "cơ cấu", "share", "ratio", "đóng góp"
+    ]
+    asks_ratio = any(k in q_low for k in ratio_keywords)
+    if not asks_ratio:
+        return df
+
+    # Kiểm tra xem DataFrame đã có cột tỷ lệ/phần trăm chưa
+    has_pct_col = any(
+        any(k in str(c).lower() for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "share", "ratio", "%"])
+        for c in df.columns
+    )
+    if has_pct_col:
+        return df
+
+    # Tìm các cột số hợp lệ (loại bỏ id-like, năm, tháng...)
+    candidate_cols = []
+    for c in df.columns:
+        if not pd.api.types.is_numeric_dtype(df[c]):
+            continue
+        c_low = str(c).lower()
+        if any(k in c_low for k in ["id", "emp_no", "year", "nam", "month", "thang", "hireyear"]):
+            continue
+        candidate_cols.append(c)
+
+    if not candidate_cols:
+        return df
+
+    # Ưu tiên cột đo lường chính (sales, amount, total, count, boxes, headcount...)
+    primary_col = None
+    for c in candidate_cols:
+        c_low = str(c).lower()
+        if any(k in c_low for k in ["sales", "amount", "total", "count", "boxes", "headcount", "employees", "doanh"]):
+            primary_col = c
+            break
+    if not primary_col:
+        primary_col = candidate_cols[0]
+
+    try:
+        col_sum = float(df[primary_col].sum())
+        if col_sum > 0:
+            df = df.copy()
+            pct_col_name = "Tỷ lệ (%)"
+            df[pct_col_name] = ((df[primary_col] / col_sum) * 100.0).round(2)
+    except Exception:
+        pass
+
+    return df
+
+
+
 def unify_year_month_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Nếu dataframe chứa riêng biệt 2 cột Year (1900-2100) và Month (1-12),
     tự động hợp nhất thành cột Month chuẩn 'YYYY-MM' để biểu đồ trực quan hóa liền mạch theo thời gian."""
@@ -1026,7 +1085,18 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                     h2 = f"• **Cơ cấu Định biên Cấp bậc & Ngân sách Vận hành**: Chênh lệch {spread_pct:.1f}% ({spread_diff:,.2f}) so với **{bot_name}** ({bot_v:,.2f}) phản ánh sự khác biệt về tỷ lệ nhân sự cao cấp (senior) và giới hạn trần ngân sách được phê duyệt giữa các đơn vị."
                 return f"{h1}\n\n{h2}"
 
-            # 3D. Sản phẩm / Thương mại (Chocolates DB)
+            # 3D. Tỷ lệ đóng góp / Cơ cấu tỷ trọng (Contribution / Ratio / Share)
+            is_contribution = any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "cơ cấu", "đóng góp", "share", "ratio"])
+            if is_contribution:
+                if is_en:
+                    h1 = f"• **Core Revenue Anchor & Portfolio Dominance**: **{top_name}** accounts for the primary revenue stream, serving as the strategic growth pillar across business operations."
+                    h2 = f"• **Channel Diversification & Secondary Growth Levers**: The contribution variance highlights an opportunity to cross-sell and elevate **{bot_name}** to reduce single-segment dependency."
+                else:
+                    h1 = f"• **Trọng tâm Đóng góp Doanh thu & Vị thế Trụ cột**: Nhóm **{top_name}** nắm giữ tỷ trọng đóng góp chủ lực, đóng vai trò đầu tàu dẫn dắt dòng tiền và tăng trưởng quy mô toàn hệ thống."
+                    h2 = f"• **Đa dạng hóa Danh mục & Khai phóng Tiềm năng Tăng trưởng**: Khoảng cách tỷ trọng so với nhóm **{bot_name}** cho thấy dư địa lớn để mở rộng chiến dịch xúc tiến bán chéo, giảm thiểu rủi ro phụ thuộc vào một phân khúc đơn lẻ."
+                return f"{h1}\n\n{h2}"
+
+            # 3E. Sản phẩm / Thương mại (Chocolates DB)
             is_sales = any(k in cols_str for k in ["product", "sản phẩm", "amount", "revenue", "boxes", "quốc gia", "country", "rep"]) or any(k in q_low for k in ["sản phẩm", "chocolate", "doanh thu", "bán chạy", "sales"])
             if is_sales:
                 if is_en:

@@ -19,6 +19,7 @@ from src.analytics.heuristics import (
     sanitize_insight_markdown,
     sanitize_followup_question,
     ensure_full_twelve_months,
+    ensure_ratio_column_if_requested,
 )
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
@@ -468,11 +469,12 @@ ORDER BY Year ASC"""
 
 
 def auto_fix_gender_ratio_query(sql: str, user_query: str) -> str:
-    """Tự động phát hiện và sửa lỗi thiếu tỷ lệ Nam khi câu hỏi yêu cầu tỷ lệ Nam và Nữ trong ban quản lý hoặc phòng ban."""
+    """Tự động phát hiện và sửa lỗi thiếu tỷ lệ Nam khi câu hỏi yêu cầu tỷ lệ Nam và Nữ trong ban quản lý, phòng ban hoặc toàn công ty."""
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
-    asks_both_genders = any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ nam"])
+    sql_low = sql.lower()
+    asks_both_genders = any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ nam", "tỉ lệ nam", "tỉ lệ nam nữ", "tỷ lệ nam nữ"])
 
     if not asks_both_genders:
         return sql
@@ -516,6 +518,20 @@ JOIN departments d ON de.dept_no = d.dept_no
 WHERE de.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY d.dept_name"""
+
+    is_company = any(k in q_low for k in ["công ty", "toàn công ty", "company", "toàn bộ"]) or "employees" in sql_low
+    if is_company or any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu"]):
+        has_female = bool(re.search(r"\b(PercentageFemale|FemalePct|female)\b", sql, re.IGNORECASE))
+        has_male = bool(re.search(r"\b(PercentageMale|MalePct|male)\b", sql, re.IGNORECASE))
+        has_percentage = bool(re.search(r"\b(percentage|percent|pct|tỷ lệ|tỉ lệ)\b", sql, re.IGNORECASE))
+        if not (has_female and has_male) and not has_percentage:
+            return """SELECT 
+    gender AS Gender,
+    COUNT(*) AS EmployeeCount,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage
+FROM employees
+GROUP BY gender
+ORDER BY EmployeeCount DESC"""
 
     return sql
 
@@ -1103,6 +1119,108 @@ def auto_fix_datetime_year_filters(sql: str, dialect: str = "MySQL") -> str:
     return sql
 
 
+def auto_fix_contribution_percentage_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa và đảm bảo câu truy vấn Tỷ lệ đóng góp / Tỷ trọng (Category, Country, Team, Product)
+    trên CSDL Awesome Chocolates luôn trả về đầy đủ cột Tỷ lệ (Percentage) và Doanh số (TotalSales)."""
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    # Không can thiệp nếu là câu hỏi xu hướng theo tháng
+    if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]):
+        return sql
+
+    is_ratio_question = any(k in q_low for k in [
+        "tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "percent", "tỷ trọng", "tỉ trọng", 
+        "cơ cấu", "share", "ratio", "đóng góp"
+    ])
+    if not is_ratio_question:
+        return sql
+
+    is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "category", "nhóm sản phẩm", "nhóm hàng"])
+    if not is_chocolates:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+
+    # Trích xuất năm nếu có (VD: 2021, 2022)
+    year_match = re.search(r'\b(20\d{2})\b', q_low)
+    year_val = year_match.group(1) if year_match else None
+
+    # Trích xuất LIMIT từ câu hỏi nếu có
+    limit = extract_requested_limit(user_query)
+    limit_clause = f"\nLIMIT {limit}" if limit else ""
+
+    # Kiểm tra xem SQL hiện tại đã có cột tỷ lệ/phần trăm chưa
+    has_percentage_in_sql = any(k in sql_low for k in ["percentage", "percent", "pct", "tỷ lệ", "tỉ lệ", "share", "ratio"]) and ("*" in sql_low or "/" in sql_low)
+
+    # 1. Tỷ lệ đóng góp theo Nhóm sản phẩm (Category)
+    is_category = any(k in q_low for k in ["category", "nhóm sản phẩm", "nhóm hàng", "danh mục"]) or "category" in sql_low
+    if is_category:
+        if not has_percentage_in_sql or "with " in sql_low or "group by" not in sql_low or "pr.category" not in sql_low:
+            yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'\n" if (year_val and is_sqlite) else f"WHERE YEAR(s.SaleDate) = {year_val}\n" if year_val else ""
+            yr_inner = f" WHERE strftime('%Y', SaleDate) = '{year_val}'" if (year_val and is_sqlite) else f" WHERE YEAR(SaleDate) = {year_val}" if year_val else ""
+            return f"""SELECT 
+    pr.Category AS Category,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{yr_filter}GROUP BY pr.Category
+ORDER BY TotalSales DESC{limit_clause}"""
+
+    # 2. Tỷ lệ đóng góp theo Quốc gia / Thị trường (Country / Geo)
+    is_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) or "geo" in sql_low or "geoid" in sql_low
+    if is_country and not is_category:
+        if not has_percentage_in_sql or "with " in sql_low or "group by" not in sql_low or "g.geo" not in sql_low:
+            yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'\n" if (year_val and is_sqlite) else f"WHERE YEAR(s.SaleDate) = {year_val}\n" if year_val else ""
+            yr_inner = f" WHERE strftime('%Y', SaleDate) = '{year_val}'" if (year_val and is_sqlite) else f" WHERE YEAR(SaleDate) = {year_val}" if year_val else ""
+            return f"""SELECT 
+    g.Geo AS Country,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{yr_filter}GROUP BY g.Geo
+ORDER BY TotalSales DESC{limit_clause}"""
+
+    # 3. Tỷ lệ đóng góp theo Đội ngũ bán hàng (Team)
+    is_team = any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng"]) or "team" in sql_low
+    if is_team and not is_category and not is_country:
+        if not has_percentage_in_sql or "with " in sql_low or "group by" not in sql_low or "pe.team" not in sql_low:
+            yr_filter = f" AND strftime('%Y', s.SaleDate) = '{year_val}'" if (year_val and is_sqlite) else f" AND YEAR(s.SaleDate) = {year_val}" if year_val else ""
+            yr_inner = f" AND strftime('%Y', s2.SaleDate) = '{year_val}'" if (year_val and is_sqlite) else f" AND YEAR(s2.SaleDate) = {year_val}" if year_val else ""
+            return f"""SELECT 
+    pe.Team AS Team,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales s2 JOIN people pe2 ON s2.SPID = pe2.SPID WHERE pe2.Team != '' AND pe2.Team IS NOT NULL{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL{yr_filter}
+GROUP BY pe.Team
+ORDER BY TotalSales DESC{limit_clause}"""
+
+    # 4. Tỷ lệ đóng góp theo Sản phẩm (Product)
+    is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "kẹo", "socola", "chocolate"]) or "product" in sql_low
+    if is_product and not is_category and not is_country and not is_team:
+        if not has_percentage_in_sql or "with " in sql_low or "group by" not in sql_low or "pr.product" not in sql_low:
+            yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'\n" if (year_val and is_sqlite) else f"WHERE YEAR(s.SaleDate) = {year_val}\n" if year_val else ""
+            yr_inner = f" WHERE strftime('%Y', SaleDate) = '{year_val}'" if (year_val and is_sqlite) else f" WHERE YEAR(SaleDate) = {year_val}" if year_val else ""
+            limit_prod = limit_clause if limit_clause else "\nLIMIT 10"
+            return f"""SELECT 
+    pr.Product AS Product,
+    SUM(s.Amount) AS TotalSales,
+    ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales{yr_inner}), 2) AS Percentage
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{yr_filter}GROUP BY pr.Product
+ORDER BY TotalSales DESC{limit_prod}"""
+
+    return sql
+
+
 def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và đảm bảo câu truy vấn bảng xếp hạng Top N (Nhân viên, Sản phẩm, Quốc gia, Đội ngũ)
     trên CSDL Awesome Chocolates luôn trả về dữ liệu chuẩn xác 100%, đúng bảng và đúng cú pháp lọc năm."""
@@ -1114,6 +1232,10 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     # Không can thiệp nếu là câu hỏi xu hướng theo tháng (đã có auto_fix_chocolates_monthly_sales_query xử lý)
     if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng"]):
+        return sql
+
+    # Không can thiệp nếu là câu hỏi tỷ lệ / đóng góp / phần trăm (đã có auto_fix_contribution_percentage_query xử lý)
+    if any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "percent", "tỷ trọng", "tỉ trọng", "cơ cấu", "share", "ratio", "đóng góp"]):
         return sql
 
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate"])
@@ -1666,6 +1788,7 @@ def run_agent(
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
@@ -1693,6 +1816,7 @@ def run_agent(
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
@@ -1802,6 +1926,7 @@ def run_agent(
                     result["logs"].append(f"⚠️ Chấp nhận kết quả sau {attempt} lần thử: {check.get('ly_do', '')}")
 
                 df = ensure_full_twelve_months(df, user_query)
+                df = ensure_ratio_column_if_requested(df, user_query)
                 result["df"] = df
                 result["sql"] = sql_query
 

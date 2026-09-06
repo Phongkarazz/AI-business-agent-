@@ -166,13 +166,13 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
     # 0. KIỂM TRA BÀI TOÁN PHÂN TÍCH TỶ LỆ GIỚI TÍNH (GENDER PARITY & BREAKDOWN)
     def _is_female_col(c: str) -> bool:
         cl = str(c).lower()
-        if any(k in cl for k in ["pct", "percent", "rate", "tỷ lệ", "%"]):
+        if any(k in cl for k in ["pct", "percent", "rate", "tỷ lệ", "tỉ lệ", "%"]):
             return False
         return any(k in cl for k in ["female", "nu", "nữ", "women", "gender_f"])
 
     def _is_male_col(c: str) -> bool:
         cl = str(c).lower()
-        if any(k in cl for k in ["pct", "percent", "rate", "tỷ lệ", "%"]):
+        if any(k in cl for k in ["pct", "percent", "rate", "tỷ lệ", "tỉ lệ", "%"]):
             return False
         if _is_female_col(c) or "department" in cl:
             return False
@@ -1053,7 +1053,7 @@ def render_result(result: dict, turn_id: str):
                     col,
                     format="$%,.2f" if has_decimals else "$%,d"
                 )
-            elif any(k in c_low for k in ["pct", "percent", "tỷ lệ", "rate", "ratio"]):
+            elif any(k in c_low for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio"]):
                 column_config[col] = st.column_config.NumberColumn(
                     col,
                     format="%.2f%%"
