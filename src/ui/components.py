@@ -190,6 +190,66 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         f_c = female_cols[0]
         s_male = pd.to_numeric(df[m_c], errors="coerce").fillna(0)
         s_female = pd.to_numeric(df[f_c], errors="coerce").fillna(0)
+
+        # Kiểm tra xem đây là SO SÁNH LƯƠNG/THU NHẬP (Gender Pay Equity) hay SỐ LƯỢNG NHÂN SỰ (Gender Headcount)
+        is_gender_salary = any(
+            any(k in str(c).lower() for k in ["salary", "lương", "luong", "pay", "income", "wage", "thu nhập", "budget", "quỹ"])
+            for c in (male_cols + female_cols)
+        ) or any(k in (user_query or "").lower() for k in ["lương", "salary", "thu nhập", "income", "pay"])
+
+        dim_col = label_cols[0] if label_cols else "Group"
+        dim_name = "Chức danh" if any(k in str(dim_col).lower() for k in ["title", "chức danh", "job"]) else (
+            "Phòng ban" if any(k in str(dim_col).lower() for k in ["dept", "phòng", "department"]) else "Nhóm"
+        )
+
+        if is_gender_salary:
+            # --- BÀI TOÁN BÌNH ĐẲNG THU NHẬP (GENDER PAY GAP / SALARY COMPARISON) ---
+            avg_m = s_male.mean()
+            avg_f = s_female.mean()
+            diff_val = avg_m - avg_f
+            diff_pct = (diff_val / avg_f * 100.0) if avg_f > 0 else 0.0
+
+            if diff_val > 50:
+                gap_delta = f"Nam cao hơn {abs(diff_pct):.1f}%"
+                gap_str = f"+${diff_val:,.0f}"
+            elif diff_val < -50:
+                gap_delta = f"Nữ cao hơn {abs(diff_pct):.1f}%"
+                gap_str = f"-${abs(diff_val):,.0f}"
+            else:
+                gap_delta = "Tương đương chuẩn"
+                gap_str = "$0"
+
+            # Tìm đối tượng có khoảng cách chênh lệch lương lớn nhất
+            gap_series = s_male - s_female
+            max_abs_idx = gap_series.abs().idxmax()
+            if label_cols and max_abs_idx in df.index:
+                max_lbl = str(df.loc[max_abs_idx, label_cols[0]])
+                max_v = gap_series.loc[max_abs_idx]
+                max_p = (max_v / s_female.loc[max_abs_idx] * 100.0) if s_female.loc[max_abs_idx] > 0 else 0.0
+                who = "Nam +" if max_v >= 0 else "Nữ +"
+                max_delta = f"{who}${abs(max_v):,.0f} ({abs(max_p):.1f}%)"
+            else:
+                max_lbl = "N/A"
+                max_delta = "N/A"
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("👨 " + ("Lương TB Nam" if not is_en else "Male Avg Salary"), f"${avg_m:,.0f}", delta=f"{total_rows} {dim_name}")
+            with c2:
+                st.metric("👩 " + ("Lương TB Nữ" if not is_en else "Female Avg Salary"), f"${avg_f:,.0f}", delta=f"Chuẩn {dim_name}")
+            with c3:
+                st.metric("⚖️ " + ("Chênh lệch (Pay Gap)" if not is_en else "Gender Pay Gap"), gap_str, delta=gap_delta)
+            with c4:
+                st.metric("🎯 " + ("Khoảng cách lớn nhất" if not is_en else "Max Gap Entity"), max_lbl, delta=max_delta)
+
+            st.caption(
+                f"ℹ️ **Phân tích Bình đẳng Thu nhập Giới tính (Gender Pay Equity)**: So sánh mức lương trung bình giữa nhân viên Nam và Nữ trên {total_rows} {dim_name} để đánh giá tính công bằng đãi ngộ."
+                if not is_en else
+                f"ℹ️ **Gender Pay Equity Analysis**: Comparing average compensation between Male and Female employees across {total_rows} {dim_name}s."
+            )
+            st.write("")
+            return
+
         tot_m = s_male.sum()
         tot_f = s_female.sum()
         tot_all = tot_m + tot_f
@@ -202,13 +262,13 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             
             c1, c2, c3, c4 = st.columns(4)
             with c1:
-                st.metric("👔 " + (f"Tổng số {entity_name}" if not is_en else f"Total {entity_name}"), f"{int(tot_all):,}", delta=f"{total_rows} Phòng ban")
+                st.metric("👔 " + (f"Tổng số {entity_name}" if not is_en else f"Total {entity_name}"), f"{int(tot_all):,}", delta=f"{total_rows} {dim_name}")
             with c2:
                 st.metric("👩 " + ("Tỷ lệ Nữ (Female)" if not is_en else "Female Ratio"), f"{pct_f:.1f}%", delta=f"{int(tot_f):,} người")
             with c3:
                 st.metric("👨 " + ("Tỷ lệ Nam (Male)" if not is_en else "Male Ratio"), f"{pct_m:.1f}%", delta=f"{int(tot_m):,} người")
             with c4:
-                st.metric("⚖️ " + ("Cân bằng 50-50" if not is_en else "Gender Parity"), f"{balanced_depts}/{total_rows} Phòng", delta="Cân bằng tuyệt đối")
+                st.metric("⚖️ " + ("Cân bằng 50-50" if not is_en else "Gender Parity"), f"{balanced_depts}/{total_rows} {dim_name}", delta="Cân bằng tuyệt đối")
             
             if is_mgr and tot_all > 9:
                 st.caption(

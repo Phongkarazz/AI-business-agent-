@@ -65,6 +65,14 @@ VI_COLUMN_MAP = {
     "malemanagers": "Quản Lý Nam",
     "femalemanagers": "Quản Lý Nữ",
     "totalmanagers": "Tổng Số Quản Lý",
+    "maleavgsalary": "Lương TB Nam ($)",
+    "femaleavgsalary": "Lương TB Nữ ($)",
+    "male_avg_salary": "Lương TB Nam ($)",
+    "female_avg_salary": "Lương TB Nữ ($)",
+    "malesalary": "Lương Nam ($)",
+    "femalesalary": "Lương Nữ ($)",
+    "male_salary": "Lương Nam ($)",
+    "female_salary": "Lương Nữ ($)",
     "malepct": "Tỷ Lệ Nam (%)",
     "femalepct": "Tỷ Lệ Nữ (%)",
     "year": "Năm",
@@ -489,8 +497,21 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         elif any(k in cl for k in ["male", "nam", "men"]):
                             color_map[col] = "#2563EB"  # Xanh dương hiện đại cho Nam
 
+                    is_salary_measure = any(
+                        any(k in c.lower() for k in ["salary", "lương", "luong", "pay", "income", "wage", "thu nhập", "budget", "quỹ", "cost", "tiền"])
+                        for c in active_measures
+                    ) or any(k in (user_query or "").lower() for k in ["lương", "salary", "thu nhập", "income", "pay"])
+
+                    is_gender_salary_comp = (
+                        len(active_measures) == 2 and
+                        is_salary_measure and
+                        any(any(k in c.lower() for k in ["female", "nu", "nữ"]) for c in active_measures) and
+                        any(any(k in c.lower() for k in ["male", "nam"]) for c in active_measures)
+                    )
+
                     is_headcount_stack = (
                         len(active_measures) == 2 and
+                        not is_salary_measure and
                         any(any(k in c.lower() for k in ["female", "nu", "nữ"]) for c in active_measures) and
                         any(any(k in c.lower() for k in ["male", "nam"]) for c in active_measures) and
                         not any(any(k in c.lower() for k in ["pct", "percent", "rate", "%"]) for c in active_measures)
@@ -498,9 +519,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     barmode_val = "stack" if (is_composition_100 or is_headcount_stack) else "group"
                     if is_composition_100:
-                        chart_title = f"Cơ cấu Tỷ lệ Phần trăm ({', '.join(active_measures)}) theo {label_name} (100% Stacked Bar)"
+                        chart_title = f"Cơ cấu Tỷ lệ Phần trăm ({', '.join(active_measures)}) theo {format_col_title(label_name)} (100% Stacked Bar)"
                     elif is_headcount_stack:
-                        chart_title = f"Quy mô & Cơ cấu Giới tính theo {label_name} (Stacked Bar)"
+                        chart_title = f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
+                    elif is_gender_salary_comp:
+                        chart_title = f"So Sánh Mức Lương Trung Bình Nam vs Nữ theo {format_col_title(label_name)} (Grouped Bar)"
 
                     # Tự động tính góc nghiêng nhãn trục X nếu nhãn dài để không bao giờ bị cắt chữ
                     max_lbl_len = max([len(str(x)) for x in plot_df[label_name]] or [0])
@@ -542,6 +565,25 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             layout_kwargs["yaxis"] = dict(range=[0, 100], ticksuffix="%", title="Tỷ lệ (%)")
                         else:
                             layout_kwargs["yaxis"] = dict(title="Số Lượng Nhân Sự")
+                        fig.update_layout(**layout_kwargs)
+
+                    elif is_gender_salary_comp:
+                        for tr in fig.data:
+                            tr_l = str(tr.name).lower()
+                            if any(k in tr_l for k in ["female", "nu", "nữ", "women"]):
+                                tr.name = "Nữ (Female)"
+                            elif any(k in tr_l for k in ["male", "nam", "men"]):
+                                tr.name = "Nam (Male)"
+
+                        fig.update_traces(texttemplate="$%{y:,.0f}", textposition="outside")
+                        try:
+                            max_val = float(plot_df[active_measures].max().max())
+                        except Exception:
+                            max_val = 100000.0
+                        layout_kwargs = dict(
+                            yaxis=dict(title="Mức Lương Trung Bình ($)", range=[0, max_val * 1.18]),
+                            legend=dict(title=None, orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
                         fig.update_layout(**layout_kwargs)
 
                     fig.update_layout(
