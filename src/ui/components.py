@@ -246,8 +246,10 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Số Lượng Quản Lý"
             elif any(k in m_low for k in ["totalsalarybudget", "salarybudget", "quỹ lương"]):
                 m_clean = "Quỹ Lương"
-            elif any(k in m_low for k in ["yearsofservice", "years of service", "thâm niên"]):
-                m_clean = "Thâm Niên"
+            elif any(k in m_low for k in ["years as manager", "yearsasmanager", "manager tenure", "managertenure", "manager years", "manageryears"]):
+                m_clean = "Thâm Niên Quản Lý (Năm)"
+            elif any(k in m_low for k in ["yearsofservice", "years of service", "thâm niên", "tenure"]):
+                m_clean = "Thâm Niên (Năm)"
             elif "raisecount" in m_low:
                 m_clean = "Số Lần Tăng Lương"
             else:
@@ -255,8 +257,12 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         else:
             m_clean = raw_m.title()
 
-        # Kiểm tra truy vấn xếp hạng Top N
-        is_top_query = any(k in (user_query or "").lower() for k in ["top", "danh sách", "hàng đầu", "cao nhất", "thấp nhất"])
+        # Kiểm tra truy vấn xếp hạng Top N / Ranking
+        is_top_query = any(k in (user_query or "").lower() for k in [
+            "top", "danh sách", "hàng đầu", "cao nhất", "thấp nhất",
+            "lâu nhất", "lịch sử", "xếp hạng", "nhiều nhất", "ít nhất",
+            "dẫn đầu", "nổi bật", "ranking", "longest", "shortest",
+        ])
         scope_suffix = f" (Top {total_rows})" if is_top_query and total_rows <= 30 else ""
 
         # Ký hiệu tiền tệ
@@ -318,18 +324,66 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 except Exception:
                     return str(v)
 
-            fmt_avg = _fmt_kpi_val(avg_val)
-            fmt_peak = _fmt_kpi_val(peak_val)
-            fmt_min = _fmt_kpi_val(min_val)
+            # Phát hiện measure là duration (years/tenure/thâm niên) để thêm đơn vị " Năm"
+            _m_col_lower = str(m_col).lower()
+            _is_years_measure = any(k in _m_col_lower for k in [
+                "years", "year_as", "yearsas", "tenure", "thâm niên", "tham_nien",
+                "service", "thamnien",
+            ])
+            _year_unit = " Năm" if _is_years_measure else ""
 
-            # Kiểm tra xem m_col có phải là giá trị trung bình/tỷ lệ/min/max không (để tránh lỗi cộng dồn thống kê)
+            fmt_avg = _fmt_kpi_val(avg_val) + _year_unit
+            fmt_peak = _fmt_kpi_val(peak_val) + _year_unit
+            fmt_min = _fmt_kpi_val(min_val) + _year_unit
+
+            # Kiểm tra xem m_col có phải là giá trị trung bình/tỷ lệ/min/max hoặc duration (để tránh lỗi cộng dồn thống kê)
             is_avg_or_rate = any(k in m_col.lower() for k in [
-                "avg", "average", "mean", "trung_bình", "rate", "ratio", "pct", "percent", "tỷ_lệ", "max", "min"
+                "avg", "average", "mean", "trung_bình", "rate", "ratio", "pct", "percent", "tỷ_lệ", "max", "min",
+                # Duration/Tenure measures — KHÔNG nên cộng tổng
+                "years", "yearsas", "year_as", "tenure", "thâm niên", "tham_nien",
+                "service", "duration", "thamnien",
             ])
 
             # Kiểm tra xem có phải là chuỗi thời gian (Time-series: Year, Month, Date...)
             dim_cols = [c for c in df.columns if c != m_col]
-            is_time_dim = any(any(k in str(c).lower() for k in ["year", "thang", "month", "quy", "quarter", "date", "nam"]) for c in dim_cols)
+            # Các cột phụ trợ ngày tháng (StartDate, EndDate, from_date, to_date...) KHÔNG nên trigger time-series
+            _auxiliary_date_keywords = {"startdate", "enddate", "start_date", "end_date",
+                                        "fromdate", "from_date", "todate", "to_date",
+                                        "hire_date", "hiredate", "birth_date", "birthdate",
+                                        "termination_date", "terminationdate"}
+            # Các cột tên/nhãn cũng KHÔNG nên trigger time-series
+            _name_like_keywords = {"managername", "manager_name", "fullname", "full_name",
+                                   "empname", "emp_name", "employeename", "employee_name",
+                                   "deptname", "dept_name", "departmentname", "department_name",
+                                   "department", "gender", "title", "empno", "emp_no"}
+            _exclude_keywords = _auxiliary_date_keywords | _name_like_keywords
+            # Từ khoá thời gian dài (an toàn cho substring match)
+            _time_long_keywords = ["year", "thang", "month", "quarter", "date"]
+            # Từ khoá thời gian ngắn (cần exact match hoặc word-boundary để tránh false positive)
+            _time_exact_keywords = {"nam", "quy"}
+            is_time_dim = False
+            for c in dim_cols:
+                c_lower = str(c).lower().replace(" ", "")
+                c_norm = re.sub(r"[^a-z0-9]", "", c_lower)
+                # Bỏ qua các cột phụ trợ ngày tháng và cột tên/nhãn
+                if c_norm in _exclude_keywords or c_lower in _exclude_keywords:
+                    continue
+                # Check từ khoá dài (substring match OK)
+                if any(k in c_lower for k in _time_long_keywords):
+                    is_time_dim = True
+                    break
+                # Check từ khoá ngắn (exact match trên c_norm)
+                if c_norm in _time_exact_keywords:
+                    is_time_dim = True
+                    break
+
+            # Nếu measure là duration/thâm niên/tenure VÀ truy vấn là ranking → KHÔNG phải time-series
+            _is_duration_measure = any(k in str(m_col).lower() for k in [
+                "years", "year_as", "yearsas", "tenure", "thâm niên", "tham_nien",
+                "service", "duration", "months_as", "monthsas",
+            ])
+            if _is_duration_measure and (is_top_query or total_rows <= 30):
+                is_time_dim = False
 
             # Kiểm tra xem người dùng có hỏi về một đối tượng cụ thể (ví dụ Customer Service) không
             target_idx = None
@@ -383,21 +437,32 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     except Exception:
                         pass
             elif is_avg_or_rate:
-                # CỘT TRUNG BÌNH/TỶ LỆ: Hiển thị Thống kê tổng hợp khoa học, KHÔNG cộng dồn!
-                with col1:
-                    st.metric("📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities"), f"{total_rows:,}")
-                with col2:
-                    st.metric(f"📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg)
-                with col3:
-                    st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
-                with col4:
-                    if target_idx is not None and target_idx in valid_vals.index:
-                        t_val = df.loc[target_idx, m_col]
-                        fmt_t_val = _fmt_kpi_val(t_val)
-                        rank = int((valid_vals > t_val).sum()) + 1
-                        st.metric(f"🎯 {target_name}", fmt_t_val, delta=f"Hạng {rank}/{total_rows}")
-                    else:
-                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
+                # CỘT TRUNG BÌNH/TỶ LỆ/DURATION: Hiển thị Thống kê tổng hợp khoa học, KHÔNG cộng dồn!
+                if _is_years_measure and is_top_query and total_rows <= 30:
+                    # --- LAYOUT ĐẶC BIỆT: XẾP HẠNG THÂM NIÊN (Top N Manager/Service) ---
+                    with col1:
+                        st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {total_rows}")
+                    with col2:
+                        st.metric("📊 " + (f"TB {m_clean}" if not is_en else f"Avg {m_clean}"), fmt_avg)
+                    with col3:
+                        st.metric(f"🥇 " + ("#1 " + peak_label if not is_en else f"#1 {peak_label}"), fmt_peak)
+                    with col4:
+                        st.metric(f"🥉 " + (f"#{total_rows} " + min_label if not is_en else f"#{total_rows} {min_label}"), fmt_min)
+                else:
+                    with col1:
+                        st.metric("📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities"), f"{total_rows:,}")
+                    with col2:
+                        st.metric(f"📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg)
+                    with col3:
+                        st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
+                    with col4:
+                        if target_idx is not None and target_idx in valid_vals.index:
+                            t_val = df.loc[target_idx, m_col]
+                            fmt_t_val = _fmt_kpi_val(t_val) + _year_unit
+                            rank = int((valid_vals > t_val).sum()) + 1
+                            st.metric(f"🎯 {target_name}", fmt_t_val, delta=f"Hạng {rank}/{total_rows}")
+                        else:
+                            st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
             else:
                 # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
                 total_val = valid_vals.sum()
