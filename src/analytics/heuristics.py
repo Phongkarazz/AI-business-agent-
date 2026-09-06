@@ -620,7 +620,7 @@ def sanitize_insight_markdown(text: str) -> str:
             if clean_tag.lower().startswith("kpi") or "kpi" in clean_tag.lower():
                 prefix_out = f"  - **{clean_tag}**"
             else:
-                if len(clean_tag.split()) > 10:
+                if len(clean_tag.split()) > 25 or len(clean_tag) > 150:
                     prefix_out = f"• {clean_tag}"
                 else:
                     prefix_out = f"• **{clean_tag}**"
@@ -1174,6 +1174,12 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
             l = re.sub(r"^[•\-\*]?\s*(?:Giả thuyết \d+:?\s*)+", "• ", l)
             if not l.startswith("•"):
                 l = "• " + l
+            if ":" in l:
+                prefix, rest = l.split(":", 1)
+                tag = prefix.lstrip("•-* ").strip().replace("**", "")
+                body = rest.strip()
+                if tag and body and len(tag) <= 150 and len(tag.split()) <= 25:
+                    l = f"• **{tag}**: {body}"
             cleaned_21.append(l)
         part_21 = "\n\n".join(cleaned_21)
 
@@ -1235,6 +1241,12 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                 continue
             if not l.startswith("•"):
                 l = "• " + l
+            if ":" in l:
+                prefix, rest = l.split(":", 1)
+                tag = prefix.lstrip("•-* ").strip().replace("**", "")
+                body = rest.strip()
+                if tag and body and len(tag) <= 150 and len(tag.split()) <= 25:
+                    l = f"• **{tag}**: {body}"
             cleaned_22.append(l)
         part_22 = "\n\n".join(cleaned_22)
 
