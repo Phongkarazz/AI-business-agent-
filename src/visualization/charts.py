@@ -761,46 +761,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     fig.update_traces(**trace_kwargs)
 
-                    # Bổ sung đường trung bình chuẩn Benchmark Line nếu là so sánh giữa các thực thể và có ít nhất 3 dòng
-                    if not color_col and len(plot_df) >= 3 and pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]):
-                        mean_benchmark = float(plot_df[measure_cols[0]].mean())
+                    # Đảm bảo không gian phía trên để nhãn ngoài (textposition='outside') không bị che
+                    if not color_col and len(plot_df) >= 1 and pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]):
                         max_y = float(plot_df[measure_cols[0]].max())
-                        min_y = float(plot_df[measure_cols[0]].min())
-                        spread_y = max_y - min_y
-                        # CHỈ vẽ đường benchmark khi có sự phân tán ý nghĩa (> 5% so với TB)
-                        if mean_benchmark > 0 and (spread_y / mean_benchmark) > 0.05:
-                            if is_years:
-                                bench_lbl = f"Benchmark TB: {mean_benchmark:,.1f} năm"
-                            elif is_headcount:
-                                bench_lbl = f"Benchmark TB: {mean_benchmark:,.0f} người"
-                            elif mean_benchmark >= 1_000_000_000 and is_salary:
-                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark / 1_000_000_000:,.2f} Tỷ"
-                            elif mean_benchmark >= 1_000_000 and is_salary:
-                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark / 1_000_000:,.2f} Tr"
-                            elif mean_benchmark > 100:
-                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.0f}"
-                            else:
-                                bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.2f}"
-
-                            first_val = float(plot_df[measure_cols[0]].iloc[0]) if len(plot_df) > 0 else 0
-                            # Đặt nhãn ở phía có khoảng trống (nếu cột đầu cao hơn TB thì đặt bên phải để không đè lên cột đầu)
-                            annot_pos = "top right" if first_val >= mean_benchmark else "top left"
-
-                            fig.add_hline(
-                                y=mean_benchmark,
-                                line_dash="dash",
-                                line_color="#EF4444",
-                                annotation_text=bench_lbl,
-                                annotation_position=annot_pos,
-                                annotation=dict(
-                                    font_size=11,
-                                    font_color="#DC2626",
-                                    bgcolor="rgba(255, 255, 255, 0.88)",
-                                    bordercolor="#EF4444",
-                                    borderwidth=1,
-                                    borderpad=3
-                                )
-                            )
                         if max_y > 0:
                             fig.update_yaxes(range=[0, max_y * 1.18])
 
@@ -989,30 +952,6 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 )
 
                 max_val = float(plot_df[measure_cols[0]].max()) if not plot_df.empty else 0
-                min_val = float(plot_df[measure_cols[0]].min()) if not plot_df.empty else 0
-                val_spread = max_val - min_val
-
-                if len(plot_df) >= 3 and pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]):
-                    mean_benchmark = float(plot_df[measure_cols[0]].mean())
-                    # CHỈ vẽ đường benchmark khi có sự phân tán ý nghĩa (> 5% so với TB)
-                    # Tránh vẽ khi tất cả giá trị đều bằng/xấp xỉ nhau gây đè chữ
-                    if mean_benchmark > 0 and (val_spread / mean_benchmark) > 0.05:
-                        if is_years:
-                            bench_lbl = f"Benchmark TB: {mean_benchmark:,.1f} năm"
-                        elif is_headcount:
-                            bench_lbl = f"Benchmark TB: {mean_benchmark:,.0f} người"
-                        elif mean_benchmark > 100:
-                            bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.0f}"
-                        else:
-                            bench_lbl = f"Benchmark TB: {curr_sym}{mean_benchmark:,.2f}"
-
-                        fig.add_vline(
-                            x=mean_benchmark,
-                            line_dash="dash",
-                            line_color="#EF4444",
-                            annotation_text=bench_lbl,
-                            annotation_position="top left"
-                        )
 
                 # Dành không gian bên phải để nhãn text outside không bị cắt hay chạm biên
                 if max_val > 0:
