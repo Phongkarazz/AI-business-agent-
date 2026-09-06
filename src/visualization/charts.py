@@ -38,7 +38,10 @@ VI_COLUMN_MAP = {
     "employee_name": "Họ và Tên",
     "salary": "Mức Lương",
     "current_salary": "Mức Lương Hiện Tại",
+    "currentsalary": "Mức Lương Hiện Tại",
     "avg_salary": "Lương Trung Bình",
+    "avgsalary": "Lương Trung Bình",
+    "averagesalary": "Lương Trung Bình",
     "department": "Phòng Ban",
     "dept_name": "Phòng Ban",
     "department_name": "Phòng Ban",
@@ -663,7 +666,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         if max_y > 0:
                             fig.update_yaxes(range=[0, max_y * 1.18])
 
+                    if target_entity and any(k in (user_query or "").lower() for k in ["so sánh", "so voi", "so với", "đối chiếu", "compare", "vs"]):
+                        dyn_title = f"📊 So Sánh {clean_m}: {target_entity} vs Các {clean_lbl} Khác"
+                    elif target_entity:
+                        dyn_title = f"{clean_m} theo {clean_lbl} (Làm nổi bật: {target_entity})"
+                    else:
+                        dyn_title = f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {format_col_title(color_col)})" if color_col else "")
+
                     fig.update_layout(
+                        title=dyn_title,
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         xaxis_title=clean_lbl,
                         yaxis_title=clean_m,

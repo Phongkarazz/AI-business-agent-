@@ -645,24 +645,21 @@ ORDER BY CurrentSalary DESC"""
 
 
 def auto_fix_department_single_vs_others_salary_query(sql: str, user_query: str) -> str:
-    """Tự động chuẩn hóa câu hỏi so sánh mức lương trung bình phòng ban với các phòng khác, loại bỏ cột phần trăm ảo làm phẳng biểu đồ."""
+    """Tự động chuẩn hóa câu hỏi so sánh mức lương trung bình phòng ban với các phòng khác, loại bỏ cột phần trăm ảo làm phẳng biểu đồ và bỏ bộ lọc phòng ban đơn lẻ."""
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
     is_dept_salary_comp = (
-        any(k in q_low for k in ["so sánh", "so voi", "so với"])
-        and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"])
-        and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng"])
+        any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu", "so sánh giữa"])
+        and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary", "avg salary"])
+        and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung", "công ty"])
     )
     if not is_dept_salary_comp:
         return sql
 
-    lowered_sql = sql.lower()
-    has_fake_pct = any(k in lowered_sql for k in ["percentoftotal", "percentage", "pct_of_total", "tỷ lệ"])
-    missing_avg = "avg(" not in lowered_sql
-
-    if has_fake_pct or missing_avg:
-        return """SELECT 
+    # Đối với câu hỏi so sánh mức lương giữa một phòng ban và các phòng ban khác / toàn công ty,
+    # BẮT BUỘC phải trả về tất cả các phòng ban để vẽ biểu đồ so sánh và xác định vị thế xếp hạng.
+    return """SELECT 
     d.dept_name AS Department,
     ROUND(AVG(s.salary), 2) AS AvgSalary
 FROM departments d
@@ -671,7 +668,28 @@ JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY AvgSalary DESC"""
 
-    return sql
+
+def auto_fix_department_single_vs_others_headcount_query(sql: str, user_query: str) -> str:
+    """Tự động chuẩn hóa câu hỏi so sánh quy mô nhân sự phòng ban với các phòng khác."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_dept_headcount_comp = (
+        any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"])
+        and any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "nhân viên"])
+        and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung"])
+        and not any(k in q_low for k in ["lương", "salary", "thu nhập"])
+    )
+    if not is_dept_headcount_comp:
+        return sql
+
+    return """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY Headcount DESC"""
 
 
 def auto_fix_dept_size_min_max_query(sql: str, user_query: str) -> str:
@@ -1112,6 +1130,7 @@ def run_agent(
         sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
         sql_query = auto_fix_current_manager_salary_query(sql_query, user_query)
         sql_query = auto_fix_department_single_vs_others_salary_query(sql_query, user_query)
+        sql_query = auto_fix_department_single_vs_others_headcount_query(sql_query, user_query)
         sql_query = auto_fix_dept_size_min_max_query(sql_query, user_query)
 
     if not sql_query:
@@ -1134,6 +1153,7 @@ def run_agent(
         sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
         sql_query = auto_fix_current_manager_salary_query(sql_query, user_query)
         sql_query = auto_fix_department_single_vs_others_salary_query(sql_query, user_query)
+        sql_query = auto_fix_department_single_vs_others_headcount_query(sql_query, user_query)
         sql_query = auto_fix_dept_size_min_max_query(sql_query, user_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 

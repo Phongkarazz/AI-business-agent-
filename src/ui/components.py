@@ -487,6 +487,24 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         st.metric(f"🥇 " + ("#1 " + peak_label if not is_en else f"#1 {peak_label}"), fmt_peak)
                     with col4:
                         st.metric(f"🥉 " + (f"#{total_rows} " + min_label if not is_en else f"#{total_rows} {min_label}"), fmt_min)
+                elif target_idx is not None and target_idx in valid_vals.index:
+                    # --- LAYOUT ĐẶC BIỆT: ĐỐI TƯỢNG MỤC TIÊU VS CÁC ĐỐI TƯỢNG KHÁC ---
+                    t_val = df.loc[target_idx, m_col]
+                    fmt_t_val = _fmt_kpi_val(t_val) + _year_unit
+                    rank = int((valid_vals > t_val).sum()) + 1
+                    diff_vs_avg = float(t_val) - float(avg_val)
+                    pct_vs_avg = ((float(t_val) - float(avg_val)) / float(avg_val) * 100) if float(avg_val) > 0 else 0
+                    sign = "+" if diff_vs_avg >= 0 else ""
+                    delta_vs_avg = f"{sign}{pct_vs_avg:.1f}% vs TB"
+
+                    with col1:
+                        st.metric(f"🎯 {target_name}", fmt_t_val, delta=f"Hạng {rank}/{total_rows}")
+                    with col2:
+                        st.metric(f"📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg, delta=delta_vs_avg)
+                    with col3:
+                        st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
+                    with col4:
+                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
                 else:
                     with col1:
                         st.metric("📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities"), f"{total_rows:,}")
@@ -495,47 +513,60 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     with col3:
                         st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
                     with col4:
-                        if target_idx is not None and target_idx in valid_vals.index:
-                            t_val = df.loc[target_idx, m_col]
-                            fmt_t_val = _fmt_kpi_val(t_val) + _year_unit
-                            rank = int((valid_vals > t_val).sum()) + 1
-                            st.metric(f"🎯 {target_name}", fmt_t_val, delta=f"Hạng {rank}/{total_rows}")
-                        else:
-                            st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
+                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
             else:
                 # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
                 total_val = valid_vals.sum()
                 fmt_total = _fmt_kpi_val(total_val)
-                with col1:
-                    if is_top_query and total_rows <= 30:
-                        st.metric("🏆 " + ("Quy mô Top" if not is_en else "Top Size"), f"Top {total_rows}")
-                    else:
-                        st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
-                with col2:
-                    # Tránh lặp từ "Tổng Total ..."
-                    prefix = "Tổng " if not is_en else "Total "
-                    if m_clean.lower().startswith("total ") or m_clean.lower().startswith("tổng ") or m_clean.lower().startswith("số lượng "):
-                        clean_card_title = m_clean
-                    else:
-                        clean_card_title = prefix + m_clean
 
-                    # Chọn icon phù hợp theo ngữ cảnh dữ liệu
-                    if is_currency:
-                        card_icon = "💰 "
-                    elif any(k in m_low for k in ["manager", "quản lý", "trưởng phòng"]):
-                        card_icon = "👔 "
-                    elif any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "hires", "tuyển dụng"]):
-                        card_icon = "👥 "
-                    elif any(k in m_low for k in ["raisecount", "lần tăng", "raise"]):
-                        card_icon = "📈 "
-                    else:
-                        card_icon = "📊 "
+                # Tránh lặp từ "Tổng Total ..."
+                prefix = "Tổng " if not is_en else "Total "
+                if m_clean.lower().startswith("total ") or m_clean.lower().startswith("tổng ") or m_clean.lower().startswith("số lượng "):
+                    clean_card_title = m_clean
+                else:
+                    clean_card_title = prefix + m_clean
 
-                    st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
-                with col3:
-                    st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
-                with col4:
-                    st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
+                # Chọn icon phù hợp theo ngữ cảnh dữ liệu
+                if is_currency:
+                    card_icon = "💰 "
+                elif any(k in m_low for k in ["manager", "quản lý", "trưởng phòng"]):
+                    card_icon = "👔 "
+                elif any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "hires", "tuyển dụng", "quy mô"]):
+                    card_icon = "👥 "
+                elif any(k in m_low for k in ["raisecount", "lần tăng", "raise"]):
+                    card_icon = "📈 "
+                else:
+                    card_icon = "📊 "
+
+                if target_idx is not None and target_idx in valid_vals.index:
+                    t_val = df.loc[target_idx, m_col]
+                    fmt_t_val = _fmt_kpi_val(t_val)
+                    rank = int((valid_vals > t_val).sum()) + 1
+                    diff_vs_avg = float(t_val) - float(avg_val)
+                    pct_vs_avg = ((float(t_val) - float(avg_val)) / float(avg_val) * 100) if float(avg_val) > 0 else 0
+                    sign = "+" if diff_vs_avg >= 0 else ""
+                    delta_vs_avg = f"{sign}{pct_vs_avg:.1f}% vs TB"
+
+                    with col1:
+                        st.metric(f"🎯 {target_name}", fmt_t_val, delta=f"Hạng {rank}/{total_rows}")
+                    with col2:
+                        st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg, delta=delta_vs_avg)
+                    with col3:
+                        st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
+                    with col4:
+                        st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
+                else:
+                    with col1:
+                        if is_top_query and total_rows <= 30:
+                            st.metric("🏆 " + ("Quy mô Top" if not is_en else "Top Size"), f"Top {total_rows}")
+                        else:
+                            st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
+                    with col2:
+                        st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
+                    with col3:
+                        st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
+                    with col4:
+                        st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
             st.write("")
 
     elif total_rows == 1 and measure_cols:

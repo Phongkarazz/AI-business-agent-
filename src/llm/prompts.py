@@ -598,7 +598,7 @@ LIMIT {req_limit};
 """
 
     # 8. So sánh mức lương trung bình của một phòng ban cụ thể so với các phòng ban khác (hoặc so sánh lương giữa các phòng)
-    elif any(k in q_low for k in ["so sánh", "so voi", "so với"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng"]):
+    elif any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung", "công ty"]):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH MỨC LƯƠNG TRUNG BÌNH GIỮA CÁC PHÒNG BAN):
 SELECT 
@@ -609,7 +609,21 @@ JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
 JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY AvgSalary DESC;
-(CẢNH BÁO ĐẶC BIỆT: CHỈ CẦN 2 CỘT: Department VÀ AvgSalary! TUYỆT ĐỐI KHÔNG TÍNH THÊM CỘT PercentOfTotal HAY TỶ LỆ TRÊN TỔNG VÌ SẼ LÀM BIỂU ĐỒ BỊ PHẲNG LÌ!)
+(CẢNH BÁO TỐI QUAN TRỌNG: TUYỆT ĐỐI KHÔNG DÙNG WHERE d.dept_name = '...'! Khi người dùng hỏi so sánh một phòng ban cụ thể (ví dụ Development) với các phòng ban khác, BẮT BUỘC phải lấy TẤT CẢ các phòng ban (GROUP BY d.dept_name) để hệ thống vẽ biểu đồ so sánh song song giữa phòng ban đó và các phòng ban khác! NẾU LỌC WHERE d.dept_name = 'Development' THÌ CHỈ CÒN 1 DÒNG VÀ HOÀN TOÀN KHÔNG THỂ SO SÁNH ĐƯỢC! TUYỆT ĐỐI KHÔNG TÍNH THÊM CỘT PercentOfTotal HAY TỶ LỆ TRÊN TỔNG!)
+"""
+
+    # 8b. So sánh quy mô/số lượng nhân sự của một phòng ban cụ thể so với các phòng ban khác
+    elif any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"]) and any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "nhân viên"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH QUY MÔ NHÂN SỰ GIỮA CÁC PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY Headcount DESC;
+(CẢNH BÁO TỐI QUAN TRỌNG: TUYỆT ĐỐI KHÔNG DÙNG WHERE d.dept_name = '...'! Khi người dùng hỏi so sánh quy mô phòng ban cụ thể với các phòng ban khác, BẮT BUỘC phải lấy TẤT CẢ các phòng ban để hệ thống vẽ biểu đồ so sánh song song!)
 """
 
     # 9. Quy mô các phòng ban lớn nhất và nhỏ nhất
