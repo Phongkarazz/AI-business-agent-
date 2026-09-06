@@ -69,6 +69,20 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA, force_refre
             except Exception:
                 pass
 
+            # Trích xuất Date Range cho các cột thời gian chính (e.g. SaleDate, from_date, hire_date)
+            try:
+                date_col_names = [col['name'] for col in columns if any(k in col['name'].lower() for k in ["saledate", "date", "hire_date", "from_date"])]
+                if date_col_names:
+                    d_col = date_col_names[0]
+                    safe_tbl = table_name.replace("`", "")
+                    safe_c = d_col.replace("`", "")
+                    with engine.connect() as conn:
+                        res = conn.execute(text(f"SELECT MIN(`{safe_c}`), MAX(`{safe_c}`) FROM `{safe_tbl}`")).fetchone()
+                        if res and res[0] is not None and res[1] is not None:
+                            distinct_samples.append(f"• Bảng `{table_name}` (cột `{d_col}` - Khoảng thời gian thực tế): Từ {str(res[0])[:10]} đến {str(res[1])[:10]}")
+            except Exception:
+                pass
+
         schema_text = "\n".join(schema_lines)
 
         if foreign_keys_info:
@@ -77,7 +91,7 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA, force_refre
 
         if distinct_samples:
             schema_text += "\n\n=== DANH SÁCH GIÁ TRỊ MẪU THỰC TẾ TRONG CSDL (SAMPLE VALUES) ===\n"
-            schema_text += "\n".join(distinct_samples[:30])
+            schema_text += "\n".join(distinct_samples[:35])
 
         if len(all_tables) > max_tables:
             schema_text += f"\n\n(Lưu ý: DB có {len(all_tables)} bảng, chỉ hiển thị {max_tables} bảng đầu tiên.)"

@@ -1008,7 +1008,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                 m_lower = str(measure_cols[0]).lower()
                 is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
-                is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu"])
+                is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "sales", "amount"])
                 is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "người", "count", "số lượng", "so_luong"])
 
                 curr_sym = "$" if is_salary else ""
@@ -1032,7 +1032,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             target_entity = v_str
                             break
 
-                h_colors = ['#F59E0B' if str(v).strip().lower() == (target_entity or "").lower() else '#1F4E78' for v in plot_df[label_name]] if target_entity else "#1F4E78"
+                if target_entity:
+                    h_colors = ['#F59E0B' if str(v).strip().lower() == (target_entity or "").lower() else '#2563EB' for v in plot_df[label_name]]
+                elif any(k in (user_query or "").lower() for k in ["top", "cao nhất", "nhất", "xếp hạng", "leading"]):
+                    # Highlight #1 entity (last row in ascending sorted plot_df) in Gold #F59E0B, others in blue #2563EB
+                    h_colors = ['#2563EB'] * len(plot_df)
+                    if len(h_colors) > 0:
+                        h_colors[-1] = '#F59E0B'
+                else:
+                    h_colors = '#2563EB'
 
                 if is_years:
                     h_ttemplate = "%{x:.1f} năm"

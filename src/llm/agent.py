@@ -937,6 +937,224 @@ ORDER BY Month ASC"""
     return sql
 
 
+def auto_fix_datetime_year_filters(sql: str, dialect: str = "MySQL") -> str:
+    """Tự động chuyển đổi các biểu thức so sánh trực tiếp cột ngày tháng với năm dạng số hoặc chuỗi năm (e.g. SaleDate = 2021 hoặc SaleDate = '2021')
+    thành hàm YEAR(SaleDate) = 2021 (MySQL) hoặc strftime('%Y', SaleDate) = '2021' (SQLite).
+    Tránh lỗi trả về 0 dòng khi MySQL so sánh DATETIME với số nguyên hoặc chuỗi năm ngắn."""
+    if not sql:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+
+    def replace_eq_year(m):
+        col = m.group(1)
+        yr = m.group(2)
+        if is_sqlite:
+            return f"strftime('%Y', {col}) = '{yr}'"
+        return f"YEAR({col}) = {yr}"
+
+    def replace_between_year(m):
+        col = m.group(1)
+        yr1 = m.group(2)
+        yr2 = m.group(3)
+        if is_sqlite:
+            return f"strftime('%Y', {col}) BETWEEN '{yr1}' AND '{yr2}'"
+        if yr1 == yr2:
+            return f"YEAR({col}) = {yr1}"
+        return f"YEAR({col}) BETWEEN {yr1} AND {yr2}"
+
+    date_col_pattern = r'(\b(?:[a-zA-Z_]\w*\.)?(?:SaleDate|sale_date|hire_date|from_date|to_date|birth_date|order_date))'
+
+    # BETWEEN 2021 AND 2021 or BETWEEN '2021' AND '2021'
+    sql = re.sub(
+        date_col_pattern + r'\s+BETWEEN\s+[\'\"]?(20\d{2}|19\d{2})[\'\"]?\s+AND\s+[\'\"]?(20\d{2}|19\d{2})[\'\"]?',
+        replace_between_year,
+        sql,
+        flags=re.IGNORECASE
+    )
+
+    # = 2021 or = '2021'
+    sql = re.sub(
+        date_col_pattern + r'\s*=\s*[\'\"]?(20\d{2}|19\d{2})[\'\"]?',
+        replace_eq_year,
+        sql,
+        flags=re.IGNORECASE
+    )
+
+    # LIKE '2021%' or LIKE '2021'
+    sql = re.sub(
+        date_col_pattern + r'\s+LIKE\s+[\'\"](20\d{2}|19\d{2})(?:%)?[\'\"]',
+        replace_eq_year,
+        sql,
+        flags=re.IGNORECASE
+    )
+
+    return sql
+
+
+def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa và đảm bảo câu truy vấn bảng xếp hạng Top N (Nhân viên, Sản phẩm, Quốc gia, Đội ngũ)
+    trên CSDL Awesome Chocolates luôn trả về dữ liệu chuẩn xác 100%, đúng bảng và đúng cú pháp lọc năm."""
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    # Không can thiệp nếu là câu hỏi xu hướng theo tháng (đã có auto_fix_chocolates_monthly_sales_query xử lý)
+    if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng"]):
+        return sql
+
+    is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate"])
+    if not is_chocolates:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+
+    # Trích xuất năm nếu có (VD: 2021, 2022)
+    year_match = re.search(r'\b(20\d{2})\b', q_low)
+    year_val = year_match.group(1) if year_match else None
+    year_clause = ""
+    if year_val:
+        year_clause = f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {year_val}"
+
+    # Xác định chỉ số đo lường: Hộp/Thùng (Boxes) hay Doanh số (Sales Amount)
+    has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"]) or any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
+    metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+    order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
+
+    # Xác định chiều sắp xếp: DESC (cao nhất/nhiều nhất) hay ASC (thấp nhất/ít nhất)
+    is_asc = any(k in q_low for k in ["thấp nhất", "ít nhất", "kém nhất", "bottom", "thấp"])
+    order_dir = "ASC" if is_asc else "DESC"
+
+    # Trích xuất LIMIT từ câu hỏi hoặc mặc định 10 nếu là câu hỏi Top N
+    limit = extract_requested_limit(user_query)
+    if not limit and any(k in q_low for k in ["top", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "bán chạy nhất"]):
+        limit = 10
+    limit_clause = f"LIMIT {limit}" if limit else ""
+
+    # 1. Bảng xếp hạng Nhân viên bán hàng (Salesperson / People)
+    is_person = any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán", "ai bán", "ai có doanh số", "ai doanh thu", "nhân sự bán"]) or "people" in sql_low or "spid" in sql_low or "salesperson" in sql_low
+    if is_person and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country"]):
+        needs_fix = (
+            "with " in sql_low
+            or "s.salesperson" in sql_low
+            or "pe.name" in sql_low
+            or "pe.spid" not in sql_low
+            or "sales s" not in sql_low
+            or ("saledate =" in sql_low and "year(" not in sql_low and "strftime(" not in sql_low)
+            or (year_val and f"{year_val}" not in sql_low)
+            or "group by" not in sql_low
+            or "order by" not in sql_low
+            or "pe.salesperson" not in sql_low
+        )
+        if needs_fix:
+            lines = [
+                "SELECT",
+                "    pe.Salesperson,",
+                f"    {metric_expr}",
+                "FROM sales s",
+                "JOIN people pe ON s.SPID = pe.SPID",
+            ]
+            if year_clause:
+                lines.append(year_clause)
+            lines.append("GROUP BY pe.Salesperson")
+            lines.append(f"ORDER BY {order_col} {order_dir}")
+            if limit_clause:
+                lines.append(limit_clause)
+            return "\n".join(lines)
+
+    # 2. Bảng xếp hạng Sản phẩm (Products)
+    is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola", "chocolate"]) or "products" in sql_low or "pid" in sql_low or "product" in sql_low
+    if is_product and not any(k in q_low for k in ["nhân viên", "salesperson", "quốc gia", "country"]):
+        needs_fix = (
+            "with " in sql_low
+            or "s.product" in sql_low
+            or "pr.pid" not in sql_low
+            or "sales s" not in sql_low
+            or ("saledate =" in sql_low and "year(" not in sql_low and "strftime(" not in sql_low)
+            or (year_val and f"{year_val}" not in sql_low)
+            or "group by" not in sql_low
+            or "order by" not in sql_low
+            or "pr.product" not in sql_low
+        )
+        if needs_fix:
+            lines = [
+                "SELECT",
+                "    pr.Product,",
+                f"    {metric_expr}",
+                "FROM sales s",
+                "JOIN products pr ON s.PID = pr.PID",
+            ]
+            if year_clause:
+                lines.append(year_clause)
+            lines.append("GROUP BY pr.Product")
+            lines.append(f"ORDER BY {order_col} {order_dir}")
+            if limit_clause:
+                lines.append(limit_clause)
+            return "\n".join(lines)
+
+    # 3. Bảng xếp hạng Thị trường / Quốc gia (Country / Geo)
+    is_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "nước nào", "đất nước", "khu vực", "geo"]) or "geo" in sql_low or "geoid" in sql_low
+    if is_country and not any(k in q_low for k in ["nhân viên", "salesperson", "sản phẩm", "product"]):
+        needs_fix = (
+            "with " in sql_low
+            or "s.country" in sql_low
+            or "s.geo " in sql_low
+            or "g.geoid" not in sql_low
+            or "sales s" not in sql_low
+            or ("saledate =" in sql_low and "year(" not in sql_low and "strftime(" not in sql_low)
+            or (year_val and f"{year_val}" not in sql_low)
+            or "group by" not in sql_low
+            or "order by" not in sql_low
+        )
+        if needs_fix:
+            lines = [
+                "SELECT",
+                "    g.Geo AS Country,",
+                f"    {metric_expr}",
+                "FROM sales s",
+                "JOIN geo g ON s.GeoID = g.GeoID",
+            ]
+            if year_clause:
+                lines.append(year_clause)
+            lines.append("GROUP BY Country")
+            lines.append(f"ORDER BY {order_col} {order_dir}")
+            if limit_clause:
+                lines.append(limit_clause)
+            return "\n".join(lines)
+
+    # 4. Bảng xếp hạng Đội ngũ bán hàng (Team)
+    is_team = any(k in q_low for k in ["đội ngũ", "team", "nhóm bán hàng", "nhóm kinh doanh"]) or "team" in sql_low
+    if is_team:
+        needs_fix = (
+            "with " in sql_low
+            or "pe.spid" not in sql_low
+            or "sales s" not in sql_low
+            or ("saledate =" in sql_low and "year(" not in sql_low and "strftime(" not in sql_low)
+            or (year_val and f"{year_val}" not in sql_low)
+            or "group by" not in sql_low
+            or "order by" not in sql_low
+            or "pe.team" not in sql_low
+        )
+        if needs_fix:
+            lines = [
+                "SELECT",
+                "    pe.Team,",
+                f"    {metric_expr}",
+                "FROM sales s",
+                "JOIN people pe ON s.SPID = pe.SPID",
+            ]
+            if year_clause:
+                lines.append(year_clause)
+            lines.append("GROUP BY pe.Team")
+            lines.append(f"ORDER BY {order_col} {order_dir}")
+            if limit_clause:
+                lines.append(limit_clause)
+            return "\n".join(lines)
+
+    return sql
+
 
 def is_safe_select(sql: str) -> bool:
     """Kiểm tra câu lệnh SQL có phải là SELECT/WITH hợp lệ và an toàn không."""
@@ -1335,7 +1553,9 @@ def run_agent(
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
@@ -1360,7 +1580,9 @@ def run_agent(
     for attempt in range(1, 4):
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)

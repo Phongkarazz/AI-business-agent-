@@ -465,6 +465,108 @@ GROUP BY Month
 ORDER BY Month ASC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG `LIMIT 10`! Bắt buộc ORDER BY Month ASC!)
 """
+        # 0.6 Top N nhân viên bán hàng (Salesperson) có doanh số / số lượng bán ra cao nhất
+        elif any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "xuất sắc", "nhiều nhất", "lớn nhất", "bán được", "bán chạy", "hộp", "thùng", "boxes"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"])
+            measure_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+            order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} NHÂN VIÊN BÁN HÀNG DOANH SỐ CAO NHẤT{yr_label}):
+SELECT 
+    pe.Salesperson AS Salesperson,
+    {measure_col}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{yr_filter}
+GROUP BY pe.Salesperson
+ORDER BY {order_col} DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Tên nhân viên nằm ở cột pe.Salesperson! Doanh số là SUM(s.Amount) AS TotalSales! Lọc năm bắt buộc dùng YEAR(s.SaleDate) = ...! BẮT BUỘC dùng LIMIT {req_limit} theo yêu cầu người dùng!)
+"""
+
+        # 0.7 Top N sản phẩm (Product) có doanh số / số lượng bán chạy nhất
+        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "món", "kẹo", "socola", "chocolate"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "bán chạy", "chạy nhất", "nhiều nhất", "hộp", "thùng", "boxes"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"])
+            measure_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+            order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} SẢN PHẨM BÁN CHẠY NHẤT{yr_label}):
+SELECT 
+    pr.Product AS Product,
+    {measure_col}
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{yr_filter}
+GROUP BY pr.Product
+ORDER BY {order_col} DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID! BẮT BUỘC dùng LIMIT {req_limit} theo yêu cầu người dùng!)
+"""
+
+        # 0.8 Top N quốc gia / thị trường có doanh số cao nhất
+        elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "cao nhất", "top", "nhiều nhất", "lớn nhất"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} QUỐC GIA DOANH SỐ CAO NHẤT{yr_label}):
+SELECT 
+    g.Geo AS Country,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{yr_filter}
+GROUP BY g.Geo
+ORDER BY TotalSales DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và geo g ON s.GeoID = g.GeoID! BẮT BUỘC dùng LIMIT {req_limit} theo yêu cầu người dùng!)
+"""
+
+        # 0.9 Doanh số theo đội ngũ (Team) bán hàng
+        elif any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng"]):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}"
+                yr_label = f" NĂM {yr_val}"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO ĐỘI NGŨ / TEAM{yr_label}):
+SELECT 
+    pe.Team AS Team,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{yr_filter}
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Cột đội ngũ là pe.Team!)
+"""
 
     # 1. Câu hỏi liên quan đến chức danh (Title)
     if any(k in q_low for k in ["chức danh", "title", "vị trí", "bổ nhiệm", "thăng chức", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
