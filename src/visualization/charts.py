@@ -384,17 +384,73 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         plot_df = plot_df.head(max_display)
 
                     category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
-                    tick_angle = 0 if len(plot_df) <= 10 else -45
-                    fig = px.bar(
-                        plot_df, x=label_name, y=active_measures,
-                        barmode="group",
-                        title=chart_title,
-                        category_orders={label_name: category_order},
-                        template="plotly_white"
-                    )
+
+                    # Kiểm tra xem có phải bài toán Tỷ lệ thành phần / Cơ cấu 100% không
+                    is_composition_100 = False
+                    pct_cols_active = [c for c in active_measures if any(k in c.lower() for k in ["pct", "percent", "rate", "tỷ lệ", "%"])]
+                    if len(pct_cols_active) >= 2:
+                        try:
+                            row_sums = plot_df[pct_cols_active].sum(axis=1)
+                            if not row_sums.empty and abs(row_sums.mean() - 100.0) < 5.0:
+                                is_composition_100 = True
+                        except Exception:
+                            pass
+                    if not is_composition_100 and any("malepct" in c.lower() for c in active_measures) and any("femalepct" in c.lower() for c in active_measures):
+                        is_composition_100 = True
+
+                    # Tùy chỉnh màu sắc chuyên nghiệp cho các phân loại đặc thù (như Giới tính Nam / Nữ)
+                    color_map = {}
+                    for col in active_measures:
+                        cl = col.lower()
+                        if any(k in cl for k in ["female", "nu", "nữ", "women"]):
+                            color_map[col] = "#EC4899"  # Hồng/Cam san hô hiện đại cho Nữ
+                        elif any(k in cl for k in ["male", "nam", "men"]):
+                            color_map[col] = "#2563EB"  # Xanh dương hiện đại cho Nam
+
+                    barmode_val = "stack" if is_composition_100 else "group"
+                    if is_composition_100:
+                        chart_title = f"Cơ cấu Tỷ lệ Phần trăm ({', '.join(active_measures)}) theo {label_name} (100% Stacked Bar)"
+
+                    # Tự động tính góc nghiêng nhãn trục X nếu nhãn dài để không bao giờ bị cắt chữ
+                    max_lbl_len = max([len(str(x)) for x in plot_df[label_name]] or [0])
+                    if max_lbl_len > 10:
+                        tick_angle = -30 if len(plot_df) <= 10 else -45
+                    else:
+                        tick_angle = 0 if len(plot_df) <= 8 else -45
+
+                    bar_kwargs = {
+                        "data_frame": plot_df,
+                        "x": label_name,
+                        "y": active_measures,
+                        "barmode": barmode_val,
+                        "title": chart_title,
+                        "category_orders": {label_name: category_order},
+                        "template": "plotly_white",
+                    }
+                    if color_map and len(color_map) == len(active_measures):
+                        bar_kwargs["color_discrete_map"] = color_map
+
+                    fig = px.bar(**bar_kwargs)
+
+                    if is_composition_100:
+                        # Đổi tên hiển thị trên Legend cho thân thiện (kiểm tra Nữ trước Nam vì 'female' chứa 'male')
+                        for tr in fig.data:
+                            tr_l = str(tr.name).lower()
+                            if any(k in tr_l for k in ["female", "nu", "nữ", "women"]):
+                                tr.name = "Nữ (Female %)"
+                            elif any(k in tr_l for k in ["male", "nam", "men"]):
+                                tr.name = "Nam (Male %)"
+
+                        # Hiển thị nhãn % trực tiếp bên trong từng phân đoạn
+                        fig.update_traces(texttemplate="%{y:.0f}%", textposition="inside", insidetextanchor="middle")
+                        fig.update_layout(
+                            yaxis=dict(range=[0, 100], ticksuffix="%", title="Tỷ lệ (%)"),
+                            legend=dict(title=None, orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
-                        margin=dict(l=20, r=20, t=50, b=80 if tick_angle != 0 else 50)
+                        margin=dict(l=20, r=20, t=50, b=90 if tick_angle != 0 else 50)
                     )
 
                 else:

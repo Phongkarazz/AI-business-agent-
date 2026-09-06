@@ -163,6 +163,62 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
 
     total_rows = len(df)
 
+    # 0. KIỂM TRA BÀI TOÁN PHÂN TÍCH TỶ LỆ GIỚI TÍNH (GENDER PARITY & BREAKDOWN)
+    def _is_female_col(c: str) -> bool:
+        cl = str(c).lower()
+        if any(k in cl for k in ["pct", "percent", "rate", "tỷ lệ", "%"]):
+            return False
+        return any(k in cl for k in ["female", "nu", "nữ", "women", "gender_f"])
+
+    def _is_male_col(c: str) -> bool:
+        cl = str(c).lower()
+        if any(k in cl for k in ["pct", "percent", "rate", "tỷ lệ", "%"]):
+            return False
+        if _is_female_col(c) or "department" in cl:
+            return False
+        return any(k in cl for k in ["male", "nam", "gender_m"]) or bool(re.search(r"\bmen\b", cl))
+
+    female_cols = [c for c in df.columns if _is_female_col(c)]
+    male_cols = [c for c in df.columns if _is_male_col(c)]
+    if not female_cols:
+        female_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["female", "nu", "nữ", "women"])]
+    if not male_cols:
+        male_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["male", "nam"]) and not any(k in str(c).lower() for k in ["female", "nu", "nữ", "women", "department"])]
+
+    if male_cols and female_cols and total_rows > 1:
+        m_c = male_cols[0]
+        f_c = female_cols[0]
+        s_male = pd.to_numeric(df[m_c], errors="coerce").fillna(0)
+        s_female = pd.to_numeric(df[f_c], errors="coerce").fillna(0)
+        tot_m = s_male.sum()
+        tot_f = s_female.sum()
+        tot_all = tot_m + tot_f
+        if tot_all > 0:
+            pct_f = (tot_f / tot_all) * 100.0
+            pct_m = (tot_m / tot_all) * 100.0
+            balanced_depts = int((s_male == s_female).sum())
+            is_mgr = any(k in (user_query or "").lower() for k in ["manager", "quản lý", "trưởng phòng"]) or any("manager" in str(c).lower() for c in df.columns)
+            entity_name = "Quản lý" if is_mgr else ("Nhân sự" if not is_en else "Workforce")
+            
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("👔 " + (f"Tổng số {entity_name}" if not is_en else f"Total {entity_name}"), f"{int(tot_all):,}", delta=f"{total_rows} Phòng ban")
+            with c2:
+                st.metric("👩 " + ("Tỷ lệ Nữ (Female)" if not is_en else "Female Ratio"), f"{pct_f:.1f}%", delta=f"{int(tot_f):,} người")
+            with c3:
+                st.metric("👨 " + ("Tỷ lệ Nam (Male)" if not is_en else "Male Ratio"), f"{pct_m:.1f}%", delta=f"{int(tot_m):,} người")
+            with c4:
+                st.metric("⚖️ " + ("Cân bằng 50-50" if not is_en else "Gender Parity"), f"{balanced_depts}/{total_rows} Phòng", delta="Cân bằng tuyệt đối")
+            
+            if is_mgr and tot_all > 9:
+                st.caption(
+                    f"ℹ️ **Lưu ý nghiệp vụ**: Bảng số liệu phản ánh toàn bộ **{int(tot_all)} lượt bổ nhiệm Quản lý trong lịch sử** công ty (1985 – 2002). Hiện tại toàn công ty có **9 Trưởng phòng đương nhiệm**."
+                    if not is_en else
+                    f"ℹ️ **Business Note**: Figures reflect all **{int(tot_all)} historical management appointments** (1985 – 2002). The company currently has **9 active department managers**."
+                )
+            st.write("")
+            return
+
     if measure_cols and total_rows > 1:
         # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị trên thẻ KPI
         count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
@@ -186,6 +242,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Mức Lương"
             elif any(k in m_low for k in ["headcount", "totalemployees", "số lượng nhân sự"]):
                 m_clean = "Quy Mô Nhân Sự"
+            elif any(k in m_low for k in ["totalmanagers", "total managers", "quản lý"]):
+                m_clean = "Số Lượng Quản Lý"
             elif any(k in m_low for k in ["totalsalarybudget", "salarybudget", "quỹ lương"]):
                 m_clean = "Quỹ Lương"
             elif any(k in m_low for k in ["yearsofservice", "years of service", "thâm niên"]):
@@ -313,7 +371,26 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     else:
                         st.metric("📋 " + ("Tổng số dòng" if not is_en else "Total Rows"), f"{total_rows:,}")
                 with col2:
-                    st.metric(f"💰 " + ("Tổng " if not is_en else "Total ") + m_clean + scope_suffix, fmt_total)
+                    # Tránh lặp từ "Tổng Total ..."
+                    prefix = "Tổng " if not is_en else "Total "
+                    if m_clean.lower().startswith("total ") or m_clean.lower().startswith("tổng ") or m_clean.lower().startswith("số lượng "):
+                        clean_card_title = m_clean
+                    else:
+                        clean_card_title = prefix + m_clean
+
+                    # Chọn icon phù hợp theo ngữ cảnh dữ liệu
+                    if is_currency:
+                        card_icon = "💰 "
+                    elif any(k in m_low for k in ["manager", "quản lý", "trưởng phòng"]):
+                        card_icon = "👔 "
+                    elif any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "hires", "tuyển dụng"]):
+                        card_icon = "👥 "
+                    elif any(k in m_low for k in ["raisecount", "lần tăng", "raise"]):
+                        card_icon = "📈 "
+                    else:
+                        card_icon = "📊 "
+
+                    st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
                 with col3:
                     st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
                 with col4:
