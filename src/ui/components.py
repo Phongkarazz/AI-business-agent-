@@ -240,7 +240,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Lương Trung Bình"
             elif "salary" in m_low or "lương" in m_low:
                 m_clean = "Mức Lương"
-            elif any(k in m_low for k in ["headcount", "totalemployees", "số lượng nhân sự"]):
+            elif any(k in m_low for k in ["headcount", "head count", "totalemployees", "total employees", "emp count", "empcount", "employee count", "employeecount", "số lượng nhân sự", "quy mô nhân sự"]):
                 m_clean = "Quy Mô Nhân Sự"
             elif any(k in m_low for k in ["totalmanagers", "total managers", "quản lý"]):
                 m_clean = "Số Lượng Quản Lý"
@@ -257,12 +257,20 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         else:
             m_clean = raw_m.title()
 
-        # Kiểm tra truy vấn xếp hạng Top N / Ranking
+        # Kiểm tra truy vấn xếp hạng Top N / Ranking / So sánh
         is_top_query = any(k in (user_query or "").lower() for k in [
             "top", "danh sách", "hàng đầu", "cao nhất", "thấp nhất",
             "lâu nhất", "lịch sử", "xếp hạng", "nhiều nhất", "ít nhất",
             "dẫn đầu", "nổi bật", "ranking", "longest", "shortest",
+            "lớn nhất", "nhỏ nhất", "so sánh", "bao nhiêu",
         ])
+        # Phát hiện truy vấn so sánh cực trị (lớn nhất VÀ nhỏ nhất, highest AND lowest)
+        _uq_low = (user_query or "").lower()
+        is_comparison_query = (
+            (any(k in _uq_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "highest", "largest", "most"])
+             and any(k in _uq_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "lowest", "smallest", "least"]))
+            or ("và" in _uq_low and any(k in _uq_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất"]))
+        )
         scope_suffix = f" (Top {total_rows})" if is_top_query and total_rows <= 30 else ""
 
         # Ký hiệu tiền tệ
@@ -399,7 +407,38 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
 
             col1, col2, col3, col4 = st.columns(4)
 
-            if is_time_dim:
+            # --- LAYOUT SO SÁNH CỰC TRỊ (lớn nhất VÀ nhỏ nhất, chỉ 2-3 dòng) ---
+            if is_comparison_query and total_rows <= 3 and not is_time_dim:
+                # Chọn icon phù hợp theo ngữ cảnh
+                if is_currency:
+                    _cmp_icon = "💰"
+                elif any(k in m_low for k in ["manager", "quản lý"]):
+                    _cmp_icon = "👔"
+                elif any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "quy mô"]):
+                    _cmp_icon = "👥"
+                else:
+                    _cmp_icon = "📊"
+
+                # Tính chênh lệch
+                try:
+                    _diff = float(peak_val) - float(min_val)
+                    _ratio = float(peak_val) / float(min_val) if float(min_val) > 0 else 0
+                    _fmt_diff = _fmt_kpi_val(_diff) + _year_unit
+                    _fmt_ratio = f"{_ratio:.1f}x"
+                except Exception:
+                    _fmt_diff = "N/A"
+                    _fmt_ratio = "N/A"
+
+                with col1:
+                    st.metric(f"🏆 " + ("Lớn nhất" if not is_en else "Largest"), peak_label, delta=fmt_peak)
+                with col2:
+                    st.metric(f"📉 " + ("Nhỏ nhất" if not is_en else "Smallest"), min_label, delta=fmt_min)
+                with col3:
+                    st.metric(f"📊 " + ("Chênh lệch" if not is_en else "Difference"), _fmt_diff, delta=_fmt_ratio)
+                with col4:
+                    st.metric(f"{_cmp_icon} " + (f"TB {m_clean}" if not is_en else f"Avg {m_clean}"), fmt_avg)
+
+            elif is_time_dim:
                 # CHUỖI THỜI GIAN THEO NĂM/THÁNG:
                 dim_c = dim_cols[0] if dim_cols else "Year"
                 dim_vals = df[dim_c].dropna()

@@ -394,7 +394,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     tick_angle = 0 if len(plot_df) <= 10 else -45
                     fig = px.bar(
                         plot_df, x=label_name, y=measure_cols[0],
-                        title=f"Tổng {measure_cols[0]} theo {label_name}",
+                        title=f"{format_col_title(measure_cols[0])} theo {format_col_title(label_name)}",
                         template="plotly_white"
                     )
                     fig.update_layout(
