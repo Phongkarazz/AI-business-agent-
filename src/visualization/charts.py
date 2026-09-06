@@ -18,6 +18,7 @@ from src.analytics.heuristics import (
 )
 
 VI_COLUMN_MAP = {
+    "headcount": "Quy Mô Nhân Sự",
     "yearsofservice": "Thâm Niên (Năm)",
     "years_of_service": "Thâm Niên (Năm)",
     "year_of_service": "Thâm Niên (Năm)",
@@ -509,6 +510,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         any(any(k in c.lower() for k in ["male", "nam"]) for c in active_measures)
                     )
 
+                    is_headcount_salary_comp = (
+                        len(active_measures) == 2 and
+                        any(any(k in c.lower() for k in ["headcount", "totalemployees", "số lượng nhân sự", "nhân sự", "nhân viên", "employee"]) for c in active_measures) and
+                        any(any(k in c.lower() for k in ["salary", "lương", "thu nhập"]) for c in active_measures)
+                    )
+
                     is_headcount_stack = (
                         len(active_measures) == 2 and
                         not is_salary_measure and
@@ -524,10 +531,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         chart_title = f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
                     elif is_gender_salary_comp:
                         chart_title = f"So Sánh Mức Lương Trung Bình Nam vs Nữ theo {format_col_title(label_name)} (Grouped Bar)"
+                    elif is_headcount_salary_comp:
+                        chart_title = f"So Sánh Quy Mô Nhân Sự & Mức Lương Trung Bình theo {format_col_title(label_name)} (Grouped Bar)"
 
                     # Tự động tính góc nghiêng nhãn trục X nếu nhãn dài để không bao giờ bị cắt chữ
                     max_lbl_len = max([len(str(x)) for x in plot_df[label_name]] or [0])
-                    if max_lbl_len > 10:
+                    if len(plot_df) <= 9 and max_lbl_len <= 18:
+                        tick_angle = -25 if max_lbl_len > 12 else 0
+                    elif max_lbl_len > 10:
                         tick_angle = -30 if len(plot_df) <= 10 else -45
                     else:
                         tick_angle = 0 if len(plot_df) <= 8 else -45
@@ -586,9 +597,33 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         )
                         fig.update_layout(**layout_kwargs)
 
+                    elif is_headcount_salary_comp:
+                        for tr in fig.data:
+                            tr_l = str(tr.name).lower()
+                            if any(k in tr_l for k in ["headcount", "nhân sự", "nhân viên", "employee", "totalemployees"]):
+                                tr.name = "Quy Mô Nhân Sự (Người)"
+                                tr.marker.color = "#2563EB"
+                                tr.texttemplate = "%{y:,.0f} ng"
+                                tr.textposition = "outside"
+                            elif any(k in tr_l for k in ["salary", "lương", "thu nhập"]):
+                                tr.name = "Lương Trung Bình ($)"
+                                tr.marker.color = "#10B981"
+                                tr.texttemplate = "$%{y:,.0f}"
+                                tr.textposition = "outside"
+
+                        try:
+                            max_val = float(plot_df[active_measures].max().max())
+                        except Exception:
+                            max_val = 100000.0
+                        layout_kwargs = dict(
+                            yaxis=dict(title="Quy Mô (Người) / Mức Lương ($)", range=[0, max_val * 1.18]),
+                            legend=dict(title=None, orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                        fig.update_layout(**layout_kwargs)
+
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
-                        margin=dict(l=20, r=20, t=50, b=90 if tick_angle != 0 else 50)
+                        margin=dict(l=40, r=25, t=50, b=90 if tick_angle != 0 else 50)
                     )
 
                 else:

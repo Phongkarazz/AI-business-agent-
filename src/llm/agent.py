@@ -551,7 +551,11 @@ def auto_fix_department_comparison_query(sql: str, user_query: str) -> str:
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
-    is_dept_comp = any(k in q_low for k in ["quy mô", "số lượng nhân sự", "số nhân sự", "số nhân viên"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"]) and any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng"])
+    is_dept_comp = (
+        any(k in q_low for k in ["quy mô", "số lượng nhân sự", "số nhân sự", "số lượng nhân viên", "số nhân viên", "headcount"])
+        and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary"])
+        and any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng", "giữa các phòng", "phòng"])
+    )
 
     if not is_dept_comp:
         return sql
@@ -653,6 +657,7 @@ def auto_fix_department_single_vs_others_salary_query(sql: str, user_query: str)
         any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu", "so sánh giữa"])
         and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary", "avg salary"])
         and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung", "công ty"])
+        and not any(k in q_low for k in ["quy mô", "headcount", "số lượng nhân sự", "số nhân sự", "số lượng nhân viên", "số nhân viên"])
     )
     if not is_dept_salary_comp:
         return sql

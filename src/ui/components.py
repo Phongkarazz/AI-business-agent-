@@ -279,6 +279,67 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             st.write("")
             return
 
+    # KIỂM TRA BÀI TOÁN SO SÁNH ĐA CHIỀU: QUY MÔ NHÂN SỰ & MỨC LƯƠNG TRUNG BÌNH
+    is_hc_sal_comp = (
+        any(any(k in str(c).lower() for k in ["headcount", "totalemployees", "số lượng nhân sự", "nhân sự", "nhân viên"]) for c in measure_cols) and
+        any(any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"]) for c in measure_cols) and
+        total_rows > 1
+    )
+    if is_hc_sal_comp:
+        hc_col = [c for c in measure_cols if any(k in str(c).lower() for k in ["headcount", "totalemployees", "nhân sự", "nhân viên", "emp"])][0]
+        sal_col = [c for c in measure_cols if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"])][0]
+        dim_col = label_cols[0] if label_cols else "Department"
+
+        total_hc = int(pd.to_numeric(df[hc_col], errors="coerce").fillna(0).sum())
+        avg_sal = float(pd.to_numeric(df[sal_col], errors="coerce").dropna().mean() or 0)
+
+        max_hc_idx = pd.to_numeric(df[hc_col], errors="coerce").idxmax()
+        max_sal_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmax()
+
+        max_hc_dept = str(df.loc[max_hc_idx, dim_col]) if max_hc_idx in df.index else "N/A"
+        max_hc_val = int(df.loc[max_hc_idx, hc_col]) if max_hc_idx in df.index else 0
+        hc_pct = (max_hc_val / total_hc * 100.0) if total_hc > 0 else 0.0
+
+        max_sal_dept = str(df.loc[max_sal_idx, dim_col]) if max_sal_idx in df.index else "N/A"
+        max_sal_val = float(df.loc[max_sal_idx, sal_col]) if max_sal_idx in df.index else 0
+        sal_diff = max_sal_val - avg_sal
+        sal_diff_pct = (sal_diff / avg_sal * 100.0) if avg_sal > 0 else 0.0
+        sign = "+" if sal_diff >= 0 else ""
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "👥 " + ("Tổng quy mô nhân sự" if not is_en else "Total Headcount"),
+                f"{total_hc:,} Người",
+                delta=f"{total_rows} Phòng ban" if not is_en else f"{total_rows} Depts"
+            )
+        with c2:
+            st.metric(
+                "💰 " + ("Mức lương TB chuẩn" if not is_en else "Benchmark Avg Salary"),
+                f"${avg_sal:,.0f}",
+                delta="Mặt bằng chung" if not is_en else "Company Benchmark"
+            )
+        with c3:
+            st.metric(
+                "🏢 " + ("Quy mô lớn nhất" if not is_en else "Largest Department"),
+                max_hc_dept,
+                delta=f"{max_hc_val:,} người ({hc_pct:.1f}%)"
+            )
+        with c4:
+            st.metric(
+                "🏆 " + ("Lương TB cao nhất" if not is_en else "Highest Avg Salary"),
+                max_sal_dept,
+                delta=f"${max_sal_val:,.0f} ({sign}{sal_diff_pct:.1f}% vs TB)"
+            )
+
+        st.caption(
+            f"ℹ️ **So sánh Đa chiều (Headcount & Salary)**: Đối chiếu giữa quy mô nhân sự ({total_hc:,} người) và mức lương trung bình (${avg_sal:,.0f}) trên {total_rows} phòng ban để đánh giá cơ cấu chi phí và phân bổ nguồn lực."
+            if not is_en else
+            f"ℹ️ **Multi-dimensional Comparison**: Cross-analyzing headcount ({total_hc:,} employees) and average salary (${avg_sal:,.0f}) across {total_rows} departments."
+        )
+        st.write("")
+        return
+
     if measure_cols and total_rows > 1:
         # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị trên thẻ KPI
         count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
