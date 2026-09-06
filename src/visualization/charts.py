@@ -15,6 +15,7 @@ from src.analytics.heuristics import (
     get_row_identity_column,
     pick_label_column,
     is_id_like,
+    unify_year_month_columns,
 )
 
 VI_COLUMN_MAP = {
@@ -91,6 +92,30 @@ VI_COLUMN_MAP = {
     "end_date": "Ngày Kết Thúc",
     "empno": "Mã NV",
     "emp_no": "Mã NV",
+    # Chocolates & Sales Domain Mappings
+    "country": "Quốc Gia",
+    "geo": "Quốc Gia",
+    "region": "Khu Vực",
+    "totalsales": "Tổng Doanh Thu ($)",
+    "total_sales": "Tổng Doanh Thu ($)",
+    "amount": "Doanh Thu ($)",
+    "sales": "Doanh Thu ($)",
+    "boxes": "Số Thùng",
+    "totalboxes": "Tổng Số Thùng",
+    "total_boxes": "Tổng Số Thùng",
+    "customers": "Khách Hàng",
+    "totalcustomers": "Tổng Số Khách Hàng",
+    "total_customers": "Tổng Số Khách Hàng",
+    "product": "Sản Phẩm",
+    "product_name": "Tên Sản Phẩm",
+    "category": "Danh Mục",
+    "size": "Kích Cỡ",
+    "cost_per_box": "Giá Vốn/Thùng ($)",
+    "costperbox": "Giá Vốn/Thùng ($)",
+    "salesperson": "Nhân Viên Kinh Doanh",
+    "team": "Đội Ngũ",
+    "location": "Vị Trí/Khu Vực",
+    "month": "Tháng",
 }
 
 
@@ -118,6 +143,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
     if df is None or df.empty:
         st.info("Không có dữ liệu để vẽ biểu đồ.")
         return None
+
+    df = unify_year_month_columns(df)
 
     measure_cols, label_cols, time_col = get_axis_columns(df)
     row_identity_col = get_row_identity_column(df)
@@ -207,16 +234,26 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             tick_angle = 0 if n_time_points <= 20 else -45
 
             if time_color_col:
+                clean_m = format_col_title(measure_cols[0])
+                clean_time = format_col_title(time_col)
+                clean_group = format_col_title(time_color_col)
                 fig = px.line(
                     sorted_df,
                     x=time_col,
                     y=measure_cols[0],
                     color=time_color_col,
                     markers=True,
-                    title=f"Xu hướng {measure_cols[0]} theo {time_col} (Phân nhóm theo {time_color_col})",
+                    title=f"Xu hướng {clean_m} theo {clean_time} (Phân loại theo {clean_group})",
                     template="plotly_white"
                 )
-                fig.update_traces(line=dict(width=2.5), marker=dict(size=7))
+                m_low = str(measure_cols[0]).lower()
+                is_curr = any(k in m_low for k in ["sales", "amount", "salary", "budget", "revenue", "lương", "doanh"])
+                curr_sym = "$" if is_curr else ""
+                fig.update_traces(
+                    line=dict(width=2.5),
+                    marker=dict(size=7),
+                    hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: {curr_sym}%{{y:,.0f}}<extra></extra>"
+                )
             else:
                 clean_m = format_col_title(measure_cols[0])
                 clean_time = format_col_title(time_col)

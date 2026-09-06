@@ -344,10 +344,22 @@ def get_db_specific_rules(schema_context: str) -> str:
        GROUP BY pr.Product
        ORDER BY TotalSales DESC
        LIMIT 10;
-     + MẪU CHUẨN DOANH THU THEO THÁNG:
-       SELECT MONTH(s.SaleDate) AS Month, SUM(s.Amount) AS TotalSales
+     + MẪU CHUẨN DOANH THU THEO TỪNG QUỐC GIA QUA CÁC THÁNG (CHUẨN XÁC 100%, TUYỆT ĐỐI KHÔNG DÙNG CTE):
+       SELECT 
+           DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month,
+           g.Geo AS Country,
+           SUM(s.Amount) AS TotalSales
        FROM sales s
-       WHERE YEAR(s.SaleDate) = 2021
+       JOIN geo g ON s.GeoID = g.GeoID
+       GROUP BY Month, Country
+       ORDER BY Month ASC, TotalSales DESC;
+       * QUY TẮC BẮT BUỘC:
+         1. TUYỆT ĐỐI CẤM DÙNG CTE (`WITH ...`). Dùng câu lệnh SELECT đơn trực tiếp để tối ưu tốc độ!
+         2. Định dạng tháng dạng 'YYYY-MM' (DATE_FORMAT trên MySQL hoặc strftime trên SQLite) để làm trục thời gian liên tục.
+         3. g.Geo AS Country làm phân loại quốc gia, GROUP BY Month, Country và ORDER BY Month ASC để vẽ biểu đồ đa đường (Multi-line chart) so sánh xu hướng các nước.
+     + MẪU CHUẨN DOANH THU TOÀN BỘ THEO THÁNG:
+       SELECT DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month, SUM(s.Amount) AS TotalSales
+       FROM sales s
        GROUP BY Month
        ORDER BY Month ASC;"""
     else:
@@ -356,13 +368,74 @@ def get_db_specific_rules(schema_context: str) -> str:
      + Mỗi bảng được JOIN phải có bí danh phân biệt, không được trùng nhau."""
 
 
-def get_targeted_hint(user_query: str, schema_context: str = "") -> str:
+def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = "") -> str:
     """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) cho câu hỏi cụ thể, áp dụng cho cả prompt gốc và prompt sửa lỗi."""
     q_low = (user_query or "").lower()
+    schema_low = (schema_context or "").lower()
+    is_sqlite = "sqlite" in (dialect or "").lower() or "sqlite" in schema_low
+    date_expr = "strftime('%Y-%m', s.SaleDate)" if is_sqlite else "DATE_FORMAT(s.SaleDate, '%Y-%m')"
 
     # Trích xuất số lượng N linh hoạt từ câu hỏi (VD: Top 10, top 5, 10 nhân viên, danh sách 10...)
     top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
     req_limit = int(top_m.group(1)) if top_m else 10
+
+    # 0. CSDL Awesome Chocolates - Doanh thu theo thời gian / tháng
+    is_choco_context = any(k in schema_low for k in ["geo", "products", "sales", "spid", "geoid"]) or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo"])
+    if is_choco_context or (any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
+        # 0.1 Doanh thu theo từng quốc gia (Country) qua các tháng
+        if any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thay đổi", "xu hướng", "biến động"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO TỪNG QUỐC GIA QUA CÁC THÁNG):
+SELECT 
+    {date_expr} AS Month,
+    g.Geo AS Country,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+GROUP BY Month, Country
+ORDER BY Month ASC, TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! BẮT BUỘC dùng SELECT trực tiếp JOIN giữa sales s và geo g ON s.GeoID = g.GeoID! Dùng {date_expr} AS Month làm trục thời gian và g.Geo AS Country để vẽ biểu đồ đa đường so sánh!)
+"""
+        # 0.2 Doanh thu theo từng sản phẩm qua các tháng
+        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU TỪNG SẢN PHẨM QUA CÁC THÁNG):
+SELECT 
+    {date_expr} AS Month,
+    pr.Product AS Product,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+GROUP BY Month, Product
+ORDER BY Month ASC, TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! Dùng SELECT trực tiếp JOIN giữa sales s và products pr ON s.PID = pr.PID!)
+"""
+        # 0.3 Doanh thu theo nhân viên qua các tháng
+        elif any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO NHÂN VIÊN QUA CÁC THÁNG):
+SELECT 
+    {date_expr} AS Month,
+    pe.Salesperson AS Salesperson,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+GROUP BY Month, Salesperson
+ORDER BY Month ASC, TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! Dùng SELECT trực tiếp JOIN giữa sales s và people pe ON s.SPID = pe.SPID!)
+"""
+        # 0.4 Doanh thu tổng hợp qua các tháng
+        elif any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng"]) and any(k in q_low for k in ["doanh thu", "doanh số", "sales"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU QUA CÁC THÁNG):
+SELECT 
+    {date_expr} AS Month,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG CTE `WITH ...`! Dùng SELECT trực tiếp từ sales s!)
+"""
 
     # 1. Câu hỏi liên quan đến chức danh (Title)
     if any(k in q_low for k in ["chức danh", "title", "vị trí", "bổ nhiệm", "thăng chức", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
@@ -748,7 +821,7 @@ def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: s
     """Xây dựng prompt tạo câu lệnh SQL với độ chính xác Schema tuyệt đối."""
     dialect_hint = get_dialect_hints(dialect, lang=lang)
     db_specific_rules = get_db_specific_rules(schema_context)
-    targeted_hint = get_targeted_hint(user_query, schema_context)
+    targeted_hint = get_targeted_hint(user_query, schema_context, dialect=dialect)
 
     if lang == "en":
         return f"""You are a world-class SQL engineer.
@@ -773,7 +846,7 @@ STRICT RULES:
    - Ensure all parentheses () and quotes are balanced.
    - Wrap identifiers in backticks ` when needed.
 5. CLEAN OUTPUT:
-   - Return ONLY the single executable raw SQL statement (starting with SELECT or WITH).
+   - Return ONLY the single executable raw SQL statement (starting with SELECT).
    - No markdown code blocks, no explanations, no comments.
 
 User Query: "{user_query}"
@@ -822,7 +895,7 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
      + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):
         Nên trả về bảng so sánh gồm tên đối tượng, doanh thu và tỷ lệ phần trăm (ví dụ: phân nhóm Đối tượng X vs 'Các sản phẩm khác') để có thể vẽ biểu đồ tròn Donut trực quan sinh động cho người dùng.
 5. ĐỊNH DẠNG ĐẦU RA (QUAN TRỌNG NHẤT):
-   - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng chữ SELECT hoặc WITH).
+   - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng chữ SELECT).
    - TUYỆT ĐỐI KHÔNG bọc trong markdown code block (```sql hoặc ```), TUYỆT ĐỐI KHÔNG đặt dấu backtick ` ở đầu hay cuối câu lệnh (`SELECT...).
    - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích nào bên ngoài.
 {targeted_hint}
@@ -834,7 +907,7 @@ def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_que
     """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi, kết quả rỗng (0 dòng) hoặc không qua self-check."""
     dialect_hint = get_dialect_hints(dialect, lang=lang)
     db_specific_rules = get_db_specific_rules(schema_context)
-    targeted_hint = get_targeted_hint(user_query, schema_context)
+    targeted_hint = get_targeted_hint(user_query, schema_context, dialect=dialect)
 
     if lang == "en":
         return f"""You are a senior SQL expert. The SQL query you generated needs adjustments on {dialect}.
@@ -859,7 +932,7 @@ FIX INSTRUCTIONS:
 1. If result returned 0 rows due to CURRENT_DATE(), NOW(), CURDATE() or overly strict date filtering: Anchor to `(SELECT MAX(date_col) FROM table_name)` or remove restrictive date filters to fetch real data!
 2. If 'Table or column doesn't exist': Carefully check the SCHEMA above and ONLY use tables and columns that exist in the Schema.
 3. If syntax error: Use `COUNT(*)`, ensure balanced parentheses ().
-4. Return ONLY the single corrected raw SQL query (SELECT or WITH). No markdown, no comments, no explanations."""
+4. Return ONLY the single corrected raw SQL query (starting with SELECT). No markdown, no comments, no explanations."""
 
     return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra CẦN ĐƯỢC ĐIỀU CHỈNH LẠI trên {dialect}.
 

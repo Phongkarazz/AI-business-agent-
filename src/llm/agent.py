@@ -776,6 +776,107 @@ ORDER BY Headcount DESC"""
     return sql
 
 
+def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo tháng (theo Quốc gia, Sản phẩm, Nhân viên) trên CSDL Awesome Chocolates.
+    Loại bỏ triệt để CTE bị vỡ (WITH ...), JOIN trùng lặp và chuyển thành câu SELECT đơn trực tiếp định dạng YYYY-MM."""
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    # Kiểm tra xem có phải câu hỏi theo tháng / thời gian trên Chocolates DB không
+    has_monthly = any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian", "xu hướng", "thay đổi", "biến động"])
+    has_sales = any(k in q_low for k in ["doanh thu", "doanh số", "sales", "tiền bán", "amount", "bán hàng"]) or any(k in sql_low for k in ["sales", "totalsales", "amount"])
+
+    if not (has_monthly and (has_sales or "sales" in sql_low or "amount" in sql_low)):
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    date_expr = "strftime('%Y-%m', s.SaleDate)" if is_sqlite else "DATE_FORMAT(s.SaleDate, '%Y-%m')"
+
+    # 1. Doanh thu theo từng quốc gia / thị trường qua các tháng
+    is_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) or any(k in sql_low for k in ["country", "country_sales", "geo", "geoid"])
+    if is_country and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
+        needs_fix = (
+            "with " in sql_low
+            or "country_sales" in sql_low
+            or "cs.geoid" in sql_low
+            or "s.saledate" in sql_low
+            or sql_low.count("geo ") > 1
+            or ("year(" in sql_low and "month(" in sql_low)
+            or not re.search(r"join\s+geo", sql_low)
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    g.Geo AS Country,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+GROUP BY Month, Country
+ORDER BY Month ASC, TotalSales DESC"""
+
+    # 2. Doanh thu theo từng sản phẩm qua các tháng
+    is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"]) or "products" in sql_low or "pid" in sql_low
+    if is_product and not any(k in q_low for k in ["quốc gia", "country", "nhân viên", "salesperson"]):
+        needs_fix = (
+            "with " in sql_low
+            or ("year(" in sql_low and "month(" in sql_low)
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    pr.Product AS Product,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+GROUP BY Month, Product
+ORDER BY Month ASC, TotalSales DESC"""
+
+    # 3. Doanh thu theo nhân viên bán hàng qua các tháng
+    is_person = any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán"]) or "people" in sql_low or "spid" in sql_low
+    if is_person and not any(k in q_low for k in ["quốc gia", "country", "sản phẩm", "product"]):
+        needs_fix = (
+            "with " in sql_low
+            or ("year(" in sql_low and "month(" in sql_low)
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    pe.Salesperson AS Salesperson,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+GROUP BY Month, Salesperson
+ORDER BY Month ASC, TotalSales DESC"""
+
+    # 4. Doanh thu tổng hợp toàn bộ qua các tháng (không phân nhóm)
+    is_general_monthly = not (is_country or is_product or is_person)
+    if is_general_monthly and any(k in q_low for k in ["doanh thu", "doanh số", "sales"]):
+        needs_fix = (
+            "with " in sql_low
+            or ("year(" in sql_low and "month(" in sql_low)
+            or ("date_format" not in sql_low and not is_sqlite)
+            or ("strftime" not in sql_low and is_sqlite)
+        )
+        if needs_fix:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+GROUP BY Month
+ORDER BY Month ASC"""
+
+    return sql
+
+
 
 def is_safe_select(sql: str) -> bool:
     """Kiểm tra câu lệnh SQL có phải là SELECT/WITH hợp lệ và an toàn không."""
@@ -1174,6 +1275,7 @@ def run_agent(
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
@@ -1198,6 +1300,7 @@ def run_agent(
     for attempt in range(1, 4):
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
+        sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
@@ -1446,6 +1549,7 @@ def run_agent(
                 bad_col = col_m.group(1) if col_m else "tên cột"
                 augmented_error += (
                     f"\n\nLƯU Ý CỘT KHÔNG TỒN TẠI: Cột '{bad_col}' không tồn tại trong CSDL!\n"
+                    f"- Nếu là 's.saleDate', 'saleDate' hoặc 'cs.GeoID' trong CTE 'country_sales': TUYỆT ĐỐI CẤM DÙNG CTE (`WITH ...`)! BẮT BUỘC bỏ hoàn toàn CTE và viết SELECT trực tiếp phẳng: `SELECT DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month, g.Geo AS Country, SUM(s.Amount) AS TotalSales FROM sales s JOIN geo g ON s.GeoID = g.GeoID GROUP BY Month, Country ORDER BY Month ASC, TotalSales DESC`!\n"
                     f"- Nếu là 'e.dept_no' hoặc 's.dept_no': Bảng employees và salaries KHÔNG có cột dept_no! BẮT BUỘC JOIN qua bảng trung gian dept_emp: FROM salaries s JOIN dept_emp de ON s.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no.\n"
                     f"- Nếu là 'p.Salesperson' hoặc 'pr.Salesperson': Cột 'Salesperson' nằm ở bảng 'people' (pe.Salesperson), KHÔNG nằm ở 'products'! Hãy bỏ cột này nếu câu hỏi không hỏi nhân viên, hoặc JOIN với 'people pe ON s.SPID = pe.SPID' và dùng 'pe.Salesperson'.\n"
                     f"- Nếu là 'ProductCost_per_box': Cột chi phí trong bảng products là 'Cost_per_box'.\n"
@@ -1454,6 +1558,7 @@ def run_agent(
                     f"Hãy sửa lại câu SQL dùng đúng các cột có thật trong Schema ở trên!"
                     if lang != "en" else
                     f"\n\nCOLUMN ERROR: Column '{bad_col}' does not exist!\n"
+                    f"- If 's.saleDate' or 'cs.GeoID' in CTE: Drop CTE completely and use direct flat SELECT: `SELECT DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month, g.Geo AS Country, SUM(s.Amount) AS TotalSales FROM sales s JOIN geo g ON s.GeoID = g.GeoID GROUP BY Month, Country ORDER BY Month ASC`!\n"
                     f"- If 'dept_no' on employees/salaries: Join through intermediate table 'dept_emp'!\n"
                     f"- If 'Salesperson': 'Salesperson' belongs to 'people' (pe.Salesperson), NOT 'products'! Drop it or JOIN with people.\n"
                     f"- If 'ProductCost_per_box': The column is 'Cost_per_box'.\n"

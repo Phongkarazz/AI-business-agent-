@@ -87,6 +87,38 @@ def find_time_column(df: pd.DataFrame):
     return None
 
 
+def unify_year_month_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Nếu dataframe chứa riêng biệt 2 cột Year (1900-2100) và Month (1-12),
+    tự động hợp nhất thành cột Month chuẩn 'YYYY-MM' để biểu đồ trực quan hóa liền mạch theo thời gian."""
+    if df is None or df.empty or len(df.columns) < 2:
+        return df
+
+    year_col = None
+    month_col = None
+    for c in df.columns:
+        c_low = str(c).strip().lower()
+        if any(k in c_low for k in ["year", "nam"]) and not any(k in c_low for k in ["of_service", "service", "experience", "thâm_niên", "kinh_nghiệm"]):
+            vals = pd.to_numeric(df[c], errors="coerce").dropna()
+            if not vals.empty and vals.min() >= 1900 and vals.max() <= 2100:
+                year_col = c
+        elif any(k in c_low for k in ["month", "thang", "tháng"]):
+            vals = pd.to_numeric(df[c], errors="coerce").dropna()
+            if not vals.empty and vals.min() >= 1 and vals.max() <= 12:
+                month_col = c
+
+    if year_col and month_col:
+        df_copy = df.copy()
+        y_series = pd.to_numeric(df_copy[year_col], errors="coerce").fillna(0).astype(int).astype(str)
+        m_series = pd.to_numeric(df_copy[month_col], errors="coerce").fillna(0).astype(int).astype(str).str.zfill(2)
+        df_copy["Month"] = y_series + "-" + m_series
+        drop_cols = [c for c in [month_col, year_col] if c != "Month"]
+        if drop_cols:
+            df_copy = df_copy.drop(columns=drop_cols)
+        return df_copy
+
+    return df
+
+
 def has_time_dimension(df: pd.DataFrame) -> bool:
     """Kiểm tra dataframe có chiều thời gian không."""
     return find_time_column(df) is not None
@@ -102,6 +134,7 @@ def get_axis_columns(df: pd.DataFrame):
     all_num_cols = df.select_dtypes(include="number").columns.tolist()
     
     # Loại bỏ ID-like và các cột biểu diễn năm thuần túy (e.g. HireYear, Year, Nam, hoặc cột có toàn giá trị 9999)
+    # cũng như cột Month dạng số (1-12)
     measure_cols = []
     for c in all_num_cols:
         if is_id_like(c):
@@ -110,6 +143,10 @@ def get_axis_columns(df: pd.DataFrame):
         if any(k in c_low for k in ["year", "hireyear", "nam"]) and not any(k in c_low for k in ["of_service", "service", "experience", "thâm_niên", "kinh_nghiệm"]):
             vals = pd.to_numeric(df[c], errors="coerce").dropna()
             if not vals.empty and (vals.min() >= 1900 or (vals == 9999).all()):
+                continue
+        if any(k in c_low for k in ["month", "thang", "tháng"]):
+            vals = pd.to_numeric(df[c], errors="coerce").dropna()
+            if not vals.empty and vals.min() >= 1 and vals.max() <= 12:
                 continue
         measure_cols.append(c)
 

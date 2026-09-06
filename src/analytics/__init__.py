@@ -13,6 +13,7 @@ from .heuristics import (
     pick_label_column,
     generate_starter_prompts,
     detect_query_language,
+    unify_year_month_columns,
 )
 from .forecasting import forecast_series
 from .anomaly import detect_outliers, analyze_data_anomalies
@@ -28,6 +29,7 @@ __all__ = [
     "pick_label_column",
     "generate_starter_prompts",
     "detect_query_language",
+    "unify_year_month_columns",
     "forecast_series",
     "detect_outliers",
     "analyze_data_anomalies",
