@@ -305,6 +305,86 @@ ORDER BY Year ASC"""
     return sql
 
 
+def auto_fix_title_assignments_query(sql: str, user_query: str) -> str:
+    """Tự động phát hiện và khắc phục lỗi mô hình AI truy vấn sai sang bảng salaries khi người dùng hỏi về số lượng nhân viên bổ nhiệm chức danh mới qua từng năm."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_title_assignment = any(k in q_low for k in ["bổ nhiệm", "thăng chức", "chức danh mới", "bổ nhiệm mới", "nhận chức"]) or (
+        any(k in q_low for k in ["chức danh", "title", "vị trí"]) and any(k in q_low for k in ["qua từng năm", "qua các năm", "theo năm", "hàng năm", "từng năm"])
+    )
+    if not is_title_assignment:
+        return sql
+
+    lowered_sql = sql.lower()
+    is_off_topic = "salaries" in lowered_sql or "salary" in lowered_sql or "raisecount" in lowered_sql or not re.search(r"GROUP\s+BY\s+.*(?:YEAR|from_date)", sql, re.IGNORECASE)
+
+    if is_off_topic or "titles" not in lowered_sql:
+        return """SELECT 
+    YEAR(t.from_date) AS Year,
+    COUNT(DISTINCT t.emp_no) AS TotalEmployees
+FROM titles t
+GROUP BY YEAR(t.from_date)
+ORDER BY Year ASC"""
+
+    # Đảm bảo bỏ lọc to_date = 9999-01-01 nếu có
+    sql = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)", "YEAR(t.from_date)", sql, flags=re.IGNORECASE)
+
+    return sql
+
+
+def auto_fix_company_hiring_trend_query(sql: str, user_query: str) -> str:
+    """Tự động sửa câu hỏi thống kê số lượng nhân viên tuyển dụng theo từng năm từ trước đến nay."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_company_hiring = any(k in q_low for k in ["tuyển dụng", "tuyển"]) and any(k in q_low for k in ["năm", "từng năm", "qua các năm", "từ trước đến nay"]) and not any(k in q_low for k in ["phòng ban", "phòng", "department", "sales", "development"])
+    if not is_company_hiring:
+        return sql
+
+    lowered_sql = sql.lower()
+    if "hire_date" not in lowered_sql or not re.search(r"GROUP\s+BY\s+.*YEAR", sql, re.IGNORECASE):
+        return """SELECT 
+    YEAR(hire_date) AS HireYear, 
+    COUNT(*) AS TotalHires
+FROM employees
+GROUP BY HireYear
+ORDER BY HireYear ASC"""
+
+    return sql
+
+
+def auto_fix_longest_managers_query(sql: str, user_query: str) -> str:
+    """Tự động sửa truy vấn ai từng giữ chức vụ Manager lâu nhất trong lịch sử công ty."""
+    if not sql or not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_longest_mgr = any(k in q_low for k in ["manager", "trưởng phòng", "quản lý"]) and any(k in q_low for k in ["lâu nhất", "dài nhất", "thâm niên nhất"]) and any(k in q_low for k in ["lịch sử", "từng giữ", "từng làm", "trước đến nay"])
+    if not is_longest_mgr:
+        return sql
+
+    lowered_sql = sql.lower()
+    if "dept_manager" not in lowered_sql or "datediff" not in lowered_sql or "to_date = '9999-01-01'" in lowered_sql:
+        top_n = extract_requested_limit(user_query) or 10
+        return f"""SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS ManagerName,
+    d.dept_name AS Department,
+    dm.from_date AS StartDate,
+    dm.to_date AS EndDate,
+    ROUND(DATEDIFF(IF(dm.to_date = '9999-01-01', '2002-08-01', dm.to_date), dm.from_date) / 365.25, 1) AS YearsAsManager
+FROM dept_manager dm
+JOIN employees e ON dm.emp_no = e.emp_no
+JOIN departments d ON dm.dept_no = d.dept_no
+ORDER BY YearsAsManager DESC
+LIMIT {top_n}"""
+
+    return sql
+
+
 def auto_fix_payroll_query(sql: str, user_query: str) -> str:
     """Tự động phát hiện và khắc phục lỗi mô hình AI dùng COUNT thay vì SUM(s.salary) khi người dùng hỏi về quỹ lương phòng ban hoặc theo năm."""
     if not sql or not user_query:
@@ -1021,6 +1101,9 @@ def run_agent(
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
+        sql_query = auto_fix_title_assignments_query(sql_query, user_query)
+        sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
+        sql_query = auto_fix_longest_managers_query(sql_query, user_query)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)
@@ -1040,6 +1123,9 @@ def run_agent(
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
+        sql_query = auto_fix_title_assignments_query(sql_query, user_query)
+        sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
+        sql_query = auto_fix_longest_managers_query(sql_query, user_query)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)

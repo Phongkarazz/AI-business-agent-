@@ -81,15 +81,17 @@ def get_db_specific_rules(schema_context: str) -> str:
      + CẢNH BÁO BẮT BUỘC TIỀN TỐ BÍ DANH & TÊN CỘT (TRÁNH LỖI 1052, 1054):
         * Cột `emp_no` có trong 3 bảng. BẮT BUỘC viết `e.emp_no` trong SELECT và GROUP BY!
         * Bảng `departments` CHỈ CÓ 2 CỘT: `dept_no` và `dept_name`! TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`!
-        * QUY TẮC BẮT BUỘC VỀ CHỨC DANH (TITLE): Khi câu hỏi có từ 'chức danh', 'vị trí', 'title' hoặc 'lương nam nữ theo chức danh': BẮT BUỘC dùng bảng `titles t` (cột `t.title`), JOIN `employees e` và `salaries s`, GROUP BY `t.title`. TUYỆT ĐỐI KHÔNG JOIN bảng `departments` hay `dept_emp`!
-        * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
-        * Thứ tự JOIN bắt buộc khi truy vấn phòng ban:
-          FROM employees e
-          JOIN salaries s ON e.emp_no = s.emp_no
-          JOIN dept_emp de ON e.emp_no = de.emp_no
-          JOIN departments d ON de.dept_no = d.dept_no
-        * TUYỆT ĐỐI KHÔNG đưa `de.dept_no = d.dept_no` vào mệnh đề ON của dept_emp trước khi JOIN departments d!
-        * TUYỆT ĐỐI KHÔNG dùng CTE (WITH ...), KHÔNG JOIN bảng titles nếu không hỏi chức danh!
+         * QUY TẮC BẮT BUỘC VỀ CHỨC DANH (TITLE):
+           - Khi hỏi số lượng bổ nhiệm chức danh qua từng năm: BẮT BUỘC dùng `titles t` (cột `t.from_date` và `t.emp_no`), GROUP BY `YEAR(t.from_date)`, TUYỆT ĐỐI KHÔNG JOIN salaries hay departments!
+           - Khi câu hỏi so sánh lương theo chức danh: BẮT BUỘC dùng bảng `titles t` (cột `t.title`), JOIN `employees e` và `salaries s`, GROUP BY `t.title`. TUYỆT ĐỐI KHÔNG JOIN bảng `departments` hay `dept_emp`!
+         * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
+         * Thứ tự JOIN bắt buộc khi truy vấn phòng ban:
+           FROM employees e
+           JOIN salaries s ON e.emp_no = s.emp_no
+           JOIN dept_emp de ON e.emp_no = de.emp_no
+           JOIN departments d ON de.dept_no = d.dept_no
+         * TUYỆT ĐỐI KHÔNG đưa `de.dept_no = d.dept_no` vào mệnh đề ON của dept_emp trước khi JOIN departments d!
+         * TUYỆT ĐỐI KHÔNG dùng CTE (WITH ...), KHÔNG JOIN bảng titles nếu không hỏi chức danh!
 
      + MẪU CHUẨN TOP 10 NHÂN VIÊN LƯƠNG CAO NHẤT HIỆN TẠI (KÈM PHÒNG BAN):
        SELECT 
@@ -363,8 +365,22 @@ def get_targeted_hint(user_query: str, schema_context: str = "") -> str:
     req_limit = int(top_m.group(1)) if top_m else 10
 
     # 1. Câu hỏi liên quan đến chức danh (Title)
-    if any(k in q_low for k in ["chức danh", "title", "vị trí", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
-        if any(k in q_low for k in ["nam", "nữ", "gender", "giới tính"]):
+    if any(k in q_low for k in ["chức danh", "title", "vị trí", "bổ nhiệm", "thăng chức", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
+        # 1.0 Số lượng nhân viên được bổ nhiệm chức danh mới qua từng năm
+        if any(k in q_low for k in ["bổ nhiệm", "thăng chức", "chức danh mới", "bổ nhiệm mới", "nhận chức"]) or (
+            any(k in q_low for k in ["chức danh", "title", "vị trí"]) and any(k in q_low for k in ["qua từng năm", "qua các năm", "theo năm", "hàng năm", "từng năm", "xu hướng"])
+        ):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN ĐƯỢC BỔ NHIỆM CHỨC DANH MỚI QUA TỪNG NĂM):
+SELECT 
+    YEAR(t.from_date) AS Year,
+    COUNT(DISTINCT t.emp_no) AS TotalEmployees
+FROM titles t
+GROUP BY YEAR(t.from_date)
+ORDER BY Year ASC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC dùng bảng titles t, nhóm theo YEAR(t.from_date) AS Year, đếm COUNT(DISTINCT t.emp_no) AS TotalEmployees! TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01', TUYỆT ĐỐI KHÔNG JOIN bảng salaries s hay employees e hay departments!)
+"""
+        elif any(k in q_low for k in ["nam", "nữ", "gender", "giới tính"]):
             return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH LƯƠNG NAM NỮ THEO CHỨC DANH):
 SELECT t.title AS Title, e.gender AS Gender, ROUND(AVG(s.salary), 2) AS AvgSalary
@@ -376,7 +392,7 @@ GROUP BY t.title, e.gender
 ORDER BY t.title, e.gender;
 (BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
 """
-        elif any(k in q_low for k in ["phân bố", "tỷ lệ", "tỷ trọng", "cơ cấu", "số lượng", "bao nhiêu nhân sự", "nhân viên theo", "nhân sự theo"]):
+        elif any(k in q_low for k in ["phân bố", "tỷ lệ", "tỷ trọng", "cơ cấu", "số lượng", "bao nhiêu nhân sự", "nhân viên theo", "nhân sự theo"]) and not any(k in q_low for k in ["qua từng năm", "qua các năm", "theo năm", "hàng năm", "từng năm", "bổ nhiệm"]):
             return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHÂN BỐ NHÂN SỰ THEO TỪNG CHỨC DANH):
 SELECT 
@@ -452,6 +468,19 @@ WHERE d.dept_name = '{dept_target}'
 GROUP BY HireYear
 ORDER BY HireYear ASC;
 (TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI KHÔNG SO SÁNH LƯƠNG CHỨC DANH NAM NỮ, BẮT BUỘC DÙNG ĐÚNG PHÒNG BAN '{dept_target}' VÀ ORDER BY HireYear ASC!)
+"""
+
+    # 3.1 Xu hướng tuyển dụng toàn công ty theo từng năm
+    elif any(k in q_low for k in ["tuyển dụng", "tuyển"]) and any(k in q_low for k in ["năm", "từng năm", "qua các năm", "từ trước đến nay"]) and not any(k in q_low for k in ["phòng ban", "phòng", "department", "sales", "development"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN TUYỂN DỤNG THEO TỪNG NĂM):
+SELECT 
+    YEAR(hire_date) AS HireYear, 
+    COUNT(*) AS TotalHires
+FROM employees
+GROUP BY HireYear
+ORDER BY HireYear ASC;
+(BẮT BUỘC dùng YEAR(hire_date) AS HireYear, COUNT(*) AS TotalHires, GROUP BY HireYear ORDER BY HireYear ASC!)
 """
 
     # 4. Top nhân viên lương cao nhất hiện tại toàn công ty hoặc theo phòng ban
@@ -547,6 +576,25 @@ JOIN salaries s ON dm.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 WHERE dm.to_date = '9999-01-01'
 ORDER BY CurrentSalary DESC;
 (BẮT BUỘC lọc dm.to_date = '9999-01-01' VÀ s.to_date = '9999-01-01' để lấy đúng 9 Trưởng phòng hiện tại! TUYỆT ĐỐI KHÔNG DÙNG SUM(salary) toàn công ty hay sinh cột TotalCompanyValue!)
+"""
+
+    # 7.1 Những ai từng giữ chức vụ Manager lâu nhất trong lịch sử công ty
+    elif any(k in q_low for k in ["manager", "trưởng phòng", "quản lý"]) and any(k in q_low for k in ["lâu nhất", "dài nhất", "thâm niên nhất"]) and any(k in q_low for k in ["lịch sử", "từng giữ", "từng làm", "trước đến nay"]):
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHỮNG AI TỪNG GIỮ CHỨC VỤ MANAGER LÂU NHẤT TRONG LỊCH SỬ):
+SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS ManagerName,
+    d.dept_name AS Department,
+    dm.from_date AS StartDate,
+    dm.to_date AS EndDate,
+    ROUND(DATEDIFF(IF(dm.to_date = '9999-01-01', '2002-08-01', dm.to_date), dm.from_date) / 365.25, 1) AS YearsAsManager
+FROM dept_manager dm
+JOIN employees e ON dm.emp_no = e.emp_no
+JOIN departments d ON dm.dept_no = d.dept_no
+ORDER BY YearsAsManager DESC
+LIMIT {req_limit};
+(BẮT BUỘC tính YearsAsManager bằng DATEDIFF, ORDER BY YearsAsManager DESC LIMIT {req_limit}, TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01' để lấy đủ lịch sử các Manager tiền nhiệm!)
 """
 
     # 8. So sánh mức lương trung bình của một phòng ban cụ thể so với các phòng ban khác (hoặc so sánh lương giữa các phòng)
