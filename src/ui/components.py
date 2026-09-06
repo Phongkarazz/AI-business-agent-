@@ -293,7 +293,23 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             else:
                 min_label = f"#{min_idx + 1}"
 
-            def _fmt_kpi_val(v):
+            def _fmt_kpi_val(v, compact=True):
+                try:
+                    fv = float(v)
+                    if compact:
+                        if abs(fv) >= 1_000_000_000:
+                            unit = " Tỷ" if not is_en else "B"
+                            return f"{curr_symbol}{fv / 1_000_000_000:,.2f}{unit}"
+                        elif abs(fv) >= 10_000_000 or (abs(fv) >= 1_000_000 and is_currency):
+                            unit = " Tr" if not is_en else "M"
+                            return f"{curr_symbol}{fv / 1_000_000:,.2f}{unit}"
+                    if fv.is_integer() or fv > 100:
+                        return f"{curr_symbol}{fv:,.0f}"
+                    return f"{curr_symbol}{fv:,.2f}"
+                except Exception:
+                    return str(v)
+
+            def _fmt_kpi_val_full(v):
                 try:
                     fv = float(v)
                     if fv.is_integer() or fv > 100:
@@ -340,11 +356,32 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 with col1:
                     st.metric("📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"), f"{total_rows} {dim_unit}" + (f" ({min_dim} – {max_dim})" if min_dim != max_dim else ""))
                 with col2:
-                    st.metric("📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg)
+                    st.metric("📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg, help=_fmt_kpi_val_full(avg_val))
                 with col3:
-                    st.metric(f"🏆 " + (f"Đỉnh cao nhất ({dim_unit} {peak_label})" if not is_en else f"Peak ({peak_label})"), fmt_peak)
+                    delta_p = _fmt_kpi_val_full(peak_val) if fmt_peak != _fmt_kpi_val_full(peak_val) else None
+                    st.metric(f"🏆 " + (f"Đỉnh cao nhất ({dim_unit} {peak_label})" if not is_en else f"Peak ({peak_label})"), fmt_peak, delta=delta_p)
                 with col4:
-                    st.metric(f"📉 " + (f"Thấp nhất ({dim_unit} {min_label})" if not is_en else f"Lowest ({min_label})"), fmt_min)
+                    delta_m = _fmt_kpi_val_full(min_val) if fmt_min != _fmt_kpi_val_full(min_val) else None
+                    st.metric(f"📉 " + (f"Thấp nhất ({dim_unit} {min_label})" if not is_en else f"Lowest ({min_label})"), fmt_min, delta=delta_m)
+
+                # Kiểm tra năm 2002 có bị sụt giảm tự nhiên do dữ liệu ghi nhận 8 tháng không
+                if any(str(v) == "2002" for v in dim_vals):
+                    try:
+                        row_2002 = df[df[dim_c].astype(str) == "2002"]
+                        row_2001 = df[df[dim_c].astype(str) == "2001"]
+                        if not row_2002.empty and not row_2001.empty:
+                            v02 = float(row_2002[m_col].iloc[0])
+                            v01 = float(row_2001[m_col].iloc[0])
+                            if v01 > 0 and v02 < v01 * 0.8:
+                                st.caption(
+                                    "ℹ️ **Lưu ý dữ liệu tài chính**: Năm 2002 cơ sở dữ liệu chỉ ghi nhận đến tháng 08/2002 (8 tháng) "
+                                    "nên tổng quỹ lương bị hụt tự nhiên so với các năm đủ 12 tháng, không phản ánh sự suy thoái kinh doanh."
+                                    if not is_en else
+                                    "ℹ️ **Financial Data Note**: Year 2002 records only contain data up to August 2002 (8 months), "
+                                    "causing an apparent drop compared to full 12-month years, not an actual operational decline."
+                                )
+                    except Exception:
+                        pass
             elif is_avg_or_rate:
                 # CỘT TRUNG BÌNH/TỶ LỆ: Hiển thị Thống kê tổng hợp khoa học, KHÔNG cộng dồn!
                 with col1:

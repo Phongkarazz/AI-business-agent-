@@ -39,9 +39,25 @@ VI_COLUMN_MAP = {
     "hire_date": "Ngày Vào Làm",
     "birth_date": "Ngày Sinh",
     "age": "Tuổi",
+    "totalsalarybudget": "Tổng Quỹ Lương ($)",
+    "total_salary_budget": "Tổng Quỹ Lương ($)",
+    "salarybudget": "Quỹ Lương ($)",
+    "salary_budget": "Quỹ Lương ($)",
+    "totalemployees": "Tổng Số Nhân Viên",
+    "total_employees": "Tổng Số Nhân Viên",
+    "maleemployees": "Nhân Viên Nam",
+    "male_employees": "Nhân Viên Nam",
+    "femaleemployees": "Nhân Viên Nữ",
+    "female_employees": "Nhân Viên Nữ",
+    "malemanagers": "Quản Lý Nam",
+    "femalemanagers": "Quản Lý Nữ",
+    "totalmanagers": "Tổng Số Quản Lý",
+    "malepct": "Tỷ Lệ Nam (%)",
+    "femalepct": "Tỷ Lệ Nữ (%)",
+    "year": "Năm",
+    "hireyear": "Năm Tuyển Dụng",
     "headcount": "Số Lượng Nhân Viên",
     "emp_count": "Số Lượng Nhân Viên",
-    "total_employees": "Tổng Số Nhân Viên",
     "count": "Số Lượng",
 }
 
@@ -170,18 +186,56 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 )
                 fig.update_traces(line=dict(width=2.5), marker=dict(size=7))
             else:
+                clean_m = format_col_title(measure_cols[0])
+                clean_time = format_col_title(time_col)
+                min_t = str(sorted_df[time_col].min())
+                max_t = str(sorted_df[time_col].max())
+                time_range_str = f" ({min_t} – {max_t})" if min_t != max_t else ""
+                chart_title = f"Xu hướng {clean_m} qua từng {clean_time}{time_range_str}" if len(measure_cols) == 1 else f"Xu hướng qua từng {clean_time}{time_range_str}"
+
                 fig = px.line(
                     sorted_df,
                     x=time_col,
                     y=measure_cols if len(measure_cols) > 1 else measure_cols[0],
                     markers=True,
-                    title=f"Xu hướng {measure_cols[0]} theo {time_col}" if len(measure_cols) == 1 else f"Xu hướng theo {time_col}",
+                    title=chart_title,
                     template="plotly_white"
                 )
-                fig.update_traces(
+
+                trace_kwargs = dict(
                     line=dict(width=3, color="#1F4E78"),
                     marker=dict(size=8, color="#1F4E78")
                 )
+
+                # Tính toán % tăng trưởng YoY (Year-over-Year) và Hover text chuyên sâu nếu là chuỗi thời gian 1 chỉ số
+                if len(measure_cols) == 1 and pd.api.types.is_numeric_dtype(sorted_df[measure_cols[0]]):
+                    m_c = measure_cols[0]
+                    yoy_series = sorted_df[m_c].pct_change() * 100.0
+                    m_low = str(m_c).lower()
+                    is_sal = any(k in m_low for k in ["salary", "budget", "lương", "quỹ", "tiền"])
+                    curr_sym = "$" if is_sal else ""
+                    hover_texts = []
+                    for idx, (_, row) in enumerate(sorted_df.iterrows()):
+                        val = float(row[m_c])
+                        yoy_val = yoy_series.iloc[idx]
+                        yoy_str = f" ({yoy_val:+.1f}% YoY)" if pd.notna(yoy_val) else " (Khởi đầu)"
+                        if is_sal:
+                            if abs(val) >= 1_000_000_000:
+                                fmt_compact = f"${val / 1e9:,.2f} Tỷ"
+                            elif abs(val) >= 1_000_000:
+                                fmt_compact = f"${val / 1e6:,.2f} Tr"
+                            else:
+                                fmt_compact = f"${val:,.0f}"
+                            val_detail = f" (${val:,.0f})" if abs(val) >= 1_000_000 else ""
+                        else:
+                            fmt_compact = f"{val:,.0f}"
+                            val_detail = ""
+                        hover_texts.append(f"<b>{clean_time} {row[time_col]}</b><br>{clean_m}: {fmt_compact}{val_detail}{yoy_str}")
+
+                    trace_kwargs["text"] = hover_texts
+                    trace_kwargs["hovertemplate"] = "%{text}<extra></extra>"
+
+                fig.update_traces(**trace_kwargs)
             fig.update_layout(
                 xaxis=dict(
                     type="category" if n_time_points <= 36 else None,
@@ -338,11 +392,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     non_total_cols = [c for c in measure_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])]
                     non_pct_cols = [c for c in measure_cols if c not in pct_cols]
 
-                    # Kiểm tra xem người dùng có thực sự yêu cầu vẽ tỷ lệ/phần trăm không
+                    # Kiểm tra xem người dùng có thực sự yêu cầu vẽ tỷ lệ/phần trăm hay số lượng không
                     uq_low = (user_query or "").lower()
                     user_asked_pct = any(k in uq_low for k in ["tỷ lệ", "phần trăm", "percent", "pct", "%", "share", "cơ cấu"])
+                    user_asked_count = any(k in uq_low for k in ["số lượng", "quy mô", "bao nhiêu", "count", "headcount", "nhân viên"])
 
-                    if pct_cols and (user_asked_pct or not non_pct_cols):
+                    # Tìm các cặp số lượng nhân sự Nam - Nữ tuyệt đối
+                    male_emp_cols = [c for c in non_pct_cols if any(k in c.lower() for k in ["maleemployees", "male_emp", "malemanagers", "male", "nam"]) and not any(k in c.lower() for k in ["female", "nu", "nữ", "department"])]
+                    female_emp_cols = [c for c in non_pct_cols if any(k in c.lower() for k in ["femaleemployees", "female_emp", "femalemanagers", "female", "nu", "nữ"])]
+
+                    # Nếu người dùng hỏi CẢ Số lượng VÀ Tỷ lệ, hoặc có cặp số lượng Nam/Nữ thực tế:
+                    if user_asked_count and male_emp_cols and female_emp_cols:
+                        active_measures = [male_emp_cols[0], female_emp_cols[0]]
+                        chart_title = f"Quy mô & Cơ cấu Nhân sự theo {label_name} (Stacked Bar)"
+                    elif pct_cols and (user_asked_pct or not non_pct_cols):
                         active_measures = pct_cols
                         chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
                     elif non_pct_cols:
@@ -407,9 +470,18 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         elif any(k in cl for k in ["male", "nam", "men"]):
                             color_map[col] = "#2563EB"  # Xanh dương hiện đại cho Nam
 
-                    barmode_val = "stack" if is_composition_100 else "group"
+                    is_headcount_stack = (
+                        len(active_measures) == 2 and
+                        any(any(k in c.lower() for k in ["female", "nu", "nữ"]) for c in active_measures) and
+                        any(any(k in c.lower() for k in ["male", "nam"]) for c in active_measures) and
+                        not any(any(k in c.lower() for k in ["pct", "percent", "rate", "%"]) for c in active_measures)
+                    )
+
+                    barmode_val = "stack" if (is_composition_100 or is_headcount_stack) else "group"
                     if is_composition_100:
                         chart_title = f"Cơ cấu Tỷ lệ Phần trăm ({', '.join(active_measures)}) theo {label_name} (100% Stacked Bar)"
+                    elif is_headcount_stack:
+                        chart_title = f"Quy mô & Cơ cấu Giới tính theo {label_name} (Stacked Bar)"
 
                     # Tự động tính góc nghiêng nhãn trục X nếu nhãn dài để không bao giờ bị cắt chữ
                     max_lbl_len = max([len(str(x)) for x in plot_df[label_name]] or [0])
@@ -432,21 +504,26 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     fig = px.bar(**bar_kwargs)
 
-                    if is_composition_100:
+                    if is_composition_100 or is_headcount_stack:
                         # Đổi tên hiển thị trên Legend cho thân thiện (kiểm tra Nữ trước Nam vì 'female' chứa 'male')
                         for tr in fig.data:
                             tr_l = str(tr.name).lower()
                             if any(k in tr_l for k in ["female", "nu", "nữ", "women"]):
-                                tr.name = "Nữ (Female %)"
+                                tr.name = "Nữ (Female %)" if is_composition_100 else "Nữ (Female)"
                             elif any(k in tr_l for k in ["male", "nam", "men"]):
-                                tr.name = "Nam (Male %)"
+                                tr.name = "Nam (Male %)" if is_composition_100 else "Nam (Male)"
 
-                        # Hiển thị nhãn % trực tiếp bên trong từng phân đoạn
-                        fig.update_traces(texttemplate="%{y:.0f}%", textposition="inside", insidetextanchor="middle")
-                        fig.update_layout(
-                            yaxis=dict(range=[0, 100], ticksuffix="%", title="Tỷ lệ (%)"),
+                        # Hiển thị nhãn trực tiếp bên trong từng phân đoạn
+                        txt_tmpl = "%{y:.0f}%" if is_composition_100 else "%{y:,.0f}"
+                        fig.update_traces(texttemplate=txt_tmpl, textposition="inside", insidetextanchor="middle")
+                        layout_kwargs = dict(
                             legend=dict(title=None, orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                         )
+                        if is_composition_100:
+                            layout_kwargs["yaxis"] = dict(range=[0, 100], ticksuffix="%", title="Tỷ lệ (%)")
+                        else:
+                            layout_kwargs["yaxis"] = dict(title="Số Lượng Nhân Sự")
+                        fig.update_layout(**layout_kwargs)
 
                     fig.update_layout(
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
