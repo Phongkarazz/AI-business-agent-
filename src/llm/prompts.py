@@ -968,7 +968,10 @@ Generate an Executive Business Insight Report in English with exact Markdown for
 (Highlight significant spikes, sharp increases/decreases, or concentration risks with exact numbers).
 
 ### 2. 🔍 Potential Root Causes & Hypotheses
-(Provide 2-3 realistic business hypotheses: seasonality, marketing campaigns, supply chain, VIP accounts, pricing,...).
+(MUST DYNAMICALLY REASON BASED ON THE EXACT USER QUERY AND DATA NUMBERS:
+- Provide 2 distinct, logical business hypotheses explaining WHY these trends, gaps, or spikes occurred in the data.
+- CITE exact years, entity names, and metrics from the results to ground each hypothesis.
+- NEVER use generic repetitive boilerplate).
 
 ### 3. 🎯 Executive Action Plan & Priority Recommendations
 (Provide 2-3 actionable, high-impact recommendations. MUST tag each action with Urgency and Execution Timeframe:
@@ -1002,7 +1005,11 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sắc bén và ma
 (Nêu thẳng nhận định kinh doanh: Đơn vị/thực thể nào dẫn đầu (Top 1) với bao nhiêu, đơn vị nào thấp nhất, khoảng cách chênh lệch bao nhiêu %. TUYỆT ĐỐI CẤM liệt kê máy móc từng dòng Min, Max, Mean, Median, Sum, số bản ghi!).
 
 ### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
-(Đưa ra 2-3 giả thuyết kinh doanh thực tế giải thích nguyên nhân: Quy mô hoạt động, Chính sách đãi ngộ & cạnh tranh nhân tài, Tính chất chuyên môn phòng ban, Thị trường tiêu thụ,... TUYỆT ĐỐI KHÔNG chèn nhãn [Ưu tiên Cao] hay từ tiếng Anh vào mục này).
+(BẮT BUỘC SUY LUẬN LOGIC BÁM SÁT ĐÚNG MỤC TIÊU CÂU HỎI VÀ DẪN CHỨNG SỐ LIỆU THỰC TẾ:
+- Đưa ra đúng 2 giả thuyết kinh doanh giải thích TẠI SAO lại xuất hiện xu hướng, chênh lệch hoặc đột biến đó (ví dụ: giải thích lý do năm tăng vọt/sụt giảm, tại sao khối/phòng ban này dẫn đầu, tại sao có sự cách biệt).
+- TUYỆT ĐỐI CẤM dùng các câu văn mẫu sáo rỗng lặp lại cho mọi câu hỏi như "Trách nhiệm & Quy mô đơn vị", "Chính sách đãi ngộ & Cạnh tranh nhân tài"!
+- MỖI GIẢ THUYẾT BẮT BUỘC TRÍCH DẪN TÊN THỰC THỂ/MỐC NĂM VÀ SỐ LIỆU TỪ KẾT QUẢ ĐỂ CHỨNG MINH.
+- TUYỆT ĐỐI KHÔNG chèn nhãn [Ưu tiên Cao] hay từ tiếng Anh vào mục này).
 
 ### 2.3. 🎯 Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)
 (BẮT BUỘC chỉ viết đúng 3 dòng đề xuất tương ứng với 3 cấp độ thời gian, bám sát số liệu cụ thể vừa truy vấn:

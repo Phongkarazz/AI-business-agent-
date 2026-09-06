@@ -697,6 +697,234 @@ def sanitize_followup_question(q: str) -> str:
     return q
 
 
+def format_entity_label(val) -> str:
+    """Định dạng nhãn thực thể hoặc năm không bị đuôi số thập phân .0."""
+    s = str(val).strip()
+    if re.match(r"^\d+\.0+$", s):
+        return s.split(".")[0]
+    return s
+
+
+def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is_en: bool = False) -> str:
+    """Tự động sinh 2 Giả thuyết & Nguyên nhân Tiềm năng (Mục 2.2) suy luận sắc bén dựa trên đúng câu hỏi người dùng và số liệu thực tế."""
+    if df is None or df.empty:
+        if is_en:
+            return (
+                "• **Data Sufficiency & Baseline Operations**: Current results reflect baseline operating conditions without significant structural disruptions.\n\n"
+                "• **Market Alignment & Governance**: Business performance remains aligned with planned operational capacity."
+            )
+        return (
+            "• **Định biên Vận hành & Mặt bằng Cơ sở**: Kết quả phản ánh trạng thái vận hành ổn định, phù hợp với định biên hoạt động thực tế của tổ chức.\n\n"
+            "• **Tuân thủ Mục tiêu & Kế hoạch Phân bổ**: Các chỉ số kinh doanh hiện tại bám sát kế hoạch điều hành và chưa ghi nhận áp lực đột biến từ ngoại cảnh."
+        )
+
+    cols = df.columns.tolist()
+    measure_cols, cat_cols, time_col = get_axis_columns(df)
+    val_col = measure_cols[0] if measure_cols else None
+
+    # Nếu không tìm thấy measure_cols bằng get_axis_columns, lấy cột số cuối cùng
+    if not val_col:
+        num_cols = df.select_dtypes(include="number").columns.tolist()
+        if num_cols:
+            val_col = num_cols[-1]
+
+    if not val_col:
+        if is_en:
+            return (
+                "• **Operational Allocation**: Performance figures reflect approved resource plans and current organizational capacity.\n\n"
+                "• **Target Alignment**: Departmental outcomes align closely with mid-term strategic governance priorities."
+            )
+        return (
+            "• **Định biên Vận hành & Phân bổ Nguồn lực**: Số liệu phản ánh sự phân bố hiện tại phù hợp với kế hoạch nhân sự và ngân sách đã được phê duyệt.\n\n"
+            "• **Cân đối Nhu cầu & Định hướng Phát triển**: Kết quả cho thấy sự tập trung vào các mục tiêu then chốt trong giai đoạn vận hành."
+        )
+
+    q_low = (user_query or "").lower()
+    cols_str = " ".join(str(c).lower() for c in cols)
+
+    # 1. NHẬN DIỆN CHUỖI THỜI GIAN (Time Series / Yearly Trend / Trend by Year)
+    is_time_series = (
+        time_col is not None
+        or any(k in q_low for k in ["qua các năm", "theo năm", "từng năm", "over time", "per year", "over the years", "yearly", "xu hướng", "trend", "biến động", "thay đổi như thế nào", "qua thời gian"])
+        or any(k in cols_str for k in ["year", "hireyear", "năm", "tháng", "month", "date"])
+    )
+
+    t_col = time_col or next((c for c in cols if any(k in str(c).lower() for k in ["year", "hireyear", "năm", "tháng", "month", "date"])), None)
+
+    if is_time_series and t_col and t_col != val_col:
+        try:
+            df_sorted = df.copy()
+            df_sorted[val_col] = pd.to_numeric(df_sorted[val_col], errors="coerce").fillna(0)
+            try:
+                df_sorted = df_sorted.sort_values(by=t_col)
+            except Exception:
+                pass
+
+            peak_row = df_sorted.loc[df_sorted[val_col].idxmax()]
+            min_row = df_sorted.loc[df_sorted[val_col].idxmin()]
+            peak_t = format_entity_label(peak_row[t_col])
+            peak_v = float(peak_row[val_col])
+            min_t = format_entity_label(min_row[t_col])
+            min_v = float(min_row[val_col])
+
+            # Tính bước nhảy vọt (spike) lớn nhất giữa các kỳ liên tiếp
+            spike_t = peak_t
+            spike_v = peak_v
+            spike_pct = ((peak_v - min_v) / min_v * 100) if min_v > 0 else 0
+
+            if len(df_sorted) >= 2:
+                pct_changes = df_sorted[val_col].pct_change() * 100
+                valid_pcts = pct_changes.dropna()
+                if not valid_pcts.empty:
+                    max_jump_idx = valid_pcts.idxmax()
+                    if valid_pcts.loc[max_jump_idx] > 15:
+                        spike_t = format_entity_label(df_sorted.loc[max_jump_idx, t_col])
+                        spike_pct = float(valid_pcts.loc[max_jump_idx])
+                        spike_v = float(df_sorted.loc[max_jump_idx, val_col])
+
+            mean_val = float(df_sorted[val_col].mean())
+
+            is_payroll = any(k in q_low or k in cols_str for k in ["salary", "lương", "quỹ", "expenditure", "budget", "chi phí"])
+            is_hiring = any(k in q_low or k in cols_str for k in ["tuyển", "hire", "headcount", "nhân viên"])
+
+            if is_en:
+                if is_payroll:
+                    h1 = f"• **Workforce Ramp-up & Budget Expansion in {spike_t}**: The significant jump of +{spike_pct:.1f}% (reaching {spike_v:,.2f}) highlights aggressive hiring and corporate scaling during this period, establishing a larger baseline payroll expenditure."
+                    h2 = f"• **Tenure Compounding & Budget Stabilization**: Total payroll peaked in {peak_t} ({peak_v:,.2f}) and sustained around the mean of {mean_val:,.2f}, driven by recurring merit increments for tenured talent paired with organizational salary caps."
+                elif is_hiring:
+                    h1 = f"• **Peak Recruitment Wave ({spike_t})**: New hiring surged to {peak_v:,.0f} employees in {peak_t}, aligning with corporate capacity expansion and critical project rollouts."
+                    h2 = f"• **Headcount Stabilization & Selective Hiring**: Post-peak recruitment normalized to {min_v:,.0f} hires in {min_t} around a historical baseline of {mean_val:,.0f} hires/year, reflecting a strategic shift from rapid scaling to talent retention and internal productivity."
+                else:
+                    h1 = f"• **Growth Acceleration Phase ({spike_t})**: The performance surge of +{spike_pct:.1f}% to {spike_v:,.2f} reflects synergistic execution of core strategic initiatives during this operational period."
+                    h2 = f"• **Market Normalization & Operational Ceiling**: Trajectory from baseline {min_v:,.2f} ({min_t}) to peak {peak_v:,.2f} ({peak_t}) outlines typical industry demand cycles, settling around the mean of {mean_val:,.2f}."
+            else:
+                if is_payroll:
+                    h1 = f"• **Mở rộng Quy mô & Bước nhảy Ngân sách Giai đoạn {spike_t}**: Mức tăng vọt +{spike_pct:.1f}% (đạt {spike_v:,.2f}) phản ánh giai đoạn doanh nghiệp ồ ạt mở rộng quy mô nhân sự hoặc sáp nhập các đơn vị lớn, tạo ra bước nhảy vọt về định biên chi phí lương."
+                    h2 = f"• **Tích lũy Thâm niên & Cơ chế Trần Quỹ Lương**: Tổng quỹ lương đạt đỉnh vào năm {peak_t} ({peak_v:,.2f}) và sau đó duy trì ổn định quanh mức trung bình {mean_val:,.2f}, xuất phát từ chính sách tăng lương định kỳ tích lũy cho lực lượng nhân sự thâm niên kết hợp với việc kiểm soát trần ngân sách tổ chức."
+                elif is_hiring:
+                    h1 = f"• **Làn sóng Tuyển dụng & Đột phá Quy mô ({spike_t})**: Số lượng nhân sự mới đạt đỉnh {peak_v:,.0f} người vào năm {peak_t}, gắn liền với giai đoạn mở rộng sản xuất kinh doanh và bổ sung nhân lực cho các dự án trọng điểm."
+                    h2 = f"• **Tối ưu Định biên & Tinh gọn Bộ máy**: Sau giai đoạn cao điểm, quy mô tuyển dụng hạ nhiệt về {min_v:,.0f} nhân sự (năm {min_t}) và duy trì quanh mức bình quân {mean_val:,.0f} người/năm, phản ánh bước chuyển từ tuyển ồ ạt sang nâng cao chất lượng và ổn định đội ngũ."
+                else:
+                    h1 = f"• **Đột phá Tăng trưởng & Mở rộng Thị phần ({spike_t})**: Mức tăng trưởng +{spike_pct:.1f}% (đạt {spike_v:,.2f}) chứng minh hiệu quả cộng hưởng từ các sáng kiến trọng tâm và mở rộng quy mô hoạt động trong giai đoạn này."
+                    h2 = f"• **Chu kỳ Biến động & Ổn định Dài hạn**: Sự dịch chuyển từ mức sàn {min_v:,.2f} ({min_t}) lên đỉnh {peak_v:,.2f} ({peak_t}) phản ánh chu kỳ thị trường đặc thù, định hình mức nền tảng ổn định quanh giá trị trung bình {mean_val:,.2f}."
+
+            return f"{h1}\n\n{h2}"
+        except Exception:
+            pass
+
+    # 2. SO SÁNH KHỐI / NHÓM PHÒNG BAN (Department Group: Tech vs Business)
+    is_dept_group = (
+        "departmentgroup" in cols_str
+        or any(k in q_low for k in ["kỹ thuật", "kinh doanh", "technical", "business", "sales, marketing", "development, research"])
+    )
+    grp_col = next((c for c in cols if "departmentgroup" in str(c).lower() or "group" in str(c).lower()), None)
+    if is_dept_group and grp_col and grp_col != val_col:
+        try:
+            grp_stats = df.groupby(grp_col)[val_col].mean().sort_values(ascending=False)
+            if len(grp_stats) >= 2:
+                top_grp = format_entity_label(grp_stats.index[0])
+                top_grp_v = float(grp_stats.iloc[0])
+                bot_grp = format_entity_label(grp_stats.index[1])
+                bot_grp_v = float(grp_stats.iloc[1])
+                diff_grp = top_grp_v - bot_grp_v
+                pct_grp = (diff_grp / bot_grp_v * 100) if bot_grp_v > 0 else 0
+
+                if is_en:
+                    h1 = f"• **Revenue Target Pressure & Performance Incentives**: The **{top_grp}** cluster commands a higher compensation level ({top_grp_v:,.2f} vs {bot_grp_v:,.2f} for **{bot_grp}**, a +{pct_grp:.1f}% spread), driven by direct quota accountability, commercial risk, and performance commissions."
+                    h2 = f"• **Talent Scarcity & Technical Compensation Models**: The gap of {diff_grp:,.2f} reflects distinct talent structures: commercial roles leverage commission-based market incentives, whereas engineering and research prioritize long-term salary stability and expert technical retention."
+                else:
+                    h1 = f"• **Áp lực Chỉ tiêu Doanh số & Cơ chế Thưởng Thương mại**: Khối **{top_grp}** đạt mức thu nhập trung bình cao hơn ({top_grp_v:,.2f} so với {bot_grp_v:,.2f} của khối **{bot_grp}**, chênh lệch +{pct_grp:.1f}%), bắt nguồn từ đặc thù gắn liền với chỉ tiêu tăng trưởng doanh thu trực tiếp và chính sách thưởng hoa hồng theo hiệu suất kinh doanh."
+                    h2 = f"• **Chi phí Cơ hội & Độ Khan hiếm Kỹ năng Chuyên môn**: Khoảng cách {diff_grp:,.2f} phản ánh chiến lược cân đối nguồn lực: khối thương mại yêu cầu gói đãi ngộ linh hoạt theo thị trường, trong khi khối kỹ thuật/nghiên cứu ưu tiên tính ổn định lâu dài và bảo toàn năng lực công nghệ cốt lõi."
+                return f"{h1}\n\n{h2}"
+        except Exception:
+            pass
+
+    # 3. SO SÁNH PHÒNG BAN, CHỨC DANH, GIỚI TÍNH, SẢN PHẨM HOẶC XẾP HẠNG
+    name_candidates = [c for c in cat_cols if c != val_col]
+    if not name_candidates:
+        name_candidates = [c for c in cols if c != val_col]
+    name_col = name_candidates[0] if name_candidates else None
+
+    if name_col and val_col:
+        try:
+            df_eval = df.copy()
+            df_eval[val_col] = pd.to_numeric(df_eval[val_col], errors="coerce").fillna(0)
+            sorted_eval = df_eval.sort_values(by=val_col, ascending=False)
+            top_r = sorted_eval.iloc[0]
+            bot_r = sorted_eval.iloc[-1]
+            top_name = format_entity_label(top_r[name_col])
+            top_v = float(top_r[val_col])
+            bot_name = format_entity_label(bot_r[name_col])
+            bot_v = float(bot_r[val_col])
+            spread_diff = top_v - bot_v
+            spread_pct = (spread_diff / bot_v * 100) if bot_v > 0 else 0
+
+            # 3A. Giới tính (Gender)
+            is_gender = any(k in cols_str for k in ["gender", "giới tính", "sex"]) or any(k in q_low for k in ["giới tính", "nam", "nữ", "gender", "male", "female"])
+            if is_gender:
+                if is_en:
+                    h1 = f"• **Job Family & Seniority Distribution**: The variance between **{top_name}** ({top_v:,.2f}) and **{bot_name}** ({bot_v:,.2f}, spread {spread_pct:.1f}%) often stems from historical tenure accumulation and the distribution of senior managerial posts."
+                    h2 = f"• **Candidate Pipeline & Pay Equity Governance**: This distribution reflects external industry talent pools across specialized divisions and active enterprise governance around compensation parity."
+                else:
+                    h1 = f"• **Cơ cấu Phân bổ Chức danh & Thâm niên Quản lý**: Chênh lệch giữa nhóm **{top_name}** ({top_v:,.2f}) và nhóm **{bot_name}** ({bot_v:,.2f}, chênh lệch {spread_pct:.1f}%) thường bắt nguồn từ tỷ lệ nắm giữ các vị trí lãnh đạo cấp cao hoặc số năm thâm niên tích lũy tại tổ chức."
+                    h2 = f"• **Đặc thù Nguồn cung Ứng viên & Chính sách Bình đẳng**: Tỷ lệ cơ cấu phản ánh nguồn cung ứng viên lịch sử trong từng chuyên ngành và cam kết của doanh nghiệp trong việc thúc đẩy công bằng cơ hội phát triển nghề nghiệp."
+                return f"{h1}\n\n{h2}"
+
+            # 3B. Chức danh (Titles / Roles)
+            is_title = any(k in cols_str for k in ["title", "chức danh", "position"]) or any(k in q_low for k in ["chức danh", "vị trí", "title"])
+            if is_title:
+                if is_en:
+                    h1 = f"• **Accountability Scope & Decision-Making Complexity**: **{top_name}** ranks highest ({top_v:,.2f}), corresponding to strategic decision risk and specialized leadership execution."
+                    h2 = f"• **Merit Progression & Key Talent Retention**: The gap of {spread_diff:,.2f} ({spread_pct:.1f}%) against **{bot_name}** ({bot_v:,.2f}) serves as a key financial incentive for career ladders and leadership retention."
+                else:
+                    h1 = f"• **Phân cấp Trách nhiệm & Biên độ Quyết định Quản lý**: Vị trí **{top_name}** dẫn đầu ({top_v:,.2f}) thể hiện mức độ rủi ro trách nhiệm cao nhất và yêu cầu kinh nghiệm điều hành phức tạp."
+                    h2 = f"• **Đòn bẩy Tài chính & Giữ chân Nhân sự Cốt lõi**: Biên độ chênh lệch {spread_pct:.1f}% ({spread_diff:,.2f}) so với vị trí **{bot_name}** ({bot_v:,.2f}) là đòn bẩy tài chính quan trọng để tạo động lực thăng tiến nội bộ và giữ chân nhân tài đầu ngành."
+                return f"{h1}\n\n{h2}"
+
+            # 3C. Phòng ban (Departments)
+            is_dept = any(k in cols_str for k in ["dept", "department", "phòng"]) or any(k in q_low for k in ["phòng ban", "bộ phận", "department"])
+            if is_dept:
+                if is_en:
+                    h1 = f"• **Strategic Contribution & Market Talent Competition**: **{top_name}** commands the top average ({top_v:,.2f}), reflecting its direct impact on core value creation and strong competition in the external hiring market."
+                    h2 = f"• **Seniority Ratio & Departmental Budget Framework**: The {spread_pct:.1f}% spread ({spread_diff:,.2f}) compared to **{bot_name}** ({bot_v:,.2f}) aligns with differing ratios of senior specialists and departmental operating caps."
+                else:
+                    h1 = f"• **Đóng góp Giá trị Cốt lõi & Tính Cạnh tranh Ngành nghề**: Phòng ban **{top_name}** đạt mức cao nhất ({top_v:,.2f}), thể hiện vị thế đơn vị trọng yếu và tính chất cạnh tranh cao trong việc thu hút nhân lực giỏi trên thị trường lao động."
+                    h2 = f"• **Cơ cấu Định biên Cấp bậc & Ngân sách Vận hành**: Chênh lệch {spread_pct:.1f}% ({spread_diff:,.2f}) so với **{bot_name}** ({bot_v:,.2f}) phản ánh sự khác biệt về tỷ lệ nhân sự cao cấp (senior) và giới hạn trần ngân sách được phê duyệt giữa các đơn vị."
+                return f"{h1}\n\n{h2}"
+
+            # 3D. Sản phẩm / Thương mại (Chocolates DB)
+            is_sales = any(k in cols_str for k in ["product", "sản phẩm", "amount", "revenue", "boxes", "quốc gia", "country", "rep"]) or any(k in q_low for k in ["sản phẩm", "chocolate", "doanh thu", "bán chạy", "sales"])
+            if is_sales:
+                if is_en:
+                    h1 = f"• **Consumer Preference & Brand Resonance**: **{top_name}** outperforms ({top_v:,.2f}), proving superior product resonance and targeted campaign effectiveness."
+                    h2 = f"• **Distribution Coverage & Market Penetration**: The {spread_pct:.1f}% gap against **{bot_name}** ({bot_v:,.2f}) indicates untapped potential in secondary channels, offering opportunities for supply chain optimization."
+                else:
+                    h1 = f"• **Thị hiếu Tiêu dùng & Độ Nhận diện Thương hiệu**: Nhóm **{top_name}** đạt kết quả vượt trội ({top_v:,.2f}), khẳng định ưu thế về sức hấp dẫn sản phẩm và hiệu quả của các chương trình xúc tiến bán hàng."
+                    h2 = f"• **Khả năng Khai thác Kênh Phân phối & Độ Phủ Thị trường**: Khoảng cách {spread_pct:.1f}% so với nhóm **{bot_name}** ({bot_v:,.2f}) cho thấy tiềm năng tăng trưởng còn lớn tại các phân khúc ngách, mở ra cơ hội tối ưu hóa chuỗi cung ứng và mở rộng thị trường."
+                return f"{h1}\n\n{h2}"
+
+            # 3E. General Ranking
+            if is_en:
+                h1 = f"• **Operational Leadership & Execution Focus**: **{top_name}** achieves the highest benchmark ({top_v:,.2f}), demonstrating superior operational capacity and resource dedication."
+                h2 = f"• **Performance Variance & Optimization Window**: The gap of {spread_diff:,.2f} ({spread_pct:.1f}%) versus **{bot_name}** ({bot_v:,.2f}) highlights an operational optimization window to narrow performance dispersion across units."
+            else:
+                h1 = f"• **Vị thế Dẫn đầu & Hiệu quả Thực thi**: Nhóm **{top_name}** đạt mức cao nhất ({top_v:,.2f}), phản ánh năng lực vận hành vượt trội và sự tập trung nguồn lực mạnh mẽ."
+                h2 = f"• **Biên độ Phân hóa & Tiềm năng Tối ưu**: Khoảng cách {spread_diff:,.2f} ({spread_pct:.1f}%) so với nhóm **{bot_name}** ({bot_v:,.2f}) mở ra cơ hội chuẩn hóa quy trình và thu hẹp khoảng cách hiệu quả giữa các đơn vị."
+            return f"{h1}\n\n{h2}"
+        except Exception:
+            pass
+
+    if is_en:
+        return (
+            "• **Operational Allocation**: Performance figures reflect approved resource plans and current organizational capacity.\n\n"
+            "• **Target Alignment**: Departmental outcomes align closely with mid-term strategic governance priorities."
+        )
+    return (
+        "• **Định biên Vận hành & Phân bổ Nguồn lực**: Số liệu phản ánh sự phân bố hiện tại phù hợp với kế hoạch nhân sự và ngân sách đã được phê duyệt.\n\n"
+        "• **Cân đối Nhu cầu & Định hướng Phát triển**: Kết quả cho thấy sự tập trung vào các mục tiêu then chốt trong giai đoạn vận hành."
+    )
+
+
 def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False) -> str:
     """Tự động sinh Đề xuất Chiến lược AI phân cấp 3 bậc (Cấp bách, Trung hạn, Dài hạn) bám chặt vào số liệu thực tế từ DataFrame."""
     if df is None or df.empty:
@@ -729,8 +957,10 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False) ->
     sorted_df = df.sort_values(by=val_col, ascending=False)
     top_row = sorted_df.iloc[0]
     bot_row = sorted_df.iloc[-1]
-    top_name, top_val = str(top_row[name_col]), top_row[val_col]
-    bot_name, bot_val = str(bot_row[name_col]), bot_row[val_col]
+    top_name = format_entity_label(top_row[name_col])
+    top_val = top_row[val_col]
+    bot_name = format_entity_label(bot_row[name_col])
+    bot_val = bot_row[val_col]
 
     mean_val = df[val_col].mean()
     median_val = df[val_col].median()
@@ -771,44 +1001,87 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False) ->
     return f"{urgent}\n\n{medium}\n\n{longterm}"
 
 
-def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[str, str]:
+def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_query: str = "", is_en: bool = False) -> dict[str, str]:
     """Bóc tách nội dung insight thành 3 phần riêng biệt để hiển thị dạng 3 Card UI chuyên nghiệp."""
     if not markdown_text:
-        # Nếu không có text (chạy Ollama cục bộ), tự động sinh đầy đủ 3 phần từ dữ liệu thực tế
+        # Nếu không có text (chạy Ollama cục bộ hoặc fallback), tự động sinh đầy đủ 3 phần từ dữ liệu thực tế bám sát câu hỏi
         part_21 = ""
         part_22 = ""
         if df is not None and not df.empty:
-            cols = df.columns.tolist()
-            num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
-            cat_cols = [c for c in cols if c not in num_cols]
-            if num_cols and cat_cols:
-                val_col = num_cols[-1]
-                name_col = cat_cols[0]
-                sorted_df = df.sort_values(by=val_col, ascending=False)
-                top_row = sorted_df.iloc[0]
-                bot_row = sorted_df.iloc[-1]
-                top_name, top_val = top_row[name_col], top_row[val_col]
-                bot_name, bot_val = bot_row[name_col], bot_row[val_col]
-                spread_diff = top_val - bot_val
-                spread_pct = (spread_diff / bot_val) * 100 if bot_val != 0 else 0
-                median_val = df[val_col].median()
-                part_21 = (
-                    f"• **Dẫn đầu toàn diện**: Nhóm **{top_name}** đạt mức cao nhất ({top_val:,.2f}), thể hiện vai trò nòng cốt.\n\n"
-                    f"• **Khoảng cách phân bổ**: Nhóm **{bot_name}** ở mức {bot_val:,.2f} (chênh lệch {spread_pct:.1f}% tương đương {spread_diff:,.2f} so với nhóm dẫn đầu).\n\n"
-                    f"• **Mức trung vị tham chiếu**: Thu nhập/quy mô trung vị toàn bảng là {median_val:,.2f}, phản ánh mặt bằng chung ổn định."
-                )
-            cols_str = " ".join([str(c).lower() for c in df.columns])
-            if any(k in cols_str for k in ["salary", "department", "emp", "title", "lương", "hire", "tuyển", "nhân_sự", "nhan_vien"]):
-                part_22 = (
-                    "• **Trách nhiệm & Quy mô đơn vị**: Các phòng ban/chức danh dẫn đầu có tính chất cạnh tranh cao, quy mô lớn và đóng góp trực tiếp vào mục tiêu cốt lõi nên có mức đãi ngộ vượt trội.\n\n"
-                    "• **Chính sách đãi ngộ & Cạnh tranh nhân tài**: Sự chênh lệch thu nhập phản ánh định hướng của tổ chức trong việc thu hút nhân sự chuyên môn giỏi và giữ chân các vị trí nòng cốt."
-                )
-            else:
-                part_22 = (
-                    "• **Nhu cầu thị trường & Mùa vụ**: Nhóm sản phẩm/thị trường dẫn đầu đáp ứng tốt thị hiếu tiêu dùng và đón đầu hiệu quả các đợt cao điểm mua sắm.\n\n"
-                    "• **Hiệu quả kênh phân phối**: Doanh số cao là kết quả của chiến lược xúc tiến thương mại mạnh mẽ và độ phủ sóng rộng khắp của đội ngũ bán hàng."
-                )
-        part_23 = generate_data_grounded_action_plan(df)
+            measure_cols, cat_cols, time_col = get_axis_columns(df)
+            val_col = measure_cols[0] if measure_cols else None
+            if not val_col:
+                num_cols = df.select_dtypes(include="number").columns.tolist()
+                if num_cols:
+                    val_col = num_cols[-1]
+
+            q_low = (user_query or "").lower()
+            cols_str = " ".join(str(c).lower() for c in df.columns)
+            is_time_series = (
+                time_col is not None
+                or any(k in q_low for k in ["qua các năm", "theo năm", "từng năm", "over time", "per year", "over the years", "yearly", "xu hướng", "trend", "biến động", "thay đổi như thế nào", "qua thời gian"])
+                or any(k in cols_str for k in ["year", "hireyear", "năm", "tháng", "month", "date"])
+            )
+            t_col = time_col or next((c for c in df.columns if any(k in str(c).lower() for k in ["year", "hireyear", "năm", "tháng", "month", "date"])), None)
+
+            if is_time_series and t_col and val_col and t_col != val_col:
+                try:
+                    df_eval = df.copy()
+                    df_eval[val_col] = pd.to_numeric(df_eval[val_col], errors="coerce").fillna(0)
+                    peak_row = df_eval.loc[df_eval[val_col].idxmax()]
+                    min_row = df_eval.loc[df_eval[val_col].idxmin()]
+                    peak_t = format_entity_label(peak_row[t_col])
+                    peak_v = float(peak_row[val_col])
+                    min_t = format_entity_label(min_row[t_col])
+                    min_v = float(min_row[val_col])
+                    mean_val = float(df_eval[val_col].mean())
+                    if is_en:
+                        part_21 = (
+                            f"• **Historical Peak**: Period **{peak_t}** reached the all-time peak ({peak_v:,.2f}), reflecting maximum capacity scale.\n\n"
+                            f"• **Baseline Trough**: Period **{min_t}** marked the lowest point ({min_v:,.2f}), showing an overall gap of {abs(peak_v - min_v):,.2f} from the peak.\n\n"
+                            f"• **Period Benchmark Average**: Multi-year baseline average stands at {mean_val:,.2f}, outlining long-term operational equilibrium."
+                        )
+                    else:
+                        part_21 = (
+                            f"• **Thời điểm Đạt đỉnh**: Giai đoạn **{peak_t}** ghi nhận mức cao nhất toàn chu kỳ ({peak_v:,.2f}), thể hiện quy mô vận hành lớn nhất.\n\n"
+                            f"• **Thời điểm Mức sàn**: Giai đoạn **{min_t}** ở mức thấp nhất ({min_v:,.2f}), chênh lệch {abs(peak_v - min_v):,.2f} so với đỉnh.\n\n"
+                            f"• **Mặt bằng Bình quân Chu kỳ**: Mức trung bình qua các kỳ là {mean_val:,.2f}, tạo đường cơ sở ổn định dài hạn."
+                        )
+                except Exception:
+                    pass
+            elif val_col:
+                name_candidates = [c for c in cat_cols if c != val_col] or [c for c in df.columns if c != val_col]
+                name_col = name_candidates[0] if name_candidates else None
+                if name_col:
+                    try:
+                        df_eval = df.copy()
+                        df_eval[val_col] = pd.to_numeric(df_eval[val_col], errors="coerce").fillna(0)
+                        sorted_df = df_eval.sort_values(by=val_col, ascending=False)
+                        top_row = sorted_df.iloc[0]
+                        bot_row = sorted_df.iloc[-1]
+                        top_name = format_entity_label(top_row[name_col])
+                        top_val = float(top_row[val_col])
+                        bot_name = format_entity_label(bot_row[name_col])
+                        bot_val = float(bot_row[val_col])
+                        spread_diff = top_val - bot_val
+                        spread_pct = (spread_diff / bot_val) * 100 if bot_val != 0 else 0
+                        median_val = float(df_eval[val_col].median())
+                        if is_en:
+                            part_21 = (
+                                f"• **Leading Position**: Group **{top_name}** achieved the top level ({top_val:,.2f}), demonstrating primary contribution.\n\n"
+                                f"• **Distribution Spread**: Group **{bot_name}** stands at {bot_val:,.2f} (a {spread_pct:.1f}% spread or {spread_diff:,.2f} variance).\n\n"
+                                f"• **Reference Median**: Overall median benchmark is {median_val:,.2f}, representing organizational baseline."
+                            )
+                        else:
+                            part_21 = (
+                                f"• **Dẫn đầu toàn diện**: Nhóm **{top_name}** đạt mức cao nhất ({top_val:,.2f}), thể hiện vai trò nòng cốt.\n\n"
+                                f"• **Khoảng cách phân bổ**: Nhóm **{bot_name}** ở mức {bot_val:,.2f} (chênh lệch {spread_pct:.1f}% tương đương {spread_diff:,.2f} so với nhóm dẫn đầu).\n\n"
+                                f"• **Mức trung vị tham chiếu**: Thu nhập/quy mô trung vị toàn bảng là {median_val:,.2f}, phản ánh mặt bằng chung ổn định."
+                            )
+                    except Exception:
+                        pass
+            part_22 = generate_data_grounded_hypotheses(df, user_query=user_query, is_en=is_en)
+        part_23 = generate_data_grounded_action_plan(df, is_en=is_en)
         return {"anomaly": part_21, "hypothesis": part_22, "action_plan": part_23}
 
     cleaned = sanitize_insight_markdown(markdown_text)
@@ -958,31 +1231,16 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None) -> dict[
             l = re.sub(r"^•\s*-\s*", "• ", l)
             clean_check = l.replace("**", "").replace("*", "").strip("•-* :")
             # Loại bỏ các tiêu đề mồ côi (chỉ có tiêu đề không có nội dung phân tích)
-            if clean_check.endswith(":") or len(clean_check) < 30 or re.search(r"^(?:\d+[\.\)]\s*)?(?:quy mô|chính sách|tính chất|thị trường|đặc thù)", clean_check, re.IGNORECASE):
+            if clean_check.endswith(":") or len(clean_check) < 25 or (len(clean_check) < 35 and ":" not in clean_check):
                 continue
             if not l.startswith("•"):
                 l = "• " + l
             cleaned_22.append(l)
         part_22 = "\n\n".join(cleaned_22)
 
-    # Nếu part_22 rỗng do bị lọc hết rác/tiếng Anh -> tạo 2 giả thuyết executive chuẩn mực
+    # Nếu part_22 rỗng do bị lọc hết rác/tiếng Anh -> tạo 2 giả thuyết executive bám sát dữ liệu thực tế và yêu cầu câu hỏi
     if not part_22 or len([l for l in part_22.split("\n") if l.strip()]) < 2:
-        is_hr = False
-        if df is not None and not df.empty:
-            cols_str = " ".join([str(c).lower() for c in df.columns])
-            if any(k in cols_str for k in ["salary", "department", "emp", "title", "lương", "hire", "tuyển", "nhân_sự", "nhan_vien"]):
-                is_hr = True
-
-        if is_hr:
-            part_22 = (
-                "• **Trách nhiệm & Quy mô đơn vị**: Các phòng ban/chức danh dẫn đầu có tính chất cạnh tranh cao, quy mô lớn và đóng góp trực tiếp vào mục tiêu cốt lõi nên có mức đãi ngộ vượt trội.\n\n"
-                "• **Chính sách đãi ngộ & Cạnh tranh nhân tài**: Sự chênh lệch thu nhập phản ánh định hướng của tổ chức trong việc thu hút nhân sự chuyên môn giỏi và giữ chân các vị trí nòng cốt."
-            )
-        else:
-            part_22 = (
-                "• **Nhu cầu thị trường & Mùa vụ**: Nhóm sản phẩm/thị trường dẫn đầu đáp ứng tốt thị hiếu tiêu dùng và đón đầu hiệu quả các đợt cao điểm mua sắm.\n\n"
-                "• **Hiệu quả kênh phân phối**: Doanh số cao là kết quả của chiến lược xúc tiến thương mại mạnh mẽ và độ phủ sóng rộng khắp của đội ngũ bán hàng."
-            )
+        part_22 = generate_data_grounded_hypotheses(df, user_query=user_query, is_en=is_en)
 
     # 3. Đảm bảo mục Kế hoạch Hành động (part_23) luôn có đủ 3 ý: Cao 🔴, Trung bình 🟡, Thấp 🟢
     if part_23:

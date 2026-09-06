@@ -1325,7 +1325,7 @@ def run_agent(
                         if provider == "Ollama (Local AI Offline)":
                             # Với Ollama cục bộ: Dùng Data-Grounded Engine tức thì (0.001s) để phản hồi trong chớp mắt
                             from src.analytics.heuristics import split_insight_sections
-                            sec = split_insight_sections("", df=df)
+                            sec = split_insight_sections("", df=df, user_query=user_query, is_en=(lang == "en"))
                             result["insights"] = (
                                 f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{sec['anomaly']}\n\n"
                                 f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{sec['hypothesis']}\n\n"

@@ -908,12 +908,12 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         st.write("")
 
 
-def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool = False):
+def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool = False, user_query: str = ""):
     """Render 3 Thẻ Giao Diện Độc Lập (Cards) cho Insight: Bất thường, Nguyên nhân, Đề xuất chiến lược phân cấp 3 bậc."""
     if not insights_raw and (df is None or df.empty):
         return
 
-    sections = split_insight_sections(insights_raw or "", df=df)
+    sections = split_insight_sections(insights_raw or "", df=df, user_query=user_query, is_en=is_en)
     p21 = sections.get("anomaly", "").strip()
     p22 = sections.get("hypothesis", "").strip()
     p23 = sections.get("action_plan", "").strip()
@@ -1251,7 +1251,7 @@ def render_result(result: dict, turn_id: str):
         # Báo cáo phân tích chuyên sâu từ AI với Priority Tagging dạng 3 Cards
         insights = result.get("insights", "")
         if insights:
-            render_insight_cards(insights, df=df, is_en=is_en)
+            render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""))
         else:
             btn_insight_text = "🔍 Generate Executive Insights & Priority Action Plan" if is_en else "🔍 Yêu cầu AI phân tích Insight & Đề xuất hành động"
             if st.button(btn_insight_text, key=f"gen_insight_{turn_id}"):
@@ -1265,7 +1265,7 @@ def render_result(result: dict, turn_id: str):
                     if generated:
                         clean_gen = sanitize_insight_markdown(generated)
                         result["insights"] = clean_gen
-                        render_insight_cards(clean_gen, df=df, is_en=is_en)
+                        render_insight_cards(clean_gen, df=df, is_en=is_en, user_query=result.get("query", ""))
 
     with tab3:
         caption_forecast = (
