@@ -242,6 +242,76 @@ def ensure_ratio_column_if_requested(df: pd.DataFrame, user_query: str = "") -> 
     return df
 
 
+def ensure_efficiency_columns_if_requested(df: pd.DataFrame, user_query: str = "") -> pd.DataFrame:
+    """Tự động tính thêm các cột hiệu quả (AvgOrderValue, RevenuePerBox) nếu người dùng hỏi về hiệu quả bán hàng
+    nhưng kết quả DataFrame chỉ mới có các cột tổng (TotalSales, TotalProductsSold, TotalBoxesSold)."""
+    if df is None or df.empty:
+        return df
+
+    uq_low = (user_query or "").lower()
+    is_efficiency = any(k in uq_low for k in [
+        "hiệu quả", "efficiency", "effectiveness", "năng suất", 
+        "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình mỗi đơn", 
+        "trung bình mỗi hộp", "order value", "per box", "profit per box", "performance"
+    ])
+    if not is_efficiency:
+        return df
+
+    cols_low = {str(c).lower(): c for c in df.columns}
+    has_avg_col = any(any(k in c for k in ["avg", "ordervalue", "perbox", "per_box", "profit", "margin", "trung bình"]) for c in cols_low.keys())
+    if has_avg_col:
+        return df
+
+    # Tìm cột sales/doanh thu
+    sales_col = None
+    for k in ["totalsales", "amount", "sales", "doanh_thu", "doanh_so"]:
+        if k in cols_low:
+            sales_col = cols_low[k]
+            break
+
+    # Tìm cột số lượng giao dịch / đơn hàng / sản phẩm
+    count_col = None
+    for k in ["totalproductssold", "totalorders", "orders", "count", "soluong"]:
+        if k in cols_low:
+            count_col = cols_low[k]
+            break
+
+    # Tìm cột số lượng thùng / hộp
+    boxes_col = None
+    for k in ["totalboxessold", "totalboxes", "boxes", "thung", "hop"]:
+        if k in cols_low:
+            boxes_col = cols_low[k]
+            break
+
+    df_mod = df.copy()
+    added = False
+    if sales_col and count_col:
+        try:
+            s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
+            c_val = pd.to_numeric(df_mod[count_col], errors="coerce")
+            df_mod["AvgOrderValue"] = (s_val / c_val.replace(0, pd.NA)).round(2).fillna(0.0)
+            added = True
+        except Exception:
+            pass
+
+    if sales_col and boxes_col:
+        try:
+            s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
+            b_val = pd.to_numeric(df_mod[boxes_col], errors="coerce")
+            df_mod["RevenuePerBox"] = (s_val / b_val.replace(0, pd.NA)).round(2).fillna(0.0)
+            added = True
+        except Exception:
+            pass
+
+    if added:
+        dim_cols = [c for c in df.columns if c not in (sales_col, count_col, boxes_col)]
+        first_dim = dim_cols[0] if dim_cols else df.columns[0]
+        eff_new = [c for c in ["AvgOrderValue", "RevenuePerBox"] if c in df_mod.columns]
+        other_cols = [c for c in df_mod.columns if c not in eff_new and c != first_dim]
+        df_mod = df_mod[[first_dim] + eff_new + other_cols]
+
+    return df_mod
+
 
 def unify_year_month_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Nếu dataframe chứa riêng biệt 2 cột Year (1900-2100) và Month (1-12),

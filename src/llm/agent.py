@@ -20,6 +20,7 @@ from src.analytics.heuristics import (
     sanitize_followup_question,
     ensure_full_twelve_months,
     ensure_ratio_column_if_requested,
+    ensure_efficiency_columns_if_requested,
 )
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
@@ -1307,6 +1308,101 @@ ORDER BY TotalSales DESC{limit_prod}"""
     return sql
 
 
+def auto_fix_sales_performance_comparison_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa các câu truy vấn so sánh hiệu quả bán hàng (Sales Performance / Efficiency),
+    đảm bảo luôn có các chỉ số hiệu quả chuẩn (AvgOrderValue, RevenuePerBox) thay vì chỉ xuất tổng doanh thu."""
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    is_efficiency = any(k in q_low for k in [
+        "hiệu quả", "efficiency", "effectiveness", "năng suất", 
+        "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình mỗi đơn", 
+        "trung bình mỗi hộp", "order value", "per box", "profit per box"
+    ])
+    if not is_efficiency:
+        return sql
+
+    is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "thị trường", "mỹ", "ấn độ", "india", "usa"])
+    if not is_chocolates:
+        return sql
+
+    # 1. So sánh hiệu quả giữa các thị trường / quốc gia
+    if any(k in q_low for k in ["thị trường", "quốc gia", "country", "geo", "usa", "mỹ", "india", "ấn độ"]):
+        specific_geos = []
+        if any(k in q_low for k in ["usa", "mỹ", "hoa kỳ", "united states"]):
+            specific_geos.append("'USA'")
+        if any(k in q_low for k in ["india", "ấn độ", "an do"]):
+            specific_geos.append("'India'")
+        if any(k in q_low for k in ["uk", "anh", "nước anh", "united kingdom"]):
+            specific_geos.append("'UK'")
+        if any(k in q_low for k in ["canada"]):
+            specific_geos.append("'Canada'")
+        if any(k in q_low for k in ["australia", "úc"]):
+            specific_geos.append("'Australia'")
+        if any(k in q_low for k in ["new zealand"]):
+            specific_geos.append("'New Zealand'")
+
+        where_clause = f"WHERE g.Geo IN ({', '.join(specific_geos)})\n" if specific_geos else ""
+        needs_fix = (
+            "avg(" not in sql_low
+            or "avgordervalue" not in sql_low
+            or "with " in sql_low
+            or (specific_geos and not any(g.lower().replace("'", "") in sql_low for g in specific_geos))
+        )
+        if needs_fix:
+            return f"""SELECT 
+    g.Geo AS Market,
+    ROUND(AVG(s.Amount), 2) AS AvgOrderValue,
+    ROUND(SUM(s.Amount) / SUM(s.Boxes), 2) AS RevenuePerBox,
+    ROUND(AVG(s.Boxes), 2) AS AvgBoxesPerOrder,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{where_clause}GROUP BY g.Geo
+ORDER BY AvgOrderValue DESC"""
+
+    # 2. Giá trị đơn hàng trung bình / hiệu quả theo Team
+    elif any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng"]):
+        needs_fix = "avg(" not in sql_low or "avgordervalue" not in sql_low or "with " in sql_low
+        if needs_fix:
+            return f"""SELECT 
+    pe.Team AS Team,
+    ROUND(AVG(s.Amount), 2) AS AvgOrderValue,
+    ROUND(SUM(s.Amount) / SUM(s.Boxes), 2) AS RevenuePerBox,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL
+GROUP BY pe.Team
+ORDER BY AvgOrderValue DESC"""
+
+    # 3. Lợi nhuận trung bình trên mỗi hộp (Profit per box)
+    elif any(k in q_low for k in ["profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp", "lợi nhuận trung bình trên mỗi hộp", "tỷ suất lợi nhuận"]):
+        top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
+        req_limit = int(top_m.group(1)) if top_m else 10
+        needs_fix = "cost_per_box" not in sql_low or "profitperbox" not in sql_low or "with " in sql_low
+        if needs_fix:
+            return f"""SELECT 
+    pr.Product AS Product,
+    pr.Category AS Category,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS ProfitMargin,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+GROUP BY pr.Product, pr.Category
+ORDER BY ProfitPerBox DESC
+LIMIT {req_limit}"""
+
+    return sql
+
+
 def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và đảm bảo câu truy vấn bảng xếp hạng Top N (Nhân viên, Sản phẩm, Quốc gia, Đội ngũ)
     trên CSDL Awesome Chocolates luôn trả về dữ liệu chuẩn xác 100%, đúng bảng và đúng cú pháp lọc năm."""
@@ -1322,6 +1418,10 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     # Không can thiệp nếu là câu hỏi tỷ lệ / đóng góp / phần trăm (đã có auto_fix_contribution_percentage_query xử lý)
     if any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "percent", "tỷ trọng", "tỉ trọng", "cơ cấu", "share", "ratio", "đóng góp"]):
+        return sql
+
+    # Không can thiệp nếu là câu hỏi so sánh hiệu quả bán hàng / đơn hàng trung bình / lợi nhuận (đã có auto_fix_sales_performance_comparison_query xử lý)
+    if any(k in q_low for k in ["hiệu quả", "efficiency", "effectiveness", "giá trị đơn hàng trung bình", "đơn hàng trung bình", "profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp"]):
         return sql
 
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate"])
@@ -1875,6 +1975,7 @@ def run_agent(
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
@@ -1903,6 +2004,7 @@ def run_agent(
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
@@ -2013,6 +2115,7 @@ def run_agent(
 
                 df = ensure_full_twelve_months(df, user_query)
                 df = ensure_ratio_column_if_requested(df, user_query)
+                df = ensure_efficiency_columns_if_requested(df, user_query)
                 result["df"] = df
                 result["sql"] = sql_query
 

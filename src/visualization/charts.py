@@ -491,10 +491,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     non_total_cols = [c for c in measure_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])]
                     non_pct_cols = [c for c in measure_cols if c not in pct_cols]
 
-                    # Kiểm tra xem người dùng có thực sự yêu cầu vẽ tỷ lệ/phần trăm hay số lượng không
+                    # Kiểm tra xem người dùng có thực sự yêu cầu vẽ tỷ lệ/phần trăm, số lượng, hay hiệu quả kinh doanh không
                     uq_low = (user_query or "").lower()
                     user_asked_pct = any(k in uq_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "percent", "pct", "%", "share", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp"])
                     user_asked_count = any(k in uq_low for k in ["số lượng", "quy mô", "bao nhiêu", "count", "headcount", "nhân viên"])
+                    user_asked_efficiency = any(k in uq_low for k in [
+                        "hiệu quả", "efficiency", "effectiveness", "năng suất", 
+                        "giá trị trung bình", "trung bình mỗi đơn", "trung bình mỗi hộp", 
+                        "order value", "per box", "per order", "aov", "performance", "profit per box"
+                    ])
+
+                    # Tìm các cột đo lường hiệu quả (Efficiency / Average / Margin / Profit)
+                    eff_cols = [c for c in measure_cols if any(k in c.lower() for k in [
+                        "avg", "ordervalue", "order_value", "perbox", "per_box", "profit", "margin", "lợi nhuận", "trung bình", "hiệu quả"
+                    ])]
 
                     # Tìm các cặp số lượng nhân sự Nam - Nữ tuyệt đối
                     male_emp_cols = [c for c in non_pct_cols if any(k in c.lower() for k in ["maleemployees", "male_emp", "malemanagers", "male", "nam"]) and not any(k in c.lower() for k in ["female", "nu", "nữ", "department"])]
@@ -504,6 +514,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if user_asked_count and male_emp_cols and female_emp_cols:
                         active_measures = [male_emp_cols[0], female_emp_cols[0]]
                         chart_title = f"Quy mô & Cơ cấu Nhân sự theo {label_name} (Stacked Bar)"
+                    elif user_asked_efficiency and eff_cols:
+                        active_measures = eff_cols
+                        chart_title = f"So sánh Hiệu quả ({', '.join([format_col_title(c) for c in eff_cols])}) theo {label_name}"
                     elif pct_cols and (user_asked_pct or not non_pct_cols):
                         active_measures = pct_cols
                         chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
@@ -528,10 +541,16 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         numeric_ms = [m for m in active_measures if pd.api.types.is_numeric_dtype(plot_df[m])]
                         max_vals = [float(plot_df[m].abs().max()) for m in numeric_ms if float(plot_df[m].abs().max()) > 0]
                         if len(max_vals) >= 2 and (max(max_vals) / min(max_vals)) > 20:
-                            # Chênh lệch trên 20 lần: Ưu tiên cột có độ lệch chuẩn và giá trị lớn nhất (ví dụ CurrentSalary)
-                            primary_m = max(numeric_ms, key=lambda m: (float(plot_df[m].std() or 0), float(plot_df[m].max() or 0)))
-                            active_measures = [primary_m]
-                            chart_title = f"{primary_m} theo {label_name}"
+                            if user_asked_efficiency and any(c in numeric_ms for c in eff_cols):
+                                # Khi hỏi hiệu quả, ưu tiên chọn chỉ số hiệu quả (AvgOrderValue, ProfitPerBox...) thay vì rơi về TotalSales
+                                primary_m = [c for c in eff_cols if c in numeric_ms][0]
+                                active_measures = [primary_m]
+                                chart_title = f"So sánh Hiệu quả ({format_col_title(primary_m)}) theo {format_col_title(label_name)}"
+                            else:
+                                # Chênh lệch trên 20 lần: Ưu tiên cột có độ lệch chuẩn và giá trị lớn nhất (ví dụ CurrentSalary)
+                                primary_m = max(numeric_ms, key=lambda m: (float(plot_df[m].std() or 0), float(plot_df[m].max() or 0)))
+                                active_measures = [primary_m]
+                                chart_title = f"{primary_m} theo {label_name}"
 
 
                     if total_rows > 30:

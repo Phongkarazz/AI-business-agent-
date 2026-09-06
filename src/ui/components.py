@@ -467,10 +467,23 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
 
     if measure_cols and total_rows > 1:
         # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị trên thẻ KPI
-        count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
-        # Ưu tiên cột tổng thể (Total/Tổng/All) nếu có
-        total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
-        m_col = total_like_cols[0] if total_like_cols else (count_like_cols[0] if count_like_cols else measure_cols[0])
+        _uq_low = (user_query or "").lower()
+        user_asked_efficiency = any(k in _uq_low for k in [
+            "hiệu quả", "efficiency", "effectiveness", "năng suất", 
+            "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình mỗi đơn", 
+            "trung bình mỗi hộp", "order value", "per box", "per order", "aov", "performance", "profit per box"
+        ])
+        eff_like_cols = [c for c in measure_cols if any(k in str(c).lower() for k in [
+            "avg", "ordervalue", "order_value", "perbox", "per_box", "profit", "margin", "lợi nhuận", "trung bình", "hiệu quả"
+        ])]
+
+        if user_asked_efficiency and eff_like_cols:
+            m_col = eff_like_cols[0]
+        else:
+            count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
+            # Ưu tiên cột tổng thể (Total/Tổng/All) nếu có
+            total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
+            m_col = total_like_cols[0] if total_like_cols else (count_like_cols[0] if count_like_cols else measure_cols[0])
         
         # Tách camelCase và chuẩn hóa tên chỉ số hiển thị chuyên nghiệp
         try:
@@ -484,6 +497,14 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Quỹ Lương"
             elif any(k in m_low for k in ["current salary", "currentsalary", "lương mới nhất", "lương hiện tại"]):
                 m_clean = "Lương Hiện Tại"
+            elif any(k in m_low for k in ["avg order value", "avgordervalue", "order value", "ordervalue", "giá trị đơn hàng"]):
+                m_clean = "Giá Trị Đơn Hàng TB"
+            elif any(k in m_low for k in ["revenue per box", "revenueperbox", "sales per box", "salesperbox"]):
+                m_clean = "Doanh Thu Mỗi Thùng"
+            elif any(k in m_low for k in ["profit per box", "profitperbox"]):
+                m_clean = "Lợi Nhuận Mỗi Hộp"
+            elif any(k in m_low for k in ["profit margin", "profitmargin"]):
+                m_clean = "Tỷ Suất Lợi Nhuận"
             elif any(k in m_low for k in ["avg salary", "avgsalary", "average salary"]):
                 m_clean = "Lương Trung Bình"
             elif "salary" in m_low or "lương" in m_low:

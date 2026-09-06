@@ -535,8 +535,82 @@ LIMIT {req_limit};
 (CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID! BẮT BUỘC tính cột Percentage! LIMIT {req_limit}!)
 """
 
+        # 0.05 So sánh hiệu quả bán hàng giữa các thị trường / quốc gia (Ví dụ: Mỹ (USA) và Ấn Độ (India))
+        elif any(k in q_low for k in ["hiệu quả", "efficiency", "effectiveness", "năng suất"]) and any(k in q_low for k in ["thị trường", "quốc gia", "country", "geo", "usa", "mỹ", "india", "ấn độ"]):
+            specific_geos = []
+            if any(k in q_low for k in ["usa", "mỹ", "hoa kỳ", "united states"]):
+                specific_geos.append("'USA'")
+            if any(k in q_low for k in ["india", "ấn độ", "an do"]):
+                specific_geos.append("'India'")
+            if any(k in q_low for k in ["uk", "anh", "nước anh", "united kingdom"]):
+                specific_geos.append("'UK'")
+            if any(k in q_low for k in ["canada"]):
+                specific_geos.append("'Canada'")
+            if any(k in q_low for k in ["australia", "úc"]):
+                specific_geos.append("'Australia'")
+            if any(k in q_low for k in ["new zealand"]):
+                specific_geos.append("'New Zealand'")
+
+            geo_filter = f"WHERE g.Geo IN ({', '.join(specific_geos)})\n" if specific_geos else ""
+            geos_label = " GIỮA " + " VÀ ".join(specific_geos).replace("'", "") if specific_geos else ""
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH HIỆU QUẢ BÁN HÀNG{geos_label}):
+SELECT 
+    g.Geo AS Market,
+    ROUND(AVG(s.Amount), 2) AS AvgOrderValue,
+    ROUND(SUM(s.Amount) / SUM(s.Boxes), 2) AS RevenuePerBox,
+    ROUND(AVG(s.Boxes), 2) AS AvgBoxesPerOrder,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{geo_filter}GROUP BY g.Geo
+ORDER BY AvgOrderValue DESC;
+(CẢNH BÁO BẮT BUỘC: So sánh hiệu quả bán hàng BẮT BUỘC phải tính các chỉ số hiệu quả gồm: Giá trị đơn hàng trung bình ROUND(AVG(s.Amount), 2) AS AvgOrderValue, Doanh thu trên mỗi hộp ROUND(SUM(s.Amount) / SUM(s.Boxes), 2) AS RevenuePerBox! TUYỆT ĐỐI KHÔNG chỉ tính mỗi TotalSales!)
+"""
+
+        # 0.06 Giá trị đơn hàng trung bình theo đội ngũ / Team kinh doanh
+        elif any(k in q_low for k in ["giá trị đơn hàng trung bình", "đơn hàng trung bình", "order value", "aov"]) or (any(k in q_low for k in ["hiệu quả", "efficiency"]) and any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng"])):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (GIÁ TRỊ ĐƠN HÀNG TRUNG BÌNH THEO ĐỘI NGŨ / TEAM):
+SELECT 
+    pe.Team AS Team,
+    ROUND(AVG(s.Amount), 2) AS AvgOrderValue,
+    ROUND(SUM(s.Amount) / SUM(s.Boxes), 2) AS RevenuePerBox,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL
+GROUP BY pe.Team
+ORDER BY AvgOrderValue DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Tính ROUND(AVG(s.Amount), 2) AS AvgOrderValue và ORDER BY AvgOrderValue DESC!)
+"""
+
+        # 0.07 Lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm
+        elif any(k in q_low for k in ["profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp", "lợi nhuận trung bình trên mỗi hộp", "tỷ suất lợi nhuận"]):
+            top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
+            req_limit = int(top_m.group(1)) if top_m else 10
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (LỢI NHUẬN TRUNG BÌNH TRÊN MỖI HỘP - PROFIT PER BOX):
+SELECT 
+    pr.Product AS Product,
+    pr.Category AS Category,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS ProfitMargin,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+GROUP BY pr.Product, pr.Category
+ORDER BY ProfitPerBox DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC: Lợi nhuận mỗi hộp = ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox! BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID!)
+"""
+
         # 0.1 Doanh thu theo từng quốc gia (Country) qua các tháng
-        if any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thay đổi", "xu hướng", "biến động"]):
+        elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thay đổi", "xu hướng", "biến động"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_label = ""
