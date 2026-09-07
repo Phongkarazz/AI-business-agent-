@@ -403,23 +403,24 @@ def ensure_efficiency_columns_if_requested(df: pd.DataFrame, user_query: str = "
         except Exception:
             pass
 
-    if sales_col and count_col and not added:
-        try:
-            s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
-            c_val = pd.to_numeric(df_mod[count_col], errors="coerce")
-            df_mod["AvgOrderValue"] = (s_val / c_val.replace(0, pd.NA)).round(2).fillna(0.0)
-            added = True
-        except Exception:
-            pass
+    if not added:
+        if sales_col and count_col:
+            try:
+                s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
+                c_val = pd.to_numeric(df_mod[count_col], errors="coerce")
+                df_mod["AvgOrderValue"] = (s_val / c_val.replace(0, pd.NA)).round(2).fillna(0.0)
+                added = True
+            except Exception:
+                pass
 
-    if sales_col and boxes_col and not added:
-        try:
-            s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
-            b_val = pd.to_numeric(df_mod[boxes_col], errors="coerce")
-            df_mod["RevenuePerBox"] = (s_val / b_val.replace(0, pd.NA)).round(2).fillna(0.0)
-            added = True
-        except Exception:
-            pass
+        if sales_col and boxes_col:
+            try:
+                s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
+                b_val = pd.to_numeric(df_mod[boxes_col], errors="coerce")
+                df_mod["RevenuePerBox"] = (s_val / b_val.replace(0, pd.NA)).round(2).fillna(0.0)
+                added = True
+            except Exception:
+                pass
 
     if added:
         dim_cols = [c for c in df.columns if c not in (sales_col, count_col, boxes_col, cost_col)]

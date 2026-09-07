@@ -14,7 +14,7 @@ from src.analytics.forecasting import forecast_series
 from src.analytics.export_reports import export_to_excel, export_to_png, export_to_pdf
 from src.analytics.share_report import send_telegram_report, send_email_report
 from src.config_store import load_saved_config
-from src.visualization.charts import render_smart_chart
+from src.visualization.charts import render_smart_chart, format_col_title
 from src.llm.agent import generate_auto_insights
 
 
@@ -1075,9 +1075,15 @@ def render_result(result: dict, turn_id: str):
         column_config = {}
         for col in display_df.columns:
             c_low = str(col).lower()
+            col_label = format_col_title(col) if not is_en else col
             if is_id_like(col):
-                column_config[col] = st.column_config.NumberColumn(col, format="%d")
-            elif any(k in c_low for k in ["salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí"]):
+                column_config[col] = st.column_config.NumberColumn(col_label, format="%d")
+            elif any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin"]):
+                column_config[col] = st.column_config.NumberColumn(
+                    col_label,
+                    format="%.2f%%"
+                )
+            elif any(k in c_low for k in ["salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales", "amount", "profit", "ordervalue"]):
                 has_decimals = False
                 try:
                     numeric_vals = pd.to_numeric(display_df[col], errors="coerce").dropna()
@@ -1085,19 +1091,16 @@ def render_result(result: dict, turn_id: str):
                 except Exception:
                     pass
                 column_config[col] = st.column_config.NumberColumn(
-                    col,
+                    col_label,
                     format="$%,.2f" if has_decimals else "$%,d"
                 )
-            elif any(k in c_low for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio"]):
+            elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp"]):
                 column_config[col] = st.column_config.NumberColumn(
-                    col,
-                    format="%.2f%%"
-                )
-            elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số"]):
-                column_config[col] = st.column_config.NumberColumn(
-                    col,
+                    col_label,
                     format="%,d"
                 )
+            else:
+                column_config[col] = st.column_config.Column(col_label)
 
         st.dataframe(display_df, column_config=column_config, width='stretch')
     except Exception:

@@ -531,15 +531,27 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         active_measures = [male_emp_cols[0], female_emp_cols[0]]
                         chart_title = f"Quy mô & Cơ cấu Nhân sự theo {label_name} (Stacked Bar)"
                     elif user_asked_efficiency and eff_cols:
-                        # Ưu tiên sắp xếp cột hiệu quả khớp nhất với ý định người dùng
-                        if any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
-                            sorted_eff = sorted(eff_cols, key=lambda c: 0 if any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"]) else 1)
-                        elif any(k in uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng"]):
-                            sorted_eff = sorted(eff_cols, key=lambda c: 0 if any(k in c.lower() for k in ["perbox", "per_box"]) else 1)
+                        # Kiểm tra xem có sự xung đột đơn vị (% và $) giữa các cột hiệu quả không
+                        has_pct_eff = [c for c in eff_cols if any(k in c.lower() for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
+                        has_non_pct_eff = [c for c in eff_cols if c not in has_pct_eff]
+                        
+                        is_margin_focus = any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"])
+                        is_box_focus = any(k in uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng"]) and not is_margin_focus
+                        
+                        if is_margin_focus and has_pct_eff:
+                            active_measures = [has_pct_eff[0]]
+                            chart_title = f"{format_col_title(has_pct_eff[0])} theo {format_col_title(label_name)}"
+                        elif is_box_focus and has_non_pct_eff:
+                            active_measures = [has_non_pct_eff[0]]
+                            chart_title = f"{format_col_title(has_non_pct_eff[0])} theo {format_col_title(label_name)}"
+                        elif has_pct_eff and has_non_pct_eff:
+                            # Khác biệt đơn vị (% vs $) -> không vẽ chung trục, chọn chỉ số khớp nhất
+                            primary_eff = has_pct_eff[0] if is_margin_focus else (has_non_pct_eff[0] if is_box_focus else eff_cols[0])
+                            active_measures = [primary_eff]
+                            chart_title = f"{format_col_title(primary_eff)} theo {format_col_title(label_name)}"
                         else:
-                            sorted_eff = eff_cols
-                        active_measures = sorted_eff
-                        chart_title = f"So sánh Hiệu quả ({', '.join([format_col_title(c) for c in sorted_eff])}) theo {label_name}"
+                            active_measures = eff_cols
+                            chart_title = f"So sánh Hiệu quả ({', '.join([format_col_title(c) for c in eff_cols])}) theo {format_col_title(label_name)}"
                     elif pct_cols and (user_asked_pct or not non_pct_cols):
                         active_measures = pct_cols
                         chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
@@ -740,17 +752,41 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         )
                         fig.update_layout(**layout_kwargs)
 
-                    is_pure_pct = len(active_measures) == 1 and any(k in str(active_measures[0]).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "%", "share", "ratio"])
-                    if is_pure_pct:
-                        fig.update_traces(texttemplate="%{y:.2f}%", textposition="outside")
-                        try:
-                            max_val = float(plot_df[active_measures[0]].max() or 0)
-                        except Exception:
-                            max_val = 100.0
-                        fig.update_layout(yaxis=dict(title=format_col_title(active_measures[0]), ticksuffix="%", range=[0, max(100.0, max_val * 1.18)]))
+                    if len(active_measures) == 1:
+                        meas = active_measures[0]
+                        meas_lower = str(meas).lower()
+                        is_pct = any(k in meas_lower for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "%", "share", "ratio"])
+                        is_curr = any(k in meas_lower for k in ["salary", "lương", "cost", "revenue", "sales", "amount", "profit", "ordervalue", "tiền"])
+                        
+                        if is_pct:
+                            fig.update_traces(texttemplate="%{y:.2f}%", textposition="outside", marker_color="#2563EB")
+                            try:
+                                max_val = float(plot_df[meas].max() or 0)
+                            except Exception:
+                                max_val = 100.0
+                            fig.update_layout(
+                                showlegend=False,
+                                yaxis=dict(title=format_col_title(meas), ticksuffix="%", range=[0, max(100.0, max_val * 1.15)])
+                            )
+                        elif is_curr:
+                            fig.update_traces(texttemplate="$%{y:,.2f}" if any('.' in str(v) for v in plot_df[meas]) else "$%{y:,.0f}", textposition="outside", marker_color="#2563EB")
+                            try:
+                                max_val = float(plot_df[meas].max() or 0)
+                            except Exception:
+                                max_val = 100.0
+                            fig.update_layout(
+                                showlegend=False,
+                                yaxis=dict(title=format_col_title(meas), range=[0, max_val * 1.15])
+                            )
+                        else:
+                            fig.update_traces(texttemplate="%{y:,.0f}", textposition="outside", marker_color="#2563EB")
+                            fig.update_layout(
+                                showlegend=False,
+                                yaxis=dict(title=format_col_title(meas))
+                            )
 
                     fig.update_layout(
-                        xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
+                        xaxis=dict(title=format_col_title(label_name), type="category", tickangle=tick_angle, automargin=True),
                         margin=dict(l=40, r=25, t=50, b=90 if tick_angle != 0 else 50)
                     )
 
