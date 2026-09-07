@@ -484,10 +484,13 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                     c_low = str(m_col).lower()
                     is_pct = any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ"])
                     is_curr = any(k in c_low for k in ["salary", "lương", "cost", "revenue", "sales", "amount", "profit", "budget"]) and not is_pct
+                    is_count = any(k in c_low for k in ["box", "hộp", "thùng", "headcount", "nhân sự", "nhân viên", "slngnhnvin", "count", "số lượng", "employee", "customer", "đối tượng"])
 
                     def _fmt_val(v):
                         if is_pct:
                             return f"{float(v):.2f}%"
+                        if is_count:
+                            return f"{round(float(v)):,.0f}"
                         if is_curr:
                             return f"${float(v):,.2f}" if (not float(v).is_integer() and abs(float(v)) < 1000) else f"${float(v):,.0f}"
                         return f"{float(v):,.0f}" if float(v).is_integer() else f"{float(v):,.2f}"
@@ -548,10 +551,12 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                                 formatted = f"{num_v:.2f}%"
                             elif any(k in c_low for k in ["salary", "lương", "cost", "revenue", "sales", "amount", "profit", "budget"]):
                                 formatted = f"${num_v:,.2f}" if (not num_v.is_integer() and abs(num_v) < 1000) else f"${num_v:,.0f}"
-                            elif any(k in c_low for k in ["boxes", "count", "số lượng", "headcount", "employees"]):
-                                formatted = f"{num_v:,.0f}"
+                            elif any(k in c_low for k in ["boxes", "box", "hộp", "thùng", "count", "số lượng", "headcount", "employees", "slngnhnvin", "đối tượng"]):
+                                formatted = f"{round(num_v):,.0f}"
+                            elif any(k in c_low for k in ["salary", "lương", "cost", "revenue", "sales", "amount", "profit", "budget"]):
+                                formatted = f"${num_v:,.2f}" if (not num_v.is_integer() and abs(num_v) < 1000) else f"${num_v:,.0f}"
                             else:
-                                formatted = f"{num_v:,.0f}" if num_v.is_integer() else f"{num_v:,.2f}"
+                                formatted = f"{round(num_v):,.0f}" if num_v.is_integer() else f"{num_v:,.2f}"
                         except Exception:
                             formatted = str(val)
                         row_cells.append(Paragraph(formatted, table_cell_num))
@@ -572,9 +577,12 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                             if any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "avg", "per_box", "perbox", "cost"]):
                                 avg_v = v_col.mean()
                                 fmt_s = f"{avg_v:.2f}%" if any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ"]) else f"${avg_v:,.2f}"
+                            elif any(k in c_low for k in ["boxes", "box", "hộp", "thùng", "count", "số lượng", "headcount", "employees", "slngnhnvin", "đối tượng"]):
+                                sum_v = v_col.sum()
+                                fmt_s = f"{round(sum_v):,.0f}"
                             else:
                                 sum_v = v_col.sum()
-                                fmt_s = f"${sum_v:,.0f}" if any(k in c_low for k in ["salary", "sales", "revenue", "amount", "budget"]) else f"{sum_v:,.0f}"
+                                fmt_s = f"${sum_v:,.0f}" if any(k in c_low for k in ["salary", "sales", "revenue", "amount", "budget"]) else (f"{round(sum_v):,.0f}" if sum_v.is_integer() else f"{sum_v:,.2f}")
                             summary_cells.append(Paragraph(f"<b>{fmt_s}</b>", table_cell_num_bold))
                         else:
                             summary_cells.append(Paragraph("", table_cell))
@@ -625,8 +633,8 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                 pass
 
         # 3. PHÂN TÍCH INSIGHT CHIẾN LƯỢC & KẾ HOẠCH HÀNH ĐỘNG
-        insights = result.get("insights")
-        if insights:
+        insights = result.get("insights") or ""
+        if insights or (df is not None and not df.empty):
             sec_counter += 1
             sec_num = str(sec_counter)
             story.append(Paragraph(f"{sec_num}. PHÂN TÍCH INSIGHT CHIẾN LƯỢC &amp; KẾ HOẠCH HÀNH ĐỘNG", section_style))

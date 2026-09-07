@@ -1709,11 +1709,16 @@ Generate an Executive Business Insight Report in English with exact Markdown for
 - NEVER use generic repetitive boilerplate).
 
 ### 3. 🎯 Executive Action Plan & Priority Recommendations
-(Provide 2-3 actionable, high-impact recommendations. MUST tag each action with Urgency and Execution Timeframe:
-- 🔴 **[High Priority - Immediate Action]**: Urgent issue or immediate high-yield opportunity.
-- 🟡 **[Medium Priority - Next Quarter]**: Mid-term operational or tactical optimization.
-- 🟢 **[Low Priority / Long-term]**: Sustainable long-term strategic initiative.
-Each recommendation must specify an expected measurable KPI/metric).
+(Provide 3 actionable, high-impact recommendations tied to real data:
+- 🔴 **[High Priority - Immediate Action / 0-30 Days]**: Urgent issue or immediate high-yield opportunity.
+- 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Mid-term operational or tactical optimization.
+- 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Sustainable long-term strategic initiative.
+COMMERCIAL / MERCHANDISING GUIDELINES:
+- For sales, products, and boxes, MUST incorporate actionable retail merchandising tactics:
+  * Bundle/Combo packaging linking top-selling items with slow-moving stock.
+  * Cross-selling programs across distribution channels.
+  * Warehouse inventory audits and optimizing Inventory Turnover to free up working capital.
+- AVOID vague clichés like "enhance competitive edge", "automate analytics pipeline", or "replicate success enterprise-wide").
 
 Style: Executive, concise, data-driven, professional tone."""
 
@@ -1749,8 +1754,16 @@ Hãy đưa ra bản báo cáo Insight Kinh doanh ngắn gọn, sắc bén và ma
 ### 2.3. 🎯 Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)
 (BẮT BUỘC chỉ viết đúng 3 dòng đề xuất tương ứng với 3 cấp độ thời gian, bám sát số liệu cụ thể vừa truy vấn:
 • 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: [Can thiệp ngay vào điểm bất thường/sụt giảm sâu nhất hoặc chênh lệch lớn nhất trích dẫn số liệu]
-• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: [Tối ưu quy trình, cân đối nguồn lực và chuẩn hóa ngân sách theo mức trung bình/trung vị]
-• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: [Chính sách đãi ngộ, chuyển đổi số và định hướng quản trị vĩ mô lâu dài]
+• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: [Tối ưu quy trình, cân đối nguồn lực và chuẩn hóa theo mức trung bình/trung vị]
+• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: [Chính sách đãi ngộ, chuỗi cung ứng hoặc định hướng quản trị vĩ mô lâu dài]
+
+ĐẶC BIỆT LƯU Ý VỀ NGỮ CẢNH KINH DOANH MẶT HÀNG / BÁN HÀNG:
+- Khi câu hỏi liên quan đến sản phẩm, mặt hàng, số lượng hộp (Boxes), doanh số:
+  + BẮT BUỘC gắn liền các giải pháp cụ thể:
+    * Đóng gói combo/ưu đãi kết hợp (Bundle/Combo) giữa sản phẩm bán chạy nhất và sản phẩm chậm luân chuyển.
+    * Đẩy mạnh chương trình bán chéo (Cross-selling) tại các kênh phân phối.
+    * Đánh giá tồn kho, rà soát hạn sử dụng và tối ưu vòng quay hàng tồn kho (Inventory Turnover) để giải phóng vốn lưu động kịp thời.
+- TUYỆT ĐỐI CẤM DÙNG CÁC CÂU CHUNG CHUNG SÁO RỖNG như "nâng cao năng lực cạnh tranh", "tự động hóa quy trình phân tích", "nhân rộng kinh nghiệm thành công sang toàn hệ thống".
 TUYỆT ĐỐI KHÔNG DÙNG BẢNG, KHÔNG THÊM GẠCH ĐẦU DÒNG CON).
 
 QUY TẮC ĐỊNH DẠNG & NGÔN NGỮ (BẮT BUỘC):
