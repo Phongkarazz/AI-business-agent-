@@ -118,6 +118,24 @@ VI_COLUMN_MAP = {
     "product_name": "Tên Sản Phẩm",
     "category": "Danh Mục",
     "size": "Kích Cỡ",
+    "profit": "Lợi Nhuận ($)",
+    "totalprofit": "Tổng Lợi Nhuận ($)",
+    "total_profit": "Tổng Lợi Nhuận ($)",
+    "netprofit": "Lợi Nhuận Thuần ($)",
+    "net_profit": "Lợi Nhuận Thuần ($)",
+    "loinhuan": "Lợi Nhuận ($)",
+    "loi_nhuan": "Lợi Nhuận ($)",
+    "totalcost": "Tổng Chi Phí ($)",
+    "total_cost": "Tổng Chi Phí ($)",
+    "tongchiphi": "Tổng Chi Phí ($)",
+    "tong_chi_phi": "Tổng Chi Phí ($)",
+    "cogs": "Giá Vốn ($)",
+    "giavon": "Giá Vốn ($)",
+    "margin": "Tỷ Suất Lợi Nhuận (%)",
+    "tysuatloinhuan": "Tỷ Suất Lợi Nhuận (%)",
+    "ty_suat_loi_nhuan": "Tỷ Suất Lợi Nhuận (%)",
+    "tongdoanhthu": "Tổng Doanh Thu ($)",
+    "tong_doanh_thu": "Tổng Doanh Thu ($)",
     "cost_per_box": "Giá Vốn/Thùng ($)",
     "costperbox": "Giá Vốn/Thùng ($)",
     "profitmargin": "Tỷ Suất Lợi Nhuận (%)",
@@ -187,6 +205,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
     row_identity_col = get_row_identity_column(df)
 
     try:
+        is_en = (st.session_state.get("lang") == "en") if hasattr(st, "session_state") else False
         n_time = df[time_col].nunique(dropna=True) if (time_col and time_col in df.columns) else 0
 
         if chart_override == "Tự động":
@@ -271,10 +290,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 st.info("Không có cột thời gian hợp lệ và không đủ dữ liệu để vẽ Bar/Scatter thay thế.")
                 return None
 
-        # Xác định cột phân nhóm màu sắc cho Line/Area (ví dụ: phân loại theo Region, Product...)
+        # Xác định cột phân nhóm màu sắc cho Line/Area (ví dụ: phân loại theo Quốc Gia, Team, Sản Phẩm...)
         # CHÚ Ý QUAN TRỌNG: time_color_col TUYỆT ĐỐI KHÔNG ĐƯỢC TRÙNG VỚI time_col
         time_color_col = None
-        if chosen in ("Line", "Area") and len(measure_cols) == 1 and label_cols:
+        if chosen in ("Line", "Area") and label_cols:
             other_labels = [c for c in label_cols if c != time_col]
             if other_labels:
                 candidate_col, candidate_series, _ = pick_label_column(df, other_labels)
@@ -282,7 +301,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if candidate_col not in df.columns and candidate_series is not None:
                         df = df.copy()
                         df[candidate_col] = candidate_series.values
-                    if candidate_col in df.columns and 1 < df[candidate_col].nunique(dropna=True) <= 20:
+                    if candidate_col in df.columns and 1 < df[candidate_col].nunique(dropna=True) <= 25:
                         time_color_col = candidate_col
 
         if chosen == "Line" and time_col and measure_cols:
@@ -291,26 +310,76 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             tick_angle = 0 if n_time_points <= 20 else -45
 
             if time_color_col:
-                clean_m = format_col_title(measure_cols[0])
+                # Nếu có nhiều chỉ số (như P&L gồm Doanh Thu, Chi Phí, Lợi Nhuận, Tỷ Suất LN):
+                if len(measure_cols) == 1:
+                    active_measure = measure_cols[0]
+                else:
+                    uq_low = (user_query or "").lower()
+                    target_m = None
+                    if any(k in uq_low for k in ["lãi", "lỗ", "lợi nhuận", "profit", "net profit", "net_profit"]):
+                        p_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["lợi nhuận", "profit", "lãi", "netprofit", "net_profit"]) and not any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"])]
+                        if p_cols:
+                            target_m = p_cols[0]
+                    elif any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%", "biên lợi nhuận"]):
+                        m_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"])]
+                        if m_cols:
+                            target_m = m_cols[0]
+                    elif any(k in uq_low for k in ["chi phí", "giá vốn", "cost", "cogs"]):
+                        c_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["chi phí", "cost", "giá vốn", "cogs"])]
+                        if c_cols:
+                            target_m = c_cols[0]
+                    elif any(k in uq_low for k in ["hộp", "thùng", "boxes"]):
+                        b_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["boxes", "hộp", "thùng"])]
+                        if b_cols:
+                            target_m = b_cols[0]
+
+                    if not target_m:
+                        p_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["lợi nhuận", "profit"]) and not any(k in str(c).lower() for k in ["margin", "tỷ suất", "%"])]
+                        if p_cols:
+                            target_m = p_cols[0]
+                        else:
+                            s_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["doanh thu", "sales", "amount"])]
+                            target_m = s_cols[0] if s_cols else measure_cols[0]
+
+                    options = [format_col_title(c) for c in measure_cols]
+                    def_idx = measure_cols.index(target_m) if target_m in measure_cols else 0
+                    sel_title = st.selectbox(
+                        "Chọn chỉ số hiển thị trên biểu đồ xu hướng:" if not is_en else "Select metric to visualize:",
+                        options=options,
+                        index=def_idx,
+                        key=f"metric_select_{turn_id}"
+                    )
+                    title_to_c = {format_col_title(c): c for c in measure_cols}
+                    active_measure = title_to_c.get(sel_title, target_m)
+
+                clean_m = format_col_title(active_measure)
                 clean_time = format_col_title(time_col)
                 clean_group = format_col_title(time_color_col)
                 fig = px.line(
                     sorted_df,
                     x=time_col,
-                    y=measure_cols[0],
+                    y=active_measure,
                     color=time_color_col,
                     markers=True,
                     title=f"Xu hướng {clean_m} theo {clean_time} (Phân loại theo {clean_group})",
                     template="plotly_white"
                 )
-                m_low = str(measure_cols[0]).lower()
-                is_curr = any(k in m_low for k in ["sales", "amount", "salary", "budget", "revenue", "lương", "doanh"])
-                curr_sym = "$" if is_curr else ""
-                fig.update_traces(
-                    line=dict(width=2.5),
-                    marker=dict(size=7),
-                    hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: {curr_sym}%{{y:,.0f}}<extra></extra>"
-                )
+                m_low = str(active_measure).lower()
+                is_pct = any(k in m_low for k in ["margin", "tỷ suất", "tỉ suất", "%", "pct", "percent"])
+                is_curr = (not is_pct) and any(k in m_low for k in ["sales", "amount", "salary", "budget", "revenue", "lương", "doanh", "lợi nhuận", "profit", "chi phí", "cost", "$"])
+                if is_pct:
+                    fig.update_traces(
+                        line=dict(width=2.5),
+                        marker=dict(size=7),
+                        hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: %{{y:,.2f}}%<extra></extra>"
+                    )
+                else:
+                    curr_sym = "$" if is_curr else ""
+                    fig.update_traces(
+                        line=dict(width=2.5),
+                        marker=dict(size=7),
+                        hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: {curr_sym}%{{y:,.0f}}<extra></extra>"
+                    )
             else:
                 clean_m = format_col_title(measure_cols[0])
                 clean_time = format_col_title(time_col)

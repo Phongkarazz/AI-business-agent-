@@ -478,7 +478,19 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             "avg", "ordervalue", "order_value", "profit", "margin", "lợi nhuận", "trung bình", "hiệu quả", "revenueperbox", "revenue_per_box"
         ]) or any(k in str(c).lower() for k in ["perbox", "per_box"])) and not any(k in str(c).lower() for k in ["cost", "giá vốn", "gia_von"])]
 
-        if user_asked_efficiency and eff_like_cols:
+        user_asked_pnl = any(k in _uq_low for k in ["lãi", "lỗ", "lãi, lỗ", "lãi lỗ", "lợi nhuận", "profit", "p&l", "pnl", "cost_per_box"])
+        if user_asked_pnl:
+            p_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["lợi nhuận", "profit", "lãi"]) and not any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"])]
+            if p_candidates:
+                m_col = p_candidates[0]
+            elif any(k in _uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
+                m_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"])]
+                m_col = m_candidates[0] if m_candidates else (eff_like_cols[0] if eff_like_cols else measure_cols[0])
+            elif eff_like_cols:
+                m_col = eff_like_cols[0]
+            else:
+                m_col = measure_cols[0]
+        elif user_asked_efficiency and eff_like_cols:
             if any(k in _uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
                 m_candidates = [c for c in eff_like_cols if any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất"])]
                 m_col = m_candidates[0] if m_candidates else eff_like_cols[0]
@@ -501,7 +513,11 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             raw_m = str(m_col).replace("_", " ").strip()
         m_low = raw_m.lower()
         if not is_en:
-            if any(k in m_low for k in ["totalsalarybudget", "total salary budget", "total_salary_budget", "salarybudget", "salary_budget", "quỹ lương"]):
+            if any(k in m_low for k in ["lợi nhuận", "profit", "net profit", "netprofit", "lãi"]) and not any(k in m_low for k in ["margin", "tỷ suất", "tỉ suất"]):
+                m_clean = "Lợi Nhuận"
+            elif any(k in m_low for k in ["chi phí", "cost", "tổng chi phí", "giá vốn", "cogs"]):
+                m_clean = "Tổng Chi Phí"
+            elif any(k in m_low for k in ["totalsalarybudget", "total salary budget", "total_salary_budget", "salarybudget", "salary_budget", "quỹ lương"]):
                 m_clean = "Quỹ Lương"
             elif any(k in m_low for k in ["current salary", "currentsalary", "lương mới nhất", "lương hiện tại"]):
                 m_clean = "Lương Hiện Tại"
@@ -730,8 +746,10 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 is_year_unit = any(k in str(dim_c).lower() for k in ["year", "nam"])
                 is_month_unit = any(k in str(dim_c).lower() for k in ["month", "thang", "tháng"])
                 dim_unit = ("Năm" if not is_en else "Years") if is_year_unit else (("Tháng" if not is_en else "Months") if is_month_unit else ("Kỳ" if not is_en else "Periods"))
+                n_periods = dim_vals.nunique()
+                period_display = f"{n_periods} {dim_unit}" if (n_periods < total_rows and n_periods > 0) else f"{total_rows} {dim_unit}"
                 with col1:
-                    st.metric("📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"), f"{total_rows} {dim_unit}" + (f" ({min_dim} – {max_dim})" if min_dim != max_dim else ""))
+                    st.metric("📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"), f"{period_display}" + (f" ({min_dim} – {max_dim})" if min_dim != max_dim else ""))
                 with col2:
                     st.metric("📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg, help=_fmt_kpi_val_full(avg_val))
                 with col3:

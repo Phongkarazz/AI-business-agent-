@@ -808,6 +808,157 @@ ORDER BY Headcount DESC"""
     return sql
 
 
+def auto_fix_chocolates_pnl_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu truy vấn Báo cáo kết quả kinh doanh / Lãi, Lỗ (P&L - Profit & Loss)
+    trên CSDL Awesome Chocolates. Đảm bảo JOIN bảng products pr ON s.PID = pr.PID để lấy pr.Cost_per_box,
+    tính đầy đủ 4 chỉ số tài chính: Doanh Thu, Chi Phí, Lợi Nhuận, Tỷ Suất Lợi Nhuận, và các chiều Tháng/Quý/Quốc Gia."""
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    is_pnl_q = any(k in q_low for k in [
+        "lãi, lỗ", "lãi lỗ", "lãi", "lỗ", "kết quả kinh doanh", "profit and loss", "p&l", "pnl", "cost_per_box"
+    ]) or (any(k in q_low for k in ["lợi nhuận", "profit", "biên lợi nhuận", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"]) and any(k in q_low for k in ["tháng", "quý", "năm", "month", "quarter", "báo cáo"]))
+
+    if not is_pnl_q:
+        return sql
+
+    is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "thị trường", "quốc gia", "country", "geo", "cost_per_box"])
+    if not is_chocolates:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    date_expr = "strftime('%Y-%m', s.SaleDate)" if is_sqlite else "DATE_FORMAT(s.SaleDate, '%Y-%m')"
+    qtr_expr = (
+        "strftime('%Y', s.SaleDate) || '-Q' || ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3)"
+        if is_sqlite else
+        "CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate))"
+    )
+
+    year_match = re.search(r'\b(20\d{2})\b', q_low)
+    year_val = year_match.group(1) if year_match else None
+    year_cond = (f"strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {year_val}") if year_val else ""
+
+    has_month = any(k in q_low for k in ["tháng", "month"])
+    has_quarter = any(k in q_low for k in ["quý", "quarter"])
+    has_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"])
+    has_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
+    has_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"])
+
+    has_cost = "cost_per_box" in sql_low
+    has_profit_calc = ("amount -" in sql_low or "amount-" in sql_low or "lợi nhuận" in sql_low or "profit" in sql_low)
+    has_full_dims = True
+    if has_quarter and ("quarter" not in sql_low and "quý" not in sql_low):
+        has_full_dims = False
+    if has_month and ("date_format" not in sql_low and "strftime" not in sql_low and "month" not in sql_low and "tháng" not in sql_low):
+        has_full_dims = False
+    if has_country and ("geo" not in sql_low and "quốc gia" not in sql_low and "country" not in sql_low):
+        has_full_dims = False
+
+    needs_fix = not (has_cost and has_profit_calc and has_full_dims) or "with " in sql_low
+    if not needs_fix:
+        return sql
+
+    # 1. Báo cáo P&L theo Quốc Gia kết hợp Tháng / Quý
+    if has_country or (has_month and not has_product and not has_team):
+        conds = []
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = f"WHERE {' AND '.join(conds)}\n" if conds else ""
+
+        if has_month and has_quarter:
+            time_cols = f"    {date_expr} AS `Tháng`,\n    {qtr_expr} AS `Quý`,\n    g.Geo AS `Quốc Gia`,"
+            group_cols = "`Tháng`, `Quý`, `Quốc Gia`"
+            order_col = "`Tháng` ASC, `Lợi Nhuận ($)` DESC"
+        elif has_quarter and not has_month:
+            time_cols = f"    {qtr_expr} AS `Quý`,\n    g.Geo AS `Quốc Gia`,"
+            group_cols = "`Quý`, `Quốc Gia`"
+            order_col = "`Quý` ASC, `Lợi Nhuận ($)` DESC"
+        else:
+            time_cols = f"    {date_expr} AS `Tháng`,\n    g.Geo AS `Quốc Gia`,"
+            group_cols = "`Tháng`, `Quốc Gia`"
+            order_col = "`Tháng` ASC, `Lợi Nhuận ($)` DESC"
+
+        return f"""SELECT 
+{time_cols}
+    SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+    ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS `Tỷ Suất Lợi Nhuận (%)`
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+JOIN geo g ON s.GeoID = g.GeoID
+{where_clause}GROUP BY {group_cols}
+ORDER BY {order_col}"""
+
+    # 2. Báo cáo P&L theo Sản phẩm
+    if has_product:
+        conds = []
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = f"WHERE {' AND '.join(conds)}\n" if conds else ""
+
+        if has_month:
+            time_cols = f"    {date_expr} AS `Tháng`,\n    pr.Product AS `Sản Phẩm`,"
+            group_cols = "`Tháng`, `Sản Phẩm`"
+            order_col = "`Tháng` ASC, `Lợi Nhuận ($)` DESC"
+        elif has_quarter:
+            time_cols = f"    {qtr_expr} AS `Quý`,\n    pr.Product AS `Sản Phẩm`,"
+            group_cols = "`Quý`, `Sản Phẩm`"
+            order_col = "`Quý` ASC, `Lợi Nhuận ($)` DESC"
+        else:
+            time_cols = "    pr.Product AS `Sản Phẩm`,\n    pr.Category AS `Danh Mục`,"
+            group_cols = "`Sản Phẩm`, `Danh Mục`"
+            order_col = "`Lợi Nhuận ($)` DESC"
+
+        return f"""SELECT 
+{time_cols}
+    SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+    ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS `Tỷ Suất Lợi Nhuận (%)`
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{where_clause}GROUP BY {group_cols}
+ORDER BY {order_col}"""
+
+    # 3. Báo cáo P&L theo Đội ngũ / Team
+    if has_team:
+        conds = ["pe.Team != '' AND pe.Team IS NOT NULL"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = f"WHERE {' AND '.join(conds)}\n"
+
+        if has_month:
+            time_cols = f"    {date_expr} AS `Tháng`,\n    pe.Team AS `Đội Ngũ`,"
+            group_cols = "`Tháng`, `Đội Ngũ`"
+            order_col = "`Tháng` ASC, `Lợi Nhuận ($)` DESC"
+        elif has_quarter:
+            time_cols = f"    {qtr_expr} AS `Quý`,\n    pe.Team AS `Đội Ngũ`,"
+            group_cols = "`Quý`, `Đội Ngũ`"
+            order_col = "`Quý` ASC, `Lợi Nhuận ($)` DESC"
+        else:
+            time_cols = "    pe.Team AS `Đội Ngũ`,"
+            group_cols = "`Đội Ngũ`"
+            order_col = "`Lợi Nhuận ($)` DESC"
+
+        return f"""SELECT 
+{time_cols}
+    SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+    ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS `Tỷ Suất Lợi Nhuận (%)`
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}GROUP BY {group_cols}
+ORDER BY {order_col}"""
+
+    return sql
+
+
 def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo tháng (theo Quốc gia, Sản phẩm, Nhân viên, hoặc Số lượng hộp/thùng bán ra) trên CSDL Awesome Chocolates.
     Loại bỏ triệt để CTE bị vỡ (WITH ...), JOIN trùng lặp và chuyển thành câu SELECT đơn trực tiếp định dạng YYYY-MM hoặc Month số."""
@@ -816,6 +967,13 @@ def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: 
 
     q_low = user_query.lower()
     sql_low = sql.lower()
+
+    # Không can thiệp nếu là câu hỏi P&L / Lãi Lỗ / Lợi nhuận (để auto_fix_chocolates_pnl_query xử lý)
+    is_pnl_q = any(k in q_low for k in [
+        "lãi, lỗ", "lãi lỗ", "lãi", "lỗ", "kết quả kinh doanh", "profit and loss", "p&l", "pnl", "cost_per_box"
+    ]) or (any(k in q_low for k in ["lợi nhuận", "profit", "biên lợi nhuận", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"]) and any(k in q_low for k in ["tháng", "quý", "năm", "month", "quarter", "báo cáo"]))
+    if is_pnl_q:
+        return sql
 
     # Kiểm tra xem có phải câu hỏi theo tháng / thời gian trên Chocolates DB không
     has_monthly = any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian", "xu hướng", "thay đổi", "biến động"])
@@ -1162,6 +1320,13 @@ def auto_fix_chocolates_quarterly_sales_query(sql: str, user_query: str, dialect
     q_low = user_query.lower()
     sql_low = sql.lower()
 
+    # Không can thiệp nếu là câu hỏi P&L / Lãi Lỗ / Lợi nhuận (để auto_fix_chocolates_pnl_query xử lý)
+    is_pnl_q = any(k in q_low for k in [
+        "lãi, lỗ", "lãi lỗ", "lãi", "lỗ", "kết quả kinh doanh", "profit and loss", "p&l", "pnl", "cost_per_box"
+    ]) or (any(k in q_low for k in ["lợi nhuận", "profit", "biên lợi nhuận", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"]) and any(k in q_low for k in ["tháng", "quý", "năm", "month", "quarter", "báo cáo"]))
+    if is_pnl_q:
+        return sql
+
     # Kiểm tra xem có phải câu hỏi theo quý không
     is_quarterly = any(k in q_low for k in ["quý", "quarter", "từng quý", "theo quý", "qua các quý", "quarterly"])
     if not is_quarterly:
@@ -1473,6 +1638,12 @@ def auto_fix_sales_performance_comparison_query(sql: str, user_query: str, diale
         "lợi nhuận", "profit", "margin", "tỉ suất", "tỷ suất", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"
     ])
     if not is_efficiency:
+        return sql
+
+    # Không can thiệp nếu là câu hỏi báo cáo P&L / Lãi Lỗ theo thời gian (đã có auto_fix_chocolates_pnl_query xử lý)
+    has_pnl_keywords = any(k in q_low for k in ["lãi", "lỗ", "lãi, lỗ", "lãi lỗ", "kết quả kinh doanh", "p&l", "pnl", "cost_per_box"])
+    has_time = any(k in q_low for k in ["tháng", "quý", "month", "quarter", "năm 20", "year", "2021", "2022"])
+    if has_pnl_keywords or (has_time and any(k in q_low for k in ["lợi nhuận", "profit"])):
         return sql
 
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "thị trường", "mỹ", "ấn độ", "india", "usa"])
@@ -2374,6 +2545,7 @@ def run_agent(
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_pnl_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
@@ -2407,6 +2579,7 @@ def run_agent(
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_pnl_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)

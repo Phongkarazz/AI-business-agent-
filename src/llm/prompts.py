@@ -385,7 +385,30 @@ def get_db_specific_rules(schema_context: str) -> str:
         WHERE g.Geo = 'India' AND YEAR(s.SaleDate) = 2021
         GROUP BY Quarter
         ORDER BY Quarter ASC;
-        (BẮT BUỘC: GROUP BY Quarter để trả về đủ các quý, TUYỆT ĐỐI CẤM dùng MAX(s.SaleDate) khiến kết quả chỉ còn 1 quý đơn lẻ!)"""
+        (BẮT BUỘC: GROUP BY Quarter để trả về đủ các quý, TUYỆT ĐỐI CẤM dùng MAX(s.SaleDate) khiến kết quả chỉ còn 1 quý đơn lẻ!)
+      + MẪU CHUẨN BÁO CÁO KẾT QUẢ KINH DOANH / LÃI, LỖ (P&L - PROFIT & LOSS):
+        * Khi câu hỏi nhắc đến 'lãi, lỗ', 'lợi nhuận', 'profit', 'loss', 'cost_per_box', 'kết quả kinh doanh' theo thời gian (tháng, quý, năm) kết hợp với quốc gia (geo) hoặc sản phẩm:
+          BẮT BUỘC JOIN bảng products pr ON s.PID = pr.PID để lấy pr.Cost_per_box!
+          TÍNH ĐẦY ĐỦ 4 CHỈ SỐ TÀI CHÍNH:
+          - Tổng Doanh Thu ($): SUM(s.Amount)
+          - Tổng Chi Phí ($): ROUND(SUM(s.Boxes * pr.Cost_per_box), 2)
+          - Lợi Nhuận ($): ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2)
+          - Tỷ Suất Lợi Nhuận (%): ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2)
+        * Ví dụ: Báo cáo kết quả lãi, lỗ trong tháng, trong quý trong năm 2021 theo quốc gia:
+          SELECT 
+              DATE_FORMAT(s.SaleDate, '%Y-%m') AS `Tháng`,
+              CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate)) AS `Quý`,
+              g.Geo AS `Quốc Gia`,
+              SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+              ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+              ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+              ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS `Tỷ Suất Lợi Nhuận (%)`
+          FROM sales s
+          JOIN products pr ON s.PID = pr.PID
+          JOIN geo g ON s.GeoID = g.GeoID
+          WHERE YEAR(s.SaleDate) = 2021
+          GROUP BY `Tháng`, `Quý`, `Quốc Gia`
+          ORDER BY `Tháng` ASC, `Lợi Nhuận ($)` DESC;"""
     else:
         return """   - QUY TẮC SCHEMA CHUNG:
      + CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng và cột xuất hiện thực tế trong SCHEMA ở trên.
@@ -653,6 +676,92 @@ ORDER BY `Số Lượng Nhân Viên` DESC;
 1. TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) HAY SUM(Amount)!
 2. BẮT BUỘC TRUY VẤN TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`!
 3. Nhóm theo Team và ORDER BY `Số Lượng Nhân Viên` DESC!)
+"""
+
+        # 0.005 Báo cáo kết quả kinh doanh / Lãi, Lỗ (P&L - Profit & Loss)
+        is_pnl_q = any(k in q_low for k in [
+            "lãi, lỗ", "lãi lỗ", "lãi", "lỗ", "kết quả kinh doanh", "profit and loss", "p&l", "pnl", "cost_per_box"
+        ]) or (any(k in q_low for k in ["lợi nhuận", "profit", "biên lợi nhuận", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"]) and any(k in q_low for k in ["tháng", "quý", "năm", "month", "quarter", "báo cáo"]))
+
+        if is_pnl_q:
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_where = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f" AND strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f" AND YEAR(s.SaleDate) = {yr_val}"
+                yr_where = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+
+            qtr_expr = (
+                "strftime('%Y', s.SaleDate) || '-Q' || ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3)"
+                if is_sqlite else
+                "CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate))"
+            )
+
+            has_month = any(k in q_low for k in ["tháng", "month"])
+            has_quarter = any(k in q_low for k in ["quý", "quarter"])
+            has_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"])
+            has_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
+            has_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"])
+
+            # 1. P&L theo Quốc Gia kết hợp Tháng / Quý
+            if has_country or (has_month and not has_product and not has_team):
+                if has_month and has_quarter:
+                    time_cols = f"    {date_expr} AS `Tháng`,\n    {qtr_expr} AS `Quý`,\n    g.Geo AS `Quốc Gia`,"
+                    group_cols = "`Tháng`, `Quý`, `Quốc Gia`"
+                    order_col = "`Tháng` ASC, `Lợi Nhuận ($)` DESC"
+                    chart_tip = f"Dùng {date_expr} AS `Tháng` làm trục thời gian và g.Geo AS `Quốc Gia` để vẽ đa đường!"
+                elif has_quarter and not has_month:
+                    time_cols = f"    {qtr_expr} AS `Quý`,\n    g.Geo AS `Quốc Gia`,"
+                    group_cols = "`Quý`, `Quốc Gia`"
+                    order_col = "`Quý` ASC, `Lợi Nhuận ($)` DESC"
+                    chart_tip = f"Dùng {qtr_expr} AS `Quý` làm trục thời gian!"
+                else:
+                    time_cols = f"    {date_expr} AS `Tháng`,\n    g.Geo AS `Quốc Gia`,"
+                    group_cols = "`Tháng`, `Quốc Gia`"
+                    order_col = "`Tháng` ASC, `Lợi Nhuận ($)` DESC"
+                    chart_tip = f"Dùng {date_expr} AS `Tháng` làm trục thời gian!"
+
+                where_clause = yr_where if yr_where else ""
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (BÁO CÁO KẾT QUẢ KINH DOANH LÃI/LỖ THEO QUỐC GIA{yr_label}):
+SELECT 
+{time_cols}
+    SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+    ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS `Tỷ Suất Lợi Nhuận (%)`
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+JOIN geo g ON s.GeoID = g.GeoID
+{where_clause}GROUP BY {group_cols}
+ORDER BY {order_col};
+(CẢNH BÁO BẮT BUỘC: 
+1. BẮT BUỘC JOIN cả products pr VÀ geo g!
+2. BẮT BUỘC tính đủ: `Tổng Doanh Thu ($)`, `Tổng Chi Phí ($)`, `Lợi Nhuận ($)`, `Tỷ Suất Lợi Nhuận (%)`!
+3. {chart_tip})
+"""
+            # 2. P&L theo Sản phẩm
+            elif has_product:
+                time_select = f"    {date_expr} AS `Tháng`,\n" if has_month else (f"    {qtr_expr} AS `Quý`,\n" if has_quarter else "")
+                group_p = "`Tháng`, `Sản Phẩm`" if has_month else ("`Quý`, `Sản Phẩm`" if has_quarter else "`Sản Phẩm`")
+                order_p = "`Tháng` ASC, `Lợi Nhuận ($)` DESC" if has_month else ("`Quý` ASC, `Lợi Nhuận ($)` DESC" if has_quarter else "`Lợi Nhuận ($)` DESC")
+                where_clause = yr_where if yr_where else ""
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (BÁO CÁO KẾT QUẢ KINH DOANH LÃI/LỖ THEO SẢN PHẨM{yr_label}):
+SELECT 
+{time_select}    pr.Product AS `Sản Phẩm`,
+    SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+    ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS `Tỷ Suất Lợi Nhuận (%)`
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{where_clause}GROUP BY {group_p}
+ORDER BY {order_p};
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN products pr và tính đầy đủ Doanh thu, Chi phí, Lợi nhuận, Tỷ suất lợi nhuận!)
 """
 
         # 0.01 Tỷ lệ đóng góp doanh thu theo nhóm sản phẩm (Category)
