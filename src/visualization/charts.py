@@ -118,6 +118,16 @@ VI_COLUMN_MAP = {
     "size": "Kích Cỡ",
     "cost_per_box": "Giá Vốn/Thùng ($)",
     "costperbox": "Giá Vốn/Thùng ($)",
+    "profitmargin": "Tỷ Suất Lợi Nhuận (%)",
+    "profit_margin": "Tỷ Suất Lợi Nhuận (%)",
+    "profitperbox": "Lợi Nhuận/Hộp ($)",
+    "profit_per_box": "Lợi Nhuận/Hộp ($)",
+    "revenueperbox": "Doanh Thu/Hộp ($)",
+    "revenue_per_box": "Doanh Thu/Hộp ($)",
+    "avgordervalue": "Giá Trị Đơn Trung Bình ($)",
+    "avg_order_value": "Giá Trị Đơn Trung Bình ($)",
+    "avgboxesperorder": "Số Hộp TB/Đơn",
+    "avg_boxes_per_order": "Số Hộp TB/Đơn",
     "salesperson": "Nhân Viên Kinh Doanh",
     "team": "Đội Ngũ",
     "location": "Vị Trí/Khu Vực",
@@ -503,13 +513,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     user_asked_efficiency = any(k in uq_low for k in [
                         "hiệu quả", "efficiency", "effectiveness", "năng suất", 
                         "giá trị trung bình", "trung bình mỗi đơn", "trung bình mỗi hộp", 
-                        "order value", "per box", "per order", "aov", "performance", "profit per box"
+                        "order value", "per box", "per order", "aov", "performance", "profit per box",
+                        "lợi nhuận", "profit", "margin", "tỷ suất", "tỉ suất", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"
                     ])
 
-                    # Tìm các cột đo lường hiệu quả (Efficiency / Average / Margin / Profit)
-                    eff_cols = [c for c in measure_cols if any(k in c.lower() for k in [
-                        "avg", "ordervalue", "order_value", "perbox", "per_box", "profit", "margin", "lợi nhuận", "trung bình", "hiệu quả"
-                    ])]
+                    # Tìm các cột đo lường hiệu quả (Efficiency / Average / Margin / Profit) - LOẠI TRỪ các cột chi phí/giá vốn đơn thuần (Cost_per_box)
+                    eff_cols = [c for c in measure_cols if (any(k in c.lower() for k in [
+                        "avg", "ordervalue", "order_value", "profit", "margin", "lợi nhuận", "trung bình", "hiệu quả", "revenueperbox", "revenue_per_box"
+                    ]) or any(k in c.lower() for k in ["perbox", "per_box"])) and not any(k in c.lower() for k in ["cost", "giá vốn", "gia_von"])]
 
                     # Tìm các cặp số lượng nhân sự Nam - Nữ tuyệt đối
                     male_emp_cols = [c for c in non_pct_cols if any(k in c.lower() for k in ["maleemployees", "male_emp", "malemanagers", "male", "nam"]) and not any(k in c.lower() for k in ["female", "nu", "nữ", "department"])]
@@ -520,8 +531,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         active_measures = [male_emp_cols[0], female_emp_cols[0]]
                         chart_title = f"Quy mô & Cơ cấu Nhân sự theo {label_name} (Stacked Bar)"
                     elif user_asked_efficiency and eff_cols:
-                        active_measures = eff_cols
-                        chart_title = f"So sánh Hiệu quả ({', '.join([format_col_title(c) for c in eff_cols])}) theo {label_name}"
+                        # Ưu tiên sắp xếp cột hiệu quả khớp nhất với ý định người dùng
+                        if any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
+                            sorted_eff = sorted(eff_cols, key=lambda c: 0 if any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"]) else 1)
+                        elif any(k in uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng"]):
+                            sorted_eff = sorted(eff_cols, key=lambda c: 0 if any(k in c.lower() for k in ["perbox", "per_box"]) else 1)
+                        else:
+                            sorted_eff = eff_cols
+                        active_measures = sorted_eff
+                        chart_title = f"So sánh Hiệu quả ({', '.join([format_col_title(c) for c in sorted_eff])}) theo {label_name}"
                     elif pct_cols and (user_asked_pct or not non_pct_cols):
                         active_measures = pct_cols
                         chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
@@ -547,8 +565,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         max_vals = [float(plot_df[m].abs().max()) for m in numeric_ms if float(plot_df[m].abs().max()) > 0]
                         if len(max_vals) >= 2 and (max(max_vals) / min(max_vals)) > 20:
                             if user_asked_efficiency and any(c in numeric_ms for c in eff_cols):
-                                # Khi hỏi hiệu quả, ưu tiên chọn chỉ số hiệu quả (AvgOrderValue, ProfitPerBox...) thay vì rơi về TotalSales
-                                primary_m = [c for c in eff_cols if c in numeric_ms][0]
+                                # Khi hỏi hiệu quả, ưu tiên chọn chỉ số hiệu quả (AvgOrderValue, ProfitMargin, ProfitPerBox...) thay vì rơi về TotalSales
+                                candidate_effs = [c for c in eff_cols if c in numeric_ms]
+                                if any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]) and any(any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"]) for c in candidate_effs):
+                                    primary_m = [c for c in candidate_effs if any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"])][0]
+                                elif any(k in uq_low for k in ["mỗi hộp", "per box", "hộp"]) and any(any(k in c.lower() for k in ["perbox", "per_box"]) for c in candidate_effs):
+                                    primary_m = [c for c in candidate_effs if any(k in c.lower() for k in ["perbox", "per_box"])][0]
+                                else:
+                                    primary_m = candidate_effs[0]
                                 active_measures = [primary_m]
                                 chart_title = f"So sánh Hiệu quả ({format_col_title(primary_m)}) theo {format_col_title(label_name)}"
                             else:

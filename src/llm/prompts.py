@@ -445,7 +445,7 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     req_limit = int(top_m.group(1)) if top_m else 10
 
     # 0. CSDL Awesome Chocolates - Doanh thu theo thời gian / tháng & Tỷ lệ đóng góp
-    is_choco_context = any(k in schema_low for k in ["geo", "products", "sales", "spid", "geoid"]) or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo"])
+    is_choco_context = any(k in schema_low for k in ["geo", "products", "sales", "spid", "geoid", "boxes"]) or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo", "hộp", "thùng", "sản phẩm", "bán hàng", "doanh số", "doanh thu", "sales"])
     if is_choco_context or (any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
         # 0.01 Tỷ lệ đóng góp doanh thu theo nhóm sản phẩm (Category)
         if any(k in q_low for k in ["category", "nhóm sản phẩm", "nhóm hàng", "danh mục"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
@@ -602,25 +602,35 @@ ORDER BY AvgOrderValue DESC;
 (CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Tính ROUND(AVG(s.Amount), 2) AS AvgOrderValue và ORDER BY AvgOrderValue DESC!)
 """
 
-        # 0.07 Lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm
-        elif any(k in q_low for k in ["profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp", "lợi nhuận trung bình trên mỗi hộp", "tỷ suất lợi nhuận"]):
+        # 0.07 Lợi nhuận trung bình trên mỗi hộp / Tỷ suất lợi nhuận (Profit per box / Profit Margin)
+        elif any(k in q_low for k in [
+            "profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp", 
+            "lợi nhuận trung bình trên mỗi hộp", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận",
+            "tỷ suất", "tỉ suất", "profit margin", "margin", "lợi nhuận", "profit"
+        ]):
             top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
             req_limit = int(top_m.group(1)) if top_m else 10
+            is_margin_focus = any(k in q_low for k in ["tỷ suất", "tỉ suất", "margin", "%", "phần trăm"])
+            order_target = "ProfitMargin" if is_margin_focus else "ProfitPerBox"
             return f"""
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (LỢI NHUẬN TRUNG BÌNH TRÊN MỖI HỘP - PROFIT PER BOX):
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ SUẤT LỢI NHUẬN / LỢI NHUẬN TRUNG BÌNH TRÊN MỖI HỘP):
 SELECT 
     pr.Product AS Product,
     pr.Category AS Category,
-    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox,
     ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS ProfitMargin,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox,
     SUM(s.Amount) AS TotalSales,
     SUM(s.Boxes) AS TotalBoxesSold
 FROM sales s
 JOIN products pr ON s.PID = pr.PID
 GROUP BY pr.Product, pr.Category
-ORDER BY ProfitPerBox DESC
+ORDER BY {order_target} DESC
 LIMIT {req_limit};
-(CẢNH BÁO BẮT BUỘC: Lợi nhuận mỗi hộp = ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox! BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID!)
+(CẢNH BÁO BẮT BUỘC: 
+1. Tỷ suất lợi nhuận % = ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS ProfitMargin.
+2. Lợi nhuận mỗi hộp = ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox.
+3. TUYỆT ĐỐI KHÔNG chỉ SELECT cột Cost_per_box và ORDER BY Cost_per_box vì Cost_per_box là GIÁ VỐN chứ không phải lợi nhuận hay tỷ suất lợi nhuận!
+4. BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID!)
 """
 
         # 0.08 Doanh thu theo từng quý (Quarterly Trend) - theo Quốc gia cụ thể, theo Team, theo Sản phẩm, hoặc Toàn công ty

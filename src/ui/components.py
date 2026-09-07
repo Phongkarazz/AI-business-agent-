@@ -471,14 +471,22 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         user_asked_efficiency = any(k in _uq_low for k in [
             "hiệu quả", "efficiency", "effectiveness", "năng suất", 
             "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình mỗi đơn", 
-            "trung bình mỗi hộp", "order value", "per box", "per order", "aov", "performance", "profit per box"
+            "trung bình mỗi hộp", "order value", "per box", "per order", "aov", "performance", "profit per box",
+            "lợi nhuận", "profit", "margin", "tỷ suất", "tỉ suất", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"
         ])
-        eff_like_cols = [c for c in measure_cols if any(k in str(c).lower() for k in [
-            "avg", "ordervalue", "order_value", "perbox", "per_box", "profit", "margin", "lợi nhuận", "trung bình", "hiệu quả"
-        ])]
+        eff_like_cols = [c for c in measure_cols if (any(k in str(c).lower() for k in [
+            "avg", "ordervalue", "order_value", "profit", "margin", "lợi nhuận", "trung bình", "hiệu quả", "revenueperbox", "revenue_per_box"
+        ]) or any(k in str(c).lower() for k in ["perbox", "per_box"])) and not any(k in str(c).lower() for k in ["cost", "giá vốn", "gia_von"])]
 
         if user_asked_efficiency and eff_like_cols:
-            m_col = eff_like_cols[0]
+            if any(k in _uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
+                m_candidates = [c for c in eff_like_cols if any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất"])]
+                m_col = m_candidates[0] if m_candidates else eff_like_cols[0]
+            elif any(k in _uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng"]):
+                m_candidates = [c for c in eff_like_cols if any(k in str(c).lower() for k in ["perbox", "per_box"])]
+                m_col = m_candidates[0] if m_candidates else eff_like_cols[0]
+            else:
+                m_col = eff_like_cols[0]
         else:
             count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
             # Ưu tiên cột tổng thể (Total/Tổng/All) nếu có
@@ -542,8 +550,10 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         )
         scope_suffix = f" (Top {total_rows})" if is_top_query and total_rows <= 30 else ""
 
-        # Ký hiệu tiền tệ
-        is_currency = any(k in str(m_col).lower() for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "thu nhập"])
+        # Ký hiệu tiền tệ và tỷ lệ phần trăm
+        _m_col_lower = str(m_col).lower()
+        _is_pct_measure = any(k in _m_col_lower for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phần trăm"])
+        is_currency = (not _is_pct_measure) and (any(k in _m_col_lower for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "thu nhập"]) or "profitperbox" in _m_col_lower or "ordervalue" in _m_col_lower)
         curr_symbol = "$" if is_currency else ""
 
         valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()
@@ -579,6 +589,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             def _fmt_kpi_val(v, compact=True):
                 try:
                     fv = float(v)
+                    if _is_pct_measure:
+                        return f"{fv:,.2f}%"
                     if compact:
                         if abs(fv) >= 1_000_000_000:
                             unit = " Tỷ" if not is_en else "B"
@@ -595,6 +607,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             def _fmt_kpi_val_full(v):
                 try:
                     fv = float(v)
+                    if _is_pct_measure:
+                        return f"{fv:,.2f}%"
                     if fv.is_integer() or fv > 100:
                         return f"{curr_symbol}{fv:,.0f}"
                     return f"{curr_symbol}{fv:,.2f}"
@@ -602,7 +616,6 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     return str(v)
 
             # Phát hiện measure là duration (years/tenure/thâm niên) để thêm đơn vị " Năm"
-            _m_col_lower = str(m_col).lower()
             _is_years_measure = any(k in _m_col_lower for k in [
                 "years", "year_as", "yearsas", "tenure", "thâm niên", "tham_nien",
                 "service", "thamnien",
@@ -616,6 +629,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             # Kiểm tra xem m_col có phải là giá trị trung bình/tỷ lệ/min/max hoặc duration (để tránh lỗi cộng dồn thống kê)
             is_avg_or_rate = any(k in m_col.lower() for k in [
                 "avg", "average", "mean", "trung_bình", "rate", "ratio", "pct", "percent", "tỷ_lệ", "max", "min",
+                "profitmargin", "profit_margin", "profitperbox", "profit_per_box", "margin", "revenueperbox",
                 # Duration/Tenure measures — KHÔNG nên cộng tổng
                 "years", "yearsas", "year_as", "tenure", "thâm niên", "tham_nien",
                 "service", "duration", "thamnien",

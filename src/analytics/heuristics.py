@@ -341,13 +341,18 @@ def ensure_efficiency_columns_if_requested(df: pd.DataFrame, user_query: str = "
     is_efficiency = any(k in uq_low for k in [
         "hiệu quả", "efficiency", "effectiveness", "năng suất", 
         "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình mỗi đơn", 
-        "trung bình mỗi hộp", "order value", "per box", "profit per box", "performance"
+        "trung bình mỗi hộp", "order value", "per box", "profit per box", "performance",
+        "lợi nhuận", "profit", "margin", "tỷ suất", "tỉ suất", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"
     ])
     if not is_efficiency:
         return df
 
     cols_low = {str(c).lower(): c for c in df.columns}
-    has_avg_col = any(any(k in c for k in ["avg", "ordervalue", "perbox", "per_box", "profit", "margin", "trung bình"]) for c in cols_low.keys())
+    has_avg_col = any(
+        (any(k in c for k in ["avg", "ordervalue", "profit", "margin", "trung bình", "revenueperbox"]) 
+         or (any(k in c for k in ["perbox", "per_box"]) and not any(k in c for k in ["cost", "giá vốn", "gia_von"])))
+        for c in cols_low.keys()
+    )
     if has_avg_col:
         return df
 
@@ -372,9 +377,33 @@ def ensure_efficiency_columns_if_requested(df: pd.DataFrame, user_query: str = "
             boxes_col = cols_low[k]
             break
 
+    # Tìm cột giá vốn / cost_per_box
+    cost_col = None
+    for k in ["cost_per_box", "costperbox", "cost"]:
+        if k in cols_low:
+            cost_col = cols_low[k]
+            break
+
     df_mod = df.copy()
     added = False
-    if sales_col and count_col:
+
+    if sales_col and boxes_col and cost_col:
+        try:
+            s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
+            b_val = pd.to_numeric(df_mod[boxes_col], errors="coerce")
+            c_val = pd.to_numeric(df_mod[cost_col], errors="coerce")
+            profit_val = s_val - b_val * c_val
+            df_mod["ProfitMargin"] = ((profit_val * 100.0) / s_val.replace(0, pd.NA)).round(2).fillna(0.0)
+            df_mod["ProfitPerBox"] = (profit_val / b_val.replace(0, pd.NA)).round(2).fillna(0.0)
+            added = True
+            if any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
+                df_mod = df_mod.sort_values(by="ProfitMargin", ascending=False).reset_index(drop=True)
+            elif any(k in uq_low for k in ["lợi nhuận", "profit"]):
+                df_mod = df_mod.sort_values(by="ProfitPerBox", ascending=False).reset_index(drop=True)
+        except Exception:
+            pass
+
+    if sales_col and count_col and not added:
         try:
             s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
             c_val = pd.to_numeric(df_mod[count_col], errors="coerce")
@@ -383,7 +412,7 @@ def ensure_efficiency_columns_if_requested(df: pd.DataFrame, user_query: str = "
         except Exception:
             pass
 
-    if sales_col and boxes_col:
+    if sales_col and boxes_col and not added:
         try:
             s_val = pd.to_numeric(df_mod[sales_col], errors="coerce")
             b_val = pd.to_numeric(df_mod[boxes_col], errors="coerce")
@@ -393,9 +422,9 @@ def ensure_efficiency_columns_if_requested(df: pd.DataFrame, user_query: str = "
             pass
 
     if added:
-        dim_cols = [c for c in df.columns if c not in (sales_col, count_col, boxes_col)]
+        dim_cols = [c for c in df.columns if c not in (sales_col, count_col, boxes_col, cost_col)]
         first_dim = dim_cols[0] if dim_cols else df.columns[0]
-        eff_new = [c for c in ["AvgOrderValue", "RevenuePerBox"] if c in df_mod.columns]
+        eff_new = [c for c in ["ProfitMargin", "ProfitPerBox", "AvgOrderValue", "RevenuePerBox"] if c in df_mod.columns]
         other_cols = [c for c in df_mod.columns if c not in eff_new and c != first_dim]
         df_mod = df_mod[[first_dim] + eff_new + other_cols]
 

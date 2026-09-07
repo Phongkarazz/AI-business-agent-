@@ -1468,7 +1468,8 @@ def auto_fix_sales_performance_comparison_query(sql: str, user_query: str, diale
     is_efficiency = any(k in q_low for k in [
         "hiệu quả", "efficiency", "effectiveness", "năng suất", 
         "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình mỗi đơn", 
-        "trung bình mỗi hộp", "order value", "per box", "profit per box"
+        "trung bình mỗi hộp", "order value", "per box", "profit per box",
+        "lợi nhuận", "profit", "margin", "tỉ suất", "tỷ suất", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"
     ])
     if not is_efficiency:
         return sql
@@ -1478,7 +1479,7 @@ def auto_fix_sales_performance_comparison_query(sql: str, user_query: str, diale
         return sql
 
     # 1. So sánh hiệu quả giữa các thị trường / quốc gia
-    if any(k in q_low for k in ["thị trường", "quốc gia", "country", "geo", "usa", "mỹ", "india", "ấn độ"]):
+    if any(k in q_low for k in ["thị trường", "quốc gia", "country", "geo", "usa", "mỹ", "hoa kỳ", "united states"]):
         specific_geos = []
         if any(k in q_low for k in ["usa", "mỹ", "hoa kỳ", "united states"]):
             specific_geos.append("'USA'")
@@ -1529,23 +1530,37 @@ WHERE pe.Team != '' AND pe.Team IS NOT NULL
 GROUP BY pe.Team
 ORDER BY AvgOrderValue DESC"""
 
-    # 3. Lợi nhuận trung bình trên mỗi hộp (Profit per box)
-    elif any(k in q_low for k in ["profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp", "lợi nhuận trung bình trên mỗi hộp", "tỷ suất lợi nhuận"]):
+    # 3. Lợi nhuận trung bình trên mỗi hộp / Tỷ suất lợi nhuận (Profit per box / Profit Margin)
+    elif any(k in q_low for k in [
+        "profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp", 
+        "lợi nhuận trung bình trên mỗi hộp", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận",
+        "tỷ suất", "tỉ suất", "margin", "profit", "lợi nhuận"
+    ]):
         top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
         req_limit = int(top_m.group(1)) if top_m else 10
-        needs_fix = "cost_per_box" not in sql_low or "profitperbox" not in sql_low or "with " in sql_low
+        is_margin_focus = any(k in q_low for k in ["tỷ suất", "tỉ suất", "margin", "%", "phần trăm"])
+        order_col = "ProfitMargin" if is_margin_focus else "ProfitPerBox"
+        needs_fix = (
+            "cost_per_box" not in sql_low 
+            or (is_margin_focus and "profitmargin" not in sql_low)
+            or (not is_margin_focus and "profitperbox" not in sql_low)
+            or "with " in sql_low
+            or "order by cost_per_box" in sql_low.replace(" ", "")
+            or "orderbypr.cost_per_box" in sql_low.replace(" ", "")
+            or "orderbycost_per_box" in sql_low.replace(" ", "")
+        )
         if needs_fix:
             return f"""SELECT 
     pr.Product AS Product,
     pr.Category AS Category,
-    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox,
     ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / SUM(s.Amount), 2) AS ProfitMargin,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox,
     SUM(s.Amount) AS TotalSales,
     SUM(s.Boxes) AS TotalBoxesSold
 FROM sales s
 JOIN products pr ON s.PID = pr.PID
 GROUP BY pr.Product, pr.Category
-ORDER BY ProfitPerBox DESC
+ORDER BY {order_col} DESC
 LIMIT {req_limit}"""
 
     return sql
@@ -1569,7 +1584,11 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
         return sql
 
     # Không can thiệp nếu là câu hỏi so sánh hiệu quả bán hàng / đơn hàng trung bình / lợi nhuận (đã có auto_fix_sales_performance_comparison_query xử lý)
-    if any(k in q_low for k in ["hiệu quả", "efficiency", "effectiveness", "giá trị đơn hàng trung bình", "đơn hàng trung bình", "profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp"]):
+    if any(k in q_low for k in [
+        "hiệu quả", "efficiency", "effectiveness", "giá trị đơn hàng trung bình", 
+        "đơn hàng trung bình", "profit per box", "lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp",
+        "lợi nhuận", "profit", "margin", "tỉ suất", "tỷ suất"
+    ]):
         return sql
 
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate"])
