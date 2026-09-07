@@ -239,6 +239,18 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             elif len(measure_cols) >= 2:
                 chosen = "Scatter"
             else:
+                # Kiểm tra nếu dataframe chỉ có cột danh mục / chuỗi (không có cột số)
+                # Nhưng có ít nhất 1 cột có các giá trị lặp lại (1 < nunique < len)
+                # -> Tự động tổng hợp đếm tần suất (Frequency count) để vẽ biểu đồ
+                cat_candidates = [c for c in df.columns if not is_id_like(c)]
+                for c in cat_candidates:
+                    n_unq = df[c].nunique(dropna=True)
+                    if 1 < n_unq < len(df):
+                        counts_df = df[c].value_counts().reset_index()
+                        counts_df.columns = [c, "Số lượng bản ghi"]
+                        st.caption(f"ℹ️ Dữ liệu dạng danh mục — tự động tổng hợp số lượng bản ghi theo `{c}` để trực quan hóa.")
+                        return render_smart_chart(counts_df, chart_override="Bar", turn_id=f"{turn_id}_freq", user_query=user_query)
+
                 st.info("Không tìm thấy dạng biểu đồ phù hợp — dữ liệu không có chỉ số đo lường số học rõ ràng (các cột số hiện có đều là mã định danh).")
                 return None
         else:
@@ -909,7 +921,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     m_lower = str(measure_cols[0]).lower()
                     is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
-                    is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu"])
+                    is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "doanh số", "doanh so", "sales", "amount", "$", "usd"])
                     is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "nhân sự", "nhan_su", "người", "nguoi", "count", "số lượng", "so_luong", "slngnhnvin", "totalemployees"]) and not is_years and not is_salary
 
                     curr_sym = "$" if is_salary else ""

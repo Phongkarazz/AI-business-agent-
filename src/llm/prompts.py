@@ -443,6 +443,73 @@ def match_chocolates_specific_person(text: str):
     return None
 
 
+def parse_threshold_query_info(q_low: str):
+    """Trích xuất thông tin điều kiện lọc theo ngưỡng (Threshold Query) cho CSDL Awesome Chocolates."""
+    has_threshold_kw = any(k in q_low for k in [
+        'vượt', 'trên', 'dưới', 'cao hơn', 'lớn hơn', 'thấp hơn', 'nhỏ hơn',
+        'nhiều hơn', 'ít hơn', 'từ', 'ít nhất', 'tối thiểu', 'tối đa',
+        '>', '<', '>=', '<=', 'over', 'above', 'under', 'below', 'exceed', 'more than', 'less than'
+    ])
+    if not has_threshold_kw:
+        return None
+
+    val = None
+    m_b = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:tỷ|ty|b|billion)\b', q_low)
+    m_m = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:tr|triệu|trieu|m|million)\b', q_low)
+    m_k = re.search(r'(\d+(?:[.,]\d+)?)\s*k\b', q_low)
+    m_num = re.search(r'(?:mức\s*|trên\s*|hơn\s*|dưới\s*|từ\s*|[><]=?\s*)(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+)', q_low)
+
+    if m_b:
+        val = float(m_b.group(1).replace(',', '.')) * 1_000_000_000
+    elif m_m:
+        val = float(m_m.group(1).replace(',', '.')) * 1_000_000
+    elif m_k:
+        val = float(m_k.group(1).replace(',', '.')) * 1_000
+    elif m_num:
+        raw = m_num.group(1).replace(',', '').replace('.', '')
+        val = float(raw)
+    else:
+        m_any = re.search(r'\b(\d{1,3}(?:[.,]\d{3})+|\d{4,})\b', q_low)
+        if m_any:
+            raw = m_any.group(1).replace(',', '').replace('.', '')
+            val = float(raw)
+
+    if not val:
+        return None
+
+    op = '>'
+    if any(k in q_low for k in ['từ', 'ít nhất', 'tối thiểu', '>=', 'at least', 'minimum']):
+        op = '>='
+    elif any(k in q_low for k in ['dưới', 'thấp hơn', 'nhỏ hơn', 'ít hơn', '<', 'under', 'below', 'less than']):
+        op = '<'
+    elif any(k in q_low for k in ['tối đa', '<=', 'at most', 'maximum']):
+        op = '<='
+    elif any(k in q_low for k in ['vượt', 'trên', 'lớn hơn', 'cao hơn', 'nhiều hơn', 'hơn', '>', 'over', 'above', 'exceed']):
+        op = '>'
+
+    has_boxes = any(k in q_low for k in ['hộp', 'hop', 'thùng', 'thung', 'boxes'])
+
+    entity_type = None
+    if any(k in q_low for k in ['nhân viên', 'salesperson', 'sales person', 'người bán', 'ai bán', 'ai có']):
+        entity_type = 'person'
+    elif any(k in q_low for k in ['sản phẩm', 'product', 'mặt hàng', 'kẹo', 'socola', 'chocolate']):
+        entity_type = 'product'
+    elif any(k in q_low for k in ['quốc gia', 'country', 'thị trường', 'geo']):
+        entity_type = 'geo'
+    elif any(k in q_low for k in ['đội ngũ', 'team', 'nhóm']):
+        entity_type = 'team'
+
+    if not entity_type:
+        return None
+
+    return {
+        'val': int(val),
+        'op': op,
+        'has_boxes': has_boxes,
+        'entity_type': entity_type
+    }
+
+
 def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = "") -> str:
     """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) cho câu hỏi cụ thể, áp dụng cho cả prompt gốc và prompt sửa lỗi."""
     q_low = (user_query or "").lower()
@@ -457,6 +524,100 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     # 0. CSDL Awesome Chocolates - Doanh thu theo thời gian / tháng & Tỷ lệ đóng góp
     is_choco_context = any(k in schema_low for k in ["geo", "products", "sales", "spid", "geoid", "boxes"]) or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo", "hộp", "thùng", "sản phẩm", "bán hàng", "doanh số", "doanh thu", "sales"])
     if is_choco_context or (any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
+        # 0.000 Câu hỏi lọc theo điều kiện ngưỡng (Threshold Condition Queries):
+        thresh_info = parse_threshold_query_info(q_low)
+        if thresh_info:
+            t_val = thresh_info['val']
+            t_op = thresh_info['op']
+            t_boxes = thresh_info['has_boxes']
+            t_entity = thresh_info['entity_type']
+
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+
+            m_expr = "SUM(s.Boxes) AS TotalBoxesSold" if t_boxes else "SUM(s.Amount) AS TotalSales"
+            m_col = "TotalBoxesSold" if t_boxes else "TotalSales"
+            m_having = f"SUM(s.Boxes) {t_op} {t_val}" if t_boxes else f"SUM(s.Amount) {t_op} {t_val}"
+
+            if t_entity == 'person':
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN BÁN HÀNG CÓ {m_col.upper()} {t_op} {t_val:,}{yr_label}):
+SELECT 
+    pe.Salesperson AS Salesperson,
+    {m_expr}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{yr_filter}GROUP BY pe.Salesperson
+HAVING {m_having}
+ORDER BY {m_col} DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CÓ CẢ 2 CỘT: pe.Salesperson AS Salesperson VÀ {m_expr}! TUYỆT ĐỐI KHÔNG ĐƯỢC CHỈ SELECT MỖI CỘT Salesperson MÀ BỎ SÓT CHỈ SỐ ĐO LƯỜNG VÌ HỆ THỐNG CẦN NÓ ĐỂ VẼ BIỂU ĐỒ VÀ PHÂN TÍCH!
+2. BẮT BUỘC dùng HAVING {m_having}!
+3. BẮT BUỘC ORDER BY {m_col} DESC!
+4. TUYỆT ĐỐI KHÔNG DÙNG LIMIT NẾU NGƯỜI DÙNG KHÔNG YÊU CẦU TOP N!)
+"""
+            elif t_entity == 'product':
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SẢN PHẨM CÓ {m_col.upper()} {t_op} {t_val:,}{yr_label}):
+SELECT 
+    pr.Product AS Product,
+    {m_expr}
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{yr_filter}GROUP BY pr.Product
+HAVING {m_having}
+ORDER BY {m_col} DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CÓ CẢ 2 CỘT: pr.Product AS Product VÀ {m_expr}! TUYỆT ĐỐI KHÔNG ĐƯỢC CHỈ SELECT MỖI CỘT TÊN SẢN PHẨM!
+2. BẮT BUỘC dùng HAVING {m_having}!
+3. BẮT BUỘC ORDER BY {m_col} DESC!
+4. TUYỆT ĐỐI KHÔNG DÙNG LIMIT NẾU NGƯỜI DÙNG KHÔNG YÊU CẦU TOP N!)
+"""
+            elif t_entity == 'geo':
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (QUỐC GIA CÓ {m_col.upper()} {t_op} {t_val:,}{yr_label}):
+SELECT 
+    g.Geo AS Country,
+    {m_expr}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{yr_filter}GROUP BY g.Geo
+HAVING {m_having}
+ORDER BY {m_col} DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CÓ CẢ 2 CỘT: g.Geo AS Country VÀ {m_expr}!
+2. BẮT BUỘC dùng HAVING {m_having}!
+3. BẮT BUỘC ORDER BY {m_col} DESC!
+4. TUYỆT ĐỐI KHÔNG DÙNG LIMIT NẾU NGƯỜI DÙNG KHÔNG YÊU CẦU TOP N!)
+"""
+            elif t_entity == 'team':
+                team_where = "WHERE pe.Team != '' AND pe.Team IS NOT NULL"
+                if yr_match:
+                    yr_val = yr_match.group(1)
+                    team_where += f" AND strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f" AND YEAR(s.SaleDate) = {yr_val}"
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (ĐỘI NGŨ / TEAM CÓ {m_col.upper()} {t_op} {t_val:,}{yr_label}):
+SELECT 
+    pe.Team AS Team,
+    {m_expr}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{team_where}
+GROUP BY pe.Team
+HAVING {m_having}
+ORDER BY {m_col} DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CÓ CẢ 2 CỘT: pe.Team AS Team VÀ {m_expr}!
+2. BẮT BUỘC dùng HAVING {m_having}!
+3. BẮT BUỘC ORDER BY {m_col} DESC!
+4. TUYỆT ĐỐI KHÔNG DÙNG LIMIT NẾU NGƯỜI DÙNG KHÔNG YÊU CẦU TOP N!)
+"""
+
         # 0.00 Số lượng nhân viên bán hàng / Headcount theo từng Đội ngũ (Team) hoặc Khu vực (Location)
         is_headcount_q = (
             any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "sales person", "người bán", "sales rep", "sales reps"])
@@ -1554,8 +1715,12 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
       + TUYỆT ĐỐI KHÔNG áp dụng `LIMIT 10` cho câu hỏi thời gian, chuỗi xu hướng qua các tháng/năm ('qua các tháng', 'theo tháng', 'biến động theo thời gian') vì 1 năm phải có đủ 12 tháng!
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
-     + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):
+      + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):
         Nên trả về bảng so sánh gồm tên đối tượng, doanh thu và tỷ lệ phần trăm (ví dụ: phân nhóm Đối tượng X vs 'Các sản phẩm khác') để có thể vẽ biểu đồ tròn Donut trực quan sinh động cho người dùng.
+      + CẢNH BÁO BẮT BUỘC VỀ CHỈ SỐ ĐO LƯỜNG TRONG MỆNH ĐỀ SELECT (CHỐNG LỖI MẤT BIỂU ĐỒ):
+        Khi câu hỏi có điều kiện lọc theo chỉ số (ví dụ: 'vượt mức X', 'trên X', 'dưới X', 'đạt từ X trở lên', 'có hơn X...') hoặc dùng mệnh đề HAVING:
+        MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CHỨA CẢ CỘT ĐỊNH DANH (Tên nhân viên, Tên sản phẩm, Quốc gia, Đội ngũ...) VÀ CỘT CHỈ SỐ ĐO LƯỜNG ĐƯỢC TÍNH TOÁN (`SUM(s.Amount) AS TotalSales`, `SUM(s.Boxes) AS TotalBoxesSold`, `COUNT(...)`)!
+        TUYỆT ĐỐI CẤM chỉ SELECT mỗi tên thực thể rồi để ẩn chỉ số tính toán trong HAVING, vì hệ thống bắt buộc cần cột số đo lường để hiển thị số tiền/số lượng và vẽ biểu đồ kinh doanh!
 5. ĐỊNH DẠNG ĐẦU RA (QUAN TRỌNG NHẤT):
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng chữ SELECT).
    - TUYỆT ĐỐI KHÔNG bọc trong markdown code block (```sql hoặc ```), TUYỆT ĐỐI KHÔNG đặt dấu backtick ` ở đầu hay cuối câu lệnh (`SELECT...).

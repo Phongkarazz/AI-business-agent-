@@ -233,7 +233,8 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
     if not top_n:
         q_low = user_query.lower()
         is_time_trend = any(k in q_low for k in ["qua các tháng", "từng tháng", "theo tháng", "xu hướng", "biến động theo thời gian", "qua các năm", "theo từng năm"])
-        if is_time_trend:
+        is_threshold = any(k in q_low for k in ["vượt", "trên", "dưới", "cao hơn", "lớn hơn", "thấp hơn", "nhỏ hơn", "nhiều hơn", "ít hơn", "từ", "ít nhất", "tối thiểu", "tối đa", ">", "<", ">=", "<="]) and any(char.isdigit() for char in q_low)
+        if is_time_trend or is_threshold:
             sql = re.sub(r"\s+LIMIT\s+\d+\s*;?$", "", sql, flags=re.IGNORECASE).rstrip(";").strip()
         return sql
 
@@ -1615,6 +1616,172 @@ def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "My
         )
 
 
+def auto_fix_chocolates_threshold_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa câu truy vấn điều kiện ngưỡng (Threshold Condition Queries)
+    như 'Những nhân viên bán hàng có tổng doanh số vượt mức 500,000 USD'.
+    Bảo đảm SELECT luôn có cả cột thực thể và cột đo lường số học để vẽ biểu đồ."""
+    if not sql or not user_query:
+        return sql
+
+    from src.llm.prompts import parse_threshold_query_info
+    q_low = user_query.lower()
+    thresh_info = parse_threshold_query_info(q_low)
+    if not thresh_info:
+        return sql
+
+    val = thresh_info['val']
+    op = thresh_info['op']
+    has_boxes = thresh_info['has_boxes']
+    entity_type = thresh_info['entity_type']
+
+    sql_low = sql.lower()
+    is_chocolates = (
+        any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"])
+        or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate"])
+    )
+    if not is_chocolates:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+
+    # Trích xuất năm nếu có (VD: 2021, 2022)
+    yr_m = re.search(r'\b(20\d{2})\b', q_low)
+    yr_val = yr_m.group(1) if yr_m else None
+    yr_filter = (f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}") if yr_val else ""
+
+    metric_agg = "SUM(s.Boxes)" if has_boxes else "SUM(s.Amount)"
+    metric_label = "Tổng Số Hộp" if has_boxes else "Tổng Doanh Số ($)"
+
+    if entity_type == 'person':
+        lines = [
+            "SELECT",
+            "    pe.Salesperson AS `Nhân Viên Kinh Doanh`,",
+            f"    {metric_agg} AS `{metric_label}`",
+            "FROM sales s",
+            "JOIN people pe ON s.SPID = pe.SPID",
+        ]
+        if yr_filter:
+            lines.append(yr_filter)
+        lines.append("GROUP BY pe.Salesperson")
+        lines.append(f"HAVING {metric_agg} {op} {val}")
+        lines.append(f"ORDER BY `{metric_label}` DESC")
+        return "\n".join(lines)
+
+    elif entity_type == 'product':
+        lines = [
+            "SELECT",
+            "    pr.Product AS `Sản Phẩm`,",
+            f"    {metric_agg} AS `{metric_label}`",
+            "FROM sales s",
+            "JOIN products pr ON s.PID = pr.PID",
+        ]
+        if yr_filter:
+            lines.append(yr_filter)
+        lines.append("GROUP BY pr.Product")
+        lines.append(f"HAVING {metric_agg} {op} {val}")
+        lines.append(f"ORDER BY `{metric_label}` DESC")
+        return "\n".join(lines)
+
+    elif entity_type == 'geo':
+        lines = [
+            "SELECT",
+            "    g.Geo AS `Quốc Gia`,",
+            f"    {metric_agg} AS `{metric_label}`",
+            "FROM sales s",
+            "JOIN geo g ON s.GeoID = g.GeoID",
+        ]
+        if yr_filter:
+            lines.append(yr_filter)
+        lines.append("GROUP BY g.Geo")
+        lines.append(f"HAVING {metric_agg} {op} {val}")
+        lines.append(f"ORDER BY `{metric_label}` DESC")
+        return "\n".join(lines)
+
+    elif entity_type == 'team':
+        team_where = "WHERE pe.Team != '' AND pe.Team IS NOT NULL"
+        if yr_val:
+            team_where += f" AND strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f" AND YEAR(s.SaleDate) = {yr_val}"
+        lines = [
+            "SELECT",
+            "    pe.Team AS `Đội Ngũ`,",
+            f"    {metric_agg} AS `{metric_label}`",
+            "FROM sales s",
+            "JOIN people pe ON s.SPID = pe.SPID",
+            team_where,
+            "GROUP BY pe.Team",
+            f"HAVING {metric_agg} {op} {val}",
+            f"ORDER BY `{metric_label}` DESC"
+        ]
+        return "\n".join(lines)
+
+    return sql
+
+
+def auto_fix_missing_metric_in_having_query(sql: str, user_query: str) -> str:
+    """Tự động bổ sung chỉ số đo lường vào SELECT nếu câu lệnh SQL có GROUP BY và HAVING
+    lọc theo hàm gộp (aggregate) nhưng SELECT lại chỉ chứa các cột danh mục/chuỗi."""
+    if not sql:
+        return sql
+
+    having_match = re.search(r'\bHAVING\s+([\s\S]+?)(?=\bORDER\s+BY\b|\bLIMIT\b|;|\s*$)', sql, re.IGNORECASE)
+    if not having_match:
+        return sql
+
+    having_clause = having_match.group(1).strip()
+
+    # Kiểm tra xem SELECT đã có hàm gộp (aggregate) chưa
+    select_match = re.search(r'\bSELECT\b([\s\S]+?)\bFROM\b', sql, re.IGNORECASE)
+    if not select_match:
+        return sql
+
+    select_clause = select_match.group(1).strip()
+    has_agg_in_select = bool(re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\s*\(', select_clause, re.IGNORECASE))
+    if has_agg_in_select:
+        return sql
+
+    # Trích xuất aggregate expression từ HAVING
+    agg_match = re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\s*\([^)]+\)', having_clause, re.IGNORECASE)
+    if not agg_match:
+        return sql
+
+    agg_expr = agg_match.group(0).strip()
+    agg_low = agg_expr.lower()
+
+    if 'amount' in agg_low:
+        alias = 'TotalSales'
+    elif 'boxes' in agg_low:
+        alias = 'TotalBoxesSold'
+    elif 'salary' in agg_low:
+        alias = 'AvgSalary' if 'avg' in agg_low else 'TotalSalary'
+    elif 'count' in agg_low:
+        alias = 'TotalCount'
+    else:
+        alias = 'MetricValue'
+
+    metric_col_str = f"{agg_expr} AS {alias}"
+
+    # Bổ sung metric vào SELECT
+    new_select_clause = f"{select_clause}, {metric_col_str}"
+    sql = sql[:select_match.start(1)] + " " + new_select_clause + " " + sql[select_match.end(1):]
+
+    # Cập nhật ORDER BY
+    if re.search(r'\bORDER\s+BY\b', sql, re.IGNORECASE):
+        sql = re.sub(r'\bORDER\s+BY\s+[^;]+(?=\bLIMIT\b|;|\s*$)', f'ORDER BY {alias} DESC ', sql, flags=re.IGNORECASE)
+    else:
+        if re.search(r'\bLIMIT\b', sql, re.IGNORECASE):
+            sql = re.sub(r'\bLIMIT\b', f'ORDER BY {alias} DESC LIMIT', sql, flags=re.IGNORECASE)
+        else:
+            sql = sql.rstrip(';').strip() + f' ORDER BY {alias} DESC'
+
+    # Gỡ bỏ LIMIT nếu người dùng không yêu cầu Top N
+    q_low = (user_query or '').lower()
+    has_top_n = bool(re.search(r'\b(?:top|danh\s+sách|lấy|cho\s+tôi)\s*(\d+)\b', q_low, re.IGNORECASE))
+    if not has_top_n:
+        sql = re.sub(r'\s+LIMIT\s+\d+\s*;?$', '', sql, flags=re.IGNORECASE)
+
+    return sql.strip()
+
+
 def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và đảm bảo câu truy vấn bảng xếp hạng Top N (Nhân viên, Sản phẩm, Quốc gia, Đội ngũ)
     trên CSDL Awesome Chocolates luôn trả về dữ liệu chuẩn xác 100%, đúng bảng và đúng cú pháp lọc năm."""
@@ -1647,6 +1814,11 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
         and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền", "tháng", "quý"])
     )
     if is_headcount_q:
+        return sql
+
+    # Không can thiệp nếu là câu hỏi lọc theo điều kiện ngưỡng (đã có auto_fix_chocolates_threshold_query xử lý)
+    has_threshold_filter = any(k in q_low for k in ["vượt", "trên", "dưới", "cao hơn", "lớn hơn", "thấp hơn", "nhỏ hơn", "nhiều hơn", "ít hơn", "từ", "ít nhất", "tối thiểu", "tối đa", ">", "<", ">=", "<="]) and any(char.isdigit() for char in q_low)
+    if has_threshold_filter:
         return sql
 
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate"])
@@ -2207,7 +2379,9 @@ def run_agent(
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_headcount_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_threshold_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_missing_metric_in_having_query(sql_query, user_query)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
@@ -2238,7 +2412,9 @@ def run_agent(
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_headcount_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_chocolates_threshold_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_missing_metric_in_having_query(sql_query, user_query)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
