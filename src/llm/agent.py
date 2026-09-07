@@ -1566,6 +1566,55 @@ LIMIT {req_limit}"""
     return sql
 
 
+def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa câu truy vấn đếm số lượng nhân viên bán hàng (Headcount)
+    theo từng Đội ngũ (Team) hoặc Khu vực (Location) trên CSDL Awesome Chocolates.
+    Ngăn chặn tuyệt đối việc tính nhầm sang SUM(Boxes) hay SUM(Amount) từ bảng sales."""
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    # Nhận diện câu hỏi về đếm số lượng nhân viên / headcount / quy mô nhân sự
+    is_headcount = (
+        any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "sales person", "người bán", "sales rep", "sales reps"])
+        and any(k in q_low for k in ["số lượng", "quy mô", "bao nhiêu", "đếm", "phân bổ", "cơ cấu", "phân chia", "mỗi team có", "từng team có", "từng đội có"])
+    )
+    # Nếu câu hỏi hỏi về doanh số, doanh thu, tiền bán thì không can thiệp
+    if not is_headcount or any(k in q_low for k in ["doanh số", "doanh thu", "tiền bán", "bán được bao nhiêu tiền", "doanh thu bao nhiêu", "tháng", "quý"]):
+        return sql
+
+    is_chocolates = (
+        any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"])
+        or any(k in q_low for k in ["team", "đội ngũ", "kẹo", "chocolate", "chocolates", "hộp kẹo", "nhân viên", "salesperson"])
+    )
+    if not is_chocolates:
+        return sql
+
+    # Phân biệt nhóm theo Location hay theo Team
+    is_location = any(k in q_low for k in ["khu vực", "địa điểm", "location", "vị trí", "thành phố", "city"]) and not any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm"])
+
+    if is_location:
+        return (
+            "SELECT\n"
+            "    COALESCE(NULLIF(pe.Location, ''), '(Chưa xác định)') AS Location,\n"
+            "    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`\n"
+            "FROM people pe\n"
+            "GROUP BY Location\n"
+            "ORDER BY `Số Lượng Nhân Viên` DESC;"
+        )
+    else:
+        return (
+            "SELECT\n"
+            "    COALESCE(NULLIF(pe.Team, ''), '(Chưa phân nhóm)') AS Team,\n"
+            "    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`\n"
+            "FROM people pe\n"
+            "GROUP BY Team\n"
+            "ORDER BY `Số Lượng Nhân Viên` DESC;"
+        )
+
+
 def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và đảm bảo câu truy vấn bảng xếp hạng Top N (Nhân viên, Sản phẩm, Quốc gia, Đội ngũ)
     trên CSDL Awesome Chocolates luôn trả về dữ liệu chuẩn xác 100%, đúng bảng và đúng cú pháp lọc năm."""
@@ -1591,6 +1640,15 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     ]):
         return sql
 
+    # Không can thiệp nếu là câu hỏi đếm số lượng nhân sự / headcount (đã có auto_fix_sales_headcount_query xử lý từ bảng people)
+    is_headcount_q = (
+        any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "sales person", "người bán", "sales rep", "sales reps"])
+        and any(k in q_low for k in ["số lượng", "quy mô", "bao nhiêu", "đếm", "phân bổ", "cơ cấu", "phân chia", "mỗi team có", "từng team có", "từng đội có"])
+        and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền", "tháng", "quý"])
+    )
+    if is_headcount_q:
+        return sql
+
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate"])
     if not is_chocolates:
         return sql
@@ -1605,7 +1663,11 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
         year_clause = f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {year_val}"
 
     # Xác định chỉ số đo lường: Hộp/Thùng (Boxes) hay Doanh số (Sales Amount)
-    has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"]) or any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
+    has_boxes = (
+        any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"])
+        or (any(k in q_low for k in ["số lượng", "so luong"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "người bán", "khách hàng", "customer"]))
+        or any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
+    )
     metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
     order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
 
@@ -2144,6 +2206,7 @@ def run_agent(
         sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_sales_headcount_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
@@ -2174,6 +2237,7 @@ def run_agent(
         sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
+        sql_query = auto_fix_sales_headcount_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)

@@ -6,8 +6,9 @@ full category display (no skipped months), and straight horizontal ticks.
 
 import re
 import streamlit as st
-import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from src.config import MAX_BAR_CATEGORIES, INDIVIDUAL_ENTITY_REGEX
 from src.analytics.heuristics import (
@@ -131,6 +132,13 @@ VI_COLUMN_MAP = {
     "salesperson": "Nhân Viên Kinh Doanh",
     "team": "Đội Ngũ",
     "location": "Vị Trí/Khu Vực",
+    "soluongnhanvien": "Số Lượng Nhân Viên",
+    "slngnhnvin": "Số Lượng Nhân Viên",
+    "soluongnhansu": "Số Lượng Nhân Sự",
+    "quymonhansu": "Quy Mô Nhân Sự",
+    "headcount": "Số Lượng Nhân Sự",
+    "totalemployees": "Tổng Số Nhân Viên",
+    "total_employees": "Tổng Số Nhân Viên",
     "saledate": "Ngày Bán",
     "sale_date": "Ngày Bán",
     "date": "Ngày",
@@ -145,11 +153,15 @@ def format_col_title(col_name: str) -> str:
     """Chuyển đổi tên cột kỹ thuật (e.g. YearsOfService, FullName) sang tên tiếng Việt dễ hiểu cho người dùng."""
     if not col_name:
         return ""
-    norm = re.sub(r"[^a-zA-Z0-9]", "", str(col_name)).lower()
+    col_str = str(col_name).strip()
+    # Nếu tên cột đã có dấu tiếng Việt chuẩn xác (e.g. 'Số Lượng Nhân Viên', 'Đội Ngũ') -> giữ nguyên
+    if any(c in col_str for c in "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựíìỉĩịđýỳỷỹỵÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÍÌỈĨỊĐÝỲỶỸỴ"):
+        return col_str
+    norm = re.sub(r"[^a-zA-Z0-9]", "", col_str).lower()
     if norm in VI_COLUMN_MAP:
         return VI_COLUMN_MAP[norm]
     # Fallback to readable title case
-    clean = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(col_name)).replace("_", " ").strip().title()
+    clean = re.sub(r"([a-z])([A-Z])", r"\1 \2", col_str).replace("_", " ").strip().title()
     return clean
 
 
@@ -541,17 +553,78 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         is_margin_focus = any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"])
                         is_box_focus = any(k in uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng"]) and not is_margin_focus
                         
-                        if is_margin_focus and has_pct_eff:
+                        if has_pct_eff and has_non_pct_eff:
+                            # Biểu đồ 2 trục Y (Dual Axis Combo Chart): Bar cho % và Line cho $
+                            pct_col = has_pct_eff[0]
+                            non_pct_col = has_non_pct_eff[0]
+
+                            if total_rows > 30:
+                                max_display = st.slider(
+                                    f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng: {total_rows:,})",
+                                    min_value=min(10, total_rows),
+                                    max_value=total_rows,
+                                    value=min(total_rows, MAX_BAR_CATEGORIES),
+                                    step=5 if total_rows <= 100 else 10,
+                                    key=f"bar_limit_{turn_id}"
+                                )
+                                plot_df = plot_df.head(max_display)
+
+                            max_label_len = max((len(str(v)) for v in plot_df[label_name]), default=0)
+                            tick_angle = -35 if (max_label_len > 8 or len(plot_df) > 8) else 0
+
+                            fig = make_subplots(specs=[[{"secondary_y": True}]])
+                            fig.add_trace(
+                                go.Bar(
+                                    x=plot_df[label_name],
+                                    y=plot_df[pct_col],
+                                    name=format_col_title(pct_col),
+                                    marker_color="#1E40AF",
+                                    text=plot_df[pct_col],
+                                    texttemplate="%{text:,.2f}%",
+                                    textposition="outside",
+                                ),
+                                secondary_y=False,
+                            )
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=plot_df[label_name],
+                                    y=plot_df[non_pct_col],
+                                    name=format_col_title(non_pct_col),
+                                    mode="lines+markers+text",
+                                    marker=dict(size=8, color="#D97706"),
+                                    line=dict(width=3, color="#D97706"),
+                                    text=plot_df[non_pct_col],
+                                    texttemplate="$%{text:,.2f}",
+                                    textposition="top center",
+                                ),
+                                secondary_y=True,
+                            )
+                            try:
+                                max_pct = float(pd.to_numeric(plot_df[pct_col], errors="coerce").max() or 100)
+                            except Exception:
+                                max_pct = 100.0
+                            try:
+                                max_non_pct = float(pd.to_numeric(plot_df[non_pct_col], errors="coerce").max() or 10)
+                            except Exception:
+                                max_non_pct = 10.0
+
+                            fig.update_layout(
+                                title=f"Biểu đồ Kết Hợp (Dual Axis): {format_col_title(pct_col)} & {format_col_title(non_pct_col)} theo {format_col_title(label_name)}",
+                                template="plotly_white",
+                                xaxis=dict(type="category", tickangle=tick_angle, automargin=True, title=format_col_title(label_name)),
+                                yaxis=dict(title=format_col_title(pct_col), ticksuffix="%", range=[0, max(100.0, max_pct * 1.25)]),
+                                yaxis2=dict(title=format_col_title(non_pct_col), tickprefix="$", range=[0, max_non_pct * 1.3], showgrid=False),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                                margin=dict(l=40, r=40, t=60, b=90 if tick_angle != 0 else 50)
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            return fig
+                        elif is_margin_focus and has_pct_eff:
                             active_measures = [has_pct_eff[0]]
                             chart_title = f"{format_col_title(has_pct_eff[0])} theo {format_col_title(label_name)}"
                         elif is_box_focus and has_non_pct_eff:
                             active_measures = [has_non_pct_eff[0]]
                             chart_title = f"{format_col_title(has_non_pct_eff[0])} theo {format_col_title(label_name)}"
-                        elif has_pct_eff and has_non_pct_eff:
-                            # Khác biệt đơn vị (% vs $) -> không vẽ chung trục, chọn chỉ số khớp nhất
-                            primary_eff = has_pct_eff[0] if is_margin_focus else (has_non_pct_eff[0] if is_box_focus else eff_cols[0])
-                            active_measures = [primary_eff]
-                            chart_title = f"{format_col_title(primary_eff)} theo {format_col_title(label_name)}"
                         else:
                             active_measures = eff_cols
                             chart_title = f"So sánh Hiệu quả ({', '.join([format_col_title(c) for c in eff_cols])}) theo {format_col_title(label_name)}"
@@ -835,7 +908,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     m_lower = str(measure_cols[0]).lower()
                     is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
                     is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu"])
-                    is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "người", "count", "số lượng", "so_luong"])
+                    is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "nhân sự", "nhan_su", "người", "nguoi", "count", "số lượng", "so_luong", "slngnhnvin", "totalemployees"]) and not is_years and not is_salary
 
                     curr_sym = "$" if is_salary else ""
                     clean_m = format_col_title(measure_cols[0])
@@ -969,11 +1042,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     else:
                         dyn_title = f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {format_col_title(color_col)})" if color_col else "")
 
+                    yaxis_title_str = f"{clean_m} (Người)" if (is_headcount and "người" not in clean_m.lower()) else clean_m
                     layout_updates = dict(
                         title=dyn_title,
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
                         xaxis_title=clean_lbl,
-                        yaxis_title=clean_m,
+                        yaxis_title=yaxis_title_str,
                         margin=dict(l=40, r=25, t=50, b=90 if tick_angle != 0 else 50)
                     )
                     if color_col:

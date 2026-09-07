@@ -330,6 +330,16 @@ def get_db_specific_rules(schema_context: str) -> str:
        * Cột: `SPID` (liên kết pe.SPID), `PID` (liên kết pr.PID), `GeoID` (liên kết g.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
      + QUY TẮC BÍ DANH (ALIAS) TUYỆT ĐỐI KHÔNG TRÙNG NHAU:
        * Luôn dùng: `pe` cho people, `pr` cho products, `s` cho sales, `g` cho geo.
+      + MẪU CHUẨN SỐ LƯỢNG NHÂN VIÊN BÁN HÀNG / HEADCOUNT THEO TEAM HOẶC LOCATION:
+        * Khi hỏi 'Số lượng nhân viên bán hàng', 'nhân sự', 'headcount', 'quy mô nhân sự', 'đếm nhân viên' theo từng Đội ngũ (Team) hoặc Khu vực (Location):
+          TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) hay SUM(Amount)!
+          BẮT BUỘC TRUY VẤN TRỰC TIẾP TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID):
+          SELECT 
+              COALESCE(NULLIF(pe.Team, ''), '(Chưa phân nhóm)') AS Team,
+              COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`
+          FROM people pe
+          GROUP BY Team
+          ORDER BY `Số Lượng Nhân Viên` DESC;
      + MẪU CHUẨN TOP NHÂN SỰ:
        SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
        FROM people pe
@@ -447,6 +457,43 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     # 0. CSDL Awesome Chocolates - Doanh thu theo thời gian / tháng & Tỷ lệ đóng góp
     is_choco_context = any(k in schema_low for k in ["geo", "products", "sales", "spid", "geoid", "boxes"]) or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo", "hộp", "thùng", "sản phẩm", "bán hàng", "doanh số", "doanh thu", "sales"])
     if is_choco_context or (any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
+        # 0.00 Số lượng nhân viên bán hàng / Headcount theo từng Đội ngũ (Team) hoặc Khu vực (Location)
+        is_headcount_q = (
+            any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "sales person", "người bán", "sales rep", "sales reps"])
+            and any(k in q_low for k in ["số lượng", "quy mô", "bao nhiêu", "đếm", "phân bổ", "cơ cấu", "phân chia", "mỗi team có", "từng team có", "từng đội có"])
+            and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền bán", "bán được bao nhiêu tiền", "doanh thu bao nhiêu", "tháng", "quý"])
+        )
+        if is_headcount_q:
+            group_by_loc = any(k in q_low for k in ["khu vực", "địa điểm", "location", "vị trí", "thành phố", "city"]) and not any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm"])
+            if group_by_loc:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN THEO TỪNG KHU VỰC / LOCATION):
+SELECT 
+    COALESCE(NULLIF(pe.Location, ''), '(Chưa xác định)') AS Location,
+    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`
+FROM people pe
+GROUP BY Location
+ORDER BY `Số Lượng Nhân Viên` DESC;
+(CẢNH BÁO BẮT BUỘC: 
+1. TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) HAY SUM(Amount)!
+2. BẮT BUỘC TRUY VẤN TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`!
+3. Nhóm theo Location và ORDER BY `Số Lượng Nhân Viên` DESC!)
+"""
+            else:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN BÁN HÀNG PHÂN BỔ THEO TỪNG TEAM / ĐỘI NGŨ):
+SELECT 
+    COALESCE(NULLIF(pe.Team, ''), '(Chưa phân nhóm)') AS Team,
+    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`
+FROM people pe
+GROUP BY Team
+ORDER BY `Số Lượng Nhân Viên` DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) HAY SUM(Amount)!
+2. BẮT BUỘC TRUY VẤN TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`!
+3. Nhóm theo Team và ORDER BY `Số Lượng Nhân Viên` DESC!)
+"""
+
         # 0.01 Tỷ lệ đóng góp doanh thu theo nhóm sản phẩm (Category)
         if any(k in q_low for k in ["category", "nhóm sản phẩm", "nhóm hàng", "danh mục"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)

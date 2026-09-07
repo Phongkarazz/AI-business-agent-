@@ -517,8 +517,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Lương Trung Bình"
             elif "salary" in m_low or "lương" in m_low:
                 m_clean = "Mức Lương"
-            elif any(k in m_low for k in ["headcount", "head count", "totalemployees", "total employees", "emp count", "empcount", "employee count", "employeecount", "số lượng nhân sự", "quy mô nhân sự"]):
-                m_clean = "Quy Mô Nhân Sự"
+            elif any(k in m_low for k in ["headcount", "head count", "totalemployees", "total employees", "emp count", "empcount", "employee count", "employeecount", "số lượng nhân sự", "quy mô nhân sự", "số lượng nhân viên", "slngnhnvin", "soluongnhanvien"]):
+                m_clean = "Số Lượng Nhân Viên"
             elif any(k in m_low for k in ["totalmanagers", "total managers", "quản lý"]):
                 m_clean = "Số Lượng Quản Lý"
             elif any(k in m_low for k in ["years as manager", "yearsasmanager", "manager tenure", "managertenure", "manager years", "manageryears"]):
@@ -854,6 +854,15 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 total_val = valid_vals.sum()
                 fmt_total = _fmt_kpi_val(total_val)
 
+                is_hc_measure = any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "hires", "tuyển dụng", "quy mô", "slngnhnvin", "totalemployees"]) and not is_currency
+                if is_hc_measure:
+                    fmt_total = f"{int(total_val):,} Người"
+                    dim_first = str(label_cols[0] if label_cols else "").lower()
+                    fmt_avg = f"{avg_val:.1f} Người/Đội" if any(k in dim_first for k in ["team", "đội"]) else f"{avg_val:.1f} Người"
+                    peak_delta_val = f"{int(peak_val):,} Người"
+                else:
+                    peak_delta_val = f"{fmt_peak}"
+
                 # Tránh lặp từ "Tổng Total ..."
                 prefix = "Tổng " if not is_en else "Total "
                 if m_clean.lower().startswith("total ") or m_clean.lower().startswith("tổng ") or m_clean.lower().startswith("số lượng "):
@@ -866,7 +875,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     card_icon = "💰 "
                 elif any(k in m_low for k in ["manager", "quản lý", "trưởng phòng"]):
                     card_icon = "👔 "
-                elif any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "hires", "tuyển dụng", "quy mô"]):
+                elif any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "hires", "tuyển dụng", "quy mô", "slngnhnvin"]):
                     card_icon = "👥 "
                 elif any(k in m_low for k in ["raisecount", "lần tăng", "raise"]):
                     card_icon = "📈 "
@@ -889,7 +898,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     with col3:
                         st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
                     with col4:
-                        st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
+                        st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=peak_delta_val)
                 else:
                     with col1:
                         if is_top_query and total_rows <= 30:
@@ -897,6 +906,12 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                             _dim_low = str(_dim_col).lower()
                             if any(k in _dim_low for k in ["dept", "phòng", "department"]):
                                 _entity_top = " Phòng ban" if not is_en else " Departments"
+                            elif any(k in _dim_low for k in ["team", "đội ngũ", "đội"]):
+                                _entity_top = " Đội ngũ" if not is_en else " Teams"
+                            elif any(k in _dim_low for k in ["country", "geo", "quốc gia", "thị trường"]):
+                                _entity_top = " Quốc gia" if not is_en else " Countries"
+                            elif any(k in _dim_low for k in ["product", "sản phẩm"]):
+                                _entity_top = " Sản phẩm" if not is_en else " Products"
                             elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
                                 _entity_top = " Chức danh" if not is_en else " Job Titles"
                             elif any(k in _dim_low for k in ["manager", "quản lý"]):
@@ -912,6 +927,15 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                             if any(k in _dim_low for k in ["dept", "phòng", "department"]):
                                 _card1_title = "🏢 " + ("Số phòng ban" if not is_en else "Departments")
                                 _card1_val = f"{total_rows} Phòng"
+                            elif any(k in _dim_low for k in ["team", "đội ngũ", "đội"]):
+                                _card1_title = "👥 " + ("Số đội ngũ" if not is_en else "Teams")
+                                _card1_val = f"{total_rows} Đội ngũ"
+                            elif any(k in _dim_low for k in ["country", "geo", "quốc gia", "thị trường"]):
+                                _card1_title = "🌍 " + ("Số thị trường" if not is_en else "Markets")
+                                _card1_val = f"{total_rows} Quốc gia"
+                            elif any(k in _dim_low for k in ["product", "sản phẩm"]):
+                                _card1_title = "🍫 " + ("Số sản phẩm" if not is_en else "Products")
+                                _card1_val = f"{total_rows} Sản phẩm"
                             elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
                                 _card1_title = "💼 " + ("Số chức danh" if not is_en else "Job Titles")
                                 _card1_val = f"{total_rows} Chức danh"
@@ -930,7 +954,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     with col3:
                         st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
                     with col4:
-                        st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=f"{fmt_peak}")
+                        peak_title = "🏆 " + ("Đội lớn nhất" if (is_hc_measure and any(k in str(label_cols[0] if label_cols else "").lower() for k in ["team", "đội"])) else ("Đỉnh cao nhất" if not is_en else "Peak Record"))
+                        st.metric(peak_title, peak_label, delta=peak_delta_val)
             st.write("")
 
     elif total_rows == 1 and measure_cols:
@@ -1084,17 +1109,11 @@ def render_result(result: dict, turn_id: str):
                     format="%.2f%%"
                 )
             elif any(k in c_low for k in ["salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales", "amount", "profit", "ordervalue"]):
-                has_decimals = False
-                try:
-                    numeric_vals = pd.to_numeric(display_df[col], errors="coerce").dropna()
-                    has_decimals = any(not float(v).is_integer() for v in numeric_vals)
-                except Exception:
-                    pass
                 column_config[col] = st.column_config.NumberColumn(
                     col_label,
-                    format="$%,.2f" if has_decimals else "$%,d"
+                    format="dollar"
                 )
-            elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp"]):
+            elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
                 column_config[col] = st.column_config.NumberColumn(
                     col_label,
                     format="%,d"

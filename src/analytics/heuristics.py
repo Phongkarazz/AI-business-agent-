@@ -1274,6 +1274,23 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                     h2 = f"• **Cơ cấu Định biên Cấp bậc & Ngân sách Vận hành**: Chênh lệch {spread_pct:.1f}% ({spread_diff:,.2f}) so với **{bot_name}** ({bot_v:,.2f}) phản ánh sự khác biệt về tỷ lệ nhân sự cao cấp (senior) và giới hạn trần ngân sách được phê duyệt giữa các đơn vị."
                 return f"{h1}\n\n{h2}"
 
+            # 3C2. Phân bổ nhân sự theo Team / Khu vực (Sales Team Headcount Distribution)
+            is_team_headcount = (
+                any(k in cols_str for k in ["team", "đội ngũ", "location", "khu vực"])
+                and any(k in cols_str for k in ["số lượng nhân viên", "slngnhnvin", "headcount", "totalemployees", "nhân sự", "nhân viên"])
+            ) or (
+                any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson"])
+                and any(k in q_low for k in ["team", "đội ngũ", "phân bổ", "đội"])
+            )
+            if is_team_headcount:
+                if is_en:
+                    h1 = f"• **Salesforce Distribution & Team Scale**: **{top_name}** maintains the largest headcount with {top_v:,.0f} sales professionals, positioning it as the primary frontline team driving account coverage."
+                    h2 = f"• **Workforce Allocation & Onboarding Gap**: The spread against **{bot_name}** ({bot_v:,.0f} reps) outlines differing regional workload demands and highlights an opportunity to reassign unallocated personnel to high-growth squads."
+                else:
+                    h1 = f"• **Quy mô Lực lượng & Phân bổ Đội ngũ Kinh doanh**: Đội ngũ **{top_name}** sở hữu quy mô nhân sự lớn nhất với {top_v:,.0f} nhân viên kinh doanh, đóng vai trò mũi nhọn chủ lực phụ trách mạng lưới khách hàng trọng yếu."
+                    h2 = f"• **Cân đối Định biên & Chuẩn hóa Phân bổ Nhóm**: Khoảng cách so với nhóm **{bot_name}** ({bot_v:,.0f} nhân sự) phản ánh sự phân bố theo quy mô thị trường mục tiêu, đồng thời mở ra cơ hội rà soát và phân nhóm rõ ràng cho các nhân viên chưa được xếp đội để tối ưu hóa năng suất bán hàng."
+                return f"{h1}\n\n{h2}"
+
             # 3D. Tỷ lệ đóng góp / Cơ cấu tỷ trọng (Contribution / Ratio / Share)
             is_contribution = any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "cơ cấu", "đóng góp", "share", "ratio"])
             if is_contribution:
@@ -1363,6 +1380,7 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False) ->
     cols_str = " ".join(str(c).lower() for c in cols)
     is_time_series = any(k in cols_str for k in ["year", "month", "date", "năm", "tháng", "ngày", "hire", "hiredate", "hireyear"])
     is_salary = any(k in cols_str for k in ["salary", "lương", "wage", "pay", "thu_nhập", "raisecount", "raise"])
+    is_headcount = any(k in cols_str for k in ["headcount", "nhân viên", "nhân sự", "slngnhnvin", "totalemployees"]) and not is_salary
 
     if is_en:
         if is_time_series:
@@ -1373,6 +1391,10 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False) ->
             urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({top_name}: {top_val:,.0f} USD vs {bot_name}: {bot_val:,.0f} USD, spread {spread_pct:.1f}%); curb flight risk among key talent."
             medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands against the median baseline of {median_val:,.0f} USD; rebalance department budget pools for internal equity."
             longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions."
+        elif is_headcount:
+            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Finalize team allocation for {bot_name} ({bot_val:,.0f} reps); align quarterly sales quotas with squad capacity led by {top_name} ({top_val:,.0f} reps)."
+            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize team sizes around {mean_val:.1f} reps per squad; conduct uniform enablement training to lift mid-tier rep productivity."
+            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Build dynamic territory rebalancing models and implement AI sales coaching tools to maximize sales output per representative."
         else:
             urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Allocate focused resources to protect and scale the market leader {top_name} ({top_val:,.0f}), while remediating underperformance in {bot_name} ({bot_val:,.0f})."
             medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Realign portfolio performance targets around the group average of {mean_val:,.0f}; institutionalize leading practices across all units."
@@ -1386,6 +1408,10 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False) ->
             urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát khung đãi ngộ tại nhóm có chênh lệch lớn nhất ({top_name} đạt {top_val:,.0f} USD so với {bot_name} là {bot_val:,.0f} USD, chênh lệch {spread_pct:.1f}%); ngăn chặn rủi ro chảy máu chất xám ở vị trí chủ chốt."
             medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Thiết lập cơ chế đánh giá năng lực gắn liền với mức trung vị tham chiếu {median_val:,.0f} USD; tái cân bằng quỹ lương giữa các khối để đảm bảo công bằng nội bộ."
             longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp lương cạnh tranh và lộ trình thăng tiến minh bạch để thu hút nhân tài cấp cao."
+        elif is_headcount:
+            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát danh sách {bot_name} ({bot_val:,.0f} nhân sự) để hoàn tất việc phân bổ đội ngũ chính thức; cân đối chỉ tiêu doanh số phù hợp với quy mô lực lượng bán hàng của từng team (dẫn đầu là {top_name}: {top_val:,.0f} nhân viên)."
+            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa định biên nhân sự quanh mức trung bình {mean_val:.1f} nhân viên/đội; triển khai chương trình đào tạo kỹ năng bán hàng đồng bộ nhằm thu hẹp khoảng cách năng suất."
+            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Thiết lập cơ chế luân chuyển nhân sự linh hoạt theo mùa vụ và tiềm năng thị trường; ứng dụng hệ thống CRM/AI phân tích hiệu suất cá nhân để tối đa hóa doanh thu trên mỗi đại diện kinh doanh."
         else:
             urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tập trung nguồn lực bảo vệ và mở rộng vị thế dẫn đầu của {top_name} ({top_val:,.0f}), đồng thời đánh giá nguyên nhân kém hiệu quả tại nhóm {bot_name} ({bot_val:,.0f})."
             medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tái cấu trúc quy trình phân bổ nguồn lực dựa trên mức trung bình {mean_val:,.0f}; nhân rộng kinh nghiệm thành công của nhóm dẫn đầu sang toàn hệ thống."
