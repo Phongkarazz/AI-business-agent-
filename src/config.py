@@ -27,8 +27,8 @@ FORBIDDEN_KEYWORDS = [
 # ---------------------------------------------------------
 # Column Classification Keywords and Regex
 # ---------------------------------------------------------
-TIME_KEYWORDS = ["date", "month", "thang", "quy", "quarter", "nam", "year"]
-BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "quy", "quarter"]
+TIME_KEYWORDS = ["date", "month", "thang", "tháng", "quy", "quý", "quarter", "nam", "năm", "year", "ngày", "ngay", "thời gian", "thoi gian"]
+BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "tháng", "quy", "quý", "quarter"]
 
 # ID-like column pattern (excluded from statistical Y-axes and forecasting)
 ID_LIKE_REGEX = re.compile(r'(^|_)(id|no|code|key|num|sn)$', re.IGNORECASE)

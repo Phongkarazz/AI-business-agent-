@@ -5,6 +5,7 @@ full category display (no skipped months), and straight horizontal ticks.
 """
 
 import re
+import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
@@ -325,14 +326,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     m_c = measure_cols[0]
                     yoy_series = sorted_df[m_c].pct_change() * 100.0
                     m_low = str(m_c).lower()
-                    is_sal = any(k in m_low for k in ["salary", "budget", "lương", "quỹ", "tiền"])
-                    curr_sym = "$" if is_sal else ""
+                    is_curr = any(k in m_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$"])
+                    is_monthly = any(k in str(time_col).lower() for k in ["month", "tháng"]) or any(re.match(r"^\d{4}-\d{2}$", str(x)) for x in sorted_df[time_col].dropna().head(3))
+                    growth_label = "MoM" if is_monthly else "YoY"
                     hover_texts = []
                     for idx, (_, row) in enumerate(sorted_df.iterrows()):
                         val = float(row[m_c])
                         yoy_val = yoy_series.iloc[idx]
-                        yoy_str = f" ({yoy_val:+.1f}% YoY)" if pd.notna(yoy_val) else " (Khởi đầu)"
-                        if is_sal:
+                        yoy_str = f" ({yoy_val:+.1f}% {growth_label})" if pd.notna(yoy_val) else " (Khởi đầu)"
+                        if is_curr:
                             if abs(val) >= 1_000_000_000:
                                 fmt_compact = f"${val / 1e9:,.2f} Tỷ"
                             elif abs(val) >= 1_000_000:

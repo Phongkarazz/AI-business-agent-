@@ -649,9 +649,9 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                                    "department", "gender", "title", "empno", "emp_no"}
             _exclude_keywords = _auxiliary_date_keywords | _name_like_keywords
             # Từ khoá thời gian dài (an toàn cho substring match)
-            _time_long_keywords = ["year", "thang", "month", "quarter", "date"]
+            _time_long_keywords = ["year", "thang", "tháng", "month", "quarter", "date", "thời gian", "thoi gian", "ngày"]
             # Từ khoá thời gian ngắn (cần exact match hoặc word-boundary để tránh false positive)
-            _time_exact_keywords = {"nam", "quy"}
+            _time_exact_keywords = {"nam", "năm", "quy", "quý"}
             is_time_dim = False
             for c in dim_cols:
                 c_lower = str(c).lower().replace(" ", "")

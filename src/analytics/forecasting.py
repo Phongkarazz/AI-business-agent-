@@ -44,14 +44,14 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
 
     # Nhận diện nếu là cột Tháng số học (1 đến 12)
     is_month_num = (
-        ("month" in x_col_lower or "thang" in x_col_lower)
+        ("month" in x_col_lower or "thang" in x_col_lower or "tháng" in x_col_lower)
         and pd.api.types.is_numeric_dtype(df_sorted[x_col])
         and all(1 <= v <= 12 for v in raw_x_values if pd.notnull(v))
     )
 
     # Nhận diện nếu là cột Năm số học (VD: 2020, 2021, 2022)
     is_year_num = (
-        ("year" in x_col_lower or "nam" in x_col_lower)
+        ("year" in x_col_lower or "nam" in x_col_lower or "năm" in x_col_lower)
         and pd.api.types.is_numeric_dtype(df_sorted[x_col])
         and all(1900 <= v <= 2100 for v in raw_x_values if pd.notnull(v))
     )

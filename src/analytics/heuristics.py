@@ -122,7 +122,7 @@ def ensure_full_twelve_months(df: pd.DataFrame, user_query: str = "") -> pd.Data
         if c == month_col:
             continue
         c_low = str(c).strip().lower()
-        if any(k in c_low for k in ["year", "nam"]) and not any(k in c_low for k in ["service", "tenure", "experience"]):
+        if any(k in c_low for k in ["year", "nam", "năm"]) and not any(k in c_low for k in ["service", "tenure", "experience"]):
             vals_yr = pd.to_numeric(df[c], errors="coerce").dropna()
             if not vals_yr.empty and vals_yr.min() >= 1900 and vals_yr.max() <= 2100 and vals_yr.nunique() == 1:
                 year_col = c
@@ -485,7 +485,7 @@ def get_axis_columns(df: pd.DataFrame):
         if is_id_like(c):
             continue
         c_low = str(c).strip().lower()
-        if any(k in c_low for k in ["year", "hireyear", "nam"]) and not any(k in c_low for k in ["of_service", "service", "experience", "thâm_niên", "kinh_nghiệm"]):
+        if any(k in c_low for k in ["year", "hireyear", "nam", "năm"]) and not any(k in c_low for k in ["of_service", "service", "experience", "thâm_niên", "kinh_nghiệm", "thâm niên"]):
             vals = pd.to_numeric(df[c], errors="coerce").dropna()
             if not vals.empty and (vals.min() >= 1900 or (vals == 9999).all()):
                 continue
