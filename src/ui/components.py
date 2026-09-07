@@ -752,12 +752,46 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     st.metric("📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"), f"{period_display}" + (f" ({min_dim} – {max_dim})" if min_dim != max_dim else ""))
                 with col2:
                     st.metric("📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg, help=_fmt_kpi_val_full(avg_val))
+                time_c = None
+                for c in df.columns:
+                    if c != m_col and any(k in str(c).lower() for k in ["tháng", "thang", "month", "năm", "nam", "year", "quý", "quy", "quarter", "ngày", "date"]):
+                        time_c = c
+                        break
+
+                entity_col = None
+                for c in df.columns:
+                    if c != m_col and c != time_c and not pd.api.types.is_numeric_dtype(df[c]):
+                        entity_col = c
+                        break
+
+                if time_c and entity_col and max_idx in df.index:
+                    ent_p = str(df.loc[max_idx, entity_col]).strip()
+                    t_p = str(df.loc[max_idx, time_c]).strip()
+                    p_disp = f"{ent_p} - {t_p}" if ent_p != t_p else t_p
+                else:
+                    p_str = str(peak_label).strip()
+                    if p_str.lower().startswith(dim_unit.lower()) or len(p_str) == 4 or "-" in p_str:
+                        p_disp = p_str
+                    else:
+                        p_disp = f"{dim_unit} {p_str}"
+
+                if time_c and entity_col and min_idx in df.index:
+                    ent_m = str(df.loc[min_idx, entity_col]).strip()
+                    t_m = str(df.loc[min_idx, time_c]).strip()
+                    m_disp = f"{ent_m} - {t_m}" if ent_m != t_m else t_m
+                else:
+                    m_str = str(min_label).strip()
+                    if m_str.lower().startswith(dim_unit.lower()) or len(m_str) == 4 or "-" in m_str:
+                        m_disp = m_str
+                    else:
+                        m_disp = f"{dim_unit} {m_str}"
+
                 with col3:
                     delta_p = _fmt_kpi_val_full(peak_val) if fmt_peak != _fmt_kpi_val_full(peak_val) else None
-                    st.metric(f"🏆 " + (f"Đỉnh cao nhất ({dim_unit} {peak_label})" if not is_en else f"Peak ({peak_label})"), fmt_peak, delta=delta_p)
+                    st.metric(f"🏆 " + (f"Đỉnh cao nhất ({p_disp})" if not is_en else f"Peak ({p_disp})"), fmt_peak, delta=delta_p)
                 with col4:
                     delta_m = _fmt_kpi_val_full(min_val) if fmt_min != _fmt_kpi_val_full(min_val) else None
-                    st.metric(f"📉 " + (f"Thấp nhất ({dim_unit} {min_label})" if not is_en else f"Lowest ({min_label})"), fmt_min, delta=delta_m)
+                    st.metric(f"📉 " + (f"Thấp nhất ({m_disp})" if not is_en else f"Lowest ({m_disp})"), fmt_min, delta=delta_m)
 
                 # Kiểm tra năm 2002 có bị sụt giảm tự nhiên do dữ liệu ghi nhận 8 tháng không
                 if any(str(v) == "2002" for v in dim_vals):
@@ -869,6 +903,17 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
             else:
                 # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
+                _unassigned_keywords = ["(chưa phân nhóm)", "(unassigned)", "chưa phân nhóm", "unassigned", "(trống)", "none", "n/a", ""]
+                _dim_col = label_cols[0] if label_cols else "Department"
+                if _dim_col in df.columns:
+                    is_unassigned_mask = df[_dim_col].astype(str).str.strip().str.lower().isin(_unassigned_keywords)
+                else:
+                    is_unassigned_mask = pd.Series([False] * len(df), index=df.index)
+
+                has_unassigned = bool(is_unassigned_mask.any())
+                real_rows_count = int((~is_unassigned_mask).sum())
+                unassigned_measure_sum = float(valid_vals[is_unassigned_mask].sum()) if has_unassigned else 0
+
                 total_val = valid_vals.sum()
                 fmt_total = _fmt_kpi_val(total_val)
 
@@ -876,10 +921,31 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 if is_hc_measure:
                     fmt_total = f"{int(total_val):,} Người"
                     dim_first = str(label_cols[0] if label_cols else "").lower()
-                    fmt_avg = f"{avg_val:.1f} Người/Đội" if any(k in dim_first for k in ["team", "đội"]) else f"{avg_val:.1f} Người"
+                    if has_unassigned and real_rows_count > 0:
+                        real_team_vals = valid_vals[~is_unassigned_mask]
+                        real_avg = float(real_team_vals.mean()) if not real_team_vals.empty else avg_val
+                        fmt_avg = f"{real_avg:.1f} Người/Đội" if any(k in dim_first for k in ["team", "đội"]) else f"{real_avg:.1f} Người"
+                    else:
+                        fmt_avg = f"{avg_val:.1f} Người/Đội" if any(k in dim_first for k in ["team", "đội"]) else f"{avg_val:.1f} Người"
                     peak_delta_val = f"{int(peak_val):,} Người"
                 else:
+                    if has_unassigned and real_rows_count > 0:
+                        real_vals = valid_vals[~is_unassigned_mask]
+                        real_avg = float(real_vals.mean()) if not real_vals.empty else avg_val
+                        fmt_avg = _fmt_kpi_val(real_avg)
                     peak_delta_val = f"{fmt_peak}"
+
+                # Nếu đối tượng dẫn đầu vô tình là nhóm Chưa phân bổ, ưu tiên lấy đối tượng chính thức dẫn đầu
+                if has_unassigned and max_idx in is_unassigned_mask.index and is_unassigned_mask.loc[max_idx]:
+                    real_valid = valid_vals[~is_unassigned_mask]
+                    if not real_valid.empty:
+                        real_max_idx = real_valid.idxmax()
+                        peak_val = df.loc[real_max_idx, m_col]
+                        peak_label = str(label_series.loc[real_max_idx]) if (label_series is not None and real_max_idx in label_series.index) else str(df.loc[real_max_idx, label_cols[0]])
+                        if is_hc_measure:
+                            peak_delta_val = f"{int(peak_val):,} Người"
+                        else:
+                            peak_delta_val = _fmt_kpi_val(peak_val)
 
                 # Tránh lặp từ "Tổng Total ..."
                 prefix = "Tổng " if not is_en else "Total "
@@ -919,8 +985,10 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=peak_delta_val)
                 else:
                     with col1:
+                        display_rows_count = real_rows_count if (has_unassigned and real_rows_count > 0) else total_rows
+                        card1_delta = f"+ {int(unassigned_measure_sum):,} chưa phân đội" if (is_hc_measure and unassigned_measure_sum > 0) else (f"+ {int(unassigned_measure_sum):,} chưa phân loại" if (has_unassigned and unassigned_measure_sum > 0) else None)
+
                         if is_top_query and total_rows <= 30:
-                            _dim_col = label_cols[0] if label_cols else "Department"
                             _dim_low = str(_dim_col).lower()
                             if any(k in _dim_low for k in ["dept", "phòng", "department"]):
                                 _entity_top = " Phòng ban" if not is_en else " Departments"
@@ -938,35 +1006,34 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                                 _entity_top = " Nhân sự" if not is_en else " Employees"
                             else:
                                 _entity_top = ""
-                            st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {total_rows}{_entity_top}")
+                            st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {display_rows_count}{_entity_top}")
                         else:
-                            _dim_col = label_cols[0] if label_cols else "Department"
                             _dim_low = str(_dim_col).lower()
                             if any(k in _dim_low for k in ["dept", "phòng", "department"]):
                                 _card1_title = "🏢 " + ("Số phòng ban" if not is_en else "Departments")
-                                _card1_val = f"{total_rows} Phòng"
+                                _card1_val = f"{display_rows_count} Phòng"
                             elif any(k in _dim_low for k in ["team", "đội ngũ", "đội"]):
                                 _card1_title = "👥 " + ("Số đội ngũ" if not is_en else "Teams")
-                                _card1_val = f"{total_rows} Đội ngũ"
+                                _card1_val = f"{display_rows_count} Đội ngũ"
                             elif any(k in _dim_low for k in ["country", "geo", "quốc gia", "thị trường"]):
                                 _card1_title = "🌍 " + ("Số thị trường" if not is_en else "Markets")
-                                _card1_val = f"{total_rows} Quốc gia"
+                                _card1_val = f"{display_rows_count} Quốc gia"
                             elif any(k in _dim_low for k in ["product", "sản phẩm"]):
                                 _card1_title = "🍫 " + ("Số sản phẩm" if not is_en else "Products")
-                                _card1_val = f"{total_rows} Sản phẩm"
+                                _card1_val = f"{display_rows_count} Sản phẩm"
                             elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
                                 _card1_title = "💼 " + ("Số chức danh" if not is_en else "Job Titles")
-                                _card1_val = f"{total_rows} Chức danh"
+                                _card1_val = f"{display_rows_count} Chức danh"
                             elif any(k in _dim_low for k in ["year", "năm", "hireyear"]):
                                 _card1_title = "📅 " + ("Giai đoạn" if not is_en else "Period")
-                                _card1_val = f"{total_rows} Năm"
+                                _card1_val = f"{display_rows_count} Năm"
                             elif any(k in _dim_low for k in ["name", "tên", "employee", "nhân viên"]):
                                 _card1_title = "👥 " + ("Số nhân sự" if not is_en else "Employees")
-                                _card1_val = f"{total_rows:,} Người"
+                                _card1_val = f"{display_rows_count:,} Người"
                             else:
                                 _card1_title = "📋 " + ("Tổng số đối tượng" if not is_en else "Total Entities")
-                                _card1_val = f"{total_rows:,}"
-                            st.metric(_card1_title, _card1_val)
+                                _card1_val = f"{display_rows_count:,}"
+                            st.metric(_card1_title, _card1_val, delta=card1_delta)
                     with col2:
                         st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
                     with col3:
@@ -974,6 +1041,16 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     with col4:
                         peak_title = "🏆 " + ("Đội lớn nhất" if (is_hc_measure and any(k in str(label_cols[0] if label_cols else "").lower() for k in ["team", "đội"])) else ("Đỉnh cao nhất" if not is_en else "Peak Record"))
                         st.metric(peak_title, peak_label, delta=peak_delta_val)
+
+                    if has_unassigned and unassigned_measure_sum > 0:
+                        pct_unassigned = (unassigned_measure_sum / total_val * 100.0) if total_val > 0 else 0
+                        st.caption(
+                            f"ℹ️ **Lưu ý nhân sự**: Cơ sở dữ liệu ghi nhận có {int(unassigned_measure_sum):,} nhân sự ({pct_unassigned:.1f}%) "
+                            f"chưa được gán Đội ngũ (trường `Team` đang để trống trong bảng `people`)."
+                            if not is_en else
+                            f"ℹ️ **HR Note**: Database records show {int(unassigned_measure_sum):,} employees ({pct_unassigned:.1f}%) "
+                            f"currently unassigned to any business Team (field `Team` is blank in `people` table)."
+                        )
             st.write("")
 
     elif total_rows == 1 and measure_cols:
@@ -1119,22 +1196,44 @@ def render_result(result: dict, turn_id: str):
         for col in display_df.columns:
             c_low = str(col).lower()
             col_label = format_col_title(col) if not is_en else col
+            is_num = pd.api.types.is_numeric_dtype(display_df[col])
+
             if is_id_like(col):
                 column_config[col] = st.column_config.NumberColumn(col_label, format="%d")
-            elif any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin"]):
-                column_config[col] = st.column_config.NumberColumn(
-                    col_label,
-                    format="%.2f%%"
-                )
-            elif any(k in c_low for k in ["salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales", "amount", "profit", "ordervalue"]):
-                column_config[col] = st.column_config.NumberColumn(
-                    col_label,
-                    format="dollar"
-                )
+            elif any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỷ suất", "tỉ suất", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin", "biên", "%"]):
+                if is_num:
+                    column_config[col] = st.column_config.NumberColumn(
+                        col_label,
+                        format="%.2f%%"
+                    )
+                else:
+                    column_config[col] = st.column_config.Column(col_label)
+            elif any(k in c_low for k in [
+                "salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales",
+                "amount", "profit", "ordervalue", "doanh thu", "doanh số", "doanh", "lợi nhuận", "lãi", "lỗ",
+                "giá vốn", "cogs", "$"
+            ]):
+                if is_num:
+                    has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
+                    column_config[col] = st.column_config.NumberColumn(
+                        col_label,
+                        format="$%,.2f" if has_dec else "$%,.0f"
+                    )
+                else:
+                    column_config[col] = st.column_config.Column(col_label)
             elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
+                if is_num:
+                    column_config[col] = st.column_config.NumberColumn(
+                        col_label,
+                        format="%,d"
+                    )
+                else:
+                    column_config[col] = st.column_config.Column(col_label)
+            elif is_num:
+                has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
                 column_config[col] = st.column_config.NumberColumn(
                     col_label,
-                    format="%,d"
+                    format="%,.2f" if has_dec else "%,d"
                 )
             else:
                 column_config[col] = st.column_config.Column(col_label)

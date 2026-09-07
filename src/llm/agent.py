@@ -857,7 +857,14 @@ def auto_fix_chocolates_pnl_query(sql: str, user_query: str, dialect: str = "MyS
     if has_country and ("geo" not in sql_low and "quốc gia" not in sql_low and "country" not in sql_low):
         has_full_dims = False
 
-    needs_fix = not (has_cost and has_profit_calc and has_full_dims) or "with " in sql_low
+    has_standard_vi_aliases = (
+        ("tổng doanh thu" in sql_low or "doanh thu" in sql_low)
+        and ("tổng chi phí" in sql_low or "chi phí" in sql_low)
+        and ("lợi nhuận" in sql_low or "lãi" in sql_low)
+    )
+    has_weird_en_alias = any(k in sql_low for k in ["total_returns", "total returns", "packaging_cost", "packaging cost", "box_cost", "box cost"])
+
+    needs_fix = not (has_cost and has_profit_calc and has_full_dims and has_standard_vi_aliases and not has_weird_en_alias) or "with " in sql_low
     if not needs_fix:
         return sql
 

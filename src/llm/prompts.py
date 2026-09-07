@@ -740,8 +740,9 @@ JOIN geo g ON s.GeoID = g.GeoID
 ORDER BY {order_col};
 (CẢNH BÁO BẮT BUỘC: 
 1. BẮT BUỘC JOIN cả products pr VÀ geo g!
-2. BẮT BUỘC tính đủ: `Tổng Doanh Thu ($)`, `Tổng Chi Phí ($)`, `Lợi Nhuận ($)`, `Tỷ Suất Lợi Nhuận (%)`!
-3. {chart_tip})
+2. BẮT BUỘC tính đủ 4 chỉ số với đúng tên cột tiếng Việt: `Tổng Doanh Thu ($)`, `Tổng Chi Phí ($)`, `Lợi Nhuận ($)`, `Tỷ Suất Lợi Nhuận (%)`!
+3. TUYỆT ĐỐI KHÔNG dùng alias tiếng Anh kỳ lạ như Total Returns, Packaging Cost hay Boxes Cost!
+4. {chart_tip})
 """
             # 2. P&L theo Sản phẩm
             elif has_product:

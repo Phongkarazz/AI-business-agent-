@@ -136,6 +136,17 @@ VI_COLUMN_MAP = {
     "ty_suat_loi_nhuan": "Tỷ Suất Lợi Nhuận (%)",
     "tongdoanhthu": "Tổng Doanh Thu ($)",
     "tong_doanh_thu": "Tổng Doanh Thu ($)",
+    "totalreturns": "Tổng Doanh Thu ($)",
+    "total_returns": "Tổng Doanh Thu ($)",
+    "returns": "Tổng Doanh Thu ($)",
+    "packagingcost": "Tổng Chi Phí ($)",
+    "packaging_cost": "Tổng Chi Phí ($)",
+    "totalpackagingcost": "Tổng Chi Phí ($)",
+    "total_packaging_cost": "Tổng Chi Phí ($)",
+    "boxcost": "Tổng Chi Phí ($)",
+    "box_cost": "Tổng Chi Phí ($)",
+    "totalboxcost": "Tổng Chi Phí ($)",
+    "totalboxescost": "Tổng Chi Phí ($)",
     "cost_per_box": "Giá Vốn/Thùng ($)",
     "costperbox": "Giá Vốn/Thùng ($)",
     "profitmargin": "Tỷ Suất Lợi Nhuận (%)",
@@ -305,7 +316,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         time_color_col = candidate_col
 
         if chosen == "Line" and time_col and measure_cols:
-            sorted_df = df.sort_values(time_col)
+            sorted_df = df.sort_values([time_color_col, time_col]) if time_color_col else df.sort_values(time_col)
             n_time_points = sorted_df[time_col].nunique(dropna=True)
             tick_angle = 0 if n_time_points <= 20 else -45
 
@@ -371,6 +382,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     fig.update_traces(
                         line=dict(width=2.5),
                         marker=dict(size=7),
+                        connectgaps=True,
                         hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: %{{y:,.2f}}%<extra></extra>"
                     )
                 else:
@@ -378,6 +390,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     fig.update_traces(
                         line=dict(width=2.5),
                         marker=dict(size=7),
+                        connectgaps=True,
                         hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: {curr_sym}%{{y:,.0f}}<extra></extra>"
                     )
             else:
@@ -438,11 +451,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     tickangle=tick_angle,
                     automargin=True
                 ),
-                margin=dict(l=20, r=20, t=50, b=50)
+                height=520,
+                margin=dict(l=30, r=30, t=50, b=60)
             )
 
         elif chosen == "Area" and time_col and measure_cols:
-            sorted_df = df.sort_values(time_col)
+            sorted_df = df.sort_values([time_color_col, time_col]) if time_color_col else df.sort_values(time_col)
             n_time_points = sorted_df[time_col].nunique(dropna=True)
             tick_angle = 0 if n_time_points <= 20 else -45
 
@@ -1084,15 +1098,21 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                     target_entity = v_str
                                     break
 
+                        _unassigned_labels = {"(chưa phân nhóm)", "(unassigned)", "chưa phân nhóm", "unassigned", "(trống)", "none", "n/a", ""}
                         if target_entity:
-                            # Tô màu nổi bật Cam Đậm #F59E0B cho đối tượng được hỏi, màu Xanh #3B82F6 cho các đối tượng khác
-                            colors = ['#F59E0B' if str(v).strip().lower() == target_entity.lower() else '#3B82F6' for v in plot_df[label_name]]
+                            # Tô màu nổi bật Cam Đậm #F59E0B cho đối tượng được hỏi, màu Xanh #3B82F6 cho các đối tượng khác, màu xám cho nhóm chưa phân nhóm
+                            colors = ['#F59E0B' if str(v).strip().lower() == target_entity.lower() else ('#94A3B8' if str(v).strip().lower() in _unassigned_labels else '#3B82F6') for v in plot_df[label_name]]
                             trace_kwargs["marker_color"] = colors
                         else:
                             # Kiểm tra xem có phải truy vấn xếp hạng Top N không
                             uq_low = (user_query or "").lower()
                             is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "dẫn đầu", "nhiều nhất", "ít nhất"])
-                            if is_top_ranking and 2 <= len(plot_df) <= 15:
+                            has_unassigned_cat = any(str(v).strip().lower() in _unassigned_labels for v in plot_df[label_name])
+
+                            if has_unassigned_cat:
+                                colors = ['#94A3B8' if str(v).strip().lower() in _unassigned_labels else '#1F4E78' for v in plot_df[label_name]]
+                                trace_kwargs["marker_color"] = colors
+                            elif is_top_ranking and 2 <= len(plot_df) <= 15:
                                 # Highlight đối tượng dẫn đầu #1 bằng màu Vàng Gold #F59E0B, các đối tượng còn lại màu Xanh Hiện Đại #2563EB
                                 colors = ['#F59E0B'] + ['#2563EB'] * (len(plot_df) - 1)
                                 trace_kwargs["marker_color"] = colors
