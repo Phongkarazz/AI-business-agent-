@@ -961,7 +961,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         meas_lower = str(meas).lower()
                         is_pct = any(k in meas_lower for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "%", "share", "ratio"])
                         is_curr = any(k in meas_lower for k in ["salary", "lương", "cost", "revenue", "sales", "amount", "profit", "ordervalue", "tiền"])
-                        
+                        is_raises = any(k in meas_lower for k in ["raise", "tăng lương", "tang_luong", "tăng_lương", "salary_increase", "salaryincrease", "increases", "số lần", "so lan", "lần tăng", "lan tang"])
+                        is_boxes = any(k in meas_lower for k in ["box", "thùng", "hộp", "thung", "hop"])
+                        is_orders = any(k in meas_lower for k in ["order", "đơn hàng", "don_hang", "giao dịch", "transaction"])
+                        is_hc = (
+                            any(k in meas_lower for k in ["headcount", "nhân sự", "nhan_su", "nhân viên", "nhan_vien", "totalemployees", "slngnhnvin", "emp_count", "employee_count", "staff_count", "quy mô nhân sự", "quymo", "người", "nguoi"])
+                            or (any(k in meas_lower for k in ["count", "số lượng", "so_luong"]) and not any(k in meas_lower for k in ["box", "thùng", "hộp", "order", "đơn", "raise", "lần", "sản phẩm", "product", "item"]))
+                        ) and not is_curr and not is_raises and not is_boxes and not is_orders
+
                         if is_pct:
                             fig.update_traces(texttemplate="%{y:.2f}%", textposition="outside", marker_color="#2563EB")
                             try:
@@ -981,6 +988,34 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             fig.update_layout(
                                 showlegend=False,
                                 yaxis=dict(title=format_col_title(meas), range=[0, max_val * 1.15])
+                            )
+                        elif is_raises:
+                            u_r = " lần" if not is_en else " times"
+                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_r}", textposition="outside", marker_color="#2563EB")
+                            fig.update_layout(
+                                showlegend=False,
+                                yaxis=dict(title=format_col_title(meas))
+                            )
+                        elif is_boxes:
+                            u_b = " hộp" if not is_en else " boxes"
+                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_b}", textposition="outside", marker_color="#2563EB")
+                            fig.update_layout(
+                                showlegend=False,
+                                yaxis=dict(title=format_col_title(meas))
+                            )
+                        elif is_orders:
+                            u_o = " đơn" if not is_en else " orders"
+                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_o}", textposition="outside", marker_color="#2563EB")
+                            fig.update_layout(
+                                showlegend=False,
+                                yaxis=dict(title=format_col_title(meas))
+                            )
+                        elif is_hc:
+                            u_h = " người" if not is_en else " reps"
+                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_h}", textposition="outside", marker_color="#2563EB")
+                            fig.update_layout(
+                                showlegend=False,
+                                yaxis=dict(title=format_col_title(meas))
                             )
                         else:
                             fig.update_traces(texttemplate="%{y:,.0f}", textposition="outside", marker_color="#2563EB")
@@ -1031,12 +1066,38 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         tick_angle = -35 if (max_label_len > 8 or len(plot_df) > 8) else 0
 
                     if pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]) and plot_df[measure_cols[0]].nunique(dropna=True) == 1 and len(plot_df) > 1:
-                        st.caption(f"ℹ️ Lưu ý: Tất cả {len(plot_df)} đối tượng hiển thị đều có cùng giá trị `{measure_cols[0]}` = {plot_df[measure_cols[0]].iloc[0]:,}.")
+                        val_num = plot_df[measure_cols[0]].iloc[0]
+                        m_low = str(measure_cols[0]).lower()
+                        is_r = any(k in m_low for k in ["raise", "tăng lương", "tang_luong", "salary_increase", "salaryincrease", "increases", "số lần", "lần tăng"])
+                        is_b = any(k in m_low for k in ["box", "thùng", "hộp"])
+                        is_o = any(k in m_low for k in ["order", "đơn hàng"])
+                        is_hc_val = any(k in m_low for k in ["headcount", "nhân viên", "nhan_vien", "nhân sự", "người", "slngnhnvin", "totalemployees"]) and not is_r
+                        is_sal_val = any(k in m_low for k in ["salary", "lương", "budget", "cost", "revenue", "sales", "$"])
+                        if is_r:
+                            val_str = f"{val_num:,} Lần" if not is_en else f"{val_num:,} times"
+                        elif is_b:
+                            val_str = f"{val_num:,} Hộp" if not is_en else f"{val_num:,} boxes"
+                        elif is_o:
+                            val_str = f"{val_num:,} Đơn" if not is_en else f"{val_num:,} orders"
+                        elif is_hc_val:
+                            val_str = f"{val_num:,} Người" if not is_en else f"{val_num:,} reps"
+                        elif is_sal_val:
+                            val_str = f"${val_num:,}"
+                        else:
+                            val_str = f"{val_num:,}"
+                        clean_m_name = format_col_title(measure_cols[0])
+                        st.caption(f"ℹ️ Lưu ý: Tất cả {len(plot_df)} đối tượng hiển thị đều có cùng {clean_m_name} = {val_str}.")
 
                     m_lower = str(measure_cols[0]).lower()
                     is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
                     is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "doanh số", "doanh so", "sales", "amount", "$", "usd"])
-                    is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "nhân sự", "nhan_su", "người", "nguoi", "count", "số lượng", "so_luong", "slngnhnvin", "totalemployees"]) and not is_years and not is_salary
+                    is_raises = any(k in m_lower for k in ["raise", "tăng lương", "tang_luong", "tăng_lương", "salary_increase", "salaryincrease", "increases", "số lần", "so lan", "lần tăng", "lan tang"])
+                    is_boxes = any(k in m_lower for k in ["box", "thùng", "hộp", "thung", "hop"])
+                    is_orders = any(k in m_lower for k in ["order", "đơn hàng", "don_hang", "giao dịch", "transaction"])
+                    is_headcount = (
+                        any(k in m_lower for k in ["headcount", "nhân sự", "nhan_su", "nhân viên", "nhan_vien", "totalemployees", "slngnhnvin", "emp_count", "employee_count", "staff_count", "quy mô nhân sự", "quymo", "người", "nguoi"])
+                        or (any(k in m_lower for k in ["count", "số lượng", "so_luong"]) and not any(k in m_lower for k in ["box", "thùng", "hộp", "order", "đơn", "raise", "lần", "sản phẩm", "product", "item"]))
+                    ) and not is_years and not is_salary and not is_raises and not is_boxes and not is_orders
 
                     curr_sym = "$" if is_salary else ""
                     clean_m = format_col_title(measure_cols[0])
@@ -1081,10 +1142,23 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         ttemplate = "%{y:.2f}%"
                         trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
                     elif is_years:
-                        ttemplate = "%{y:.1f} năm"
+                        ttemplate = "%{y:.1f} năm" if not is_en else "%{y:.1f} yrs"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
+                    elif is_raises:
+                        u_raise = " lần" if not is_en else " times"
+                        ttemplate = f"%{{y:,.0f}}{u_raise}"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
+                    elif is_boxes:
+                        u_box = " hộp" if not is_en else " boxes"
+                        ttemplate = f"%{{y:,.0f}}{u_box}"
+                        trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
+                    elif is_orders:
+                        u_order = " đơn" if not is_en else " orders"
+                        ttemplate = f"%{{y:,.0f}}{u_order}"
                         trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
                     elif is_headcount:
-                        ttemplate = "%{y:,.0f} người"
+                        u_hc = " người" if not is_en else " reps"
+                        ttemplate = f"%{{y:,.0f}}{u_hc}"
                         trace_kwargs = {"texttemplate": ttemplate, "textposition": "outside"}
                     elif use_compact_currency:
                         def _compact_currency_str(v):
@@ -1175,8 +1249,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             dyn_title = f"📊 So Sánh {clean_m} theo {clean_lbl} (Phân loại theo {format_col_title(color_col)})"
                     else:
                         dyn_title = f"{clean_m} theo {clean_lbl}" + (f" (Phân loại theo {format_col_title(color_col)})" if color_col else "")
-
-                    yaxis_title_str = f"{clean_m} (Người)" if (is_headcount and "người" not in clean_m.lower()) else clean_m
+                    if is_raises:
+                        unit_str = "Lần" if not is_en else "Times"
+                        yaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                    elif is_boxes:
+                        unit_str = "Hộp" if not is_en else "Boxes"
+                        yaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                    elif is_orders:
+                        unit_str = "Đơn" if not is_en else "Orders"
+                        yaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                    elif is_headcount:
+                        unit_str = "Người" if not is_en else "People"
+                        yaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                    else:
+                        yaxis_title_str = clean_m
                     layout_updates = dict(
                         title=dyn_title,
                         xaxis=dict(type="category", tickangle=tick_angle, automargin=True),
@@ -1333,7 +1419,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 m_lower = str(measure_cols[0]).lower()
                 is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
                 is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "sales", "amount"])
-                is_headcount = any(k in m_lower for k in ["headcount", "nhân viên", "nhan_vien", "người", "count", "số lượng", "so_luong"])
+                is_raises = any(k in m_lower for k in ["raise", "tăng lương", "tang_luong", "tăng_lương", "salary_increase", "salaryincrease", "increases", "số lần", "so lan", "lần tăng", "lan tang"])
+                is_boxes = any(k in m_lower for k in ["box", "thùng", "hộp", "thung", "hop"])
+                is_orders = any(k in m_lower for k in ["order", "đơn hàng", "don_hang", "giao dịch", "transaction"])
+                is_headcount = (
+                    any(k in m_lower for k in ["headcount", "nhân sự", "nhan_su", "nhân viên", "nhan_vien", "totalemployees", "slngnhnvin", "emp_count", "employee_count", "staff_count", "quy mô nhân sự", "quymo", "người", "nguoi"])
+                    or (any(k in m_lower for k in ["count", "số lượng", "so_luong"]) and not any(k in m_lower for k in ["box", "thùng", "hộp", "order", "đơn", "raise", "lần", "sản phẩm", "product", "item"]))
+                ) and not is_years and not is_salary and not is_raises and not is_boxes and not is_orders
 
                 curr_sym = "$" if is_salary else ""
                 clean_m = format_col_title(measure_cols[0])
@@ -1367,9 +1459,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     h_colors = '#2563EB'
 
                 if is_years:
-                    h_ttemplate = "%{x:.1f} năm"
+                    h_ttemplate = "%{x:.1f} năm" if not is_en else "%{x:.1f} yrs"
+                elif is_raises:
+                    u_raise = " lần" if not is_en else " times"
+                    h_ttemplate = f"%{{x:,.0f}}{u_raise}"
+                elif is_boxes:
+                    u_box = " hộp" if not is_en else " boxes"
+                    h_ttemplate = f"%{{x:,.0f}}{u_box}"
+                elif is_orders:
+                    u_order = " đơn" if not is_en else " orders"
+                    h_ttemplate = f"%{{x:,.0f}}{u_order}"
                 elif is_headcount:
-                    h_ttemplate = "%{x:,.0f} người"
+                    u_hc = " người" if not is_en else " reps"
+                    h_ttemplate = f"%{{x:,.0f}}{u_hc}"
                 elif any('.' in str(v) for v in plot_df[measure_cols[0]]):
                     h_ttemplate = f"{curr_sym}%{{x:,.2f}}"
                 else:
@@ -1392,9 +1494,24 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 margin_left = max(130, min(250, max_name_len * 9))
                 chart_height = max(400, len(plot_df) * 38 + 100)
 
+                if is_raises:
+                    unit_str = "Lần" if not is_en else "Times"
+                    xaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                elif is_boxes:
+                    unit_str = "Hộp" if not is_en else "Boxes"
+                    xaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                elif is_orders:
+                    unit_str = "Đơn" if not is_en else "Orders"
+                    xaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                elif is_headcount:
+                    unit_str = "Người" if not is_en else "People"
+                    xaxis_title_str = f"{clean_m} ({unit_str})" if (unit_str.lower() not in clean_m.lower()) else clean_m
+                else:
+                    xaxis_title_str = clean_m
+
                 fig.update_layout(
                     yaxis=dict(type="category", automargin=True),
-                    xaxis_title=clean_m,
+                    xaxis_title=xaxis_title_str,
                     yaxis_title="",
                     height=chart_height,
                     margin=dict(l=margin_left, r=60, t=60, b=50)
