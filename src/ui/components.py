@@ -1512,3 +1512,39 @@ def render_result(result: dict, turn_id: str):
             for log in logs:
                 st.text(f"• {log}")
 
+    # 6. Gợi ý Câu hỏi Phân tích Tiếp nối (Follow-up Question Suggestions)
+    followups = result.get("followups", [])
+    if not followups and df is not None and not df.empty:
+        try:
+            from src.llm.agent import generate_grounded_fallback_followups
+            schema_ctx = st.session_state.get("schema_context", "")
+            followups = generate_grounded_fallback_followups(df, schema_context=schema_ctx, current_query=user_query, lang=lang)
+            result["followups"] = followups
+        except Exception:
+            pass
+
+    if followups:
+        st.markdown("<div style='margin-top: 20px; margin-bottom: 8px;'>", unsafe_allow_html=True)
+        header_fup = "💡 **Gợi ý phân tích tiếp theo (Nhấp để chạy ngay):**" if not is_en else "💡 **Suggested Follow-up Questions (Click to run):**"
+        st.markdown(header_fup)
+
+        cols = st.columns(min(len(followups), 3))
+        for idx, (col_f, q_text) in enumerate(zip(cols, followups[:3])):
+            clean_q = sanitize_followup_question(q_text)
+            if not clean_q:
+                continue
+            def _on_fup_click(q_target=clean_q):
+                st.session_state["pending_prompt"] = q_target
+
+            with col_f:
+                help_text = f"Chạy tiếp: \"{clean_q}\"" if not is_en else f"Run query: \"{clean_q}\""
+                st.button(
+                    f"👉 {clean_q}",
+                    key=f"btn_fup_{turn_id}_{idx}_{abs(hash(clean_q)) % 1000000}",
+                    use_container_width=True,
+                    help=help_text,
+                    on_click=_on_fup_click
+                )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
