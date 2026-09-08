@@ -1498,10 +1498,28 @@ ORDER BY HireYear ASC;
 """
 
     # 4. Top nhân viên lương cao nhất hiện tại toàn công ty hoặc theo phòng ban
-    elif any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "toàn công ty", "công ty", "người", "ai", "sales", "phòng"]):
+    elif (
+        any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất", "lương thấp nhất", "thu nhập thấp nhất", "highest paid", "highest salary"])
+        or (
+            any(k in q_low for k in ["top", "danh sách", "những", "ai", "ai là", "xếp hạng"])
+            and any(k in q_low for k in ["lương", "thu nhập", "salary"])
+            and any(k in q_low for k in ["cao nhất", "thấp nhất", "cao"])
+        )
+    ) and any(k in q_low for k in ["nhân viên", "nhân sự", "toàn công ty", "công ty", "người", "ai", "sales", "phòng", "employee", "employees"]):
+        dept_map = [
+            (["sales", "kinh doanh", "bán hàng"], "Sales"),
+            (["marketing", "tiếp thị"], "Marketing"),
+            (["development", "phát triển", "lập trình", "dev"], "Development"),
+            (["research", "nghiên cứu", "r&d"], "Research"),
+            (["finance", "tài chính", "kế toán"], "Finance"),
+            (["production", "sản xuất"], "Production"),
+            (["human resources", "nhân sự", "hr", "tuyển dụng"], "Human Resources"),
+            (["quality management", "quản lý chất lượng", "qa", "qc", "chất lượng"], "Quality Management"),
+            (["customer service", "chăm sóc khách hàng", "cskh", "dịch vụ khách hàng"], "Customer Service"),
+        ]
         dept_filter = ""
-        for d_name in ["Sales", "Development", "Marketing", "Research", "Finance", "Production", "Human Resources", "Quality Management", "Customer Service"]:
-            if d_name.lower() in q_low:
+        for keywords, d_name in dept_map:
+            if any(k in q_low for k in keywords):
                 dept_filter = f" AND d.dept_name = '{d_name}'"
                 break
         return f"""

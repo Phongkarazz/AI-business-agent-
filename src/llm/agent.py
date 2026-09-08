@@ -249,9 +249,11 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
     return sql
 
 
-def auto_fix_top_employee_salary_query(sql: str, user_query: str) -> str:
-    """Tự động sửa câu hỏi Top N lương cao nhất của nhân viên để luôn lọc đúng lương hiện tại (to_date = '9999-01-01') tránh trùng lặp năm lịch sử gây hao hụt số dòng."""
-    if not sql or not user_query:
+def auto_fix_top_employee_salary_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu hỏi Top N nhân viên có mức lương cao nhất / thấp nhất (toàn công ty hoặc theo từng phòng ban).
+    Đảm bảo luôn lọc đúng s.to_date = '9999-01-01' và de.to_date = '9999-01-01' để lấy lương hiện tại duy nhất, tránh trùng lặp năm lịch sử gây hao hụt hoặc sai lệch số dòng.
+    """
+    if not user_query:
         return sql
     q_low = user_query.lower()
     is_yearly = any(k in q_low for k in ["qua các năm", "theo năm", "hàng năm", "từng năm", "qua từng năm", "thay đổi như thế nào", "xu hướng", "biến động", "lịch sử", "theo thời gian"])
@@ -259,32 +261,68 @@ def auto_fix_top_employee_salary_query(sql: str, user_query: str) -> str:
         return sql
 
     is_top_salary = (
-        any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất"])
-        and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "sales", "phòng"])
-        and not any(k in q_low for k in ["chức danh", "title", "nam và nữ", "quỹ lương"])
-    )
+        any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất", "lương thấp nhất", "thu nhập thấp nhất", "mức lương thấp nhất", "lương cao", "lương khủng", "highest paid", "highest salary"])
+        or (
+            any(k in q_low for k in ["top", "danh sách", "những", "ai", "ai là", "xếp hạng"])
+            and any(k in q_low for k in ["lương", "thu nhập", "salary"])
+            and any(k in q_low for k in ["cao nhất", "thấp nhất", "lớn nhất", "nhỏ nhất", "cao"])
+        )
+    ) and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "sales", "phòng", "công ty", "toàn công ty", "emp", "employee", "employees"]) and not any(k in q_low for k in ["chức danh", "title", "nam và nữ", "quỹ lương", "chênh lệch lương", "so sánh", "manager", "trưởng phòng", "giám đốc", "lãnh đạo", "tăng lương", "thâm niên", "lâu nhất", "gắn bó"])
+
     if not is_top_salary:
         return sql
 
-    lowered_sql = sql.lower()
-    # Kiểm tra xem câu SQL có JOIN salaries và employees không
-    if "salaries" in lowered_sql and "employees" in lowered_sql:
-        # Đảm bảo có lọc s.to_date = '9999-01-01' để không bị lặp 1 nhân viên nhiều năm lương
-        if not re.search(r"\bs\.to_date\s*=\s*'9999-01-01'", sql, re.IGNORECASE) and not re.search(r"GROUP\s+BY\s+.*emp_no", sql, re.IGNORECASE):
-            if "where" in lowered_sql:
-                sql = re.sub(r"\bWHERE\b", "WHERE s.to_date = '9999-01-01' AND ", sql, count=1, flags=re.IGNORECASE)
-            else:
-                if re.search(r"\bORDER\s+BY\b", sql, re.IGNORECASE):
-                    sql = re.sub(r"\bORDER\s+BY\b", "WHERE s.to_date = '9999-01-01' ORDER BY", sql, count=1, flags=re.IGNORECASE)
-                elif re.search(r"\bLIMIT\b", sql, re.IGNORECASE):
-                    sql = re.sub(r"\bLIMIT\b", "WHERE s.to_date = '9999-01-01' LIMIT", sql, count=1, flags=re.IGNORECASE)
-                else:
-                    sql = sql.rstrip(";").strip() + " WHERE s.to_date = '9999-01-01'"
+    req_limit = extract_requested_limit(user_query) or 10
+    is_lowest = any(k in q_low for k in ["thấp nhất", "ít nhất", "nhỏ nhất", "lowest"])
+    order_dir = "ASC" if is_lowest else "DESC"
 
-        # Nếu có dept_emp, đảm bảo de.to_date = '9999-01-01'
-        if "dept_emp" in lowered_sql and not re.search(r"\bde\.to_date\s*=\s*'9999-01-01'", sql, re.IGNORECASE):
-            if "where" in sql.lower():
-                sql = re.sub(r"\bWHERE\b", "WHERE de.to_date = '9999-01-01' AND ", sql, count=1, flags=re.IGNORECASE)
+    # Nhận diện phòng ban mục tiêu
+    dept_map = [
+        (["sales", "kinh doanh", "bán hàng"], "Sales"),
+        (["marketing", "tiếp thị"], "Marketing"),
+        (["development", "phát triển", "lập trình", "dev"], "Development"),
+        (["research", "nghiên cứu", "r&d"], "Research"),
+        (["finance", "tài chính", "kế toán"], "Finance"),
+        (["production", "sản xuất"], "Production"),
+        (["human resources", "nhân sự", "hr", "tuyển dụng"], "Human Resources"),
+        (["quality management", "quản lý chất lượng", "qa", "qc", "chất lượng"], "Quality Management"),
+        (["customer service", "chăm sóc khách hàng", "cskh", "dịch vụ khách hàng"], "Customer Service"),
+    ]
+    target_dept = None
+    for keywords, dept_name in dept_map:
+        if any(k in q_low for k in keywords):
+            target_dept = dept_name
+            break
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    concat_expr = "e.first_name || ' ' || e.last_name" if is_sqlite else "CONCAT(e.first_name, ' ', e.last_name)"
+
+    lowered_sql = (sql or "").lower()
+    # Kiểm tra xem SQL hiện tại có hợp lệ và đầy đủ thông tin không:
+    has_necessary_tables = all(tbl in lowered_sql for tbl in ["salaries", "employees", "dept_emp", "departments"])
+    has_current_filter = "s.to_date = '9999-01-01'" in lowered_sql or "s.to_date='9999-01-01'" in lowered_sql
+    has_dept_filter = (target_dept is None) or (target_dept.lower() in lowered_sql)
+    has_name_col = ("fullname" in lowered_sql) or ("first_name" in lowered_sql)
+    has_wrong_group = bool(re.search(r"GROUP\s+BY\s+.*(?:year|from_date|hire_date)", lowered_sql))
+
+    if not has_necessary_tables or not has_current_filter or not has_dept_filter or not has_name_col or has_wrong_group or not sql:
+        dept_clause = f"WHERE d.dept_name = '{target_dept}'" if target_dept else ""
+        return f"""SELECT 
+    e.emp_no,
+    {concat_expr} AS FullName,
+    d.dept_name AS Department,
+    s.salary AS CurrentSalary
+FROM employees e
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+{dept_clause}
+ORDER BY CurrentSalary {order_dir}
+LIMIT {req_limit}""".strip()
+
+    # Nếu câu SQL đã có đủ cấu trúc, đảm bảo LIMIT đúng theo yêu cầu
+    if not re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE):
+        sql = sql.rstrip(";").strip() + f" LIMIT {req_limit}"
 
     return sql
 
@@ -294,25 +332,40 @@ def auto_fix_yearly_salary_trend_query(sql: str, user_query: str) -> str:
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
+
+    # Guard 1: Tuyệt đối không can thiệp vào các câu hỏi xếp hạng cá nhân / Top N nhân viên
+    is_individual_ranking = (
+        any(k in q_low for k in ["top", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "danh sách"])
+        and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "ai là", "emp_no", "cá nhân"])
+    )
+    if is_individual_ranking:
+        return sql
+
     is_yearly_trend = any(k in q_low for k in ["qua các năm", "theo năm", "hàng năm", "từng năm", "qua từng năm", "thay đổi như thế nào", "xu hướng", "biến động", "lịch sử", "theo thời gian"])
     is_salary_or_hire = any(k in q_low for k in ["lương", "thu nhập", "salary", "quỹ lương", "tuyển dụng", "nhân sự", "chi trả"])
-    grouped_by_year = bool(re.search(r"GROUP\s+BY\s+.*(?:YEAR|hireyear|from_date)", sql, re.IGNORECASE))
 
-    if (is_yearly_trend and is_salary_or_hire) or grouped_by_year:
-        # 1. Gỡ bỏ triệt để mọi điều kiện lọc to_date = 9999-01-01 (nguyên nhân cốt lõi khiến dữ liệu lịch sử chỉ còn 2 năm 2001 và 2002)
-        sql = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
-        sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", sql, flags=re.IGNORECASE)
-        sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+    # Chỉ xử lý khi người dùng thực sự hỏi về xu hướng/biến động qua các năm
+    if not (is_yearly_trend and is_salary_or_hire):
+        return sql
 
-        # 2. Đổi YEAR(to_date) thành YEAR(s.from_date) để không bị năm 9999
-        sql = re.sub(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)", "YEAR(s.from_date)", sql, flags=re.IGNORECASE)
-        sql = re.sub(r"\b(?:[a-zA-Z0-9_]+\.)?salary_date\b", "s.from_date", sql, flags=re.IGNORECASE)
+    # 1. Gỡ bỏ triệt để mọi điều kiện lọc to_date = 9999-01-01 (nguyên nhân cốt lõi khiến dữ liệu lịch sử chỉ còn 2 năm 2001 và 2002)
+    sql = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
 
-        # 3. Trường hợp hỏi mức lương trung bình toàn công ty qua các năm
-        is_avg_salary = any(k in q_low for k in ["lương trung bình", "mức lương", "lương bình quân"]) and any(k in q_low for k in ["công ty", "toàn công ty", "tất cả", "nhân viên", "qua các năm", "theo năm", "hàng năm"])
-        if is_avg_salary:
-            if "salaries" not in sql.lower() or "avg" not in sql.lower() or not re.search(r"GROUP\s+BY\s+.*YEAR", sql, re.IGNORECASE):
-                return """SELECT 
+    # 2. Đổi YEAR(to_date) thành YEAR(s.from_date) để không bị năm 9999
+    sql = re.sub(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)", "YEAR(s.from_date)", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\b(?:[a-zA-Z0-9_]+\.)?salary_date\b", "s.from_date", sql, flags=re.IGNORECASE)
+
+    # 3. Trường hợp hỏi mức lương trung bình toàn công ty qua các năm
+    is_avg_salary = (
+        any(k in q_low for k in ["lương trung bình", "mức lương", "lương bình quân"])
+        and any(k in q_low for k in ["công ty", "toàn công ty", "tất cả", "toàn bộ"])
+        and not any(k in q_low for k in ["top", "cao nhất", "thấp nhất", "phòng ban", "bộ phận", "chức danh", "title", "nam", "nữ", "gender", "sales"])
+    )
+    if is_avg_salary:
+        if "salaries" not in sql.lower() or "avg" not in sql.lower() or not re.search(r"GROUP\s+BY\s+.*YEAR", sql, re.IGNORECASE):
+            return """SELECT 
     YEAR(s.from_date) AS Year,
     ROUND(AVG(s.salary), 2) AS AverageSalary
 FROM salaries s
@@ -2670,6 +2723,7 @@ def run_agent(
         if not sql_cur:
             return sql_cur
         if is_employees_db:
+            sql_cur = auto_fix_top_employee_salary_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_yearly_salary_trend_query(sql_cur, user_query)
             sql_cur = auto_fix_title_assignments_query(sql_cur, user_query)
             sql_cur = auto_fix_company_hiring_trend_query(sql_cur, user_query)
@@ -2680,7 +2734,6 @@ def run_agent(
             sql_cur = auto_fix_raises_query(sql_cur, user_query)
             sql_cur = auto_fix_department_comparison_query(sql_cur, user_query)
             sql_cur = auto_fix_title_gender_salary_query(sql_cur, user_query)
-            sql_cur = auto_fix_top_employee_salary_query(sql_cur, user_query)
             sql_cur = auto_fix_current_manager_salary_query(sql_cur, user_query)
             sql_cur = auto_fix_department_group_salary_query(sql_cur, user_query)
             sql_cur = auto_fix_department_single_vs_others_salary_query(sql_cur, user_query)
