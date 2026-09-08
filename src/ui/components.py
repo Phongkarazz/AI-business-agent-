@@ -1446,26 +1446,17 @@ def render_result(result: dict, turn_id: str):
         )
         st.caption(caption_forecast)
 
-        t_col, m_cols = get_axis_columns(df)
-        if t_col and m_cols:
-            m_col = m_cols[0]
-            periods = st.slider(
-                "Forecast Horizon (periods)" if is_en else "Số kỳ dự báo tương lai",
-                1, 12, st.session_state.get("forecast_periods", 3),
-                key=f"periods_{turn_id}"
-            )
-            forecast_df, r2 = forecast_series(df, t_col, m_col, periods=periods)
-            if forecast_df is not None and not forecast_df.empty:
-                st.markdown(f"**R² goodness of fit:** `{r2:.3f}`" if is_en else f"**Độ phù hợp của mô hình (R²):** `{r2:.3f}`")
-                st.dataframe(forecast_df, width='stretch')
-            else:
-                st.info("Insufficient data points to build a reliable forecast model." if is_en else "Dữ liệu chuỗi thời gian chưa đủ điểm để xây dựng mô hình dự báo tin cậy.")
+        periods = st.slider(
+            "Forecast Horizon (periods)" if is_en else "Số kỳ dự báo tương lai",
+            1, 12, st.session_state.get("forecast_periods", 3),
+            key=f"periods_{turn_id}"
+        )
+        fig_forecast, method = forecast_series(df, periods=periods)
+        if fig_forecast is None:
+            st.info(method)
         else:
-            st.info(
-                "Forecast is not applicable to this dataset (requires time dimension and numeric measures)."
-                if is_en else
-                "Dữ liệu hiện tại không phù hợp để dự báo (cần có cột thời gian và cột chỉ số tài chính)."
-            )
+            st.plotly_chart(fig_forecast, width='stretch', key=f"forecast_{turn_id}")
+            st.caption(f"Phương pháp: {method}" if not is_en else f"Method: {method}")
 
     # -----------------------------------------------------
     # TAB 4: CÂU LỆNH SQL & DEBUG LOGS
