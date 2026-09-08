@@ -608,38 +608,62 @@ ORDER BY EmployeeCount DESC"""
 
 
 def auto_fix_raises_query(sql: str, user_query: str) -> str:
-    """Tự động khóa LIMIT 10 cho danh sách nhân viên tăng lương nhiều nhất, tránh tràn 5,000 dòng dữ liệu."""
+    """Tự động chuẩn hóa truy vấn danh sách nhân viên tăng lương nhiều nhất, tránh lỗi cú pháp và tràn dữ liệu."""
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
-    is_raises_query = any(k in q_low for k in ["tăng lương", "lần tăng"]) and any(k in q_low for k in ["nhân viên", "ai", "danh sách", "những"])
+    is_raises_query = (
+        any(k in q_low for k in ["tăng lương", "lần tăng", "được tăng"])
+        and any(k in q_low for k in ["nhân viên", "ai", "danh sách", "những", "người", "top", "ai là"])
+    )
 
     if not is_raises_query:
         return sql
 
-    # Đảm bảo câu truy vấn tối ưu và có LIMIT 10
-    if ("having count" in sql.lower() or "raisecount" in sql.lower() or "numberofincreases" in sql.lower()) and "from (" not in sql.lower():
-        return """SELECT 
+    # Trích xuất số lần tăng lương yêu cầu (mặc định 5 lần nếu không nêu rõ)
+    match_n = re.search(r"(\d+)\s*lần", q_low)
+    min_raises = int(match_n.group(1)) if match_n else 5
+
+    match_limit = re.search(r"top\s*(\d+)", q_low)
+    limit_val = int(match_limit.group(1)) if match_limit else 10
+
+    # Kiểm tra các lỗi phổ biến mà LLM tạo ra:
+    # 1. Lỗi cú pháp dấu ngoặc
+    has_paren_mismatch = (sql.count("(") != sql.count(")"))
+    # 2. Lỗi nhầm dept_no trong bảng salaries (1054: Unknown column 'dept_no' in 'field list')
+    has_bad_dept_no = bool(re.search(r"salaries\b[^)]*dept_no", sql, re.IGNORECASE)) or "s.dept_no" in sql.lower() or ("dept_no" in sql.lower() and "from salaries" in sql.lower())
+    # 3. Lỗi dùng CTE phức tạp dẫn tới timeout / cú pháp sai
+    has_cte = bool(re.search(r"\bWITH\b", sql, re.IGNORECASE))
+    # 4. Thiếu JOIN bảng dept_emp hoặc departments
+    missing_dept = "dept_emp" not in sql.lower() or "departments" not in sql.lower()
+    # 5. Dùng subquery nhưng bị cắt cụt hoặc lỗi alias
+    is_broken_subquery = ("from (" in sql.lower() and "join employees" not in sql.lower()) or "totalcount" in sql.lower() or "sagg." in sql.lower()
+    # 6. Thiếu aggregated subquery dẫn tới timeout hoặc lỗi grouping chậm
+    not_optimized = "s_agg" not in sql.lower()
+
+    if has_paren_mismatch or has_bad_dept_no or has_cte or missing_dept or is_broken_subquery or not_optimized:
+        return f"""SELECT 
     e.emp_no,
     CONCAT(e.first_name, ' ', e.last_name) AS FullName,
-    d.dept_name AS Department,
+    COALESCE(d.dept_name, 'Chưa rõ') AS Department,
     s_agg.RaiseCount,
     s_agg.CurrentSalary
 FROM (
     SELECT emp_no, COUNT(*) AS RaiseCount, MAX(salary) AS CurrentSalary
     FROM salaries
     GROUP BY emp_no
-    HAVING COUNT(*) >= 5
+    HAVING COUNT(*) >= {min_raises}
     ORDER BY RaiseCount DESC, CurrentSalary DESC
-    LIMIT 10
+    LIMIT {limit_val}
 ) s_agg
 JOIN employees e ON s_agg.emp_no = e.emp_no
-JOIN dept_emp de ON s_agg.emp_no = de.emp_no AND de.to_date = '9999-01-01'
-JOIN departments d ON de.dept_no = d.dept_no
+LEFT JOIN dept_emp de ON s_agg.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+LEFT JOIN departments d ON de.dept_no = d.dept_no
 ORDER BY s_agg.RaiseCount DESC, s_agg.CurrentSalary DESC"""
 
+    # Nếu truy vấn không có LIMIT, đảm bảo giới hạn số dòng
     if not re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE):
-        sql = sql.rstrip(";").strip() + " LIMIT 10"
+        sql = sql.rstrip(";").strip() + f" LIMIT {limit_val}"
 
     return sql
 

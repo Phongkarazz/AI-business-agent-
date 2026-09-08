@@ -544,6 +544,14 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_col = m_candidates[0] if m_candidates else eff_like_cols[0]
             else:
                 m_col = eff_like_cols[0]
+        elif any(k in _uq_low for k in ["tăng lương", "lần tăng", "số lần", "được tăng"]):
+            raises_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases", "lần tăng", "số lần", "raises", "num_raises"])]
+            if raises_candidates:
+                m_col = raises_candidates[0]
+            else:
+                count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
+                total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
+                m_col = total_like_cols[0] if total_like_cols else (count_like_cols[0] if count_like_cols else measure_cols[0])
         else:
             count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
             # Ưu tiên cột tổng thể (Total/Tổng/All) nếu có
@@ -588,7 +596,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Thâm Niên (Năm)"
             elif any(k in m_low for k in ["boxes", "boxessold", "totalboxessold", "total_boxes", "hộp", "thùng"]):
                 m_clean = "Tổng Số Hộp Bán Ra"
-            elif "raisecount" in m_low:
+            elif any(k in m_low for k in ["raisecount", "raise count", "numberofincreases", "salaryincreases", "salary increases", "lần tăng", "số lần", "num raises"]):
                 m_clean = "Số Lần Tăng Lương"
             else:
                 m_clean = raw_m.title()
@@ -681,7 +689,11 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 "years", "year_as", "yearsas", "tenure", "thâm niên", "tham_nien",
                 "service", "thamnien",
             ])
-            _year_unit = " Năm" if _is_years_measure else ""
+            _is_raises_measure = any(k in _m_col_lower for k in [
+                "raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases",
+                "lần tăng", "số lần", "raises", "num_raises",
+            ])
+            _year_unit = " Năm" if _is_years_measure else ((" Lần" if not is_en else " times") if _is_raises_measure else "")
 
             fmt_avg = _fmt_kpi_val(avg_val) + _year_unit
             fmt_peak = _fmt_kpi_val(peak_val) + _year_unit
@@ -973,6 +985,11 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     else:
                         fmt_avg = f"{avg_val:.1f} Người/Đội" if any(k in dim_first for k in ["team", "đội"]) else f"{avg_val:.1f} Người"
                     peak_delta_val = f"{int(peak_val):,} Người"
+                elif _is_raises_measure:
+                    _u_raise = " Lần" if not is_en else " times"
+                    fmt_total = f"{int(total_val):,}{_u_raise}"
+                    fmt_avg = f"{avg_val:.1f}{_u_raise}"
+                    peak_delta_val = f"{int(peak_val):,}{_u_raise}"
                 else:
                     if has_unassigned and real_rows_count > 0:
                         real_vals = valid_vals[~is_unassigned_mask]
@@ -1317,7 +1334,12 @@ def render_result(result: dict, turn_id: str):
                         )
                     else:
                         column_config[col] = st.column_config.Column(col_label)
-                elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
+                elif any(k in c_low for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases", "lần tăng", "số lần"]):
+                    if is_num:
+                        column_config[col] = st.column_config.NumberColumn(col_label, format="%d lần" if not is_en else "%d times")
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
+                elif any(k in c_low for k in ["headcount", "hires", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
                     if is_num:
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%,d")
                     else:

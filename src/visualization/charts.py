@@ -52,6 +52,13 @@ VI_COLUMN_MAP = {
     "avg_salary": "Lương Trung Bình",
     "avgsalary": "Lương Trung Bình",
     "averagesalary": "Lương Trung Bình",
+    "raisecount": "Số Lần Tăng Lương",
+    "raise_count": "Số Lần Tăng Lương",
+    "numberofincreases": "Số Lần Tăng Lương",
+    "salaryincreases": "Số Lần Tăng Lương",
+    "salary_increases": "Số Lần Tăng Lương",
+    "num_raises": "Số Lần Tăng Lương",
+    "raises": "Số Lần Tăng Lương",
     "department": "Phòng Ban",
     "dept_name": "Phòng Ban",
     "department_name": "Phòng Ban",
@@ -557,13 +564,18 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if plot_df[cand].nunique(dropna=True) <= 20:
                         color_col = cand
 
-                # Nếu có cột phân nhóm (DepartmentGroup) và người dùng hỏi so sánh một chỉ số cụ thể (VD: Lương),
+                # Nếu có cột phân nhóm (DepartmentGroup) và người dùng hỏi so sánh một chỉ số cụ thể (VD: Lương, Tăng lương),
                 # ưu tiên vẽ chỉ số đó phân nhóm theo color_col thay vì vẽ gộp nhiều chỉ số khác thang đo
                 if color_col and len(measure_cols) >= 2:
                     uq_low = (user_query or "").lower()
-                    user_asked_salary = any(k in uq_low for k in ["lương", "salary", "thu nhập"])
+                    user_asked_raises = any(k in uq_low for k in ["tăng lương", "lần tăng", "số lần", "được tăng"])
+                    user_asked_salary = any(k in uq_low for k in ["lương", "salary", "thu nhập"]) and not user_asked_raises
                     user_asked_headcount = any(k in uq_low for k in ["quy mô", "headcount", "số lượng nhân sự", "số nhân sự", "số lượng nhân viên"])
-                    if user_asked_salary and not user_asked_headcount:
+                    if user_asked_raises:
+                        raises_c = [c for c in measure_cols if any(k in c.lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases", "lần tăng", "số lần", "raises", "num_raises"])]
+                        if raises_c:
+                            measure_cols = [raises_c[0]]
+                    elif user_asked_salary and not user_asked_headcount:
                         sal_cols = [c for c in measure_cols if any(k in c.lower() for k in ["salary", "lương", "thu nhập"])]
                         if sal_cols:
                             measure_cols = [sal_cols[0]]
@@ -774,12 +786,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 else:
                                     primary_m = candidate_effs[0]
                                 active_measures = [primary_m]
-                                chart_title = f"So sánh Hiệu quả ({format_col_title(primary_m)}) theo {format_col_title(label_name)}"
+                            elif any(k in uq_low for k in ["tăng lương", "lần tăng", "số lần", "được tăng"]) and any(any(k in c.lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "số lần", "lần tăng"]) for c in numeric_ms):
+                                primary_m = [c for c in numeric_ms if any(k in c.lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "số lần", "lần tăng"])][0]
+                                active_measures = [primary_m]
+                                chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
                             else:
                                 # Chênh lệch trên 20 lần: Ưu tiên cột có độ lệch chuẩn và giá trị lớn nhất (ví dụ CurrentSalary)
                                 primary_m = max(numeric_ms, key=lambda m: (float(plot_df[m].std() or 0), float(plot_df[m].max() or 0)))
                                 active_measures = [primary_m]
-                                chart_title = f"{primary_m} theo {label_name}"
+                                chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
 
 
                     if total_rows > 30:
