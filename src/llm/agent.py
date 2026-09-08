@@ -2006,6 +2006,15 @@ def auto_fix_missing_metric_in_having_query(sql: str, user_query: str) -> str:
     if not sql:
         return sql
 
+    # 1. Tuyệt đối KHÔNG can thiệp nếu SQL có subquery hoặc CTE lồng nhau (tránh làm vỡ cấu trúc ngoặc)
+    sql_low = sql.lower()
+    if any(k in sql_low for k in ["from (", "with ", "(select", "from\n(", "from  (", ") s_agg", ") t"]):
+        return sql
+
+    # 2. Phải có GROUP BY ở mức truy vấn chính
+    if not re.search(r'\bGROUP\s+BY\b', sql, re.IGNORECASE):
+        return sql
+
     having_match = re.search(r'\bHAVING\s+([\s\S]+?)(?=\bORDER\s+BY\b|\bLIMIT\b|;|\s*$)', sql, re.IGNORECASE)
     if not having_match:
         return sql
@@ -2020,6 +2029,10 @@ def auto_fix_missing_metric_in_having_query(sql: str, user_query: str) -> str:
     select_clause = select_match.group(1).strip()
     has_agg_in_select = bool(re.search(r'\b(SUM|AVG|COUNT|MAX|MIN)\s*\(', select_clause, re.IGNORECASE))
     if has_agg_in_select:
+        return sql
+
+    # Nếu SELECT đã có các tên cột chỉ số thông dụng thì không thêm nữa
+    if any(k in select_clause.lower() for k in ["total", "amount", "sales", "salary", "count", "boxes", "avg", "raisecount", "currentsalary"]):
         return sql
 
     # Trích xuất aggregate expression từ HAVING
@@ -2047,9 +2060,9 @@ def auto_fix_missing_metric_in_having_query(sql: str, user_query: str) -> str:
     new_select_clause = f"{select_clause}, {metric_col_str}"
     sql = sql[:select_match.start(1)] + " " + new_select_clause + " " + sql[select_match.end(1):]
 
-    # Cập nhật ORDER BY
+    # Cập nhật ORDER BY an toàn
     if re.search(r'\bORDER\s+BY\b', sql, re.IGNORECASE):
-        sql = re.sub(r'\bORDER\s+BY\s+[^;]+(?=\bLIMIT\b|;|\s*$)', f'ORDER BY {alias} DESC ', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'\bORDER\s+BY\s+.*$', f'ORDER BY {alias} DESC', sql, flags=re.IGNORECASE)
     else:
         if re.search(r'\bLIMIT\b', sql, re.IGNORECASE):
             sql = re.sub(r'\bLIMIT\b', f'ORDER BY {alias} DESC LIMIT', sql, flags=re.IGNORECASE)
@@ -2683,7 +2696,7 @@ def run_agent(
             sql_cur = auto_fix_sales_headcount_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_threshold_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_top_rankings_query(sql_cur, user_query, dialect=dialect)
-        sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
+            sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         return sql_cur
 
     # 1. Sinh SQL ban đầu
