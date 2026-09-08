@@ -845,21 +845,29 @@ ORDER BY Headcount DESC"""
 
 def auto_fix_dept_size_min_max_query(sql: str, user_query: str) -> str:
     """Tự động sửa lỗi subquery Max_size/Min_size toàn công ty lặp lại trên từng dòng khi hỏi quy mô phòng ban lớn nhất và nhỏ nhất."""
-    if not sql or not user_query:
+    if not user_query:
         return sql
     q_low = user_query.lower()
     is_min_max_size = (
-        any(k in q_low for k in ["quy mô", "nhân sự", "số lượng"])
-        and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất"])
-        and any(k in q_low for k in ["phòng ban", "phòng"])
+        any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhất"])
+        and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất"])
+        and any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng"])
     )
     if not is_min_max_size:
         return sql
 
-    lowered_sql = sql.lower()
+    lowered_sql = (sql or "").lower()
     has_scalar_subquery = "max_size" in lowered_sql or "min_size" in lowered_sql or lowered_sql.count("select") > 1
+    needs_normalization = (
+        has_scalar_subquery
+        or "people" in lowered_sql
+        or "departments" not in lowered_sql
+        or "dept_emp" not in lowered_sql
+        or "headcount" not in lowered_sql
+        or not re.search(r"\bde\.to_date\s*=\s*'9999-01-01'", sql, re.IGNORECASE)
+    )
 
-    if has_scalar_subquery:
+    if needs_normalization or not sql:
         return """SELECT 
     d.dept_name AS Department,
     COUNT(DISTINCT de.emp_no) AS Headcount
@@ -1818,6 +1826,13 @@ def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "My
     q_low = user_query.lower()
     sql_low = sql.lower()
 
+    # BẢO VỆ TUYỆT ĐỐI CSDL EMPLOYEES:
+    if (
+        any(k in q_low for k in ["phòng ban", "phòng", "department", "chức danh", "title", "thâm niên", "lương"])
+        or any(k in sql_low for k in ["departments", "dept_emp", "titles", "salaries", "dept_manager"])
+    ):
+        return sql
+
     # Nhận diện câu hỏi về đếm số lượng nhân viên / headcount / quy mô nhân sự
     is_headcount = (
         any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "sales person", "người bán", "sales rep", "sales reps"])
@@ -1829,7 +1844,7 @@ def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "My
 
     is_chocolates = (
         any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"])
-        or any(k in q_low for k in ["team", "đội ngũ", "kẹo", "chocolate", "chocolates", "hộp kẹo", "nhân viên", "salesperson"])
+        or any(k in q_low for k in ["team", "đội ngũ", "kẹo", "chocolate", "chocolates", "hộp kẹo", "salesperson", "sales rep"])
     )
     if not is_chocolates:
         return sql
@@ -2605,6 +2620,45 @@ def run_agent(
         )
         return result
 
+    schema_low = (schema_context or "").lower()
+    is_employees_db = (
+        ("dept_emp" in schema_low or "dept_manager" in schema_low or "titles" in schema_low or "salaries" in schema_low or "hire_date" in schema_low)
+        and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`sales`", "bảng sales"])
+    )
+
+    def _apply_domain_auto_fixes(sql_cur: str) -> str:
+        if not sql_cur:
+            return sql_cur
+        if is_employees_db:
+            sql_cur = auto_fix_yearly_salary_trend_query(sql_cur, user_query)
+            sql_cur = auto_fix_title_assignments_query(sql_cur, user_query)
+            sql_cur = auto_fix_company_hiring_trend_query(sql_cur, user_query)
+            sql_cur = auto_fix_longest_managers_query(sql_cur, user_query)
+            sql_cur = auto_fix_top_tenured_employees_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_payroll_query(sql_cur, user_query)
+            sql_cur = auto_fix_gender_ratio_query(sql_cur, user_query)
+            sql_cur = auto_fix_raises_query(sql_cur, user_query)
+            sql_cur = auto_fix_department_comparison_query(sql_cur, user_query)
+            sql_cur = auto_fix_title_gender_salary_query(sql_cur, user_query)
+            sql_cur = auto_fix_top_employee_salary_query(sql_cur, user_query)
+            sql_cur = auto_fix_current_manager_salary_query(sql_cur, user_query)
+            sql_cur = auto_fix_department_group_salary_query(sql_cur, user_query)
+            sql_cur = auto_fix_department_single_vs_others_salary_query(sql_cur, user_query)
+            sql_cur = auto_fix_department_single_vs_others_headcount_query(sql_cur, user_query)
+            sql_cur = auto_fix_dept_size_min_max_query(sql_cur, user_query)
+        else:
+            sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
+            sql_cur = auto_fix_chocolates_pnl_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_chocolates_monthly_sales_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_chocolates_quarterly_sales_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_contribution_percentage_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_sales_performance_comparison_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_sales_headcount_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_chocolates_threshold_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_chocolates_top_rankings_query(sql_cur, user_query, dialect=dialect)
+        sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
+        return sql_cur
+
     # 1. Sinh SQL ban đầu
     if status_callback:
         status_callback("🤖 Đang phân tích câu hỏi & tạo câu lệnh SQL tối ưu...")
@@ -2614,32 +2668,7 @@ def run_agent(
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
-        sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_pnl_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_sales_headcount_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_threshold_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_missing_metric_in_having_query(sql_query, user_query)
-        sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
-        sql_query = auto_fix_title_assignments_query(sql_query, user_query)
-        sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
-        sql_query = auto_fix_longest_managers_query(sql_query, user_query)
-        sql_query = auto_fix_top_tenured_employees_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_payroll_query(sql_query, user_query)
-        sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
-        sql_query = auto_fix_raises_query(sql_query, user_query)
-        sql_query = auto_fix_department_comparison_query(sql_query, user_query)
-        sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
-        sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
-        sql_query = auto_fix_current_manager_salary_query(sql_query, user_query)
-        sql_query = auto_fix_department_group_salary_query(sql_query, user_query)
-        sql_query = auto_fix_department_single_vs_others_salary_query(sql_query, user_query)
-        sql_query = auto_fix_department_single_vs_others_headcount_query(sql_query, user_query)
-        sql_query = auto_fix_dept_size_min_max_query(sql_query, user_query)
+        sql_query = _apply_domain_auto_fixes(sql_query)
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
@@ -2649,32 +2678,7 @@ def run_agent(
     for attempt in range(1, 4):
         result["attempts"] = attempt
         sql_query = enforce_top_n_limit(sql_query, user_query)
-        sql_query = auto_fix_datetime_year_filters(sql_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_pnl_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_monthly_sales_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_quarterly_sales_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_contribution_percentage_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_sales_performance_comparison_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_sales_headcount_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_threshold_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_chocolates_top_rankings_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_missing_metric_in_having_query(sql_query, user_query)
-        sql_query = auto_fix_yearly_salary_trend_query(sql_query, user_query)
-        sql_query = auto_fix_title_assignments_query(sql_query, user_query)
-        sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
-        sql_query = auto_fix_longest_managers_query(sql_query, user_query)
-        sql_query = auto_fix_top_tenured_employees_query(sql_query, user_query, dialect=dialect)
-        sql_query = auto_fix_payroll_query(sql_query, user_query)
-        sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
-        sql_query = auto_fix_raises_query(sql_query, user_query)
-        sql_query = auto_fix_department_comparison_query(sql_query, user_query)
-        sql_query = auto_fix_title_gender_salary_query(sql_query, user_query)
-        sql_query = auto_fix_top_employee_salary_query(sql_query, user_query)
-        sql_query = auto_fix_current_manager_salary_query(sql_query, user_query)
-        sql_query = auto_fix_department_group_salary_query(sql_query, user_query)
-        sql_query = auto_fix_department_single_vs_others_salary_query(sql_query, user_query)
-        sql_query = auto_fix_department_single_vs_others_headcount_query(sql_query, user_query)
-        sql_query = auto_fix_dept_size_min_max_query(sql_query, user_query)
+        sql_query = _apply_domain_auto_fixes(sql_query)
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):
