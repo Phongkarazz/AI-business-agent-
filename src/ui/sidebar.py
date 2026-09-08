@@ -74,6 +74,63 @@ def perform_connection(
         return False, err_display
 
 
+@st.dialog("👁️ Khám Phá Cấu Trúc & Dữ Liệu Mẫu", width="large")
+def show_table_preview_dialog(engine, tables: list[str], default_table: str = None):
+    """Hộp thoại Modal toàn màn hình hiển thị cấu trúc schema và 10 dòng dữ liệu mẫu trực quan."""
+    if not tables:
+        st.info("Không tìm thấy bảng nào trong cơ sở dữ liệu.")
+        return
+
+    c_sel1, c_sel2 = st.columns([3, 1])
+    with c_sel1:
+        initial_idx = tables.index(default_table) if (default_table and default_table in tables) else 0
+        selected_t = st.selectbox(
+            "Chọn bảng dữ liệu để xem chi tiết:",
+            tables,
+            index=initial_idx,
+            key="dialog_preview_selected_table"
+        )
+    with c_sel2:
+        st.write("")
+        st.write("")
+        st.caption(f"Tổng số: **{len(tables)} bảng**")
+
+    cols_info = get_table_columns_info(engine, selected_t)
+
+    # 1. Hiển thị cấu trúc cột
+    with st.expander(f"📋 Cấu trúc Schema bảng `{selected_t}` ({len(cols_info)} cột)", expanded=False):
+        import pandas as pd
+        col_rows = []
+        for idx, c in enumerate(cols_info):
+            col_rows.append({
+                "STT": idx + 1,
+                "Tên Cột": c["name"],
+                "Kiểu Dữ Liệu": str(c["type"]),
+                "Khóa / Ràng buộc": "🔑 Khóa Chính" if c.get("pk") else ("Bắt buộc (NOT NULL)" if not c.get("nullable") else "NULL")
+            })
+        if col_rows:
+            st.dataframe(pd.DataFrame(col_rows), hide_index=True, use_container_width=True)
+
+    # 2. Hiển thị 10 dòng mẫu
+    sample_df = get_table_sample_df(engine, selected_t, limit=10)
+    if not sample_df.empty:
+        st.markdown(f"**👁️ 10 dòng dữ liệu mẫu bảng `{selected_t}`:**")
+        st.dataframe(sample_df, use_container_width=True)
+
+        c_dl, _ = st.columns([2, 3])
+        with c_dl:
+            csv_data = sample_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label=f"📥 Tải mẫu `{selected_t}.csv`",
+                data=csv_data,
+                file_name=f"{selected_t}_sample.csv",
+                mime="text/csv",
+                key=f"dl_dialog_sample_{selected_t}"
+            )
+    else:
+        st.caption("Bảng này hiện chưa có dữ liệu.")
+
+
 def render_main_sidebar():
     """Hiển thị Sidebar với nút Cài đặt, Khám phá Bảng DB và Danh sách Lịch sử Chat tương tác (Click to View)."""
     engine = st.session_state.get("engine")
@@ -103,57 +160,30 @@ def render_main_sidebar():
         st.markdown("---")
 
         # --- PHẦN 2: BÊN DƯỚI TOP SIDEBAR (KHÁM PHÁ BẢNG DATABASE) ---
-        st.subheader("🗄️ Khám phá Bảng Database")
+        st.subheader("🗄️ Khám phá Bảng DB")
 
         if engine:
             tables = get_table_names(engine)
             if tables:
-                all_tables_option = "🌟 Tất cả các bảng (Toàn bộ CSDL)"
-                table_options = [all_tables_option, *tables]
-
-                selected_option = st.selectbox(
-                    "Chọn bảng dữ liệu để xem",
-                    table_options,
+                st.caption(f"Cơ sở dữ liệu gồm **{len(tables)} bảng** nghiệp vụ:")
+                selected_table = st.selectbox(
+                    "Chọn bảng",
+                    tables,
                     key="sidebar_selected_table",
-                    help="Xem cấu trúc cột và dữ liệu mẫu của bảng được chọn hoặc toàn bộ CSDL."
+                    label_visibility="collapsed",
+                    help="Chọn một bảng để xem cấu trúc và mẫu dữ liệu toàn màn hình."
                 )
+                cols_info = get_table_columns_info(engine, selected_table)
+                st.caption(f"📊 Bảng `{selected_table}`: **{len(cols_info)} cột**")
 
-                if selected_option == all_tables_option:
-                    st.markdown(f"**Tổng quan CSDL**: Có **{len(tables)}** bảng")
-
-                    # Danh sách cấu trúc tất cả các bảng
-                    with st.expander("📋 Xem cấu trúc Schema tất cả các bảng", expanded=False):
-                        for t in tables:
-                            c_info = get_table_columns_info(engine, t)
-                            col_str = ", ".join(f"`{c['name']}` ({c['type']})" for c in c_info)
-                            st.markdown(f"**• Bảng `{t}`** ({len(c_info)} cột): {col_str}")
-
-                    # Xem mẫu dữ liệu tất cả các bảng qua Tabs
-                    with st.expander("👁️ Xem trước mẫu dữ liệu tất cả các bảng", expanded=True):
-                        sample_tabs = st.tabs([f"`{t}`" for t in tables])
-                        for tab, t in zip(sample_tabs, tables):
-                            with tab:
-                                df_sample = get_table_sample_df(engine, t, limit=5)
-                                if not df_sample.empty:
-                                    st.dataframe(df_sample, use_container_width=True)
-                                else:
-                                    st.caption("Bảng chưa có dữ liệu.")
-                else:
-                    selected_table = selected_option
-                    cols_info = get_table_columns_info(engine, selected_table)
-                    st.markdown(f"**Cấu trúc bảng `{selected_table}`** ({len(cols_info)} cột):")
-
-                    col_summary = ", ".join(f"`{c['name']}` ({c['type']})" for c in cols_info[:8])
-                    if len(cols_info) > 8:
-                        col_summary += f", ... (+{len(cols_info)-8} cột)"
-                    st.caption(col_summary)
-
-                    with st.expander(f"👁️ Xem 5 dòng mẫu bảng `{selected_table}`", expanded=True):
-                        sample_df = get_table_sample_df(engine, selected_table, limit=5)
-                        if not sample_df.empty:
-                            st.dataframe(sample_df, use_container_width=True)
-                        else:
-                            st.caption("Bảng này hiện chưa có dữ liệu.")
+                if st.button(
+                    f"👁️ Mở bảng `{selected_table}`",
+                    key=f"sidebar_btn_preview_{selected_table}",
+                    use_container_width=True,
+                    type="secondary",
+                    help=f"Mở hộp thoại toàn màn hình xem cấu trúc schema và 10 dòng mẫu của bảng {selected_table}"
+                ):
+                    show_table_preview_dialog(engine, tables, selected_table)
             else:
                 st.caption("Không tìm thấy bảng nào trong cơ sở dữ liệu.")
         else:

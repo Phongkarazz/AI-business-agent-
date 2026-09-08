@@ -46,6 +46,22 @@ st.markdown("""
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     
+    /* Ẩn triệt để thanh Chrome thừa mặc định của Streamlit */
+    #MainMenu {visibility: hidden; display: none !important;}
+    footer {visibility: hidden; display: none !important;}
+    .stDeployButton {display: none !important;}
+    div[data-testid="stDecoration"] {display: none !important;}
+    div[data-testid="stToolbar"] {display: none !important;}
+    div[data-testid="stStatusWidget"] {display: none !important;}
+    header {background-color: transparent !important;}
+    header [data-testid="stToolbarActions"] {display: none !important;}
+
+    /* Tối ưu khoảng đệm trên cùng của trang để nội dung hiển thị ngay trong tầm mắt */
+    .block-container {
+        padding-top: 1.25rem !important;
+        padding-bottom: 2.5rem !important;
+    }
+    
     /* Modern KPI Cards */
     div[data-testid="stMetric"] {
         background-color: #F8FAFC;
@@ -330,8 +346,14 @@ else:
     focused_turn_idx = st.session_state.get("focused_turn_idx", None)
 
     # Tiếp nhận câu hỏi từ Chat Input hoặc Pending Prompt (từ Thẻ Starter / Gợi ý tiếp nối)
+    has_active_conversation = bool(history) or (focused_turn_idx is not None)
     pending_prompt = st.session_state.get("pending_prompt")
-    user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
+
+    # Chỉ hiển thị chat_input ở chân trang khi ĐÃ CÓ lịch sử trò chuyện (tránh trùng lặp với Hero Search)
+    user_input = None
+    if has_active_conversation:
+        user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
+
     prompt_to_run = pending_prompt or user_input
 
     # 4.2 Hiển thị câu hỏi được chọn trực tiếp (Direct Focus View) hoặc toàn bộ hội thoại
