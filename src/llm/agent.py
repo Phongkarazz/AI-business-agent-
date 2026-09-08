@@ -402,6 +402,69 @@ LIMIT {top_n}"""
     return sql
 
 
+def auto_fix_top_tenured_employees_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu hỏi về top nhân viên có thâm niên làm việc lâu nhất / cống hiến lâu nhất còn công tác."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    is_tenured_emp = (
+        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai"])
+        and any(k in q_low for k in ["thâm niên", "lâu nhất", "cống hiến", "gắn bó"])
+        and not any(k in q_low for k in ["manager", "trưởng phòng", "quản lý", "lãnh đạo", "chức danh", "title"])
+    )
+
+    if not is_tenured_emp:
+        return sql
+
+    top_n = extract_requested_limit(user_query) or 10
+    lowered_sql = (sql or "").lower()
+
+    # Bị sai nếu:
+    # - Thiếu cột tên nhân viên (FullName hoặc first_name)
+    # - Bị GROUP BY theo năm hoặc theo phòng ban (HireYear, TotalHires, GROUP BY d.dept_name, GROUP BY HireYear)
+    # - Thiếu bảng employees hoặc dept_emp
+    # - Thiếu DATEDIFF hoặc YearsOfService hoặc de.to_date = '9999-01-01'
+    is_wrong = (
+        ("fullname" not in lowered_sql and "first_name" not in lowered_sql)
+        or "hireyear" in lowered_sql
+        or "totalhires" in lowered_sql
+        or "group by" in lowered_sql
+        or ("datediff" not in lowered_sql and "julianday" not in lowered_sql)
+        or "de.to_date = '9999-01-01'" not in lowered_sql
+        or "dept_emp" not in lowered_sql
+    )
+
+    if is_wrong or not sql:
+        is_sqlite = "sqlite" in (dialect or "").lower()
+        if is_sqlite:
+            return f"""SELECT 
+    e.emp_no,
+    e.first_name || ' ' || e.last_name AS FullName,
+    d.dept_name AS Department,
+    e.hire_date AS HireDate,
+    ROUND((julianday(CASE WHEN de.to_date = '9999-01-01' THEN '2002-08-01' ELSE de.to_date END) - julianday(e.hire_date)) / 365.25, 1) AS YearsOfService
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+ORDER BY e.hire_date ASC, YearsOfService DESC
+LIMIT {top_n}"""
+        else:
+            return f"""SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+    d.dept_name AS Department,
+    e.hire_date AS HireDate,
+    ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+ORDER BY e.hire_date ASC, YearsOfService DESC
+LIMIT {top_n}"""
+
+    return sql
+
+
 def auto_fix_payroll_query(sql: str, user_query: str) -> str:
     """Tự động phát hiện và khắc phục lỗi mô hình AI dùng COUNT thay vì SUM(s.salary) khi người dùng hỏi về quỹ lương phòng ban hoặc theo năm."""
     if not sql or not user_query:
@@ -2565,6 +2628,7 @@ def run_agent(
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
         sql_query = auto_fix_longest_managers_query(sql_query, user_query)
+        sql_query = auto_fix_top_tenured_employees_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)
@@ -2599,6 +2663,7 @@ def run_agent(
         sql_query = auto_fix_title_assignments_query(sql_query, user_query)
         sql_query = auto_fix_company_hiring_trend_query(sql_query, user_query)
         sql_query = auto_fix_longest_managers_query(sql_query, user_query)
+        sql_query = auto_fix_top_tenured_employees_query(sql_query, user_query, dialect=dialect)
         sql_query = auto_fix_payroll_query(sql_query, user_query)
         sql_query = auto_fix_gender_ratio_query(sql_query, user_query)
         sql_query = auto_fix_raises_query(sql_query, user_query)

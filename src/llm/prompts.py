@@ -237,6 +237,20 @@ def get_db_specific_rules(schema_context: str) -> str:
         ORDER BY d.dept_name;
         * CẢNH BÁO: Dùng COUNT(*) để đếm tổng số, BẮT BUỘC chỉ GROUP BY d.dept_name (TUYỆT ĐỐI KHÔNG GROUP BY e.gender) để mỗi phòng ban là 1 dòng duy nhất! Không JOIN salaries khi hỏi tỷ lệ quản lý!
 
+      + MẪU CHUẨN TOP NHÂN VIÊN THÂM NIÊN LÂU NHẤT CÔNG TY CÒN ĐANG CÔNG TÁC (Top N):
+        SELECT 
+            e.emp_no,
+            CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+            d.dept_name AS Department,
+            e.hire_date AS HireDate,
+            ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+        FROM employees e
+        JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+        JOIN departments d ON de.dept_no = d.dept_no
+        ORDER BY e.hire_date ASC, YearsOfService DESC
+        LIMIT 10;
+        * QUY TẮC BẮT BUỘC: Khi hỏi về 'nhân viên thâm niên / cống hiến lâu nhất còn công tác': BẮT BUỘC xuất danh sách từng nhân viên (e.emp_no, FullName, d.dept_name, e.hire_date, YearsOfService), TUYỆT ĐỐI KHÔNG GROUP BY THEO PHÒNG BAN VÀ KHÔNG ĐƯA RA XU HƯỚNG TUYỂN DỤNG CỦA PHÒNG BAN!
+
      + MẪU CHUẨN XU HƯỚNG TUYỂN DỤNG THEO NĂM:
        SELECT YEAR(hire_date) AS HireYear, COUNT(*) AS TotalHires
        FROM employees
@@ -544,9 +558,18 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
     req_limit = int(top_m.group(1)) if top_m else 10
 
-    # 0. CSDL Awesome Chocolates - Doanh thu theo thời gian / tháng & Tỷ lệ đóng góp
-    is_choco_context = any(k in schema_low for k in ["geo", "products", "sales", "spid", "geoid", "boxes"]) or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo", "hộp", "thùng", "sản phẩm", "bán hàng", "doanh số", "doanh thu", "sales"])
-    if is_choco_context or (any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
+    # 0. Phân biệt ngữ cảnh CSDL (Employees vs Awesome Chocolates)
+    is_employees_db = (
+        ("dept_emp" in schema_low or "dept_manager" in schema_low or "titles" in schema_low or "salaries" in schema_low or "hire_date" in schema_low)
+        and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`sales`", "bảng sales", "bảng `sales`"])
+    )
+    is_choco_context = (
+        (any(k in schema_low for k in ["geo", "products", "spid", "geoid", "boxes"])
+         or ("`sales`" in schema_low or "bảng sales" in schema_low or "table sales" in schema_low)
+         or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo", "hộp", "thùng", "sản phẩm", "bán hàng", "doanh số", "doanh thu"]))
+        and not is_employees_db
+    )
+    if is_choco_context or (not is_employees_db and any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
         # 0.000 Câu hỏi lọc theo điều kiện ngưỡng (Threshold Condition Queries):
         thresh_info = parse_threshold_query_info(q_low)
         if thresh_info:
@@ -1410,7 +1433,7 @@ LIMIT {req_limit};
 """
 
     # 2. Thâm niên nhân sự
-    elif any(k in q_low for k in ["thâm niên", "cống hiến"]) or ("lâu nhất" in q_low and any(k in q_low for k in ["nhân viên", "công tác", "làm việc"])):
+    elif any(k in q_low for k in ["thâm niên", "cống hiến", "gắn bó"]) or (any(k in q_low for k in ["lâu nhất", "dài nhất"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "công tác", "làm việc", "người", "ai", "toàn công ty"])):
         return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN THÂM NIÊN LÂU NHẤT CÒN CÔNG TÁC):
 SELECT 

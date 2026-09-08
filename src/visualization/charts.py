@@ -253,8 +253,6 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
             if is_distribution_breakdown:
                 chosen = "Pie"
-            elif time_col and measure_cols and n_time > 1:
-                chosen = "Line"
             elif is_individual_entity and measure_cols:
                 uq_low = (user_query or "").lower()
                 is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "danh sách"])
@@ -262,6 +260,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     chosen = "Bar Ngang"
                 else:
                     chosen = "Bar"
+            elif time_col and measure_cols and n_time > 1:
+                chosen = "Line"
             elif len(df) == 1 and measure_cols and any(k in str(measure_cols[0]).lower() for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram", "%"]):
                 chosen = "Pie"
             elif measure_cols:
