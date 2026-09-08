@@ -104,41 +104,62 @@ def render_onboarding():
             st.markdown("### 🏢 Chế độ Doanh nghiệp")
             st.caption("Kết nối MySQL Database thực tế và tùy biến các thông số AI nâng cao.")
 
-            should_expand_mysql = bool(auto_err or saved.get("data_mode_index", 0) == 1)
+            should_expand_mysql = True
             with st.expander("🔌 1. Thông số Kết nối MySQL Database", expanded=should_expand_mysql):
-                run_local = st.checkbox(
-                    "🖥️ Database chạy trên máy Local (localhost)",
-                    value=saved.get("run_local", False),
-                    key="onboarding_run_local",
-                    help="Tự động điền Host = localhost và thử các alias (127.0.0.1, host.docker.internal)."
+                is_local_saved = saved.get("run_local", True) or (saved.get("db_host", "") in ("localhost", "127.0.0.1", ""))
+                conn_mode = st.radio(
+                    "Môi trường MySQL Database",
+                    ["🖥️ Máy tính này (Localhost)", "☁️ Máy chủ / Cloud (Từ xa)"],
+                    index=0 if is_local_saved else 1,
+                    horizontal=True,
+                    key="onboarding_conn_mode"
                 )
+                run_local = (conn_mode == "🖥️ Máy tính này (Localhost)")
 
                 if run_local:
-                    db_host = st.text_input("Host", value=saved.get("db_host", "localhost") or "localhost", key="onboarding_db_host")
+                    db_host = "localhost"
+                    use_ssl = False
+
+                    st.markdown("""
+                    <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.84rem; color: #166534; display: flex; align-items: center; gap: 8px;">
+                        <span>🟢</span> <span><b>Chế độ Cục bộ (Localhost):</b> Tự động kết nối <code>127.0.0.1 / localhost:3306</code>. Không cần nhập Host hay cấu hình mạng phức tạp.</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    c_u1, c_u2 = st.columns([1, 2])
+                    with c_u1:
+                        db_user = st.text_input("User", value=saved.get("db_user", "root") or "root", key="onboarding_db_user_local")
+                    with c_u2:
+                        db_pass = st.text_input("Password", value=saved.get("db_pass", ""), type="password", key="onboarding_db_pass_local")
+
+                    db_name = st.text_input("Database Name", value=saved.get("db_name", "employees") or "employees", placeholder="VD: employees", key="onboarding_db_name_local")
+
+                    with st.expander("⚙️ Tùy chọn Port nâng cao (Mặc định: 3306)", expanded=False):
+                        db_port_raw = st.text_input("Port", value=saved.get("db_port", "3306") or "3306", key="onboarding_db_port_local")
                 else:
-                    default_host = saved.get("db_host", "")
-                    if default_host in ("localhost", "127.0.0.1"):
-                        default_host = ""
-                    db_host = st.text_input("Host", value=default_host, placeholder="VD: mysql-xxx.aivencloud.com", key="onboarding_db_host")
+                    default_cloud_host = saved.get("db_host", "")
+                    if default_cloud_host in ("localhost", "127.0.0.1"):
+                        default_cloud_host = ""
+                    db_host = st.text_input("Host máy chủ MySQL", value=default_cloud_host, placeholder="VD: mysql-xxx.aivencloud.com", key="onboarding_db_host")
 
-                c_p1, c_p2 = st.columns([1, 2])
-                with c_p1:
-                    db_port_raw = st.text_input("Port", value=saved.get("db_port", "3306"), key="onboarding_db_port")
-                with c_p2:
-                    db_user = st.text_input("User", value=saved.get("db_user", "root"), key="onboarding_db_user")
+                    c_p1, c_p2 = st.columns([1, 2])
+                    with c_p1:
+                        db_port_raw = st.text_input("Port", value=saved.get("db_port", "3306") or "3306", key="onboarding_db_port_remote")
+                    with c_p2:
+                        db_user = st.text_input("User", value=saved.get("db_user", "root") or "root", key="onboarding_db_user_remote")
 
-                db_pass = st.text_input("Password", value=saved.get("db_pass", ""), type="password", key="onboarding_db_pass")
-                db_name = st.text_input("Database Name", value=saved.get("db_name", ""), placeholder="VD: my_company_db", key="onboarding_db_name")
-                use_ssl = st.checkbox(
-                    "Dùng SSL (Bắt buộc với hầu hết MySQL Cloud: Aiven, Railway...)",
-                    value=saved.get("use_ssl", not run_local),
-                    key="onboarding_use_ssl"
-                )
+                    db_pass = st.text_input("Password", value=saved.get("db_pass", ""), type="password", key="onboarding_db_pass_remote")
+                    db_name = st.text_input("Database Name", value=saved.get("db_name", ""), placeholder="VD: my_company_db", key="onboarding_db_name_remote")
+                    use_ssl = st.checkbox(
+                        "Dùng SSL (Bắt buộc với hầu hết MySQL Cloud: Aiven, Railway...)",
+                        value=saved.get("use_ssl", True),
+                        key="onboarding_use_ssl"
+                    )
 
-                db_host = db_host.strip()
+                db_host = (db_host or "localhost" if run_local else db_host or "").strip()
                 db_user = db_user.strip()
                 db_name = db_name.strip()
-                db_port_digits = "".join(ch for ch in db_port_raw if ch.isdigit())
+                db_port_digits = "".join(ch for ch in str(db_port_raw) if ch.isdigit())
                 db_port = db_port_digits or "3306"
 
             with st.expander("🤖 2. Nhà cung cấp AI & API Key", expanded=False):
@@ -328,8 +349,14 @@ def render_onboarding():
 
         if not clean_api_key and effective_provider != "Ollama (Local AI Offline)":
             st.error(f"❌ Vui lòng nhập API Key cho {effective_provider}!")
-        elif not (db_host and db_user and db_name):
-            st.error("❌ Vui lòng điền đầy đủ Host, User, Database Name!")
+        elif run_local and not db_name:
+            st.error("❌ Vui lòng nhập Database Name (VD: employees)!")
+        elif run_local and not db_user:
+            st.error("❌ Vui lòng nhập User MySQL (mặc định: root)!")
+        elif not run_local and not db_host:
+            st.error("❌ Vui lòng nhập Host máy chủ MySQL Cloud (hoặc chọn 'Máy tính này (Localhost)')!")
+        elif not run_local and not (db_user and db_name):
+            st.error("❌ Vui lòng điền đầy đủ User và Database Name!")
         else:
             # Đồng bộ session state
             st.session_state["enable_auto_insights"] = enable_auto_insights

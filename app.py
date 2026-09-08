@@ -267,11 +267,15 @@ if (
         effective_provider = "OpenRouter" if is_openrouter_key else provider
 
         use_demo = saved.get("data_mode_index", 0) == 0
-        db_host = saved.get("db_host", "")
-        db_user = saved.get("db_user", "")
-        db_name = saved.get("db_name", "")
+        db_host = (saved.get("db_host", "") or "").strip()
+        db_user = (saved.get("db_user", "") or "").strip()
+        db_name = (saved.get("db_name", "") or "").strip()
+        run_local = saved.get("run_local", True) or (db_host in ("localhost", "127.0.0.1", ""))
 
-        can_connect = clean_api_key and (use_demo or bool(db_host and db_user and db_name))
+        if run_local and not db_host:
+            db_host = "localhost"
+
+        can_connect = clean_api_key and (use_demo or bool(db_user and db_name and (db_host or run_local)))
 
         if can_connect:
             custom_base_url = saved.get("openrouter_base_url" if effective_provider == "OpenRouter" else "qwen_base_url", "")
@@ -283,8 +287,8 @@ if (
                     db_user=db_user,
                     db_pass=saved.get("db_pass", ""),
                     db_name=db_name,
-                    use_ssl=saved.get("use_ssl", False),
-                    run_local=saved.get("run_local", False),
+                    use_ssl=saved.get("use_ssl", False) if not run_local else False,
+                    run_local=run_local,
                     effective_provider=effective_provider,
                     clean_api_key=clean_api_key,
                     custom_base_url=custom_base_url,

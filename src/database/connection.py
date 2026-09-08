@@ -31,8 +31,13 @@ def try_connect(host: str, port: str, user: str, pw: str, name: str, use_ssl: bo
         raise ValueError(f"Port không hợp lệ: '{port}'. Vui lòng chỉ nhập số (VD: 3306).")
     port_int = int(port_str)
 
-    # Thử lần lượt các alias khi run_local bật
-    candidate_hosts = LOCAL_HOST_ALIASES if (run_local and host.lower() in ("localhost", "127.0.0.1")) else [host]
+    # Thử lần lượt các alias khi run_local bật hoặc khi host là localhost / trống
+    if run_local or not host or host.lower() in ("localhost", "127.0.0.1"):
+        candidate_hosts = LOCAL_HOST_ALIASES.copy()
+        if host and host not in candidate_hosts:
+            candidate_hosts = [host] + candidate_hosts
+    else:
+        candidate_hosts = [host]
 
     last_error = None
     for candidate in candidate_hosts:

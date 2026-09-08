@@ -13,7 +13,7 @@ def load_saved_config() -> Dict[str, Any]:
     """Tải cấu hình đã lưu từ file .saved_config.json và fallback vào biến môi trường."""
     config: Dict[str, Any] = {
         "data_mode_index": 0,
-        "run_local": False,
+        "run_local": True,
         "db_host": os.getenv("DB_HOST", "localhost"),
         "db_port": os.getenv("DB_PORT", "3306"),
         "db_user": os.getenv("DB_USER", "root"),
