@@ -617,7 +617,10 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
              and any(k in _uq_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "lowest", "smallest", "least"]))
             or ("và" in _uq_low and any(k in _uq_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất"]))
         )
-        scope_suffix = f" (Top {total_rows})" if is_top_query and total_rows <= 30 else ""
+        if is_comparison_query and total_rows == 2:
+            scope_suffix = " (2 đơn vị)" if not is_en else " (2 entities)"
+        else:
+            scope_suffix = f" (Top {total_rows})" if is_top_query and total_rows <= 30 else ""
 
         # Ký hiệu tiền tệ và tỷ lệ phần trăm
         _m_col_lower = str(m_col).lower()
@@ -1068,7 +1071,10 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                                 _entity_top = " Nhân sự" if not is_en else " Employees"
                             else:
                                 _entity_top = ""
-                            st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {display_rows_count}{_entity_top}")
+                            if is_comparison_query and total_rows == 2:
+                                st.metric("⚖️ " + ("So sánh Đối chiếu" if not is_en else "Min-Max Comparison"), f"2{_entity_top}")
+                            else:
+                                st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {display_rows_count}{_entity_top}")
                         else:
                             _dim_low = str(_dim_col).lower()
                             if any(k in _dim_low for k in ["dept", "phòng", "department"]):
@@ -1099,10 +1105,19 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                     with col2:
                         st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total)
                     with col3:
-                        st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
+                        if is_comparison_query and total_rows == 2:
+                            peak_title = "🥇 " + ("Lớn nhất" if not is_en else "Largest")
+                            st.metric(peak_title, peak_label, delta=peak_delta_val)
+                        else:
+                            st.metric(f"📈 " + ("Trung bình" if not is_en else "Average"), fmt_avg)
                     with col4:
-                        peak_title = "🏆 " + ("Đội lớn nhất" if (is_hc_measure and any(k in str(label_cols[0] if label_cols else "").lower() for k in ["team", "đội"])) else ("Đỉnh cao nhất" if not is_en else "Peak Record"))
-                        st.metric(peak_title, peak_label, delta=peak_delta_val)
+                        if is_comparison_query and total_rows == 2:
+                            min_delta_val = f"{int(min_val):,} Người" if is_hc_measure else f"{_fmt_kpi_val(min_val)}"
+                            min_title = "📉 " + ("Nhỏ nhất" if not is_en else "Smallest")
+                            st.metric(min_title, min_label, delta=min_delta_val)
+                        else:
+                            peak_title = "🏆 " + ("Đội lớn nhất" if (is_hc_measure and any(k in str(label_cols[0] if label_cols else "").lower() for k in ["team", "đội"])) else ("Đỉnh cao nhất" if not is_en else "Peak Record"))
+                            st.metric(peak_title, peak_label, delta=peak_delta_val)
 
                     if has_unassigned and unassigned_measure_sum > 0:
                         pct_unassigned = (unassigned_measure_sum / total_val * 100.0) if total_val > 0 else 0

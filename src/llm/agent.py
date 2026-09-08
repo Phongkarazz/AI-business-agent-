@@ -924,37 +924,63 @@ ORDER BY Headcount DESC"""
 
 
 def auto_fix_dept_size_min_max_query(sql: str, user_query: str) -> str:
-    """Tự động sửa lỗi subquery Max_size/Min_size toàn công ty lặp lại trên từng dòng khi hỏi quy mô phòng ban lớn nhất và nhỏ nhất."""
+    """Tự động chuẩn hóa câu hỏi về quy mô nhân sự phòng ban lớn nhất và/hoặc nhỏ nhất.
+    Khi người dùng hỏi phòng ban có quy mô lớn nhất VÀ nhỏ nhất, BẮT BUỘC chỉ xuất ra đúng 2 phòng ban tương ứng với 2 cực trị (lớn nhất & nhỏ nhất),
+    tránh xuất toàn bộ danh sách các phòng ban gây loãng thông tin và sai lệch yêu cầu của người dùng.
+    """
     if not user_query:
         return sql
     q_low = user_query.lower()
     is_min_max_size = (
         any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhất"])
-        and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất"])
-        and any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng"])
+        and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "đông nhất"])
+        and any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"])
     )
     if not is_min_max_size:
         return sql
 
-    lowered_sql = (sql or "").lower()
-    has_scalar_subquery = "max_size" in lowered_sql or "min_size" in lowered_sql or lowered_sql.count("select") > 1
-    needs_normalization = (
-        has_scalar_subquery
-        or "people" in lowered_sql
-        or "departments" not in lowered_sql
-        or "dept_emp" not in lowered_sql
-        or "headcount" not in lowered_sql
-        or not re.search(r"\bde\.to_date\s*=\s*'9999-01-01'", sql, re.IGNORECASE)
-    )
+    has_largest = any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "đông nhất", "largest", "highest", "most"])
+    has_smallest = any(k in q_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "smallest", "lowest", "least"])
 
-    if needs_normalization or not sql:
+    # 1. Trường hợp hỏi CẢ HAI cực trị (lớn nhất VÀ nhỏ nhất) -> BẮT BUỘC chỉ xuất ra đúng 2 phòng ban!
+    if has_largest and has_smallest:
+        return """WITH DeptHeadcount AS (
+    SELECT 
+        d.dept_name AS Department,
+        COUNT(DISTINCT de.emp_no) AS Headcount
+    FROM departments d
+    JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+    GROUP BY d.dept_name
+)
+SELECT 
+    Department, 
+    Headcount
+FROM DeptHeadcount
+WHERE Headcount = (SELECT MAX(Headcount) FROM DeptHeadcount)
+   OR Headcount = (SELECT MIN(Headcount) FROM DeptHeadcount)
+ORDER BY Headcount DESC;""".strip()
+
+    # 2. Trường hợp CHỈ hỏi phòng ban lớn nhất / đông nhất
+    elif has_largest and not has_smallest:
         return """SELECT 
     d.dept_name AS Department,
     COUNT(DISTINCT de.emp_no) AS Headcount
 FROM departments d
 JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
 GROUP BY d.dept_name
-ORDER BY Headcount DESC"""
+ORDER BY Headcount DESC
+LIMIT 1;""".strip()
+
+    # 3. Trường hợp CHỈ hỏi phòng ban nhỏ nhất / ít nhất
+    elif has_smallest and not has_largest:
+        return """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY Headcount ASC
+LIMIT 1;""".strip()
 
     return sql
 

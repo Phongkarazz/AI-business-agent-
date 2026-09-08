@@ -1688,17 +1688,54 @@ ORDER BY Headcount DESC;
 """
 
     # 9. Quy mô các phòng ban lớn nhất và nhỏ nhất
-    elif any(k in q_low for k in ["quy mô", "nhân sự", "số lượng"]) and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất"]) and any(k in q_low for k in ["phòng ban", "phòng"]):
-        return """
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (QUY MÔ CÁC PHÒNG BAN TỪ LỚN NHẤT ĐẾN NHỎ NHẤT):
+    elif any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhất"]) and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "đông nhất", "ít nhất"]) and any(k in q_low for k in ["phòng ban", "phòng", "department"]):
+        has_largest = any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "đông nhất", "largest", "highest", "most"])
+        has_smallest = any(k in q_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "smallest", "lowest", "least"])
+        if has_largest and has_smallest:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN QUY MÔ LỚN NHẤT VÀ NHỎ NHẤT):
+WITH DeptHeadcount AS (
+    SELECT 
+        d.dept_name AS Department,
+        COUNT(DISTINCT de.emp_no) AS Headcount
+    FROM departments d
+    JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+    GROUP BY d.dept_name
+)
+SELECT 
+    Department, 
+    Headcount
+FROM DeptHeadcount
+WHERE Headcount = (SELECT MAX(Headcount) FROM DeptHeadcount)
+   OR Headcount = (SELECT MIN(Headcount) FROM DeptHeadcount)
+ORDER BY Headcount DESC;
+(CẢNH BÁO BẮT BUỘC: Người dùng hỏi phòng ban lớn nhất VÀ nhỏ nhất, BẮT BUỘC dùng CTE và mệnh đề WHERE Headcount = MAX OR MIN để CHỈ XUẤT ĐÚNG 2 PHÒNG BAN tương ứng với 2 cực trị, TUYỆT ĐỐI KHÔNG xuất tất cả các phòng ban!)
+"""
+        elif has_smallest:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN QUY MÔ NHỎ NHẤT):
 SELECT 
     d.dept_name AS Department,
     COUNT(DISTINCT de.emp_no) AS Headcount
 FROM departments d
 JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
 GROUP BY d.dept_name
-ORDER BY Headcount DESC;
-(CẢNH BÁO ĐẶC BIỆT: Sắp xếp ORDER BY Headcount DESC để thấy rõ ràng phòng ban lớn nhất ở đầu và nhỏ nhất ở cuối! TUYỆT ĐỐI KHÔNG DÙNG SUBQUERY TÍNH Max_size / Min_size lặp lại trên từng dòng!)
+ORDER BY Headcount ASC
+LIMIT 1;
+(CẢNH BÁO: BẮT BUỘC ORDER BY Headcount ASC LIMIT 1 để chỉ lấy 1 phòng ban nhỏ nhất!)
+"""
+        else:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN QUY MÔ LỚN NHẤT):
+SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY Headcount DESC
+LIMIT 1;
+(CẢNH BÁO: BẮT BUỘC ORDER BY Headcount DESC LIMIT 1 để chỉ lấy 1 phòng ban lớn nhất!)
 """
 
     # 10. Tỷ lệ nam và nữ trong ban quản lý (dept_manager)
