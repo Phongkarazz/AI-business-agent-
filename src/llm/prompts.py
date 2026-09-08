@@ -480,21 +480,57 @@ def match_chocolates_specific_person(text: str):
     return None
 
 
+def match_chocolates_specific_country(text: str):
+    """Khớp tên quốc gia/thị trường cụ thể trong CSDL Chocolates."""
+    if not text:
+        return None
+    t_clean = text.lower()
+    country_patterns = {
+        "india": "India", "ấn độ": "India", "an do": "India",
+        "usa": "USA", "mỹ": "USA", "hoa kỳ": "USA", "united states": "USA",
+        "canada": "Canada",
+        "new zealand": "New Zealand",
+        "australia": "Australia", "úc": "Australia",
+        "uk": "UK", "nước anh": "UK", "vương quốc anh": "UK", "united kingdom": "UK"
+    }
+    for cp_key, cp_val in country_patterns.items():
+        if re.search(rf"\b{re.escape(cp_key)}\b", t_clean):
+            return cp_val
+    return None
+
+
 def parse_threshold_query_info(q_low: str):
     """Trích xuất thông tin điều kiện lọc theo ngưỡng (Threshold Query) cho CSDL Awesome Chocolates."""
-    has_threshold_kw = any(k in q_low for k in [
-        'vượt', 'trên', 'dưới', 'cao hơn', 'lớn hơn', 'thấp hơn', 'nhỏ hơn',
-        'nhiều hơn', 'ít hơn', 'từ', 'ít nhất', 'tối thiểu', 'tối đa',
-        '>', '<', '>=', '<=', 'over', 'above', 'under', 'below', 'exceed', 'more than', 'less than'
-    ])
+    if not q_low:
+        return None
+
+    # Loại bỏ các cụm từ gây hiểu nhầm sang từ khóa ngưỡng
+    q_clean = re.sub(
+        r'\b(trên thị trường|trên toàn quốc|trên thế giới|trên bảng|dưới đây|như dưới đây|'
+        r'từng quý|từng tháng|từng năm|từng ngày|từng người|từng sản phẩm|từng quốc gia|từng team|'
+        r'từ năm\s+\d+|từ tháng\s+\d+|từ ngày\s+\d+)\b',
+        ' ',
+        q_low
+    )
+
+    # Kiểm tra từ khóa so sánh ngưỡng bằng regex có ranh giới từ (word boundary)
+    has_threshold_kw = (
+        bool(re.search(r'\b(vượt|vượt mức|vượt quá|cao hơn|lớn hơn|thấp hơn|nhỏ hơn|nhiều hơn|ít hơn|ít nhất|tối thiểu|tối đa|over|above|under|below|exceed|more than|less than)\b|[><]=?', q_clean))
+        or bool(re.search(r'\b(trên|dưới)\s+(?:\$|usd\s*)?\d+', q_clean))
+        or bool(re.search(r'\btừ\s+(?:\$|usd\s*)?\d+', q_clean))
+    )
     if not has_threshold_kw:
         return None
 
+    # Nếu câu hỏi nói về xu hướng thời gian đơn thuần (theo từng quý, theo từng tháng, qua các quý...)
+    # mà không có số liệu ngưỡng rõ ràng, không coi là threshold query
+    is_time_trend = any(k in q_low for k in ["từng quý", "theo từng quý", "qua các quý", "từng tháng", "theo từng tháng", "qua các tháng", "xu hướng", "biến động", "qua từng năm"])
+
     val = None
-    m_b = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:tỷ|ty|b|billion)\b', q_low)
-    m_m = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:tr|triệu|trieu|m|million)\b', q_low)
-    m_k = re.search(r'(\d+(?:[.,]\d+)?)\s*k\b', q_low)
-    m_num = re.search(r'(?:mức\s*|trên\s*|hơn\s*|dưới\s*|từ\s*|[><]=?\s*)(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+)', q_low)
+    m_b = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:tỷ|ty|b|billion)\b', q_clean)
+    m_m = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:tr|triệu|trieu|m|million)\b', q_clean)
+    m_k = re.search(r'(\d+(?:[.,]\d+)?)\s*k\b', q_clean)
+    m_num = re.search(r'(?:mức\s*|trên\s*|hơn\s*|dưới\s*|từ\s*|[><]=?\s*)(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+)', q_clean)
 
     if m_b:
         val = float(m_b.group(1).replace(',', '.')) * 1_000_000_000
@@ -504,36 +540,48 @@ def parse_threshold_query_info(q_low: str):
         val = float(m_k.group(1).replace(',', '.')) * 1_000
     elif m_num:
         raw = m_num.group(1).replace(',', '').replace('.', '')
-        val = float(raw)
+        candidate_val = float(raw)
+        # Loại trừ năm lịch (1980 - 2040) nếu không có phân cách hàng nghìn
+        if 1980 <= candidate_val <= 2040 and ',' not in m_num.group(1) and '.' not in m_num.group(1):
+            val = None
+        else:
+            val = candidate_val
     else:
-        m_any = re.search(r'\b(\d{1,3}(?:[.,]\d{3})+|\d{4,})\b', q_low)
+        m_any = re.search(r'\b(\d{1,3}(?:[.,]\d{3})+|\d{4,})\b', q_clean)
         if m_any:
             raw = m_any.group(1).replace(',', '').replace('.', '')
-            val = float(raw)
+            candidate_val = float(raw)
+            if 1980 <= candidate_val <= 2040 and ',' not in m_any.group(1) and '.' not in m_any.group(1):
+                val = None
+            else:
+                val = candidate_val
 
-    if not val:
+    if not val or val <= 0:
+        return None
+
+    if is_time_trend and not (m_b or m_m or m_k or (m_num and val >= 10000)):
         return None
 
     op = '>'
-    if any(k in q_low for k in ['từ', 'ít nhất', 'tối thiểu', '>=', 'at least', 'minimum']):
+    if any(k in q_clean for k in ['ít nhất', 'tối thiểu', '>=', 'at least', 'minimum']) or re.search(r'\btừ\s+\d+', q_clean):
         op = '>='
-    elif any(k in q_low for k in ['dưới', 'thấp hơn', 'nhỏ hơn', 'ít hơn', '<', 'under', 'below', 'less than']):
+    elif any(k in q_clean for k in ['thấp hơn', 'nhỏ hơn', 'ít hơn', '<', 'under', 'below', 'less than']) or re.search(r'\bdưới\s+\d+', q_clean):
         op = '<'
-    elif any(k in q_low for k in ['tối đa', '<=', 'at most', 'maximum']):
+    elif any(k in q_clean for k in ['tối đa', '<=', 'at most', 'maximum']):
         op = '<='
-    elif any(k in q_low for k in ['vượt', 'trên', 'lớn hơn', 'cao hơn', 'nhiều hơn', 'hơn', '>', 'over', 'above', 'exceed']):
+    elif any(k in q_clean for k in ['vượt', 'lớn hơn', 'cao hơn', 'nhiều hơn', 'hơn', '>', 'over', 'above', 'exceed']) or re.search(r'\btrên\s+\d+', q_clean):
         op = '>'
 
     has_boxes = any(k in q_low for k in ['hộp', 'hop', 'thùng', 'thung', 'boxes'])
 
     entity_type = None
-    if any(k in q_low for k in ['nhân viên', 'salesperson', 'sales person', 'người bán', 'ai bán', 'ai có']):
+    if any(k in q_low for k in ['nhân viên', 'salesperson', 'sales person', 'người bán', 'ai bán', 'ai có']) and not match_chocolates_specific_person(q_low):
         entity_type = 'person'
-    elif any(k in q_low for k in ['sản phẩm', 'product', 'mặt hàng', 'kẹo', 'socola', 'chocolate']):
+    elif any(k in q_low for k in ['sản phẩm', 'product', 'mặt hàng', 'kẹo', 'socola', 'chocolate']) and not match_chocolates_specific_product(q_low):
         entity_type = 'product'
-    elif any(k in q_low for k in ['quốc gia', 'country', 'thị trường', 'geo']):
+    elif any(k in q_low for k in ['quốc gia', 'country', 'thị trường', 'geo']) and not match_chocolates_specific_country(q_low):
         entity_type = 'geo'
-    elif any(k in q_low for k in ['đội ngũ', 'team', 'nhóm']):
+    elif any(k in q_low for k in ['đội ngũ', 'team', 'nhóm']) and not any(k in q_low for k in ['yummies', 'delish', 'jucies']):
         entity_type = 'team'
 
     if not entity_type:
@@ -976,19 +1024,7 @@ LIMIT {req_limit};
 
         # 0.08 Doanh thu theo từng quý (Quarterly Trend) - theo Quốc gia cụ thể, theo Team, theo Sản phẩm, hoặc Toàn công ty
         elif any(k in q_low for k in ["quý", "quarter", "từng quý", "theo quý", "qua các quý", "quarterly"]):
-            specific_country = None
-            country_patterns = {
-                "india": "India", "ấn độ": "India", "an do": "India",
-                "usa": "USA", "mỹ": "USA", "hoa kỳ": "USA", "united states": "USA",
-                "canada": "Canada",
-                "new zealand": "New Zealand",
-                "australia": "Australia", "úc": "Australia",
-                "uk": "UK", "nước anh": "UK", "vương quốc anh": "UK", "united kingdom": "UK"
-            }
-            for cp_key, cp_val in country_patterns.items():
-                if re.search(rf"\b{re.escape(cp_key)}\b", q_low):
-                    specific_country = cp_val
-                    break
+            specific_country = match_chocolates_specific_country(q_low)
 
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_val = yr_match.group(1) if yr_match else None
@@ -1063,7 +1099,34 @@ ORDER BY Quarter ASC;
 (CẢNH BÁO BẮT BUỘC: Dùng {qtr_expr} AS Quarter! GROUP BY Quarter và ORDER BY Quarter ASC!)
 """
 
-        # 0.1 Doanh thu theo từng quốc gia (Country) qua các tháng
+        # 0.09 Doanh thu của một Quốc gia cụ thể (India, USA, Canada...) qua các tháng
+        elif match_chocolates_specific_country(q_low) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian", "xu hướng", "thay đổi", "biến động"]) and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
+            specific_c = match_chocolates_specific_country(q_low)
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"])
+            metric_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE g.Geo = '{specific_c}' AND strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE g.Geo = '{specific_c}' AND YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+            else:
+                yr_filter = f"WHERE g.Geo = '{specific_c}'\n"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THỊ TRƯỜNG {specific_c.upper()} QUA CÁC THÁNG{yr_label}):
+SELECT 
+    {date_expr} AS Month,
+    {metric_col}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{yr_filter}GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: Lọc đúng thị trường g.Geo = '{specific_c}'! GROUP BY Month và ORDER BY Month ASC để trả về đúng 12 tháng liên tục của riêng thị trường này và vẽ biểu đồ đường Line chart! TUYỆT ĐỐI KHÔNG GROUP BY Country hoặc trả về các quốc gia khác!)
+"""
+
+        # 0.1 Doanh thu theo từng quốc gia (Country) qua các tháng (đa quốc gia)
         elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thay đổi", "xu hướng", "biến động"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
@@ -1331,8 +1394,34 @@ LIMIT {req_limit};
 (CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID! BẮT BUỘC dùng LIMIT {req_limit} theo yêu cầu người dùng!)
 """
 
+        # 0.79 Doanh thu của một Quốc gia / Thị trường cụ thể (India, USA, Canada...)
+        elif match_chocolates_specific_country(q_low) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "hộp", "thùng", "boxes", "tiền"]) and not any(k in q_low for k in ["top", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "bảng xếp hạng", "các quốc gia", "từng quốc gia", "mỗi quốc gia", "tất cả", "so sánh"]):
+            specific_c = match_chocolates_specific_country(q_low)
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"])
+            metric_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_filter = ""
+            yr_label = ""
+            if yr_match:
+                yr_val = yr_match.group(1)
+                yr_filter = f"WHERE g.Geo = '{specific_c}' AND strftime('%Y', s.SaleDate) = '{yr_val}'\n" if is_sqlite else f"WHERE g.Geo = '{specific_c}' AND YEAR(s.SaleDate) = {yr_val}\n"
+                yr_label = f" NĂM {yr_val}"
+            else:
+                yr_filter = f"WHERE g.Geo = '{specific_c}'\n"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THỊ TRƯỜNG {specific_c.upper()}{yr_label}):
+SELECT 
+    g.Geo AS Country,
+    {metric_col}
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+{yr_filter}GROUP BY g.Geo;
+(CẢNH BÁO BẮT BUỘC: Lọc đúng thị trường g.Geo = '{specific_c}'! TUYỆT ĐỐI KHÔNG hiển thị các quốc gia khác!)
+"""
+
         # 0.8 Top N quốc gia / thị trường có doanh số cao nhất
-        elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "cao nhất", "top", "nhiều nhất", "lớn nhất"]):
+        elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "cao nhất", "top", "nhiều nhất", "lớn nhất"]) and not match_chocolates_specific_country(q_low):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_label = ""

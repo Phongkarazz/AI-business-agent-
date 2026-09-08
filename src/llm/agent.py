@@ -1210,19 +1210,8 @@ GROUP BY Month
 ORDER BY Month ASC"""
 
     # 0.1 Doanh thu của một Quốc gia cụ thể (India, USA, Canada, New Zealand, Australia, UK) qua các tháng
-    specific_country = None
-    country_patterns = {
-        "india": "India", "ấn độ": "India", "an do": "India",
-        "usa": "USA", "mỹ": "USA", "hoa kỳ": "USA", "united states": "USA",
-        "canada": "Canada",
-        "new zealand": "New Zealand",
-        "australia": "Australia", "úc": "Australia",
-        "uk": "UK", "nước anh": "UK", "vương quốc anh": "UK", "united kingdom": "UK"
-    }
-    for cp_key, cp_val in country_patterns.items():
-        if re.search(rf"\b{re.escape(cp_key)}\b", q_low):
-            specific_country = cp_val
-            break
+    from src.llm.prompts import match_chocolates_specific_country
+    specific_country = match_chocolates_specific_country(q_low)
 
     if specific_country and has_monthly and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
         conds = [f"g.Geo = '{specific_country}'"]
@@ -1535,19 +1524,8 @@ def auto_fix_chocolates_quarterly_sales_query(sql: str, user_query: str, dialect
     metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
 
     # 1. Doanh thu của một Quốc gia cụ thể qua từng quý (ví dụ: Ấn Độ / India năm 2021)
-    specific_country = None
-    country_patterns = {
-        "india": "India", "ấn độ": "India", "an do": "India",
-        "usa": "USA", "mỹ": "USA", "hoa kỳ": "USA", "united states": "USA",
-        "canada": "Canada",
-        "new zealand": "New Zealand",
-        "australia": "Australia", "úc": "Australia",
-        "uk": "UK", "nước anh": "UK", "vương quốc anh": "UK", "united kingdom": "UK"
-    }
-    for cp_key, cp_val in country_patterns.items():
-        if re.search(rf"\b{re.escape(cp_key)}\b", q_low):
-            specific_country = cp_val
-            break
+    from src.llm.prompts import match_chocolates_specific_country
+    specific_country = match_chocolates_specific_country(q_low)
 
     if specific_country and not any(k in q_low for k in ["sản phẩm", "product", "nhân viên", "salesperson"]):
         conds = [f"g.Geo = '{specific_country}'"]
@@ -1985,8 +1963,23 @@ def auto_fix_chocolates_threshold_query(sql: str, user_query: str, dialect: str 
     if not sql or not user_query:
         return sql
 
-    from src.llm.prompts import parse_threshold_query_info
     q_low = user_query.lower()
+
+    # 0. Tuyệt đối KHÔNG can thiệp nếu là câu hỏi xu hướng theo thời gian (quý, tháng, năm,...)
+    if any(k in q_low for k in ["quý", "quarter", "từng quý", "theo quý", "qua các quý", "tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng", "trend", "biến động"]):
+        return sql
+
+    # 0.1 Tuyệt đối KHÔNG can thiệp nếu SQL đã gom nhóm theo thời gian (Quarter, Month, SaleDate)
+    sql_low = sql.lower()
+    if any(k in sql_low for k in ["quarter", "month", "date_format", "strftime"]) or "group by quarter" in sql_low or "group by month" in sql_low:
+        return sql
+
+    # 0.2 Nếu câu hỏi có nhắc đến một quốc gia cụ thể (Ấn Độ, India, USA...), không can thiệp
+    from src.llm.prompts import match_chocolates_specific_country
+    if match_chocolates_specific_country(q_low):
+        return sql
+
+    from src.llm.prompts import parse_threshold_query_info
     thresh_info = parse_threshold_query_info(q_low)
     if not thresh_info:
         return sql
@@ -2290,6 +2283,22 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             return "\n".join(lines)
 
     # 3. Bảng xếp hạng Thị trường / Quốc gia (Country / Geo)
+    from src.llm.prompts import match_chocolates_specific_country
+    specific_c = match_chocolates_specific_country(q_low)
+    is_multi_country_rank = any(k in q_low for k in ["top", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "bảng xếp hạng", "các quốc gia", "từng quốc gia", "mỗi quốc gia", "tất cả", "so sánh", "nước nào"])
+
+    if specific_c and not is_multi_country_rank and not any(k in q_low for k in ["nhân viên", "salesperson", "sản phẩm", "product"]):
+        lines = [
+            "SELECT",
+            "    g.Geo AS Country,",
+            f"    {metric_expr}",
+            "FROM sales s",
+            "JOIN geo g ON s.GeoID = g.GeoID",
+            f"WHERE g.Geo = '{specific_c}'" + (f" AND strftime('%Y', s.SaleDate) = '{year_val}'" if (year_val and is_sqlite) else f" AND YEAR(s.SaleDate) = {year_val}" if year_val else ""),
+            "GROUP BY g.Geo",
+        ]
+        return "\n".join(lines)
+
     is_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "nước nào", "đất nước", "khu vực", "geo"]) or "geo" in sql_low or "geoid" in sql_low
     if is_country and not any(k in q_low for k in ["nhân viên", "salesperson", "sản phẩm", "product"]):
         needs_fix = (
