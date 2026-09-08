@@ -1181,234 +1181,227 @@ def render_result(result: dict, turn_id: str):
     user_query = result.get("query", "")
     render_executive_kpi_cards(df, is_en=is_en, user_query=user_query)
 
-    # 4. Hiển thị Bảng dữ liệu & Cụm Nút Xuất Báo Cáo Đa Định Dạng (CSV, Excel, PDF)
-    display_df = df.copy()
-
-    try:
-        # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N
-        is_ranking = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất"])
-        if is_ranking and len(display_df) <= 50:
-            medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
-            display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
-            display_df.index.name = "Xếp hạng" if not is_en else "Rank"
-
-        column_config = {}
-        for col in display_df.columns:
-            c_low = str(col).lower()
-            col_label = format_col_title(col) if not is_en else col
-            is_num = pd.api.types.is_numeric_dtype(display_df[col])
-
-            if is_id_like(col):
-                column_config[col] = st.column_config.NumberColumn(col_label, format="%d")
-            elif any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỷ suất", "tỉ suất", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin", "biên", "%"]):
-                if is_num:
-                    column_config[col] = st.column_config.NumberColumn(
-                        col_label,
-                        format="%.2f%%"
-                    )
-                else:
-                    column_config[col] = st.column_config.Column(col_label)
-            elif any(k in c_low for k in [
-                "salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales",
-                "amount", "profit", "ordervalue", "doanh thu", "doanh số", "doanh", "lợi nhuận", "lãi", "lỗ",
-                "giá vốn", "cogs", "$"
-            ]):
-                if is_num:
-                    has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
-                    column_config[col] = st.column_config.NumberColumn(
-                        col_label,
-                        format="$%,.2f" if has_dec else "$%,.0f"
-                    )
-                else:
-                    column_config[col] = st.column_config.Column(col_label)
-            elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
-                if is_num:
-                    column_config[col] = st.column_config.NumberColumn(
-                        col_label,
-                        format="%,d"
-                    )
-                else:
-                    column_config[col] = st.column_config.Column(col_label)
-            elif is_num:
-                has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
-                column_config[col] = st.column_config.NumberColumn(
-                    col_label,
-                    format="%,.2f" if has_dec else "%,d"
-                )
-            else:
-                column_config[col] = st.column_config.Column(col_label)
-
-        st.dataframe(display_df, column_config=column_config, width='stretch')
-    except Exception:
-        st.dataframe(df, width='stretch')
-
-    c_csv, c_excel, c_pdf, _ = st.columns([2, 2.5, 2.5, 3])
-    with c_csv:
-        st.download_button(
-            "⬇️ Tải CSV" if not is_en else "⬇️ Download CSV",
-            df.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"result_{turn_id}.csv",
-            mime="text/csv",
-            key=f"csv_{turn_id}",
-            use_container_width=True
+    # 4. Biểu đồ Trực quan Trung tâm (Visual-First Hero Chart)
+    chart_options = (
+        ["Automatic", "Bar (Vertical)", "Bar (Horizontal Ranking)", "Line", "Pie", "Area", "Scatter"]
+        if is_en else
+        ["Tự động", "Bar (Cột đứng)", "Bar (Cột ngang xếp hạng)", "Line (Đường)", "Pie (Tròn)", "Area (Miền)", "Scatter (Phân tán)"]
+    )
+    c_ch_space, c_ch_sel = st.columns([4, 1.3])
+    with c_ch_sel:
+        chart_override = st.selectbox(
+            "Loại biểu đồ" if not is_en else "Chart Type",
+            chart_options,
+            key=f"charttype_{turn_id}",
+            label_visibility="collapsed"
         )
 
-    with c_excel:
-        excel_bytes = export_to_excel(df, sheet_name=result.get("query", "Data"))
-        st.download_button(
-            "📊 Xuất Excel (.xlsx)" if not is_en else "📊 Export Excel (.xlsx)",
-            excel_bytes,
-            file_name=f"report_{turn_id}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"excel_{turn_id}",
-            use_container_width=True
-        )
+    if "ngang" in chart_override.lower() or "horizontal" in chart_override.lower():
+        norm_override = "Bar Ngang"
+    elif "Bar" in chart_override:
+        norm_override = "Bar"
+    elif "Line" in chart_override:
+        norm_override = "Line"
+    elif "Pie" in chart_override:
+        norm_override = "Pie"
+    elif "Area" in chart_override:
+        norm_override = "Area"
+    elif "Scatter" in chart_override:
+        norm_override = "Scatter"
+    else:
+        norm_override = "Tự động"
 
-    with c_pdf:
-        pdf_bytes = export_to_pdf(result, df)
-        st.download_button(
-            "📄 Xuất Báo cáo PDF" if not is_en else "📄 Export PDF Report",
-            pdf_bytes,
-            file_name=f"executive_report_{turn_id}.pdf",
-            mime="application/pdf",
-            key=f"pdf_{turn_id}",
-            use_container_width=True
-        )
+    chart_fig = render_smart_chart(df, norm_override, turn_id, user_query=user_query)
 
-    # 4.1 Khung Gửi Báo Cáo Đa Kênh Tức Thì (Telegram Bot & Email SMTP)
-    exp_share_title = "📤 Gửi Báo Cáo cho Sếp / Đội ngũ (Telegram & Email)" if not is_en else "📤 Share Report (Telegram Bot & Email)"
-    with st.expander(exp_share_title, expanded=False):
-        saved = load_saved_config()
-        tab_tg, tab_em = st.tabs(["🚀 Gửi qua Telegram Bot", "📧 Gửi qua Email SMTP"])
-
-        with tab_tg:
-            st.caption("Gửi trực tiếp file Báo cáo PDF Executive kèm tóm tắt Insight vào nhóm Telegram.")
-            tg_token = st.text_input(
-                "Telegram Bot Token",
-                value=st.session_state.get("telegram_bot_token") or saved.get("telegram_bot_token", ""),
-                type="password",
-                placeholder="123456789:ABCdef...",
-                key=f"tg_tok_{turn_id}"
-            )
-            tg_chat_id = st.text_input(
-                "Telegram Chat ID / Group ID",
-                value=st.session_state.get("telegram_chat_id") or saved.get("telegram_chat_id", ""),
-                placeholder="-100123456789 hoặc @channel_name",
-                key=f"tg_chat_{turn_id}"
-            )
-
-            if st.button("🚀 Gửi Báo Cáo vào Telegram", key=f"btn_send_tg_{turn_id}", type="primary", use_container_width=True):
-                if not tg_token or not tg_chat_id:
-                    st.error("Vui lòng nhập Bot Token và Chat ID (hoặc cấu hình trong ⚙️ Cài đặt).")
-                else:
-                    with st.spinner("Đang gửi file báo cáo PDF vào Telegram..."):
-                        insight_summary = result.get("insights", "") or result.get("query", "")
-                        clean_cap = re.sub(r"#+\s*", "", insight_summary)
-                        clean_cap = clean_cap.replace("###", "").replace("**", "").replace("`", "")[:900]
-                        ok, msg = send_telegram_report(
-                            tg_token, tg_chat_id, clean_cap, pdf_bytes, filename=f"executive_report_{turn_id}.pdf"
-                        )
-                        if ok:
-                            st.success(f"✅ {msg}")
-                            st.toast(f"✅ {msg}", icon="🚀")
-                        else:
-                            st.error(f"❌ {msg}")
-
-        with tab_em:
-            st.caption("Gửi email đính kèm file Báo cáo PDF cho ban giám đốc hoặc danh sách người nhận.")
-            em_receivers = st.text_input(
-                "Email Người nhận (cách nhau bằng dấu phẩy)",
-                value=st.session_state.get("email_receivers") or saved.get("email_receivers", ""),
-                placeholder="boss@company.com, leads@company.com",
-                key=f"em_rec_{turn_id}"
-            )
-            em_subject = st.text_input(
-                "Tiêu đề Email",
-                value=f"Báo cáo Điều hành: {result.get('query', 'Tổng quan Doanh nghiệp')}",
-                key=f"em_sub_{turn_id}"
-            )
-
-            if st.button("📧 Gửi Báo Cáo qua Email", key=f"btn_send_em_{turn_id}", type="primary", use_container_width=True):
-                smtp_server = st.session_state.get("smtp_server") or saved.get("smtp_server", "smtp.gmail.com")
-                smtp_port = st.session_state.get("smtp_port") or saved.get("smtp_port", "587")
-                smtp_user = st.session_state.get("smtp_user") or saved.get("smtp_user", "")
-                smtp_pass = st.session_state.get("smtp_pass") or saved.get("smtp_pass", "")
-
-                if not smtp_user or not smtp_pass:
-                    st.error("Chưa cấu hình Email người gửi và Mật khẩu ứng dụng trong mục ⚙️ Cài đặt.")
-                elif not em_receivers:
-                    st.error("Vui lòng nhập email người nhận.")
-                else:
-                    with st.spinner("Đang gửi email đính kèm báo cáo..."):
-                        insight_summary = result.get("insights", "") or result.get("query", "")
-                        ok, msg = send_email_report(
-                            smtp_server, smtp_port, smtp_user, smtp_pass,
-                            em_receivers, em_subject, insight_summary, pdf_bytes,
-                            filename=f"executive_report_{turn_id}.pdf"
-                        )
-                        if ok:
-                            st.success(f"✅ {msg}")
-                            st.toast(f"✅ {msg}", icon="📧")
-                        else:
-                            st.error(f"❌ {msg}")
-
-    # 4. Tabs: Biểu đồ, Insight & Bất thường, Dự báo
     anomalies_info = result.get("anomalies_info") or analyze_data_anomalies(df)
     has_anomaly = anomalies_info.get("has_anomaly", False)
 
-    if is_en:
-        tab_insight_label = "💡 Insights & Anomalies 🚨" if has_anomaly else "💡 Insights & Analysis"
-        tab_chart_label = "📊 Chart"
-        tab_forecast_label = "🔮 Forecast"
-    else:
-        tab_insight_label = "💡 Insight & Bất thường 🚨" if has_anomaly else "💡 Insight & Phân tích"
-        tab_chart_label = "📊 Biểu đồ"
-        tab_forecast_label = "🔮 Dự báo"
+    if chart_fig and has_anomaly:
+        n_findings = len(anomalies_info.get("findings", []))
+        caption_anom = f"🚨 **Detected {n_findings} statistical anomalies/trends**. See details in **'Insights & Analysis'** tab." if is_en else f"🚨 **Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Xem chi tiết tại tab **'Insight & Hành động'**."
+        st.caption(caption_anom)
 
-    tab1, tab2, tab3 = st.tabs([tab_chart_label, tab_insight_label, tab_forecast_label])
+    # 5. Cụm Tab Phân loại Thông tin (Progressive Disclosure Tabs)
+    tab_data_label = "📋 Bảng số liệu & Báo cáo" if not is_en else "📋 Data Table & Reports"
+    tab_insight_label = "💡 Insight & Hành động 🚨" if (has_anomaly and not is_en) else ("💡 Insight & Phân tích" if not is_en else ("💡 Insights & Anomalies 🚨" if has_anomaly else "💡 Insights & Analysis"))
+    tab_forecast_label = "🔮 Dự báo xu hướng" if not is_en else "🔮 Forecast"
+    tab_sql_label = "🛠️ Câu lệnh SQL & Debug" if not is_en else "🛠️ SQL Query & Logs"
 
-    with tab1:
-        chart_options = (
-            ["Automatic", "Bar (Vertical)", "Bar (Horizontal Ranking)", "Line", "Pie", "Area", "Scatter"]
-            if is_en else
-            ["Tự động", "Bar (Cột đứng)", "Bar (Cột ngang xếp hạng)", "Line (Đường)", "Pie (Tròn)", "Area (Miền)", "Scatter (Phân tán)"]
-        )
-        chart_override_label = "Chart Type" if is_en else "Loại biểu đồ"
-        chart_override = st.selectbox(
-            chart_override_label,
-            chart_options,
-            key=f"charttype_{turn_id}"
-        )
-        if "ngang" in chart_override.lower() or "horizontal" in chart_override.lower():
-            norm_override = "Bar Ngang"
-        elif "Bar" in chart_override:
-            norm_override = "Bar"
-        elif "Line" in chart_override:
-            norm_override = "Line"
-        elif "Pie" in chart_override:
-            norm_override = "Pie"
-        elif "Area" in chart_override:
-            norm_override = "Area"
-        elif "Scatter" in chart_override:
-            norm_override = "Scatter"
-        else:
-            norm_override = "Tự động"
+    tab_data, tab_insight, tab_forecast, tab_sql = st.tabs([tab_data_label, tab_insight_label, tab_forecast_label, tab_sql_label])
 
-        chart_fig = render_smart_chart(df, norm_override, turn_id, user_query=user_query)
+    # -----------------------------------------------------
+    # TAB 1: BẢNG SỐ LIỆU & XUẤT BÁO CÁO (EXCEL, PDF, TELEGRAM, EMAIL)
+    # -----------------------------------------------------
+    with tab_data:
+        display_df = df.copy()
+        try:
+            # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N
+            is_ranking = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất"])
+            if is_ranking and len(display_df) <= 50:
+                medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
+                display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
+                display_df.index.name = "Xếp hạng" if not is_en else "Rank"
 
-        if chart_fig:
-            st.caption("💡 **Mẹo:** Rê chuột vào góc trên bên phải biểu đồ và bấm biểu tượng máy ảnh 📷 để tải ngay ảnh PNG độ nét cao (HD)." if not is_en else "💡 **Tip:** Hover over the top-right of the chart and click the camera icon 📷 to download HD PNG image instantly.")
+            column_config = {}
+            for col in display_df.columns:
+                c_low = str(col).lower()
+                col_label = format_col_title(col) if not is_en else col
+                is_num = pd.api.types.is_numeric_dtype(display_df[col])
 
-        if has_anomaly:
-            n_findings = len(anomalies_info.get("findings", []))
-            caption_anom = f"🚨 **Detected {n_findings} statistical anomalies/trends**. See detailed report in **'{tab_insight_label}'** tab." if is_en else f"🚨 **Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Xem phân tích chi tiết tại tab **'{tab_insight_label}'**."
-            st.caption(caption_anom)
+                if is_id_like(col):
+                    column_config[col] = st.column_config.NumberColumn(col_label, format="%d")
+                elif any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỷ suất", "tỉ suất", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin", "biên", "%"]):
+                    if is_num:
+                        column_config[col] = st.column_config.NumberColumn(col_label, format="%.2f%%")
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
+                elif any(k in c_low for k in [
+                    "salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales",
+                    "amount", "profit", "ordervalue", "doanh thu", "doanh số", "doanh", "lợi nhuận", "lãi", "lỗ",
+                    "giá vốn", "cogs", "$"
+                ]):
+                    if is_num:
+                        has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
+                        column_config[col] = st.column_config.NumberColumn(
+                            col_label,
+                            format="$%,.2f" if has_dec else "$%,.0f"
+                        )
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
+                elif any(k in c_low for k in ["headcount", "hires", "raise", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
+                    if is_num:
+                        column_config[col] = st.column_config.NumberColumn(col_label, format="%,d")
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
+                elif is_num:
+                    has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
+                    column_config[col] = st.column_config.NumberColumn(
+                        col_label,
+                        format="%,.2f" if has_dec else "%,d"
+                    )
+                else:
+                    column_config[col] = st.column_config.Column(col_label)
 
-    with tab2:
+            st.dataframe(display_df, column_config=column_config, width='stretch')
+        except Exception:
+            st.dataframe(df, width='stretch')
+
+        c_csv, c_excel, c_pdf, _ = st.columns([2, 2.5, 2.5, 3])
+        with c_csv:
+            st.download_button(
+                "⬇️ Tải CSV" if not is_en else "⬇️ Download CSV",
+                df.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"result_{turn_id}.csv",
+                mime="text/csv",
+                key=f"csv_{turn_id}",
+                use_container_width=True
+            )
+
+        with c_excel:
+            excel_bytes = export_to_excel(df, sheet_name=result.get("query", "Data"))
+            st.download_button(
+                "📊 Xuất Excel (.xlsx)" if not is_en else "📊 Export Excel (.xlsx)",
+                excel_bytes,
+                file_name=f"report_{turn_id}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"excel_{turn_id}",
+                use_container_width=True
+            )
+
+        with c_pdf:
+            pdf_bytes = export_to_pdf(result, df)
+            st.download_button(
+                "📄 Xuất Báo cáo PDF" if not is_en else "📄 Export PDF Report",
+                pdf_bytes,
+                file_name=f"executive_report_{turn_id}.pdf",
+                mime="application/pdf",
+                key=f"pdf_{turn_id}",
+                use_container_width=True
+            )
+
+        exp_share_title = "📤 Chia sẻ Báo cáo qua Telegram Bot & Email SMTP" if not is_en else "📤 Share Report (Telegram Bot & Email)"
+        with st.expander(exp_share_title, expanded=False):
+            saved = load_saved_config()
+            tab_tg, tab_em = st.tabs(["🚀 Telegram Bot", "📧 Email SMTP"])
+
+            with tab_tg:
+                st.caption("Gửi trực tiếp file Báo cáo PDF Executive kèm tóm tắt Insight vào nhóm Telegram.")
+                tg_token = st.text_input(
+                    "Telegram Bot Token",
+                    value=st.session_state.get("telegram_bot_token") or saved.get("telegram_bot_token", ""),
+                    type="password",
+                    placeholder="123456789:ABCdef...",
+                    key=f"tg_tok_{turn_id}"
+                )
+                tg_chat_id = st.text_input(
+                    "Telegram Chat ID / Group ID",
+                    value=st.session_state.get("telegram_chat_id") or saved.get("telegram_chat_id", ""),
+                    placeholder="-100123456789 hoặc @channel_name",
+                    key=f"tg_chat_{turn_id}"
+                )
+
+                if st.button("🚀 Gửi Báo Cáo vào Telegram", key=f"btn_send_tg_{turn_id}", type="primary", use_container_width=True):
+                    if not tg_token or not tg_chat_id:
+                        st.error("Vui lòng nhập Bot Token và Chat ID.")
+                    else:
+                        with st.spinner("Đang gửi file báo cáo PDF vào Telegram..."):
+                            insight_summary = result.get("insights", "") or result.get("query", "")
+                            clean_cap = re.sub(r"#+\s*", "", insight_summary)
+                            clean_cap = clean_cap.replace("###", "").replace("**", "").replace("`", "")[:900]
+                            ok, msg = send_telegram_report(
+                                tg_token, tg_chat_id, clean_cap, pdf_bytes, filename=f"executive_report_{turn_id}.pdf"
+                            )
+                            if ok:
+                                st.success(f"✅ {msg}")
+                                st.toast(f"✅ {msg}", icon="🚀")
+                            else:
+                                st.error(f"❌ {msg}")
+
+            with tab_em:
+                st.caption("Gửi email đính kèm file Báo cáo PDF cho ban giám đốc hoặc danh sách người nhận.")
+                em_receivers = st.text_input(
+                    "Email Người nhận (cách nhau bằng dấu phẩy)",
+                    value=st.session_state.get("email_receivers") or saved.get("email_receivers", ""),
+                    placeholder="boss@company.com, leads@company.com",
+                    key=f"em_rec_{turn_id}"
+                )
+                em_subject = st.text_input(
+                    "Tiêu đề Email",
+                    value=f"Báo cáo Điều hành: {result.get('query', 'Tổng quan Doanh nghiệp')}",
+                    key=f"em_sub_{turn_id}"
+                )
+
+                if st.button("📧 Gửi Báo Cáo qua Email", key=f"btn_send_em_{turn_id}", type="primary", use_container_width=True):
+                    smtp_server = st.session_state.get("smtp_server") or saved.get("smtp_server", "smtp.gmail.com")
+                    smtp_port = st.session_state.get("smtp_port") or saved.get("smtp_port", "587")
+                    smtp_user = st.session_state.get("smtp_user") or saved.get("smtp_user", "")
+                    smtp_pass = st.session_state.get("smtp_pass") or saved.get("smtp_pass", "")
+
+                    if not smtp_user or not smtp_pass:
+                        st.error("Chưa cấu hình Email người gửi và Mật khẩu ứng dụng trong mục ⚙️ Cài đặt.")
+                    elif not em_receivers:
+                        st.error("Vui lòng nhập email người nhận.")
+                    else:
+                        with st.spinner("Đang gửi email đính kèm báo cáo..."):
+                            insight_summary = result.get("insights", "") or result.get("query", "")
+                            ok, msg = send_email_report(
+                                smtp_server, smtp_port, smtp_user, smtp_pass,
+                                em_receivers, em_subject, insight_summary, pdf_bytes,
+                                filename=f"executive_report_{turn_id}.pdf"
+                            )
+                            if ok:
+                                st.success(f"✅ {msg}")
+                                st.toast(f"✅ {msg}", icon="📧")
+                            else:
+                                st.error(f"❌ {msg}")
+
+    # -----------------------------------------------------
+    # TAB 2: INSIGHT & HÀNH ĐỘNG
+    # -----------------------------------------------------
+    with tab_insight:
         title_insight_header = "💡 Executive Business Insight & Anomaly Report" if is_en else "💡 Báo cáo Phân tích Insight & Phát hiện Bất thường"
         st.subheader(title_insight_header)
 
-        # Thống kê nhanh
         stats = anomalies_info.get("summary_stats", {})
         if stats:
             c1, c2, c3, c4 = st.columns(4)
@@ -1417,7 +1410,6 @@ def render_result(result: dict, turn_id: str):
             c3.metric("Max" if is_en else "Lớn nhất (Max)", f"{stats.get('max', 0):,.2f}")
             c4.metric("Min" if is_en else "Nhỏ nhất (Min)", f"{stats.get('min', 0):,.2f}")
 
-        # Danh sách điểm bất thường phát hiện theo thuật toán
         if has_anomaly:
             st.markdown("#### 🚨 Statistical Anomaly Findings:" if is_en else "#### 🚨 Các phát hiện bất thường từ thuật toán:")
             for f in anomalies_info.get("findings", []):
@@ -1425,7 +1417,6 @@ def render_result(result: dict, turn_id: str):
         else:
             st.success("✅ No extreme anomalies or spikes detected in this dataset." if is_en else "✅ Thuật toán không phát hiện điểm đột biến hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
 
-        # Báo cáo phân tích chuyên sâu từ AI với Priority Tagging dạng 3 Cards
         insights = result.get("insights", "")
         if insights:
             render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""))
@@ -1444,49 +1435,46 @@ def render_result(result: dict, turn_id: str):
                         result["insights"] = clean_gen
                         render_insight_cards(clean_gen, df=df, is_en=is_en, user_query=result.get("query", ""))
 
-    with tab3:
+    # -----------------------------------------------------
+    # TAB 3: DỰ BÁO XU HƯỚNG
+    # -----------------------------------------------------
+    with tab_forecast:
         caption_forecast = (
             "🧮 Forecast uses deterministic linear regression — mathematically verifiable. Available when dataset contains time and numerical measure columns."
             if is_en else
-            "🧮 Dự báo dùng thuật toán hồi quy tuyến tính xác định (deterministic) — không phải AI 'đoán' số. "
-            "Lựa chọn này đảm bảo kết quả nhất quán, có thể kiểm chứng bằng toán học. "
-            "Dự báo chỉ khả dụng khi kết quả có cột thời gian và chỉ số đo lường số học."
+            "🧮 Dự báo bằng mô hình hồi quy tuyến tính xác định (Deterministic Linear Regression) — có thể kiểm chứng toán học 100%. Áp dụng khi dữ liệu có cột thời gian và số đo."
         )
         st.caption(caption_forecast)
-        periods = st.session_state.get("forecast_periods", 3)
-        fig, method = forecast_series(df, periods=periods)
-        if fig is None:
-            st.info(method)
+
+        t_col, m_cols = get_axis_columns(df)
+        if t_col and m_cols:
+            m_col = m_cols[0]
+            periods = st.slider(
+                "Forecast Horizon (periods)" if is_en else "Số kỳ dự báo tương lai",
+                1, 12, st.session_state.get("forecast_periods", 3),
+                key=f"periods_{turn_id}"
+            )
+            forecast_df, r2 = forecast_series(df, t_col, m_col, periods=periods)
+            if forecast_df is not None and not forecast_df.empty:
+                st.markdown(f"**R² goodness of fit:** `{r2:.3f}`" if is_en else f"**Độ phù hợp của mô hình (R²):** `{r2:.3f}`")
+                st.dataframe(forecast_df, width='stretch')
+            else:
+                st.info("Insufficient data points to build a reliable forecast model." if is_en else "Dữ liệu chuỗi thời gian chưa đủ điểm để xây dựng mô hình dự báo tin cậy.")
         else:
-            st.plotly_chart(fig, width='stretch', key=f"forecast_{turn_id}")
-            st.caption(f"Method: {method}" if is_en else f"Phương pháp: {method}")
+            st.info(
+                "Forecast is not applicable to this dataset (requires time dimension and numeric measures)."
+                if is_en else
+                "Dữ liệu hiện tại không phù hợp để dự báo (cần có cột thời gian và cột chỉ số tài chính)."
+            )
 
-    # 5. Gợi ý Câu hỏi Phân tích Tiếp nối (Follow-up Question Suggestions)
-    followups = result.get("followups", [])
-    if followups:
-        st.markdown("---")
-        header_fup = "##### 💡 Suggested Follow-up Questions (Click to run):" if is_en else "##### 💡 Gợi ý câu hỏi phân tích tiếp nối (Nhấp để chạy ngay):"
-        st.markdown(header_fup)
-        cols = st.columns(len(followups))
-        for col_f, q_text in zip(cols, followups):
-            clean_q = sanitize_followup_question(q_text)
-            def _on_fup_click(q_target=clean_q):
-                st.session_state["pending_prompt"] = q_target
-
-            with col_f:
-                help_text = f"Run query: {clean_q}" if is_en else f"Chạy tiếp câu hỏi: {clean_q}"
-                st.button(
-                    f"👉 {clean_q}",
-                    key=f"btn_fup_{turn_id}_{abs(hash(clean_q))}",
-                    use_container_width=True,
-                    help=help_text,
-                    on_click=_on_fup_click
-                )
-
-    # 6. Chi tiết Kỹ thuật & SQL Playground (Expander thu gọn ở cuối cùng)
-    exp_tech = "🛠️ Technical Details & SQL Query Playground" if is_en else "🛠️ Chi tiết Kỹ thuật & SQL Playground (Sửa & Chạy trực tiếp)"
-    with st.expander(exp_tech, expanded=False):
+    # -----------------------------------------------------
+    # TAB 4: CÂU LỆNH SQL & DEBUG LOGS
+    # -----------------------------------------------------
+    with tab_sql:
         if sql_query:
+            st.markdown("#### ⚡ " + ("Câu Lệnh SQL Đã Thực Thi" if not is_en else "Executed SQL Query"))
+            st.code(sql_query, language="sql")
+
             st.markdown("#### ⚡ " + ("Chỉnh sửa & Chạy lại SQL Trực tiếp" if not is_en else "Live SQL Editor & Playground"))
             st.caption(
                 "Bạn có thể sửa câu lệnh SQL (đổi điều kiện WHERE, GROUP BY, ORDER BY, LIMIT...) và bấm nút bên dưới để cập nhật kết quả tức thì mà không cần gọi lại AI."
@@ -1496,7 +1484,7 @@ def render_result(result: dict, turn_id: str):
             edited_sql = st.text_area(
                 "SQL Editor",
                 value=sql_query,
-                height=130,
+                height=120,
                 key=f"sql_edit_area_{turn_id}",
                 label_visibility="collapsed"
             )
@@ -1532,3 +1520,4 @@ def render_result(result: dict, turn_id: str):
             st.markdown("**Execution Logs:**" if is_en else "**Nhật ký các bước thực thi:**")
             for log in logs:
                 st.text(f"• {log}")
+

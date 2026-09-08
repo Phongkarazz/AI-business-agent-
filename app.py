@@ -205,6 +205,35 @@ st.markdown("""
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
     }
+
+    /* Quick Action Chip Buttons & Central Search */
+    .quick-chip-container .stButton > button {
+        border-radius: 9999px !important;
+        min-height: 44px !important;
+        font-weight: 600 !important;
+        font-size: 0.88rem !important;
+        background-color: #F8FAFC !important;
+        border: 1px solid #E2E8F0 !important;
+        color: #1E293B !important;
+        padding: 8px 16px !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+    }
+    .quick-chip-container .stButton > button:hover {
+        border-color: #2563EB !important;
+        background-color: #EFF6FF !important;
+        color: #1D4ED8 !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1) !important;
+        transform: translateY(-1px) !important;
+    }
+    .center-search-card {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 16px;
+        padding: 16px 20px 12px 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        margin-bottom: 14px;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -332,22 +361,8 @@ else:
                     if st.button("🔄 Tải lại lượt này", key=f"retry_hist_{i}"):
                         st.rerun()
 
-    # 4.3 Hiển thị Thẻ Gợi ý Câu hỏi Nhanh (Starter Cards) khi chưa có tin nhắn nào VÀ không có câu hỏi đang chạy
+    # 4.3 Màn hình Khám phá Dữ liệu Chuẩn Thi đấu (Perplexity / CPO Standard)
     if not history and focused_turn_idx is None and not prompt_to_run:
-        st.markdown("""
-        <div class="hero-container">
-            <div class="hero-badge">
-                ✨ Trợ Lý Phân Tích Dữ Liệu Doanh Nghiệp • Text-to-SQL Agent
-            </div>
-            <div class="hero-title">
-                Khám Phá Dữ Liệu Doanh Nghiệp
-            </div>
-            <div class="hero-subtitle">
-                Đặt câu hỏi tự nhiên bằng tiếng Việt — AI sẽ tự động lập trình SQL tối ưu, truy xuất dữ liệu tức thời, vẽ biểu đồ trực quan và phát hiện Insight quản trị.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
         engine = st.session_state.get("engine")
         tables = get_table_names(engine)
         schema_context = st.session_state.get("schema_context", "")
@@ -356,85 +371,76 @@ else:
 
         tbl_low = [t.lower() for t in tables]
         is_emp = "employees" in tbl_low and "departments" in tbl_low
+        db_disp = "Employees DB" if is_emp else "Awesome Chocolates"
 
-        pill1 = "👥 <b>300,024</b> Nhân sự" if is_emp else f"📋 <b>{len(tables)}</b> Bảng CSDL"
-        pill2 = "🏢 <b>9</b> Phòng ban" if is_emp else "⚡ <b>MySQL</b> Kết nối an toàn"
-        pill3 = "📅 <b>18 Năm</b> Dữ liệu (1985–2002)" if is_emp else "🛡️ <b>Chế độ Chỉ đọc</b> Bảo mật"
-        pill4 = f"🤖 <b>Local AI</b> ({model_disp})" if "ollama" in provider_name.lower() else f"🤖 <b>AI</b> ({model_disp})"
-
+        # Status Badge góc trên bên phải
         st.markdown(f"""
-        <div class="snapshot-bar">
-            <div class="snapshot-pill">{pill1}</div>
-            <div class="snapshot-pill">{pill2}</div>
-            <div class="snapshot-pill">{pill3}</div>
-            <div class="snapshot-pill">{pill4}</div>
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+            <span style="background: #F1F5F9; color: #334155; border: 1px solid #E2E8F0; padding: 5px 14px; border-radius: 9999px; font-size: 0.8rem; font-weight: 600;">
+                • {db_disp} | Local {model_disp} (Offline & Secured)
+            </span>
+        </div>
+        <div class="hero-container" style="padding: 10px 10px 18px 10px;">
+            <div class="hero-title" style="font-size: 2.25rem; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
+                VERAXUS AI
+            </div>
+            <div class="hero-subtitle" style="font-size: 1.02rem; color: #64748B; margin-bottom: 18px;">
+                Hỏi đáp dữ liệu điều hành kinh doanh tức thì
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
-        starter_cards = generate_starter_prompts(tables, schema_context)
-        cards_to_show = starter_cards[:4]
-
-        # Category mapping for badges
-        category_map = {
-            "⚖️": "Công Bằng Thu Nhập",
-            "💰": "Khối Kinh Doanh",
-            "📅": "Quy Mô Tuyển Dụng",
-            "🚻": "Đa Dạng Giới Tính",
-            "🏢": "Nội Bộ Phòng Ban",
-            "👔": "Hồ Sơ Lãnh Đạo",
-            "📦": "Danh Mục Sản Phẩm",
-            "🏆": "Hiệu Suất Bán Hàng",
-            "🌍": "Thị Trường Quốc Tế",
-        }
-
-        col_s1, col_s2 = st.columns(2, gap="medium")
-        for idx, card in enumerate(cards_to_show):
-            target_col = col_s1 if idx % 2 == 0 else col_s2
-            with target_col:
-                with st.container(border=True):
-                    tag_name = category_map.get(card.get("icon", ""), "Phân Tích")
-                    c_tag1, c_tag2 = st.columns([3, 1])
-                    with c_tag1:
-                        st.markdown(
-                            f"<span style='background: #F1F5F9; color: #475569; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; letter-spacing: 0.04em; text-transform: uppercase;'>"
-                            f"{tag_name}</span>",
-                            unsafe_allow_html=True
+        # Trục tương tác chính: Thanh Tìm kiếm Lớn tại Trung tâm
+        col_c_l, col_c_mid, col_c_r = st.columns([1, 8, 1])
+        with col_c_mid:
+            with st.container():
+                st.markdown('<div class="center-search-card">', unsafe_allow_html=True)
+                with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
+                    c_in, c_btn = st.columns([5.8, 1.2])
+                    with c_in:
+                        hero_query = st.text_input(
+                            "Search",
+                            placeholder="🔍 Hỏi bất kỳ điều gì về doanh thu, chi phí, P&L, nhân sự...",
+                            label_visibility="collapsed",
+                            key="hero_search_input"
                         )
-                    with c_tag2:
-                        st.markdown(
-                            f"<div style='text-align: right; color: #94A3B8; font-size: 0.75rem; font-weight: 600;'>#{idx+1}</div>",
-                            unsafe_allow_html=True
-                        )
+                    with c_btn:
+                        hero_submit = st.form_submit_button("Hỏi AI ↗", type="primary", use_container_width=True)
+                    if hero_submit and hero_query.strip():
+                        st.session_state["pending_prompt"] = hero_query.strip()
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
-                    st.markdown(f"<div style='font-size: 1.05rem; font-weight: 700; color: #0F172A; margin: 6px 0 3px 0;'>{card['icon']} {card['title']}</div>", unsafe_allow_html=True)
-                    st.caption(card["desc"])
+            # 4 Nút Chip bo tròn tinh gọn (Quick Action Chips)
+            st.markdown("<div style='margin-top: 10px; margin-bottom: 10px; font-size: 0.85rem; font-weight: 600; color: #64748B;'>Gợi ý truy vấn nhanh:</div>", unsafe_allow_html=True)
 
-                    st.markdown(
-                        f"<div style='background: #F8FAFC; border-left: 3px solid #2563EB; padding: 7px 11px; border-radius: 6px; font-size: 0.83rem; color: #334155; margin: 8px 0 10px 0; font-style: italic; line-height: 1.4;'>"
-                        f"“{card['prompt']}”"
-                        f"</div>",
-                        unsafe_allow_html=True
-                    )
+            starter_cards = generate_starter_prompts(tables, schema_context)
+            cards_to_show = starter_cards[:4]
 
-                    def _on_starter_click(p_text=card["prompt"]):
+            st.markdown('<div class="quick-chip-container">', unsafe_allow_html=True)
+            c_chip1, c_chip2 = st.columns(2, gap="small")
+            for idx, card in enumerate(cards_to_show):
+                target_col = c_chip1 if idx % 2 == 0 else c_chip2
+                with target_col:
+                    btn_label = f"{card['icon']} {card['title']}"
+                    def _on_chip_click(p_text=card["prompt"]):
                         st.session_state["pending_prompt"] = p_text
 
                     st.button(
-                        "⚡ Khám phá ngay ↗",
-                        key=f"btn_starter_card_{idx}",
+                        btn_label,
+                        key=f"btn_quick_chip_{idx}",
                         use_container_width=True,
-                        type="secondary",
-                        on_click=_on_starter_click
+                        help=f"Truy vấn nhanh: \"{card['prompt']}\"",
+                        on_click=_on_chip_click
                     )
+            st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("<div style='margin-top: 14px; margin-bottom: 4px;'>", unsafe_allow_html=True)
-        col_v1, col_v2, col_v3 = st.columns([1, 2, 1])
-        with col_v2:
+            st.markdown("<div style='margin-top: 20px; display: flex; justify-content: center;'>", unsafe_allow_html=True)
             render_voice_input_button()
-            st.caption("💡 *Mẹo: Nhấp vào thẻ bất kỳ ở trên, gõ câu hỏi vào khung chat hoặc bấm micro để nói tiếng Việt.*")
-        st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
     elif not prompt_to_run:
         render_voice_input_button()
+
 
     if prompt_to_run:
         # Xóa pending prompt và reset focus view
