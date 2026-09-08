@@ -638,10 +638,25 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     male_emp_cols = [c for c in non_pct_cols if any(k in c.lower() for k in ["maleemployees", "male_emp", "malemanagers", "male", "nam"]) and not any(k in c.lower() for k in ["female", "nu", "nữ", "department"])]
                     female_emp_cols = [c for c in non_pct_cols if any(k in c.lower() for k in ["femaleemployees", "female_emp", "femalemanagers", "female", "nu", "nữ"])]
 
-                    # Nếu người dùng hỏi CẢ Số lượng VÀ Tỷ lệ, hoặc có cặp số lượng Nam/Nữ thực tế:
-                    if user_asked_count and male_emp_cols and female_emp_cols:
+                    # Nếu không có cột số lượng Nam/Nữ nhưng có cột Tổng nhân sự và Tỷ lệ Nam/Nữ:
+                    total_emp_col_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["totalemployees", "total_emp", "headcount", "tổng số", "total", "slngnhnvin", "count"]) and not any(k in c.lower() for k in ["male", "female", "nam", "nữ"])]
+                    male_pct_cands = [c for c in pct_cols if any(k in c.lower() for k in ["male", "nam"]) and not any(k in c.lower() for k in ["female", "nu", "nữ", "department"])]
+                    female_pct_cands = [c for c in pct_cols if any(k in c.lower() for k in ["female", "nu", "nữ"])]
+
+                    if (not male_emp_cols or not female_emp_cols) and total_emp_col_cands and male_pct_cands and female_pct_cands:
+                        tot_col_use = total_emp_col_cands[0]
+                        m_p_col = male_pct_cands[0]
+                        f_p_col = female_pct_cands[0]
+                        plot_df["MaleEmployees"] = (plot_df[m_p_col] * plot_df[tot_col_use] / 100.0).round()
+                        plot_df["FemaleEmployees"] = (plot_df[f_p_col] * plot_df[tot_col_use] / 100.0).round()
+                        male_emp_cols = ["MaleEmployees"]
+                        female_emp_cols = ["FemaleEmployees"]
+
+                    # Nếu có cặp số lượng Nam/Nữ thực tế (hoặc vừa được tính từ Tổng * %):
+                    is_pure_pct_only = any(k in uq_low for k in ["chỉ xem tỷ lệ", "chỉ xem phần trăm", "chỉ tỷ lệ"])
+                    if male_emp_cols and female_emp_cols and not is_pure_pct_only:
                         active_measures = [male_emp_cols[0], female_emp_cols[0]]
-                        chart_title = f"Quy mô & Cơ cấu Nhân sự theo {label_name} (Stacked Bar)"
+                        chart_title = f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
                     elif user_asked_efficiency and eff_cols:
                         # Kiểm tra xem có sự xung đột đơn vị (% và $) giữa các cột hiệu quả không
                         has_pct_eff = [c for c in eff_cols if any(k in c.lower() for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
@@ -830,7 +845,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     barmode_val = "stack" if (is_composition_100 or is_headcount_stack) else "group"
                     if is_composition_100:
-                        chart_title = f"Cơ cấu Tỷ lệ Phần trăm ({', '.join(active_measures)}) theo {format_col_title(label_name)} (100% Stacked Bar)"
+                        meas_labels = [format_col_title(c) for c in active_measures]
+                        chart_title = f"Cơ cấu Tỷ lệ Phần trăm ({', '.join(meas_labels)}) theo {format_col_title(label_name)} (100% Stacked Bar)"
                     elif is_headcount_stack:
                         chart_title = f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
                     elif is_gender_salary_comp:

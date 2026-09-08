@@ -250,25 +250,70 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             st.write("")
             return
 
-        tot_m = s_male.sum()
-        tot_f = s_female.sum()
-        tot_all = tot_m + tot_f
-        if tot_all > 0:
-            pct_f = (tot_f / tot_all) * 100.0
-            pct_m = (tot_m / tot_all) * 100.0
-            balanced_depts = int((s_male == s_female).sum())
-            is_mgr = any(k in (user_query or "").lower() for k in ["manager", "quản lý", "trưởng phòng"]) or any("manager" in str(c).lower() for c in df.columns)
-            entity_name = "Quản lý" if is_mgr else ("Nhân sự" if not is_en else "Workforce")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
+        # Kiểm tra xem male_cols và female_cols là CỘT TỶ LỆ (%) hay CỘT SỐ LƯỢNG NGƯỜI (Count)
+        is_pct_data = any(any(k in str(c).lower() for k in ["pct", "percent", "rate", "tỷ lệ", "tỉ lệ", "%"]) for c in [m_c, f_c])
+        if not is_pct_data and s_male.max() <= 100 and s_female.max() <= 100 and abs((s_male + s_female).mean() - 100.0) < 2.5:
+            is_pct_data = True
+
+        # Tìm cột Tổng số nhân sự thực tế trong bảng (nếu có)
+        total_emp_cols = [
+            c for c in df.columns
+            if any(k in str(c).lower() for k in ["totalemployees", "total_emp", "headcount", "tổng số", "total", "slngnhnvin", "count"])
+            and not any(k in str(c).lower() for k in ["male", "female", "nam", "nữ", "pct", "%"])
+            and pd.api.types.is_numeric_dtype(df[c])
+        ]
+
+        is_mgr = any(k in (user_query or "").lower() for k in ["manager", "quản lý", "trưởng phòng"]) or any("manager" in str(c).lower() for c in df.columns)
+        entity_name = "Quản lý" if is_mgr else ("Nhân sự" if not is_en else "Workforce")
+
+        if is_pct_data:
+            if total_emp_cols:
+                tot_col = total_emp_cols[0]
+                s_tot = pd.to_numeric(df[tot_col], errors="coerce").fillna(0)
+                tot_all = float(s_tot.sum())
+                s_male_real = (s_male * s_tot / 100.0).round()
+                s_female_real = (s_female * s_tot / 100.0).round()
+                tot_m = float(s_male_real.sum())
+                tot_f = float(s_female_real.sum())
+                pct_m = (tot_m / tot_all * 100.0) if tot_all > 0 else 0.0
+                pct_f = (tot_f / tot_all * 100.0) if tot_all > 0 else 0.0
+            else:
+                tot_all = None
+                tot_m = None
+                tot_f = None
+                pct_m = float(s_male.mean())
+                pct_f = float(s_female.mean())
+        else:
+            tot_m = float(s_male.sum())
+            tot_f = float(s_female.sum())
+            tot_all = tot_m + tot_f
+            pct_f = (tot_f / tot_all * 100.0) if tot_all > 0 else 0.0
+            pct_m = (tot_m / tot_all * 100.0) if tot_all > 0 else 0.0
+
+        balanced_depts = int((s_male == s_female).sum())
+        if balanced_depts == total_rows:
+            balance_delta = "Cân bằng tuyệt đối 50-50"
+        elif balanced_depts > 0:
+            balance_delta = f"{balanced_depts}/{total_rows} {dim_name} đạt 50-50"
+        else:
+            diff_avg = abs(pct_m - pct_f)
+            who_more = "Nam" if pct_m > pct_f else "Nữ"
+            balance_delta = f"{who_more} chiếm đa số (+{diff_avg:.1f}%)"
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            if tot_all is not None:
                 st.metric("👔 " + (f"Tổng số {entity_name}" if not is_en else f"Total {entity_name}"), f"{int(tot_all):,}", delta=f"{total_rows} {dim_name}")
-            with c2:
-                st.metric("👩 " + ("Tỷ lệ Nữ (Female)" if not is_en else "Female Ratio"), f"{pct_f:.1f}%", delta=f"{int(tot_f):,} người")
-            with c3:
-                st.metric("👨 " + ("Tỷ lệ Nam (Male)" if not is_en else "Male Ratio"), f"{pct_m:.1f}%", delta=f"{int(tot_m):,} người")
-            with c4:
-                st.metric("⚖️ " + ("Cân bằng 50-50" if not is_en else "Gender Parity"), f"{balanced_depts}/{total_rows} {dim_name}", delta="Cân bằng tuyệt đối")
+            else:
+                st.metric("🏢 " + ("Quy mô phân tích" if not is_en else "Analyzed Entities"), f"{total_rows} {dim_name}", delta="Cơ cấu theo tỷ lệ")
+        with c2:
+            delta_f = f"{int(tot_f):,} người" if tot_f is not None else ("Bình quân toàn công ty" if not is_en else "Company Average")
+            st.metric("👩 " + ("Tỷ lệ Nữ (Female)" if not is_en else "Female Ratio"), f"{pct_f:.1f}%", delta=delta_f)
+        with c3:
+            delta_m = f"{int(tot_m):,} người" if tot_m is not None else ("Bình quân toàn công ty" if not is_en else "Company Average")
+            st.metric("👨 " + ("Tỷ lệ Nam (Male)" if not is_en else "Male Ratio"), f"{pct_m:.1f}%", delta=delta_m)
+        with c4:
+            st.metric("⚖️ " + ("Cân bằng 50-50" if not is_en else "Gender Parity"), f"{balanced_depts}/{total_rows} {dim_name}", delta=balance_delta)
             
             if is_mgr and tot_all > 9:
                 st.caption(

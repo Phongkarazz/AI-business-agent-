@@ -570,9 +570,12 @@ ORDER BY d.dept_name"""
     is_dept_employees = any(k in q_low for k in ["từng phòng ban", "các phòng ban", "phòng ban"])
     if is_dept_employees and not is_dept_manager:
         uses_cte = bool(re.search(r"\bWITH\b", sql, re.IGNORECASE))
-        has_female = bool(re.search(r"\b(PercentageFemale|FemalePct|female)\b", sql, re.IGNORECASE))
-        has_male = bool(re.search(r"\b(PercentageMale|MalePct|male)\b", sql, re.IGNORECASE))
-        if uses_cte or not (has_female and has_male):
+        has_female_pct = bool(re.search(r"\b(PercentageFemale|FemalePct)\b", sql, re.IGNORECASE))
+        has_male_pct = bool(re.search(r"\b(PercentageMale|MalePct)\b", sql, re.IGNORECASE))
+        has_female_count = bool(re.search(r"\b(FemaleEmployees|FemaleCount|female_emp)\b", sql, re.IGNORECASE))
+        has_male_count = bool(re.search(r"\b(MaleEmployees|MaleCount|male_emp)\b", sql, re.IGNORECASE))
+        missing_counts_or_pcts = not (has_female_pct and has_male_pct and has_female_count and has_male_count)
+        if uses_cte or missing_counts_or_pcts:
             return """SELECT 
     d.dept_name AS Department,
     SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleEmployees,
@@ -585,7 +588,7 @@ JOIN employees e ON de.emp_no = e.emp_no
 JOIN departments d ON de.dept_no = d.dept_no
 WHERE de.to_date = '9999-01-01'
 GROUP BY d.dept_name
-ORDER BY d.dept_name"""
+ORDER BY TotalEmployees DESC"""
 
     is_company = any(k in q_low for k in ["công ty", "toàn công ty", "company", "toàn bộ"]) or "employees" in sql_low
     if is_company or any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu"]):
