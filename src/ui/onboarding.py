@@ -12,6 +12,7 @@ from src.config import (
 )
 from src.config_store import load_saved_config, save_user_config, clear_saved_config
 from src.ui.connection_dialog import show_connecting_dialog
+from src.database.connection import try_connect
 
 
 def render_onboarding():
@@ -102,10 +103,27 @@ def render_onboarding():
     with col_enterprise:
         with st.container(border=True):
             st.markdown("### 🏢 Chế độ Doanh nghiệp")
-            st.caption("Kết nối MySQL Database thực tế và tùy biến các thông số AI nâng cao.")
+            st.caption("Kết nối MySQL Database thực tế và tùy biến thông số AI nâng cao.")
 
-            should_expand_mysql = True
-            with st.expander("🔌 1. Thông số Kết nối MySQL Database", expanded=should_expand_mysql):
+            # Giá trị mặc định an toàn cho các tùy chọn
+            telegram_bot_token = saved.get("telegram_bot_token", "")
+            telegram_chat_id = saved.get("telegram_chat_id", "")
+            smtp_server = saved.get("smtp_server", "smtp.gmail.com")
+            smtp_port = saved.get("smtp_port", "587")
+            smtp_user = saved.get("smtp_user", "")
+            smtp_pass = saved.get("smtp_pass", "")
+            email_receivers = saved.get("email_receivers", "")
+            remember_config = saved.get("remember_config", True)
+            auto_connect = saved.get("auto_connect", True)
+            enable_auto_insights = saved.get("enable_auto_insights", True)
+            enable_self_check = saved.get("enable_self_check", True)
+            enable_cache = saved.get("enable_cache", True)
+            forecast_periods = saved.get("forecast_periods", 3)
+            schema_context_input = ""
+
+            tab_mysql, tab_ai, tab_opts = st.tabs(["🔌 CSDL MySQL", "🤖 Cấu hình AI", "⚡ Tham số & Kênh"])
+
+            with tab_mysql:
                 is_local_saved = saved.get("run_local", True) or (saved.get("db_host", "") in ("localhost", "127.0.0.1", ""))
                 conn_mode = st.radio(
                     "Môi trường MySQL Database",
@@ -122,7 +140,7 @@ def render_onboarding():
 
                     st.markdown("""
                     <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.84rem; color: #166534; display: flex; align-items: center; gap: 8px;">
-                        <span>🟢</span> <span><b>Chế độ Cục bộ (Localhost):</b> Tự động kết nối <code>127.0.0.1 / localhost:3306</code>. Không cần nhập Host hay cấu hình mạng phức tạp.</span>
+                        <span>🟢</span> <span><b>Chế độ Cục bộ (Localhost):</b> <code>127.0.0.1:3306</code> (Không cần cấu hình mạng).</span>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -162,7 +180,20 @@ def render_onboarding():
                 db_port_digits = "".join(ch for ch in str(db_port_raw) if ch.isdigit())
                 db_port = db_port_digits or "3306"
 
-            with st.expander("🤖 2. Nhà cung cấp AI & API Key", expanded=False):
+                # Nút kiểm tra kết nối nhanh (Ping Test)
+                if st.button("🔍 Kiểm tra kết nối MySQL (Ping Test)", use_container_width=True, key="btn_ping_mysql"):
+                    if not db_user or not db_name or (not run_local and not db_host):
+                        st.warning("⚠️ Vui lòng điền đủ User và Database Name trước khi kiểm tra.")
+                    else:
+                        try:
+                            with st.spinner(f"Đang kiểm tra kết nối tới MySQL ({db_host}:{db_port})..."):
+                                test_eng = try_connect(db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local)
+                                test_eng.dispose()
+                            st.success(f"✅ Kết nối thành công tới database `{db_name}` ({db_host}:{db_port})!")
+                        except Exception as p_err:
+                            st.error(f"❌ Kết nối thất bại: {p_err}")
+
+            with tab_ai:
                 provider_list = list(PROVIDER_CONFIGS.keys())
                 saved_provider = saved.get("provider", "OpenRouter")
                 provider_idx = provider_list.index(saved_provider) if saved_provider in provider_list else 0
@@ -216,7 +247,6 @@ def render_onboarding():
                 selected_model = st.selectbox("Chọn Model AI", model_options, index=model_idx, key="onboarding_model")
 
                 custom_base_url = ""
-                custom_model_input = ""
                 if provider == "OpenRouter" or is_openrouter_key:
                     custom_base_url = st.text_input(
                         "Base URL",
@@ -232,7 +262,7 @@ def render_onboarding():
                         key="onboarding_ollama_base_url"
                     ).strip() or OLLAMA_BASE_URL
 
-            with st.expander("⚡ 3. Tùy chọn Phân tích & Báo cáo", expanded=False):
+            with tab_opts:
                 c_opt1, c_opt2 = st.columns(2)
                 with c_opt1:
                     remember_config = st.checkbox(
@@ -266,15 +296,6 @@ def render_onboarding():
                         key="onboarding_forecast_periods"
                     )
 
-                st.markdown("##### 📤 Kênh chia sẻ Báo cáo (Telegram / Email SMTP)")
-                telegram_bot_token = st.text_input("Telegram Bot Token", value=saved.get("telegram_bot_token", ""), type="password", key="onboarding_telegram_bot_token")
-                telegram_chat_id = st.text_input("Telegram Chat ID", value=saved.get("telegram_chat_id", ""), key="onboarding_telegram_chat_id")
-                smtp_server = st.text_input("SMTP Server", value=saved.get("smtp_server", "smtp.gmail.com"), key="onboarding_smtp_server")
-                smtp_port = st.text_input("SMTP Port", value=saved.get("smtp_port", "587"), key="onboarding_smtp_port")
-                smtp_user = st.text_input("Email Người gửi", value=saved.get("smtp_user", ""), key="onboarding_smtp_user")
-                smtp_pass = st.text_input("Mật khẩu Ứng dụng SMTP", value=saved.get("smtp_pass", ""), type="password", key="onboarding_smtp_pass")
-                email_receivers = st.text_input("Email Người nhận", value=saved.get("email_receivers", ""), key="onboarding_email_receivers")
-
                 raw_saved_notes = saved.get("custom_business_notes", "")
                 if raw_saved_notes.startswith("Cơ sở dữ liệu bao gồm"):
                     raw_saved_notes = ""
@@ -282,13 +303,23 @@ def render_onboarding():
                     "Ghi chú Quy tắc Nghiệp vụ bổ sung (Tùy chọn)",
                     value=raw_saved_notes,
                     placeholder="VD: Chỉ tính nhân viên chính thức, Lương chưa bao gồm phụ cấp...",
-                    height=70,
+                    height=65,
                     key="onboarding_schema_context_input"
                 )
 
+                with st.expander("📤 Kênh chia sẻ Báo cáo (Telegram / Email SMTP)", expanded=False):
+                    telegram_bot_token = st.text_input("Telegram Bot Token", value=saved.get("telegram_bot_token", ""), type="password", key="onboarding_telegram_bot_token")
+                    telegram_chat_id = st.text_input("Telegram Chat ID", value=saved.get("telegram_chat_id", ""), key="onboarding_telegram_chat_id")
+                    smtp_server = st.text_input("SMTP Server", value=saved.get("smtp_server", "smtp.gmail.com"), key="onboarding_smtp_server")
+                    smtp_port = st.text_input("SMTP Port", value=saved.get("smtp_port", "587"), key="onboarding_smtp_port")
+                    smtp_user = st.text_input("Email Người gửi", value=saved.get("smtp_user", ""), key="onboarding_smtp_user")
+                    smtp_pass = st.text_input("Mật khẩu Ứng dụng SMTP", value=saved.get("smtp_pass", ""), type="password", key="onboarding_smtp_pass")
+                    email_receivers = st.text_input("Email Người nhận", value=saved.get("email_receivers", ""), key="onboarding_email_receivers")
+
+            st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
             btn_custom_connect = st.button(
                 "🚀 Kết nối MySQL Doanh nghiệp",
-                type="secondary",
+                type="primary",
                 use_container_width=True,
                 key="btn_onboarding_connect"
             )

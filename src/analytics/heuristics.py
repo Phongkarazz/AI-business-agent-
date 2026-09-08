@@ -778,6 +778,147 @@ def generate_starter_prompts(tables: list[str], schema_context: str = "") -> lis
     return cards[:4]
 
 
+def generate_categorized_starter_prompts(tables: list[str], schema_context: str = "") -> dict[str, list[dict]]:
+    """Tự động sinh các thẻ gợi ý câu hỏi thông minh phân loại theo 3 lăng kính điều hành chính."""
+    tables_lower = [t.lower() for t in tables]
+    has_hr = any(t in tables_lower for t in ["employees", "nhan_vien", "salaries", "luong", "departments", "phong_ban", "titles", "dept_emp", "staff", "payroll"])
+    has_sales = any(t in tables_lower for t in ["sales", "orders", "don_hang", "order_details", "transactions", "invoices", "hoa_don"])
+    has_product = any(t in tables_lower for t in ["products", "san_pham", "items", "hang_hoa"])
+
+    if has_hr and not has_sales:
+        return {
+            "💰 Tài chính & Lương": [
+                {
+                    "icon": "⚖️",
+                    "title": "Lương Nam vs Nữ Theo Chức Danh",
+                    "prompt": "So sánh mức lương trung bình giữa nhân viên nam và nữ theo từng chức danh",
+                    "desc": "Đối chuẩn công bằng thu nhập và thu hẹp khoảng cách giới"
+                },
+                {
+                    "icon": "💰",
+                    "title": "Top 10 Lương Cao Nhất Sales",
+                    "prompt": "Top 10 nhân viên có mức lương cao nhất trong phòng ban Sales",
+                    "desc": "Nhân sự xuất sắc có thu nhập cao nhất khối Kinh doanh"
+                },
+                {
+                    "icon": "📈",
+                    "title": "Nhân Viên Có Từ 5 Lần Tăng Lương",
+                    "prompt": "Những nhân viên có từ 5 lần tăng lương trở lên trong lịch sử công ty",
+                    "desc": "Lịch sử đãi ngộ và thăng tiến thu nhập nhân sự"
+                }
+            ],
+            "👥 Quy mô & Nhân sự": [
+                {
+                    "icon": "🏢",
+                    "title": "Quy Mô Phòng Ban Lớn / Nhỏ Nhất",
+                    "prompt": "Phòng ban nào có quy mô nhân sự lớn nhất và nhỏ nhất hiện nay?",
+                    "desc": "Phân bổ lực lượng lao động hiện hành giữa các khối"
+                },
+                {
+                    "icon": "📅",
+                    "title": "Xu Hướng Tuyển Dụng Theo Năm",
+                    "prompt": "Thống kê số lượng nhân viên được tuyển dụng theo từng năm từ trước đến nay",
+                    "desc": "Tốc độ tăng trưởng quy mô tổ chức qua các thời kỳ"
+                },
+                {
+                    "icon": "🚻",
+                    "title": "Tỷ Lệ Giới Tính Ban Quản Lý",
+                    "prompt": "Tỷ lệ nam và nữ trong ban quản lý (dept_manager) của từng phòng ban",
+                    "desc": "Cơ cấu đa dạng giới trong đội ngũ lãnh đạo phòng ban"
+                }
+            ],
+            "🏆 Xếp hạng & Lãnh đạo": [
+                {
+                    "icon": "🎖️",
+                    "title": "Top 10 Nhân Viên Thâm Niên Nhất",
+                    "prompt": "Top 10 nhân viên có thâm niên làm việc lâu nhất công ty hiện nay",
+                    "desc": "Ghi nhận những nhân sự gắn bó dài lâu nhất với tổ chức"
+                },
+                {
+                    "icon": "👔",
+                    "title": "Danh Sách Trưởng Phòng & Lương",
+                    "prompt": "Danh sách các Manager hiện tại của từng phòng ban kèm mức lương mới nhất",
+                    "desc": "Hồ sơ chức danh và mức lương ban lãnh đạo quản lý"
+                },
+                {
+                    "icon": "🏢",
+                    "title": "Chênh Lệch Lương Nội Bộ Phòng",
+                    "prompt": "Phòng ban nào có mức chênh lệch lương giữa người cao nhất và thấp nhất lớn nhất?",
+                    "desc": "Khoảng cách phân hóa thu nhập nội bộ từng đơn vị"
+                }
+            ]
+        }
+    elif has_sales or has_product:
+        return {
+            "📈 Doanh thu & Thị trường": [
+                {
+                    "icon": "📦",
+                    "title": "Đóng Góp Doanh Thu Nhóm Hàng",
+                    "prompt": "Tỷ lệ đóng góp doanh thu của từng nhóm sản phẩm (Category) vào tổng doanh thu",
+                    "desc": "Phân tích cơ cấu danh mục hàng hóa và tỷ trọng doanh thu"
+                },
+                {
+                    "icon": "🌍",
+                    "title": "Doanh Thu Theo Thị Trường Quốc Gia",
+                    "prompt": "Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng?",
+                    "desc": "Theo dõi biểu đồ tăng trưởng thị trường quốc tế"
+                },
+                {
+                    "icon": "🍫",
+                    "title": "Top 10 Sản Phẩm Bán Chạy Nhất",
+                    "prompt": "Top 10 sản phẩm có tổng doanh số bán ra cao nhất",
+                    "desc": "Danh sách mặt hàng chủ lực đóng góp doanh thu cao nhất"
+                }
+            ],
+            "💰 Lợi nhuận & Biên lãi": [
+                {
+                    "icon": "🏷️",
+                    "title": "Lợi Nhuận Trung Bình Mỗi Hộp",
+                    "prompt": "Mức lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm",
+                    "desc": "Xác định các mặt hàng có biên lợi nhuận cao nhất"
+                },
+                {
+                    "icon": "💵",
+                    "title": "Báo Cáo P&L Toàn Diện Sản Phẩm",
+                    "prompt": "Tổng doanh thu, chi phí và lợi nhuận ròng của từng sản phẩm",
+                    "desc": "Báo cáo P&L phân tích lãi lỗ chi tiết danh mục"
+                },
+                {
+                    "icon": "📦",
+                    "title": "Tổng Số Lượng Hộp Xuất Bán",
+                    "prompt": "Tổng số lượng hộp bán ra theo từng dòng sản phẩm",
+                    "desc": "Sản lượng tiêu thụ thực tế của từng phân khúc"
+                }
+            ],
+            "👥 Đội ngũ & Hiệu suất": [
+                {
+                    "icon": "🏆",
+                    "title": "So Sánh Hiệu Suất Các Team",
+                    "prompt": "So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh",
+                    "desc": "Đánh giá hiệu suất cạnh tranh giữa các đội ngũ bán hàng"
+                },
+                {
+                    "icon": "👥",
+                    "title": "Chuyên Viên Doanh Số > 50k USD",
+                    "prompt": "Những nhân viên bán hàng có tổng doanh số vượt mức 50,000 USD",
+                    "desc": "Vinh danh các chuyên viên kinh doanh đạt mốc ấn tượng"
+                },
+                {
+                    "icon": "👔",
+                    "title": "Quy Mô Nhân Sự Các Team",
+                    "prompt": "Số lượng nhân viên của từng Team kinh doanh",
+                    "desc": "Phân bổ quy mô nhân sự giữa các đội ngũ kinh doanh"
+                }
+            ]
+        }
+    else:
+        general_cards = generate_starter_prompts(tables, schema_context)
+        return {
+            "📊 Khám phá Chung": general_cards[:3],
+            "🔍 Phân tích Bổ sung": general_cards[3:6] if len(general_cards) > 3 else general_cards[:2]
+        }
+
+
 def sanitize_insight_markdown(text: str) -> str:
     """Tự động làm sạch hoàn toàn các lỗi định dạng markdown của AI:
     - CẤM TỰ Ý IN ĐẬM TRONG CÂU: Chỉ in đậm duy nhất Tiêu đề ở đầu gạch đầu dòng trước dấu hai chấm.
