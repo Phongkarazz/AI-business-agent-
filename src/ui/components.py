@@ -1248,7 +1248,11 @@ def render_result(result: dict, turn_id: str):
                 col_label = format_col_title(col) if not is_en else col
                 is_num = pd.api.types.is_numeric_dtype(display_df[col])
 
-                if is_id_like(col):
+                is_year_or_id = is_id_like(col) or (
+                    any(k in c_low for k in ["year", "năm", "nam", "hireyear", "hire_date", "tháng", "month"])
+                    and not any(k in c_low for k in ["salary", "lương", "cost", "revenue", "amount", "profit", "budget", "tiền"])
+                )
+                if is_year_or_id:
                     column_config[col] = st.column_config.NumberColumn(col_label, format="%d")
                 elif any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỷ suất", "tỉ suất", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin", "biên", "%"]):
                     if is_num:

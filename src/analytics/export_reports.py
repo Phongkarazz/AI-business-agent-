@@ -108,11 +108,20 @@ def export_to_excel(df: pd.DataFrame, sheet_name: str = "Bao_Cao") -> bytes:
                 ws.column_dimensions[col_letter].width = max(max_len, 14)
 
                 # Định dạng dữ liệu các dòng
+                from src.analytics.heuristics import is_id_like
                 is_num = pd.api.types.is_numeric_dtype(df[col])
+                c_low = str(col).lower()
+                is_year_or_id = is_id_like(col) or (
+                    any(k in c_low for k in ["year", "năm", "nam", "hireyear", "hire_date", "tháng", "month", "emp_no", "mã", "id", "spid", "pid", "geoid"])
+                    and not any(k in c_low for k in ["salary", "lương", "cost", "revenue", "amount", "profit", "budget", "tiền"])
+                )
                 for row_idx in range(2, len(df) + 2):
                     c = ws.cell(row=row_idx, column=col_idx)
                     c.border = border_thin
-                    if is_num:
+                    if is_year_or_id:
+                        c.number_format = "0"
+                        c.alignment = Alignment(horizontal="center")
+                    elif is_num:
                         c.number_format = "#,##0"
                         c.alignment = Alignment(horizontal="right")
                     else:
@@ -514,7 +523,9 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                     story.append(Spacer(1, 8))
 
             # Bảng Dữ Liệu Clean Style McKinsey (No vertical lines, clean typography, localized headers)
-            preview_df = df.head(15)
+            MAX_PDF_ROWS = 100
+            is_truncated = len(df) > MAX_PDF_ROWS
+            preview_df = df.head(MAX_PDF_ROWS) if is_truncated else df
             n_cols = len(preview_df.columns)
             available_w = 515.0
 
@@ -547,14 +558,21 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                     if pd.api.types.is_numeric_dtype(preview_df[col]):
                         try:
                             num_v = float(val)
-                            if any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ"]):
+                            # Kiểm tra nếu cột là năm / thời gian / mã ID (không được format dấu phẩy hàng nghìn 1,985)
+                            is_year_or_id = is_id_like(col) or (
+                                any(k in c_low for k in ["year", "năm", "nam", "hireyear", "hire_date", "tháng", "month", "emp_no", "mã", "id", "spid", "pid", "geoid"])
+                                and not any(k in c_low for k in ["salary", "lương", "cost", "revenue", "amount", "profit", "budget", "tiền"])
+                            )
+                            if is_year_or_id:
+                                formatted = str(int(round(num_v))) if (pd.notna(val) and not pd.isna(num_v)) else str(val)
+                            elif any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ"]):
                                 formatted = f"{num_v:.2f}%"
                             elif any(k in c_low for k in ["salary", "lương", "cost", "revenue", "sales", "amount", "profit", "budget"]):
                                 formatted = f"${num_v:,.2f}" if (not num_v.is_integer() and abs(num_v) < 1000) else f"${num_v:,.0f}"
                             elif any(k in c_low for k in ["boxes", "box", "hộp", "thùng", "count", "số lượng", "headcount", "employees", "slngnhnvin", "đối tượng"]):
                                 formatted = f"{round(num_v):,.0f}"
-                            elif any(k in c_low for k in ["salary", "lương", "cost", "revenue", "sales", "amount", "profit", "budget"]):
-                                formatted = f"${num_v:,.2f}" if (not num_v.is_integer() and abs(num_v) < 1000) else f"${num_v:,.0f}"
+                            elif any(k in c_low for k in ["thâm niên", "service", "tenure"]):
+                                formatted = f"{num_v:.1f} năm" if not num_v.is_integer() else f"{int(num_v)} năm"
                             else:
                                 formatted = f"{round(num_v):,.0f}" if num_v.is_integer() else f"{num_v:,.2f}"
                         except Exception:
@@ -574,23 +592,31 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                     elif pd.api.types.is_numeric_dtype(preview_df[col]):
                         v_col = pd.to_numeric(preview_df[col], errors="coerce").dropna()
                         if not v_col.empty:
-                            if any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "avg", "per_box", "perbox", "cost"]):
+                            is_year_col = is_id_like(col) or (
+                                any(k in c_low for k in ["year", "năm", "nam", "hireyear", "hire_date", "tháng", "month", "emp_no", "mã", "id", "spid", "pid", "geoid"])
+                                and not any(k in c_low for k in ["salary", "lương", "cost", "revenue", "amount", "profit", "budget", "tiền"])
+                            )
+                            if is_year_col:
+                                summary_cells.append(Paragraph("-", table_cell_num_bold))
+                            elif any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "avg", "per_box", "perbox", "cost"]):
                                 avg_v = v_col.mean()
                                 fmt_s = f"{avg_v:.2f}%" if any(k in c_low for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ"]) else f"${avg_v:,.2f}"
+                                summary_cells.append(Paragraph(f"<b>{fmt_s}</b>", table_cell_num_bold))
                             elif any(k in c_low for k in ["boxes", "box", "hộp", "thùng", "count", "số lượng", "headcount", "employees", "slngnhnvin", "đối tượng"]):
                                 sum_v = v_col.sum()
                                 fmt_s = f"{round(sum_v):,.0f}"
+                                summary_cells.append(Paragraph(f"<b>{fmt_s}</b>", table_cell_num_bold))
                             else:
                                 sum_v = v_col.sum()
                                 fmt_s = f"${sum_v:,.0f}" if any(k in c_low for k in ["salary", "sales", "revenue", "amount", "budget"]) else (f"{round(sum_v):,.0f}" if sum_v.is_integer() else f"{sum_v:,.2f}")
-                            summary_cells.append(Paragraph(f"<b>{fmt_s}</b>", table_cell_num_bold))
+                                summary_cells.append(Paragraph(f"<b>{fmt_s}</b>", table_cell_num_bold))
                         else:
                             summary_cells.append(Paragraph("", table_cell))
                     else:
                         summary_cells.append(Paragraph("", table_cell))
                 table_rows.append(summary_cells)
 
-            t = Table(table_rows, colWidths=final_widths)
+            t = Table(table_rows, colWidths=final_widths, repeatRows=1)
             t_style = [
                 ("BACKGROUND", (0, 0), (-1, 0), MCK_NAVY),
                 ("TOPPADDING", (0, 0), (-1, 0), 5),
@@ -618,6 +644,12 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
 
             t.setStyle(TableStyle(t_style))
             story.append(t)
+            if is_truncated:
+                story.append(Spacer(1, 4))
+                story.append(Paragraph(
+                    f"<font color='#64748B'><i>* Ghi chú: Bảng PDF hiển thị {MAX_PDF_ROWS} dòng đầu tiên trong tổng số {len(df):,} dòng. Vui lòng tải file Excel (.xlsx) hoặc CSV để xem toàn bộ dữ liệu.</i></font>",
+                    body_style
+                ))
             story.append(Spacer(1, 10))
 
         # 2. BIỂU ĐỒ TRỰC QUAN HÓA CHIẾN LƯỢC (nếu có ảnh chart)
