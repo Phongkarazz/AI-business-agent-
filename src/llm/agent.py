@@ -1522,7 +1522,7 @@ JOIN products pr ON s.PID = pr.PID
 ORDER BY Month ASC, TotalSales DESC"""
 
     # 3. Doanh thu theo nhân viên bán hàng qua các tháng
-    is_person = any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán"]) or "people" in sql_low or "spid" in sql_low
+    is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "thành viên", "sales rep"]) or "people" in sql_low or "spid" in sql_low
     if is_person and not specific_person and not any(k in q_low for k in ["quốc gia", "country", "sản phẩm", "product"]):
         needs_fix = (
             "with " in sql_low
@@ -1863,7 +1863,7 @@ def auto_fix_pareto_cumulative_query(sql: str, user_query: str, dialect: str = "
         metric_expr = "SUM(s.Boxes)" if has_boxes else "SUM(s.Amount)"
         metric_col = "TotalBoxesSold" if has_boxes else "TotalSales"
 
-        is_person = any(k in q_low for k in ["nhân viên", "salesperson", "người bán", "sales rep", "rep"]) and not any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
+        is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "người bán", "sales rep", "rep", "thành viên", "yummies", "delish", "jucies"]) and not any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
         is_country = any(k in q_low for k in ["quốc gia", "thị trường", "country", "geo", "nước"]) and not any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
         is_category = any(k in q_low for k in ["nhóm sản phẩm", "category", "danh mục", "dòng sản phẩm"]) and not any(k in q_low for k in ["sản phẩm cụ thể", "từng sản phẩm"])
         is_product = not (is_person or is_country or is_category)
@@ -2535,8 +2535,22 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     limit_clause = f"LIMIT {limit}" if limit else ""
 
     # 1. Bảng xếp hạng Nhân viên bán hàng (Salesperson / People)
-    is_person = any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán", "ai bán", "ai có doanh số", "ai doanh thu", "nhân sự bán"]) or "people" in sql_low or "spid" in sql_low or "salesperson" in sql_low
+    is_person = (
+        any(k in q_low for k in [
+            "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai bán", 
+            "ai có doanh số", "ai doanh thu", "nhân sự bán", "sales rep", "rep", "thành viên",
+            "ai có", "người"
+        ])
+        or any(k in q_low for k in ["yummies", "delish", "jucies"])
+        or any(k in sql_low for k in ["people", "spid", "salesperson", "employeename", "first_name", "last_name", "sales_person"])
+    )
     if is_person and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country"]):
+        specific_team = None
+        for tm in ["yummies", "delish", "jucies"]:
+            if tm in q_low:
+                specific_team = tm.capitalize()
+                break
+
         needs_fix = (
             "with " in sql_low
             or "s.salesperson" in sql_low
@@ -2548,13 +2562,13 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             or "group by" not in sql_low
             or "order by" not in sql_low
             or "pe.salesperson" not in sql_low
+            or (specific_team and f"'{specific_team.lower()}'" not in sql_low)
+            or ("products" in sql_low and not any(k in q_low for k in ["sản phẩm", "product", "kẹo", "socola"]))
+            or "price" in sql_low
+            or "pieces" in sql_low
+            or "employeename" in sql_low
+            or "division" in sql_low
         )
-        specific_team = None
-        for tm in ["yummies", "delish", "jucies"]:
-            if tm in q_low:
-                specific_team = tm.capitalize()
-                break
-
         if needs_fix:
             where_conditions = []
             if specific_team:
@@ -2578,8 +2592,14 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             return "\n".join(lines)
 
     # 2. Bảng xếp hạng Sản phẩm (Products)
-    is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola", "chocolate"]) or "products" in sql_low or "pid" in sql_low or "product" in sql_low
-    if is_product and not any(k in q_low for k in ["nhân viên", "salesperson", "quốc gia", "country"]):
+    is_product = (
+        any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola", "chocolate"]) 
+        or any(k in sql_low for k in ["products", "pid", "product"])
+    )
+    if is_product and not any(k in q_low for k in [
+        "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "quốc gia", 
+        "country", "yummies", "delish", "jucies", "thành viên", "sales rep", "rep"
+    ]):
         needs_fix = (
             "with " in sql_low
             or "s.product" in sql_low

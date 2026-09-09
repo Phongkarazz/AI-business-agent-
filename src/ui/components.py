@@ -1300,7 +1300,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         entity_name = "Phòng ban" if not is_en else "Departments"
                     elif any(k in _dim_low for k in ["manager", "quản lý", "trưởng phòng"]):
                         entity_name = "Quản lý" if not is_en else "Managers"
-                    elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "emp", "name"]):
+                    elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "emp", "name", "salesperson"]):
                         entity_name = "Nhân sự" if not is_en else "Employees"
                     else:
                         entity_name = ""
@@ -1486,7 +1486,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                                 _entity_top = " Chức danh" if not is_en else " Job Titles"
                             elif any(k in _dim_low for k in ["manager", "quản lý"]):
                                 _entity_top = " Quản lý" if not is_en else " Managers"
-                            elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "name", "tên"]):
+                            elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "name", "tên", "salesperson"]):
                                 _entity_top = " Nhân sự" if not is_en else " Employees"
                             else:
                                 _entity_top = ""
@@ -1514,7 +1514,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                             elif any(k in _dim_low for k in ["year", "năm", "hireyear"]):
                                 _card1_title = "📅 " + ("Giai đoạn" if not is_en else "Period")
                                 _card1_val = f"{display_rows_count} Năm"
-                            elif any(k in _dim_low for k in ["name", "tên", "employee", "nhân viên"]):
+                            elif any(k in _dim_low for k in ["name", "tên", "employee", "nhân viên", "nhân sự", "salesperson"]):
                                 _card1_title = "👥 " + ("Số nhân sự" if not is_en else "Employees")
                                 _card1_val = f"{display_rows_count:,} Người"
                             else:

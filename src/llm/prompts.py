@@ -363,6 +363,19 @@ def get_db_specific_rules(schema_context: str) -> str:
        GROUP BY pe.Salesperson, pe.Team
        ORDER BY TotalSales DESC
        LIMIT 10;
+      + MẪU CHUẨN TOP NHÂN SỰ / NHÂN VIÊN TRONG MỘT NHÓM / ĐỘI NGŨ (TEAM YUMMIES, DELISH, JUCIES):
+        * Khi hỏi 'Top 5 nhân sự có doanh số cao nhất trong nhóm Yummies' hoặc 'Top nhân viên team Delish':
+          CÁC TỪ 'nhân sự', 'nhân viên', 'salesperson' VÀ CÁC NHÓM 'Yummies', 'Delish', 'Jucies' LÀ NÓI VỀ NHÂN SỰ (BẢNG people, CỘT pe.Team)!
+          TUYỆT ĐỐI CẤM TRUY VẤN SẢN PHẨM (BẢNG products) HAY NHẦM SANG BẢNG employees!
+          SELECT 
+              pe.Salesperson, 
+              SUM(s.Amount) AS TotalSales
+          FROM sales s
+          JOIN people pe ON s.SPID = pe.SPID
+          WHERE pe.Team = 'Yummies'
+          GROUP BY pe.Salesperson
+          ORDER BY TotalSales DESC
+          LIMIT 5;
      + MẪU CHUẨN TOP SẢN PHẨM:
        SELECT pr.Product, SUM(s.Amount) AS TotalSales
        FROM products pr
@@ -599,7 +612,7 @@ def parse_threshold_query_info(q_low: str):
     has_boxes = any(k in q_low for k in ['hộp', 'hop', 'thùng', 'thung', 'boxes'])
 
     entity_type = None
-    if any(k in q_low for k in ['nhân viên', 'salesperson', 'sales person', 'người bán', 'ai bán', 'ai có']) and not match_chocolates_specific_person(q_low):
+    if any(k in q_low for k in ['nhân viên', 'nhân sự', 'salesperson', 'sales person', 'người bán', 'ai bán', 'ai có', 'thành viên', 'sales rep', 'rep', 'yummies', 'delish', 'jucies']) and not match_chocolates_specific_person(q_low):
         entity_type = 'person'
     elif any(k in q_low for k in ['sản phẩm', 'product', 'mặt hàng', 'kẹo', 'socola', 'chocolate']) and not match_chocolates_specific_product(q_low):
         entity_type = 'product'
@@ -1365,36 +1378,49 @@ GROUP BY Month
 ORDER BY Month ASC;
 (CẢNH BÁO BẮT BUỘC: TUYỆT ĐỐI CẤM DÙNG `LIMIT 10`! Bắt buộc ORDER BY Month ASC!)
 """
-        # 0.6 Top N nhân viên bán hàng (Salesperson) có doanh số / số lượng bán ra cao nhất
-        elif any(k in q_low for k in ["nhân viên", "salesperson", "sales person", "người bán"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "xuất sắc", "nhiều nhất", "lớn nhất", "bán được", "bán chạy", "hộp", "thùng", "boxes"]):
+        # 0.6 Top N nhân viên bán hàng / nhân sự (Salesperson) có doanh số / số lượng bán ra cao nhất
+        elif (
+            any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "sales rep", "rep", "thành viên", "ai bán", "ai có doanh số", "người", "ai có"])
+            or any(k in q_low for k in ["yummies", "delish", "jucies"])
+        ) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "xuất sắc", "nhiều nhất", "lớn nhất", "bán được", "bán chạy", "hộp", "thùng", "boxes"]):
+            specific_team = None
+            for tm in ["yummies", "delish", "jucies"]:
+                if tm in q_low:
+                    specific_team = tm.capitalize()
+                    break
+
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
-            yr_filter = ""
-            yr_label = ""
-            if yr_match:
-                yr_val = yr_match.group(1)
-                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}"
-                yr_label = f" NĂM {yr_val}"
+            yr_val = yr_match.group(1) if yr_match else None
+            yr_label = f" NĂM {yr_val}" if yr_val else ""
+
+            where_conds = []
+            if specific_team:
+                where_conds.append(f"pe.Team = '{specific_team}'")
+            if yr_val:
+                where_conds.append(f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}")
+
+            where_str = ("WHERE " + " AND ".join(where_conds) + "\n") if where_conds else ""
+            team_label = f" TRONG NHÓM {specific_team.upper()}" if specific_team else ""
 
             has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"])
             measure_col = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
             order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
 
             return f"""
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} NHÂN VIÊN BÁN HÀNG DOANH SỐ CAO NHẤT{yr_label}):
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} NHÂN SỰ/NHÂN VIÊN BÁN HÀNG{team_label}{yr_label}):
 SELECT 
     pe.Salesperson AS Salesperson,
     {measure_col}
 FROM sales s
 JOIN people pe ON s.SPID = pe.SPID
-{yr_filter}
-GROUP BY pe.Salesperson
+{where_str}GROUP BY pe.Salesperson
 ORDER BY {order_col} DESC
 LIMIT {req_limit};
-(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Tên nhân viên nằm ở cột pe.Salesperson! Doanh số là SUM(s.Amount) AS TotalSales! Lọc năm bắt buộc dùng YEAR(s.SaleDate) = ...! BẮT BUỘC dùng LIMIT {req_limit} theo yêu cầu người dùng!)
+(CẢNH BÁO BẮT BUỘC: Nhóm '{specific_team or "kinh doanh"}' là đội ngũ nhân sự trong bảng people (cột pe.Team)! BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Tên nhân sự nằm ở cột pe.Salesperson! TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG products HOẶC SẢN PHẨM! BẮT BUỘC dùng LIMIT {req_limit} theo yêu cầu người dùng!)
 """
 
         # 0.7 Top N sản phẩm (Product) có doanh số / số lượng bán chạy nhất
-        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "món", "kẹo", "socola", "chocolate"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "bán chạy", "chạy nhất", "nhiều nhất", "hộp", "thùng", "boxes"]):
+        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "món", "kẹo", "socola", "chocolate"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "yummies", "delish", "jucies", "thành viên"]) and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "bán chạy", "chạy nhất", "nhiều nhất", "hộp", "thùng", "boxes"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_label = ""
