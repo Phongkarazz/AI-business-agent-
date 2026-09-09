@@ -1278,11 +1278,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
     measure_cols, cat_cols, time_col = get_axis_columns(df)
     val_col = measure_cols[0] if measure_cols else None
 
-    # Nếu không tìm thấy measure_cols bằng get_axis_columns, lấy cột số cuối cùng
     if not val_col:
         num_cols = df.select_dtypes(include="number").columns.tolist()
         if num_cols:
             val_col = num_cols[-1]
+
+    spread_candidate = next((c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
+    if spread_candidate:
+        val_col = spread_candidate
 
     if not val_col:
         if is_en:
@@ -1341,12 +1344,16 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             mean_val = float(df_sorted[val_col].mean())
 
             is_payroll = any(k in q_low or k in cols_str for k in ["salary", "lương", "quỹ", "expenditure", "budget", "chi phí"])
-            is_hiring = any(k in q_low or k in cols_str for k in ["tuyển", "hire", "headcount", "nhân viên"])
+            is_title_appointment = any(k in q_low or k in cols_str for k in ["appointment", "bổ nhiệm", "chức danh", "title", "newtitleappointments"])
+            is_hiring = not is_title_appointment and any(k in q_low or k in cols_str for k in ["tuyển", "hire", "headcount", "nhân viên"])
 
             if is_en:
                 if is_payroll:
                     h1 = f"• **Workforce Ramp-up & Budget Expansion in {spike_t}**: The significant jump of +{spike_pct:.1f}% (reaching {spike_v:,.2f}) highlights aggressive hiring and corporate scaling during this period, establishing a larger baseline payroll expenditure."
                     h2 = f"• **Tenure Compounding & Budget Stabilization**: Total payroll peaked in {peak_t} ({peak_v:,.2f}) and sustained around the mean of {mean_val:,.2f}, driven by recurring merit increments for tenured talent paired with organizational salary caps."
+                elif is_title_appointment:
+                    h1 = f"• **Peak Organizational Restructuring & Title Promotion Wave ({spike_t})**: New title appointments surged to {peak_v:,.0f} promotions in {peak_t}, reflecting a major corporate restructuring, role reclassification, or accelerated internal mobility."
+                    h2 = f"• **Career Path Stabilization & Succession Planning**: Post-peak title appointments normalized to {min_v:,.0f} promotions in {min_t} around an annual baseline of {mean_val:,.0f} promotions/year, indicating structured merit-based career progression rather than ad-hoc job title expansions."
                 elif is_hiring:
                     h1 = f"• **Peak Recruitment Wave ({spike_t})**: New hiring surged to {peak_v:,.0f} employees in {peak_t}, aligning with corporate capacity expansion and critical project rollouts."
                     h2 = f"• **Headcount Stabilization & Selective Hiring**: Post-peak recruitment normalized to {min_v:,.0f} hires in {min_t} around a historical baseline of {mean_val:,.0f} hires/year, reflecting a strategic shift from rapid scaling to talent retention and internal productivity."
@@ -1357,6 +1364,9 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                 if is_payroll:
                     h1 = f"• **Mở rộng Quy mô & Bước nhảy Ngân sách Giai đoạn {spike_t}**: Mức tăng vọt +{spike_pct:.1f}% (đạt {spike_v:,.2f}) phản ánh giai đoạn doanh nghiệp ồ ạt mở rộng quy mô nhân sự hoặc sáp nhập các đơn vị lớn, tạo ra bước nhảy vọt về định biên chi phí lương."
                     h2 = f"• **Tích lũy Thâm niên & Cơ chế Trần Quỹ Lương**: Tổng quỹ lương đạt đỉnh vào năm {peak_t} ({peak_v:,.2f}) và sau đó duy trì ổn định quanh mức trung bình {mean_val:,.2f}, xuất phát từ chính sách tăng lương định kỳ tích lũy cho lực lượng nhân sự thâm niên kết hợp với việc kiểm soát trần ngân sách tổ chức."
+                elif is_title_appointment:
+                    h1 = f"• **Làn sóng Bổ nhiệm & Tái cơ cấu Chức danh Giai đoạn {spike_t}**: Số lượng nhân sự được bổ nhiệm chức danh mới đạt đỉnh {peak_v:,.0f} lượt vào năm {peak_t}, gắn liền với đợt chuẩn hóa chức danh, tái cơ cấu sơ đồ tổ chức hoặc luân chuyển cán bộ quy mô lớn."
+                    h2 = f"• **Chuẩn hóa Lộ trình Thăng tiến & Ổn định Bộ máy**: Sau giai đoạn bổ nhiệm ồ ạt, hoạt động bổ nhiệm duy trì ổn định quanh mức bình quân {mean_val:,.0f} lượt/năm ({min_v:,.0f} lượt năm {min_t}), phản ánh quy trình đánh giá và thăng tiến chức danh đã đi vào nền nếp theo chu kỳ thẩm định định kỳ."
                 elif is_hiring:
                     h1 = f"• **Làn sóng Tuyển dụng & Đột phá Quy mô ({spike_t})**: Số lượng nhân sự mới đạt đỉnh {peak_v:,.0f} người vào năm {peak_t}, gắn liền với giai đoạn mở rộng sản xuất kinh doanh và bổ sung nhân lực cho các dự án trọng điểm."
                     h2 = f"• **Tối ưu Định biên & Tinh gọn Bộ máy**: Sau giai đoạn cao điểm, quy mô tuyển dụng hạ nhiệt về {min_v:,.0f} nhân sự (năm {min_t}) và duy trì quanh mức bình quân {mean_val:,.0f} người/năm, phản ánh bước chuyển từ tuyển ồ ạt sang nâng cao chất lượng và ổn định đội ngũ."
@@ -1441,6 +1451,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             # 3C. Phòng ban (Departments)
             is_dept = any(k in cols_str for k in ["dept", "department", "phòng"]) or any(k in q_low for k in ["phòng ban", "bộ phận", "department"])
             if is_dept:
+                if len(df) == 1:
+                    if is_en:
+                        h1 = f"• **Strategic Breadth & Functional Specialization**: **{top_name}** operates across highly varied job grades, causing a wide internal compensation spread between senior leads and operational staff."
+                        h2 = f"• **Performance Incentive & Merit Progression**: The pay spread provides strong financial incentives for merit recognition and key talent retention in critical business workflows."
+                    else:
+                        h1 = f"• **Đa dạng Cấp bậc & Chuyên môn hóa Chức danh**: Phòng ban **{top_name}** tập hợp nhiều dải chức danh từ chuyên viên tác nghiệp đến chuyên gia cấp cao, tạo nên biên độ phân hóa thu nhập nội bộ sâu rộng."
+                        h2 = f"• **Cơ chế Đãi ngộ Theo Hiệu suất & Giữ chân Nhân tài**: Khoảng cách thu nhập nội bộ là đòn bẩy tài chính quan trọng để thúc đẩy lộ trình thăng tiến và duy trì sự gắn bó của lực lượng nhân sự chủ chốt."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Strategic Contribution & Market Talent Competition**: **{top_name}** commands the top average ({format_metric_value(top_v, val_col)}), reflecting its direct impact on core value creation and strong competition in the external hiring market."
                     h2 = f"• **Seniority Ratio & Departmental Budget Framework**: The {gap_vs_top:.1f}% lower spread ({format_metric_value(spread_diff, val_col)}) compared to **{bot_name}** ({format_metric_value(bot_v, val_col)}) aligns with differing ratios of senior specialists and departmental operating caps."
@@ -1619,6 +1637,10 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                 if num_cols:
                     val_col = num_cols[-1]
 
+            spread_candidate = next((c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
+            if spread_candidate:
+                val_col = spread_candidate
+
             q_low = (user_query or "").lower()
             cols_str = " ".join(str(c).lower() for c in df.columns)
             is_time_series = (
@@ -1671,9 +1693,33 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                         gap_vs_top = ((top_val - bot_val) / top_val * 100) if top_val > 0 else 0
                         lead_vs_bot = ((top_val - bot_val) / bot_val * 100) if bot_val != 0 else 0
                         median_val = float(df_eval[val_col].median())
-                        is_salary = any(k in str(val_col).lower() for k in ["salary", "lương", "wage", "pay", "thu_nhập"])
-                        med_label = "Thu nhập trung vị" if is_salary else "Quy mô trung vị"
-                        if is_en:
+                        if len(df) == 1:
+                            has_max_min = any("max" in str(c).lower() for c in df.columns) and any("min" in str(c).lower() for c in df.columns)
+                            if has_max_min:
+                                max_c = next((c for c in df.columns if "max" in str(c).lower()), None)
+                                min_c = next((c for c in df.columns if "min" in str(c).lower()), None)
+                                max_v_fmt = format_metric_value(float(df[max_c].iloc[0]), max_c)
+                                min_v_fmt = format_metric_value(float(df[min_c].iloc[0]), min_c)
+                                val_fmt = format_metric_value(top_val, val_col)
+                                if is_en:
+                                    part_21 = (
+                                        f"• **Leading Entity**: **{top_name}** exhibits the organization's largest salary spread of **{val_fmt}**.\n\n"
+                                        f"• **Internal Compensation Range**: Peak compensation reaches **{max_v_fmt}**, against a base floor of **{min_v_fmt}**.\n\n"
+                                        f"• **Structural Evaluation**: This wide variance highlights significant pay progression between entry levels and senior specialists."
+                                    )
+                                else:
+                                    part_21 = (
+                                        f"• **Đơn vị Dẫn đầu**: Phòng ban **{top_name}** ghi nhận mức chênh lệch lương nội bộ lớn nhất toàn tổ chức với **{val_fmt}**.\n\n"
+                                        f"• **Biên độ Thu nhập Nội bộ**: Mức lương cao nhất tại phòng đạt **{max_v_fmt}**, trong khi mức lương sàn là **{min_v_fmt}**.\n\n"
+                                        f"• **Đánh giá Cấu trúc**: Khoảng cách thu nhập thể hiện chính sách phân tầng đãi ngộ rõ nét giữa cấp bậc chuyên môn và đội ngũ quản trị."
+                                    )
+                            else:
+                                val_fmt = format_metric_value(top_val, val_col)
+                                if is_en:
+                                    part_21 = f"• **Target Entity**: **{top_name}** recorded at **{val_fmt}**, representing the primary metric extracted from the inquiry."
+                                else:
+                                    part_21 = f"• **Thực thể Trọng tâm**: **{top_name}** đạt mức **{val_fmt}**, là chỉ số trọng tâm theo yêu cầu của câu hỏi điều hành."
+                        elif is_en:
                             part_21 = (
                                 f"• **Leading Position**: Group **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
                                 f"• **Distribution Spread**: Group **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than market leader **{top_name}**, a variance of -{format_metric_value(spread_diff, val_col)}; leader exceeds by +{lead_vs_bot:.1f}%).\n\n"

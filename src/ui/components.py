@@ -18,53 +18,92 @@ from src.visualization.charts import render_smart_chart, format_col_title
 from src.llm.agent import generate_auto_insights
 
 
-def render_voice_input_button(key: str = "voice_input_widget"):
-    """Hiển thị nút Micro nhập liệu bằng giọng nói tiếng Việt thời gian thực (Web Speech API)."""
-    voice_html = """
-    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-        <button id="micBtn" onclick="toggleSpeechRecognition()" style="
-            background: linear-gradient(135deg, #1F4E78 0%, #2563EB 100%);
-            color: #ffffff;
-            border: none;
-            border-radius: 20px;
-            padding: 7px 16px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            transition: all 0.2s ease;
-        ">
-            <span id="micIcon">🎙️</span> <span id="micText">Nói câu hỏi (Tiếng Việt)</span>
-        </button>
-        <span id="speechStatus" style="font-size: 13px; color: #475569; font-style: italic;"></span>
-    </div>
+def render_voice_input_button(key: str = "voice_input_widget", compact: bool = False):
+    """Hiển thị nút Micro nhập liệu bằng giọng nói tiếng Việt thời gian thực (Web Speech API).
+    Hỗ trợ chế độ compact (icon-only 42x42) đặt ngay trong thanh Search chính hoặc chế độ pill button truyền thống."""
+    is_compact_js = "true" if compact else "false"
+
+    if compact:
+        btn_markup = """
+        <div style="display: flex; align-items: center; justify-content: center; height: 42px;">
+            <button id="micBtn" onclick="toggleSpeechRecognition()" title="Nói câu hỏi bằng Tiếng Việt (Voice Input)" style="
+                background: #F8FAFC;
+                color: #1E293B;
+                border: 1px solid #CBD5E1;
+                border-radius: 10px;
+                width: 42px;
+                height: 42px;
+                font-size: 18px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+                transition: all 0.2s ease;
+            " onmouseover="if(!isListening){this.style.background='#EFF6FF'; this.style.borderColor='#3B82F6';}" onmouseout="if(!isListening){this.style.background='#F8FAFC'; this.style.borderColor='#CBD5E1';}">
+                <span id="micIcon">🎙️</span>
+            </button>
+        </div>
+        """
+    else:
+        btn_markup = """
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+            <button id="micBtn" onclick="toggleSpeechRecognition()" style="
+                background: linear-gradient(135deg, #1F4E78 0%, #2563EB 100%);
+                color: #ffffff;
+                border: none;
+                border-radius: 20px;
+                padding: 7px 16px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                transition: all 0.2s ease;
+            ">
+                <span id="micIcon">🎙️</span> <span id="micText">Nói câu hỏi (Tiếng Việt)</span>
+            </button>
+            <span id="speechStatus" style="font-size: 13px; color: #475569; font-style: italic;"></span>
+        </div>
+        """
+
+    voice_html = f"""
+    <body style="margin: 0; padding: 0; overflow: hidden; background: transparent;">
+    {btn_markup}
     <script>
+        const isCompact = {is_compact_js};
         let recognition = null;
         let isListening = false;
 
-        function toggleSpeechRecognition() {
+        function toggleSpeechRecognition() {{
             const micBtn = document.getElementById('micBtn');
             const micIcon = document.getElementById('micIcon');
             const micText = document.getElementById('micText');
             const speechStatus = document.getElementById('speechStatus');
 
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
                 alert('Trình duyệt của bạn chưa hỗ trợ nhận diện giọng nói (Web Speech API). Vui lòng sử dụng Google Chrome, Microsoft Edge hoặc Safari.');
                 return;
-            }
+            }}
 
-            if (isListening) {
+            if (isListening) {{
                 if (recognition) recognition.stop();
                 isListening = false;
-                micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                if (isCompact) {{
+                    micBtn.style.background = '#F8FAFC';
+                    micBtn.style.borderColor = '#CBD5E1';
+                    micBtn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
+                    micBtn.title = 'Nói câu hỏi bằng Tiếng Việt (Voice Input)';
+                }} else {{
+                    micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                    if (micText) micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
+                    if (speechStatus) speechStatus.innerText = '';
+                }}
                 micIcon.innerText = '🎙️';
-                micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
-                speechStatus.innerText = '';
                 return;
-            }
+            }}
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
@@ -72,66 +111,99 @@ def render_voice_input_button(key: str = "voice_input_widget"):
             recognition.continuous = false;
             recognition.interimResults = false;
 
-            recognition.onstart = function() {
+            recognition.onstart = function() {{
                 isListening = true;
-                micBtn.style.background = '#DC2626';
+                if (isCompact) {{
+                    micBtn.style.background = '#FEF2F2';
+                    micBtn.style.borderColor = '#EF4444';
+                    micBtn.style.boxShadow = '0 0 0 3px rgba(239, 68, 68, 0.25)';
+                    micBtn.title = 'Đang lắng nghe... Bấm để dừng';
+                }} else {{
+                    micBtn.style.background = '#DC2626';
+                    if (micText) micText.innerText = 'Đang lắng nghe...';
+                    if (speechStatus) speechStatus.innerText = 'Hãy nói câu hỏi của bạn vào micro...';
+                }}
                 micIcon.innerText = '🔴';
-                micText.innerText = 'Đang lắng nghe...';
-                speechStatus.innerText = 'Hãy nói câu hỏi của bạn vào micro...';
-            };
+            }};
 
-            recognition.onresult = function(event) {
+            recognition.onresult = function(event) {{
                 const transcript = event.results[0][0].transcript.trim();
-                speechStatus.innerText = 'Đã điền câu hỏi! Bạn có thể sửa nếu cần và nhấn Enter hoặc ⬆️ để gửi.';
+                if (!isCompact && speechStatus) {{
+                    speechStatus.innerText = 'Đã điền câu hỏi! Bạn có thể sửa nếu cần và nhấn Enter hoặc ⬆️ để gửi.';
+                }}
                 
-                // Cập nhật vào Streamlit chat_input thông qua React Native Property Setter
+                // Cập nhật vào Streamlit chat_input hoặc text_input thông qua React Native Property Setter
                 const textAreas = window.parent.document.querySelectorAll('textarea, input[type="text"]');
-                for (let ta of textAreas) {
-                    if (ta.placeholder && (ta.placeholder.includes('Hỏi bất kỳ') || ta.placeholder.includes('Ask anything'))) {
-                        try {
-                            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
-                            if (nativeSetter) {
+                for (let ta of textAreas) {{
+                    if (ta.placeholder && (
+                        ta.placeholder.includes('Hỏi bất kỳ') || 
+                        ta.placeholder.includes('Ask anything') ||
+                        ta.placeholder.includes('doanh thu') ||
+                        ta.placeholder.includes('Tìm kiếm') ||
+                        ta.placeholder.includes('Search')
+                    )) {{
+                        try {{
+                            const nativeSetter = Object.getOwnPropertyDescriptor(
+                                ta instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype, 
+                                "value"
+                            )?.set;
+                            if (nativeSetter) {{
                                 nativeSetter.call(ta, transcript);
-                            } else {
+                            }} else {{
                                 ta.value = transcript;
-                            }
-                        } catch(e) {
+                            }}
+                        }} catch(e) {{
                             ta.value = transcript;
-                        }
+                        }}
                         
-                        ta.dispatchEvent(new Event('input', { bubbles: true }));
-                        ta.dispatchEvent(new Event('change', { bubbles: true }));
+                        ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        ta.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         
                         // Đặt con trỏ chuột vào ô chat để người dùng xem và sửa tiếp
                         ta.focus();
-                        try {
+                        try {{
                             ta.setSelectionRange(ta.value.length, ta.value.length);
-                        } catch(e) {}
+                        }} catch(e) {{}}
                         break;
-                    }
-                }
-            };
+                    }}
+                }}
+            }};
 
-            recognition.onerror = function(event) {
+            recognition.onerror = function(event) {{
                 isListening = false;
-                micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                if (isCompact) {{
+                    micBtn.style.background = '#F8FAFC';
+                    micBtn.style.borderColor = '#CBD5E1';
+                    micBtn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
+                    micBtn.title = 'Lỗi nhận diện: ' + event.error;
+                }} else {{
+                    micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                    if (micText) micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
+                    if (speechStatus) speechStatus.innerText = 'Lỗi: ' + event.error;
+                }}
                 micIcon.innerText = '🎙️';
-                micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
-                speechStatus.innerText = 'Lỗi: ' + event.error;
-            };
+            }};
 
-            recognition.onend = function() {
+            recognition.onend = function() {{
                 isListening = false;
-                micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                if (isCompact) {{
+                    micBtn.style.background = '#F8FAFC';
+                    micBtn.style.borderColor = '#CBD5E1';
+                    micBtn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
+                    micBtn.title = 'Nói câu hỏi bằng Tiếng Việt (Voice Input)';
+                }} else {{
+                    micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
+                    if (micText) micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
+                }}
                 micIcon.innerText = '🎙️';
-                micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
-            };
+            }};
 
             recognition.start();
-        }
+        }}
     </script>
+    </body>
     """
-    st.components.v1.html(voice_html, height=45)
+    st.components.v1.html(voice_html, height=44 if compact else 45)
 
 
 def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: bool = False):
@@ -510,6 +582,158 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
         st.write("")
         return
 
+    # KIỂM TRA BÀI TOÁN PHÂN TÍCH CHÊNH LỆCH LƯƠNG NỘI BỘ PHÒNG BAN (SALARY SPREAD / GAP)
+    is_salary_spread_analysis = (
+        any(any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"]) for c in df.columns)
+        or (any(k in (user_query or "").lower() for k in ["chênh lệch lương", "khoảng cách lương", "phân hóa lương", "salary spread"])
+            and any(any(k in str(c).lower() for k in ["maxsalary", "minsalary", "spread", "salary"]) for c in df.columns))
+    )
+    if is_salary_spread_analysis:
+        spread_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
+        max_s_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["maxsalary", "max_salary", "cao nhất"])), None)
+        min_s_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["minsalary", "min_salary", "thấp nhất"])), None)
+        dept_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["department", "dept_name", "phòng ban", "phòng"])), label_cols[0] if label_cols else "Department")
+
+        if total_rows == 1:
+            row0 = df.iloc[0]
+            dept_name = str(row0[dept_col]) if dept_col in df.columns else "N/A"
+            s_val = float(row0[spread_col]) if spread_col and spread_col in df.columns else 0.0
+            max_val = float(row0[max_s_col]) if max_s_col and max_s_col in df.columns else 0.0
+            min_val = float(row0[min_s_col]) if min_s_col and min_s_col in df.columns else 0.0
+
+            ratio_max_min = (max_val / min_val) if min_val > 0 else 1.0
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏢 " + ("Phòng ban dẫn đầu" if not is_en else "Leading Department"),
+                    dept_name,
+                    delta="Chênh lệch lớn nhất" if not is_en else "Largest Spread"
+                )
+            with c2:
+                st.metric(
+                    "⚖️ " + ("Chênh lệch lương" if not is_en else "Salary Spread"),
+                    f"${s_val:,.0f}",
+                    delta=f"Gấp {ratio_max_min:.1f} lần mức sàn" if not is_en else f"{ratio_max_min:.1f}x floor salary"
+                )
+            with c3:
+                st.metric(
+                    "🏆 " + ("Lương cao nhất" if not is_en else "Max Salary"),
+                    f"${max_val:,.0f}",
+                    delta=f"Đỉnh phòng {dept_name}" if not is_en else f"Peak at {dept_name}"
+                )
+            with c4:
+                st.metric(
+                    "📉 " + ("Lương thấp nhất" if not is_en else "Min Salary"),
+                    f"${min_val:,.0f}",
+                    delta=f"Sàn phòng {dept_name}" if not is_en else f"Floor at {dept_name}"
+                )
+
+            st.caption(
+                f"ℹ️ **Phân tích Chênh lệch Lương**: Phòng ban **{dept_name}** có mức chênh lệch lương nội bộ lớn nhất toàn tổ chức là **${s_val:,.0f}** "
+                f"(Lương cao nhất **${max_val:,.0f}** gấp **{ratio_max_min:.1f} lần** mức thấp nhất **${min_val:,.0f}**)."
+                if not is_en else
+                f"ℹ️ **Salary Spread Analysis**: Department **{dept_name}** exhibits the organization's largest internal salary gap of **${s_val:,.0f}** "
+                f"(Max salary of **${max_val:,.0f}** is **{ratio_max_min:.1f}x** the base salary of **${min_val:,.0f}**)."
+            )
+            st.write("")
+            return
+
+        elif total_rows == 2 and spread_col:
+            s_series = pd.to_numeric(df[spread_col], errors="coerce").fillna(0)
+            max_idx = s_series.idxmax()
+            min_idx = s_series.idxmin()
+
+            max_d = str(df.loc[max_idx, dept_col])
+            max_v = float(s_series.loc[max_idx])
+            min_d = str(df.loc[min_idx, dept_col])
+            min_v = float(s_series.loc[min_idx])
+            gap_ext = max_v - min_v
+            gap_pct = (gap_ext / min_v * 100.0) if min_v > 0 else 0.0
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏆 " + ("Chênh lệch lớn nhất" if not is_en else "Largest Spread"),
+                    max_d,
+                    delta=f"${max_v:,.0f}"
+                )
+            with c2:
+                st.metric(
+                    "📉 " + ("Chênh lệch nhỏ nhất" if not is_en else "Narrowest Spread"),
+                    min_d,
+                    delta=f"${min_v:,.0f}"
+                )
+            with c3:
+                st.metric(
+                    "⚖️ " + ("Khoảng cách cực trị" if not is_en else "Variance Range"),
+                    f"${gap_ext:,.0f}",
+                    delta=f"+{gap_pct:.1f}% chênh lệch" if not is_en else f"+{gap_pct:.1f}% difference"
+                )
+            with c4:
+                st.metric(
+                    "📊 " + ("Chênh lệch bình quân" if not is_en else "Average Spread"),
+                    f"${s_series.mean():,.0f}",
+                    delta="2 cực trị đối chiếu" if not is_en else "2 extreme benchmarks"
+                )
+
+            st.caption(
+                f"ℹ️ **Đối chiếu 2 Cực trị Chênh lệch Lương**: Phòng ban **{max_d}** có mức phân hóa lớn nhất (**${max_v:,.0f}**), "
+                f"trong khi phòng ban **{min_d}** có độ lệch hẹp nhất (**${min_v:,.0f}**, thấp hơn **${gap_ext:,.0f} (-{gap_pct:.1f}%)**)."
+                if not is_en else
+                f"ℹ️ **Extreme Benchmark Comparison**: **{max_d}** has the widest internal gap (**${max_v:,.0f}**), "
+                f"while **{min_d}** has the narrowest gap (**${min_v:,.0f}**, difference of **${gap_ext:,.0f} (-{gap_pct:.1f}%)**)."
+            )
+            st.write("")
+            return
+
+        elif total_rows > 2 and spread_col:
+            s_series = pd.to_numeric(df[spread_col], errors="coerce").fillna(0)
+            max_idx = s_series.idxmax()
+            min_idx = s_series.idxmin()
+            top_d = str(df.loc[max_idx, dept_col])
+            top_v = float(s_series.loc[max_idx])
+            bot_d = str(df.loc[min_idx, dept_col])
+            bot_v = float(s_series.loc[min_idx])
+            avg_spread = float(s_series.mean())
+            range_val = top_v - bot_v
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏆 " + ("Chênh lệch lớn nhất" if not is_en else "Largest Spread"),
+                    top_d,
+                    delta=f"${top_v:,.0f}"
+                )
+            with c2:
+                st.metric(
+                    "📉 " + ("Chênh lệch nhỏ nhất" if not is_en else "Narrowest Spread"),
+                    bot_d,
+                    delta=f"${bot_v:,.0f}"
+                )
+            with c3:
+                st.metric(
+                    "📊 " + ("Mức chênh lệch TB" if not is_en else "Avg Spread"),
+                    f"${avg_spread:,.0f}",
+                    delta=f"{total_rows} phòng ban" if not is_en else f"{total_rows} departments"
+                )
+            with c4:
+                st.metric(
+                    "⚖️ " + ("Biên độ phân hóa" if not is_en else "Spread Dispersion"),
+                    f"${range_val:,.0f}",
+                    delta="Khoảng cách Max - Min" if not is_en else "Max - Min gap"
+                )
+
+            st.caption(
+                f"ℹ️ **Khảo sát Chênh lệch Lương {total_rows} Phòng Ban**: Phòng ban **{top_d}** có độ phân hóa cao nhất (**${top_v:,.0f}**), "
+                f"phòng ban **{bot_d}** có độ đồng đều cao nhất (**${bot_v:,.0f}**); mức chênh lệch trung bình toàn tổ chức là **${avg_spread:,.0f}**."
+                if not is_en else
+                f"ℹ️ **Salary Spread Overview across {total_rows} Departments**: **{top_d}** shows greatest disparity (**${top_v:,.0f}**), "
+                f"**{bot_d}** shows highest parity (**${bot_v:,.0f}**); average organizational spread is **${avg_spread:,.0f}**."
+            )
+            st.write("")
+            return
+
     if measure_cols and total_rows > 1:
         # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị trên thẻ KPI
         _uq_low = (user_query or "").lower()
@@ -586,6 +810,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Lương Trung Bình"
             elif "salary" in m_low or "lương" in m_low:
                 m_clean = "Mức Lương"
+            elif any(k in m_low for k in ["newtitleappointments", "new title appointments", "new_title_appointments", "titleappointments", "title appointments", "title_appointments", "titleassignments", "title assignments", "bổ nhiệm", "chức danh mới", "appointedemployees", "appointed employees"]):
+                m_clean = "Số Lượng Bổ Nhiệm Chức Danh Mới"
             elif any(k in m_low for k in ["headcount", "head count", "totalemployees", "total employees", "emp count", "empcount", "employee count", "employeecount", "số lượng nhân sự", "quy mô nhân sự", "số lượng nhân viên", "slngnhnvin", "soluongnhanvien"]):
                 m_clean = "Số Lượng Nhân Viên"
             elif any(k in m_low for k in ["totalmanagers", "total managers", "quản lý"]):
@@ -696,7 +922,16 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 "raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases",
                 "lần tăng", "số lần", "raises", "num_raises",
             ])
-            _year_unit = " Năm" if _is_years_measure else ((" Lần" if not is_en else " times") if _is_raises_measure else "")
+            _is_appointment_measure = any(k in _m_col_lower for k in [
+                "newtitleappointments", "new_title_appointments", "titleappointments", "title_appointments",
+                "titleassignments", "title_assignments", "appointedemployees", "appointed_employees",
+                "bổ nhiệm", "chức danh mới",
+            ])
+            _year_unit = " Năm" if _is_years_measure else (
+                (" Lần" if not is_en else " times") if _is_raises_measure else (
+                    (" Lượt" if not is_en else " turns") if _is_appointment_measure else ""
+                )
+            )
 
             fmt_avg = _fmt_kpi_val(avg_val) + _year_unit
             fmt_peak = _fmt_kpi_val(peak_val) + _year_unit
@@ -847,10 +1082,12 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         m_disp = f"{dim_unit} {m_str}"
 
                 with col3:
-                    delta_p = _fmt_kpi_val_full(peak_val) if fmt_peak != _fmt_kpi_val_full(peak_val) else None
+                    full_p = _fmt_kpi_val_full(peak_val) + _year_unit
+                    delta_p = full_p if fmt_peak != full_p else None
                     st.metric(f"🏆 " + (f"Đỉnh cao nhất ({p_disp})" if not is_en else f"Peak ({p_disp})"), fmt_peak, delta=delta_p)
                 with col4:
-                    delta_m = _fmt_kpi_val_full(min_val) if fmt_min != _fmt_kpi_val_full(min_val) else None
+                    full_m = _fmt_kpi_val_full(min_val) + _year_unit
+                    delta_m = full_m if fmt_min != full_m else None
                     st.metric(f"📉 " + (f"Thấp nhất ({m_disp})" if not is_en else f"Lowest ({m_disp})"), fmt_min, delta=delta_m)
 
                 # Kiểm tra năm 2002 có bị sụt giảm tự nhiên do dữ liệu ghi nhận 8 tháng không
@@ -862,13 +1099,31 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                             v02 = float(row_2002[m_col].iloc[0])
                             v01 = float(row_2001[m_col].iloc[0])
                             if v01 > 0 and v02 < v01 * 0.8:
-                                st.caption(
-                                    "ℹ️ **Lưu ý dữ liệu tài chính**: Năm 2002 cơ sở dữ liệu chỉ ghi nhận đến tháng 08/2002 (8 tháng) "
-                                    "nên tổng quỹ lương bị hụt tự nhiên so với các năm đủ 12 tháng, không phản ánh sự suy thoái kinh doanh."
-                                    if not is_en else
-                                    "ℹ️ **Financial Data Note**: Year 2002 records only contain data up to August 2002 (8 months), "
-                                    "causing an apparent drop compared to full 12-month years, not an actual operational decline."
-                                )
+                                if _is_appointment_measure:
+                                    note_msg = (
+                                        "ℹ️ **Lưu ý dữ liệu**: Năm 2002 cơ sở dữ liệu chỉ ghi nhận đến tháng 08/2002 (8 tháng) "
+                                        "nên số lượt bổ nhiệm ghi nhận thấp hơn tự nhiên so với các năm đủ 12 tháng, không phản ánh sự suy thoái vận hành."
+                                        if not is_en else
+                                        "ℹ️ **Data Note**: Year 2002 records only contain data up to August 2002 (8 months), "
+                                        "causing recorded appointments to appear lower than full 12-month years, not an operational decline."
+                                    )
+                                elif any(k in m_low for k in ["salary", "lương", "budget", "quỹ"]):
+                                    note_msg = (
+                                        "ℹ️ **Lưu ý dữ liệu tài chính**: Năm 2002 cơ sở dữ liệu chỉ ghi nhận đến tháng 08/2002 (8 tháng) "
+                                        "nên tổng quỹ lương bị hụt tự nhiên so với các năm đủ 12 tháng, không phản ánh sự suy thoái kinh doanh."
+                                        if not is_en else
+                                        "ℹ️ **Financial Data Note**: Year 2002 records only contain data up to August 2002 (8 months), "
+                                        "causing an apparent drop compared to full 12-month years, not an actual operational decline."
+                                    )
+                                else:
+                                    note_msg = (
+                                        "ℹ️ **Lưu ý dữ liệu**: Năm 2002 cơ sở dữ liệu chỉ ghi nhận đến tháng 08/2002 (8 tháng) "
+                                        "nên chỉ số ghi nhận bị hụt tự nhiên so với các năm đủ 12 tháng, không phản ánh sự suy thoái vận hành."
+                                        if not is_en else
+                                        "ℹ️ **Data Note**: Year 2002 records only contain data up to August 2002 (8 months), "
+                                        "causing recorded metrics to appear lower than full 12-month years, not an operational decline."
+                                    )
+                                st.caption(note_msg)
                     except Exception:
                         pass
             elif is_avg_or_rate:
@@ -963,7 +1218,7 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                         st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
             else:
                 # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
-                _unassigned_keywords = ["(chưa phân nhóm)", "(unassigned)", "chưa phân nhóm", "unassigned", "(trống)", "none", "n/a", ""]
+                _unassigned_keywords = ["(chưa phân nhóm)", "(chưa xác định)", "(unassigned)", "chưa phân nhóm", "chưa xác định", "unassigned", "(trống)", "none", "n/a", ""]
                 _dim_col = label_cols[0] if label_cols else "Department"
                 if _dim_col in df.columns:
                     is_unassigned_mask = df[_dim_col].astype(str).str.strip().str.lower().isin(_unassigned_keywords)
@@ -1022,6 +1277,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 # Chọn icon phù hợp theo ngữ cảnh dữ liệu
                 if is_currency:
                     card_icon = "💰 "
+                elif any(k in m_low for k in ["bổ nhiệm", "chức danh", "appointment", "assignment"]):
+                    card_icon = "🎖️ "
                 elif any(k in m_low for k in ["manager", "quản lý", "trưởng phòng"]):
                     card_icon = "👔 "
                 elif any(k in m_low for k in ["employee", "headcount", "nhân sự", "nhân viên", "hires", "tuyển dụng", "quy mô", "slngnhnvin"]):
@@ -1249,7 +1506,7 @@ def render_result(result: dict, turn_id: str):
     cleaned_df = df.copy()
     for col in cleaned_df.columns:
         if not pd.api.types.is_numeric_dtype(cleaned_df[col]):
-            unassigned_label = "(Unassigned)" if is_en else "(Chưa phân nhóm)"
+            unassigned_label = "(Unassigned)" if is_en else "(Chưa xác định)"
             cleaned_df[col] = cleaned_df[col].apply(
                 lambda val: unassigned_label if pd.isna(val) or (isinstance(val, str) and not val.strip()) else val
             )

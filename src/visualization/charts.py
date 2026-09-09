@@ -52,6 +52,12 @@ VI_COLUMN_MAP = {
     "avg_salary": "Lương Trung Bình",
     "avgsalary": "Lương Trung Bình",
     "averagesalary": "Lương Trung Bình",
+    "salaryspread": "Chênh Lệch Lương ($)",
+    "salary_spread": "Chênh Lệch Lương ($)",
+    "maxsalary": "Lương Cao Nhất ($)",
+    "max_salary": "Lương Cao Nhất ($)",
+    "minsalary": "Lương Thấp Nhất ($)",
+    "min_salary": "Lương Thấp Nhất ($)",
     "raisecount": "Số Lần Tăng Lương",
     "raise_count": "Số Lần Tăng Lương",
     "numberofincreases": "Số Lần Tăng Lương",
@@ -75,6 +81,14 @@ VI_COLUMN_MAP = {
     "salary_budget": "Quỹ Lương ($)",
     "totalemployees": "Tổng Số Nhân Viên",
     "total_employees": "Tổng Số Nhân Viên",
+    "newtitleappointments": "Số Lượng Bổ Nhiệm Chức Danh Mới",
+    "new_title_appointments": "Số Lượng Bổ Nhiệm Chức Danh Mới",
+    "titleappointments": "Số Lượng Bổ Nhiệm Chức Danh Mới",
+    "title_appointments": "Số Lượng Bổ Nhiệm Chức Danh Mới",
+    "titleassignments": "Số Lượng Bổ Nhiệm Chức Danh Mới",
+    "title_assignments": "Số Lượng Bổ Nhiệm Chức Danh Mới",
+    "appointedemployees": "Số Nhân Viên Được Bổ Nhiệm",
+    "appointed_employees": "Số Nhân Viên Được Bổ Nhiệm",
     "maleemployees": "Nhân Viên Nam",
     "male_employees": "Nhân Viên Nam",
     "femaleemployees": "Nhân Viên Nữ",
@@ -251,8 +265,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 "tỷ lệ", "tỉ lệ", "phần trăm", "percent", "percentage", "pct", "%", 
                 "share", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp"
             ])
+            non_pct_cols = [c for c in measure_cols if c not in pct_cols]
             is_distribution_breakdown = (
-                (has_single_pct_col or user_asked_pct)
+                (user_asked_pct or (has_single_pct_col and not non_pct_cols))
                 and (2 <= len(df) <= 10)
                 and (len(pct_cols) <= 1)
                 and (not time_col or n_time <= 1)
@@ -496,11 +511,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
         elif chosen == "Bar" and measure_cols:
             # 1. Trường hợp đặc biệt: 1 dòng so sánh nhiều chỉ số (VD: Cá nhân vs Toàn đội / Benchmark)
             if len(df) == 1 and len(measure_cols) >= 2:
-                person_name = None
+                entity_name = None
                 if label_cols:
                     for c in label_cols:
-                        if any(k in c.lower() for k in ["salesperson", "nhân viên", "employee", "people", "name", "tên"]):
-                            person_name = str(df[c].iloc[0])
+                        if any(k in c.lower() for k in ["dept", "phòng", "department", "salesperson", "nhân viên", "employee", "people", "name", "tên", "group", "khối"]):
+                            entity_name = str(df[c].iloc[0])
                             break
 
                 comp_labels = []
@@ -512,12 +527,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         val_num = 0.0
 
                     m_low = m.lower()
+                    formatted_name = format_col_title(m)
                     if any(k in m_low for k in ["team", "đội", "total", "toàn", "all"]):
-                        comp_labels.append(f"Toàn đội ({m})")
-                    elif person_name and any(k in m_low for k in ["sold", "amount", "boxes", "sales", "qty", "hộp", "tiền"]):
-                        comp_labels.append(f"{person_name} ({m})")
+                        comp_labels.append(f"Toàn đội ({formatted_name})")
+                    elif entity_name and any(k in m_low for k in ["sold", "amount", "boxes", "sales", "qty", "hộp", "tiền"]):
+                        comp_labels.append(f"{entity_name} ({formatted_name})")
                     else:
-                        comp_labels.append(m)
+                        comp_labels.append(formatted_name)
                     comp_values.append(val_num)
 
                 comp_df = pd.DataFrame({
@@ -525,13 +541,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     "Giá trị": comp_values
                 })
 
+                title_prefix = f"📊 Biểu đồ Phân tích Chỉ số: {entity_name} (" if entity_name else "📊 Biểu đồ So sánh Chỉ số: ("
                 fig = px.bar(
                     comp_df,
                     x="Chỉ số So sánh",
                     y="Giá trị",
                     color="Chỉ số So sánh",
                     text="Giá trị",
-                    title="📊 Biểu đồ So sánh Chỉ số: " + (" vs ".join(comp_labels)),
+                    title=title_prefix + (" vs ".join(comp_labels)) + ")",
                     template="plotly_white"
                 )
                 fig.update_traces(texttemplate='%{text:,.0f}', textposition='outside')
@@ -1203,7 +1220,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                     target_entity = v_str
                                     break
 
-                        _unassigned_labels = {"(chưa phân nhóm)", "(unassigned)", "chưa phân nhóm", "unassigned", "(trống)", "none", "n/a", ""}
+                        _unassigned_labels = {"(chưa phân nhóm)", "(chưa xác định)", "(unassigned)", "chưa phân nhóm", "chưa xác định", "unassigned", "(trống)", "none", "n/a", ""}
                         if target_entity:
                             # Tô màu nổi bật Cam Đậm #F59E0B cho đối tượng được hỏi, màu Xanh #3B82F6 cho các đối tượng khác, màu xám cho nhóm chưa phân nhóm
                             colors = ['#F59E0B' if str(v).strip().lower() == target_entity.lower() else ('#94A3B8' if str(v).strip().lower() in _unassigned_labels else '#3B82F6') for v in plot_df[label_name]]

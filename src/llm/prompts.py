@@ -82,7 +82,7 @@ def get_db_specific_rules(schema_context: str) -> str:
         * Cột `emp_no` có trong 3 bảng. BẮT BUỘC viết `e.emp_no` trong SELECT và GROUP BY!
         * Bảng `departments` CHỈ CÓ 2 CỘT: `dept_no` và `dept_name`! TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`!
          * QUY TẮC BẮT BUỘC VỀ CHỨC DANH (TITLE):
-           - Khi hỏi số lượng bổ nhiệm chức danh qua từng năm: BẮT BUỘC dùng `titles t` (cột `t.from_date` và `t.emp_no`), GROUP BY `YEAR(t.from_date)`, TUYỆT ĐỐI KHÔNG JOIN salaries hay departments!
+           - Khi hỏi số lượng bổ nhiệm chức danh mới qua từng năm: BẮT BUỘC dùng `titles t` (cột `t.from_date` và `t.emp_no`), đặt tên cột là `NewTitleAppointments` (TUYỆT ĐỐI CẤM đặt TotalEmployees hay Tổng Số Nhân Viên!), GROUP BY `YEAR(t.from_date)`, TUYỆT ĐỐI KHÔNG JOIN salaries hay departments!
            - Khi câu hỏi so sánh lương theo chức danh: BẮT BUỘC dùng bảng `titles t` (cột `t.title`), JOIN `employees e` và `salaries s`, GROUP BY `t.title`. TUYỆT ĐỐI KHÔNG JOIN bảng `departments` hay `dept_emp`!
          * Cột tên phòng ban là `d.dept_name` (ví dụ: WHERE d.dept_name = 'Sales'). TUYỆT ĐỐI KHÔNG DÙNG `d.dept_no = 'Sales'` vì dept_no là mã số (d007)!
          * Thứ tự JOIN bắt buộc khi truy vấn phòng ban:
@@ -349,10 +349,12 @@ def get_db_specific_rules(schema_context: str) -> str:
           TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) hay SUM(Amount)!
           BẮT BUỘC TRUY VẤN TRỰC TIẾP TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID):
           SELECT 
-              COALESCE(NULLIF(pe.Team, ''), '(Chưa phân nhóm)') AS Team,
-              COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`
+              pe.Team AS `Đội Ngũ`,
+              COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`,
+              ROUND(COUNT(DISTINCT pe.SPID) * 100.0 / (SELECT COUNT(*) FROM people WHERE Team != '' AND Team IS NOT NULL), 2) AS `Tỷ Lệ (%)`
           FROM people pe
-          GROUP BY Team
+          WHERE pe.Team != '' AND pe.Team IS NOT NULL
+          GROUP BY pe.Team
           ORDER BY `Số Lượng Nhân Viên` DESC;
      + MẪU CHUẨN TOP NHÂN SỰ:
        SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
@@ -724,10 +726,11 @@ ORDER BY {m_col} DESC;
                 return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN THEO TỪNG KHU VỰC / LOCATION):
 SELECT 
-    COALESCE(NULLIF(pe.Location, ''), '(Chưa xác định)') AS Location,
+    pe.Location AS `Khu Vực`,
     COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`
 FROM people pe
-GROUP BY Location
+WHERE pe.Location != '' AND pe.Location IS NOT NULL
+GROUP BY pe.Location
 ORDER BY `Số Lượng Nhân Viên` DESC;
 (CẢNH BÁO BẮT BUỘC: 
 1. TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) HAY SUM(Amount)!
@@ -738,15 +741,17 @@ ORDER BY `Số Lượng Nhân Viên` DESC;
                 return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN BÁN HÀNG PHÂN BỔ THEO TỪNG TEAM / ĐỘI NGŨ):
 SELECT 
-    COALESCE(NULLIF(pe.Team, ''), '(Chưa phân nhóm)') AS Team,
-    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`
+    pe.Team AS `Đội Ngũ`,
+    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`,
+    ROUND(COUNT(DISTINCT pe.SPID) * 100.0 / (SELECT COUNT(*) FROM people WHERE Team != '' AND Team IS NOT NULL), 2) AS `Tỷ Lệ (%)`
 FROM people pe
-GROUP BY Team
+WHERE pe.Team != '' AND pe.Team IS NOT NULL
+GROUP BY pe.Team
 ORDER BY `Số Lượng Nhân Viên` DESC;
 (CẢNH BÁO BẮT BUỘC:
 1. TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) HAY SUM(Amount)!
 2. BẮT BUỘC TRUY VẤN TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`!
-3. Nhóm theo Team và ORDER BY `Số Lượng Nhân Viên` DESC!)
+3. Nhóm theo Team, lọc bỏ các dòng rỗng, tính đầy đủ số lượng và tỷ lệ, ORDER BY `Số Lượng Nhân Viên` DESC!)
 """
 
         # 0.005 Báo cáo kết quả kinh doanh / Lãi, Lỗ (P&L - Profit & Loss)
@@ -1477,11 +1482,11 @@ ORDER BY TotalSales DESC;
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN ĐƯỢC BỔ NHIỆM CHỨC DANH MỚI QUA TỪNG NĂM):
 SELECT 
     YEAR(t.from_date) AS Year,
-    COUNT(DISTINCT t.emp_no) AS TotalEmployees
+    COUNT(DISTINCT t.emp_no) AS NewTitleAppointments
 FROM titles t
 GROUP BY YEAR(t.from_date)
 ORDER BY Year ASC;
-(CẢNH BÁO BẮT BUỘC: BẮT BUỘC dùng bảng titles t, nhóm theo YEAR(t.from_date) AS Year, đếm COUNT(DISTINCT t.emp_no) AS TotalEmployees! TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01', TUYỆT ĐỐI KHÔNG JOIN bảng salaries s hay employees e hay departments!)
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC dùng bảng titles t, nhóm theo YEAR(t.from_date) AS Year, đếm COUNT(DISTINCT t.emp_no) AS NewTitleAppointments! TUYỆT ĐỐI CẤM đặt tên cột là TotalEmployees hay Tổng Số Nhân Viên! TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01', TUYỆT ĐỐI KHÔNG JOIN bảng salaries s hay employees e hay departments!)
 """
         elif any(k in q_low for k in ["nam", "nữ", "gender", "giới tính"]):
             return """
@@ -1774,6 +1779,117 @@ JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY Headcount DESC;
 (CẢNH BÁO TỐI QUAN TRỌNG: TUYỆT ĐỐI KHÔNG DÙNG WHERE d.dept_name = '...'! Khi người dùng hỏi so sánh quy mô phòng ban cụ thể với các phòng ban khác, BẮT BUỘC phải lấy TẤT CẢ các phòng ban để hệ thống vẽ biểu đồ so sánh song song!)
+"""
+
+    # 8c. Mức chênh lệch lương giữa người cao nhất và thấp nhất theo phòng ban (Salary Spread / Gap)
+    elif (
+        any(k in q_low for k in ["chênh lệch", "khoảng cách", "độ lệch", "spread", "gap", "phân hóa", "difference"])
+        and any(k in q_low for k in ["lương", "thu nhập", "salary", "income"])
+        and any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"])
+        and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "gender", "kỹ thuật", "tech"])
+    ):
+        cleaned = re.sub(r"(giữa|between)\s+(người|nhân viên|mức)?\s*(cao nhất|highest)\s+(và|and)\s+(thấp nhất|lowest)", "", q_low)
+        cleaned = re.sub(r"(giữa|between)\s+(người|nhân viên|mức)?\s*(thấp nhất|lowest)\s+(và|and)\s+(cao nhất|highest)", "", cleaned)
+        has_largest = any(k in cleaned for k in ["lớn nhất", "cao nhất", "nhiều nhất", "largest", "highest", "most", "rộng nhất", "dẫn đầu"])
+        has_smallest = any(k in cleaned for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "smallest", "lowest", "least", "hẹp nhất"])
+        is_all_or_comparison = (
+            any(k in cleaned for k in ["từng phòng", "các phòng", "tất cả", "toàn bộ", "so sánh", "danh sách", "bảng", "mỗi phòng", "all", "each", "compare"])
+            or not (has_largest or has_smallest)
+        )
+        top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
+        req_limit = int(top_m.group(1)) if top_m else None
+
+        if req_limit:
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} PHÒNG BAN CHÊNH LỆCH LƯƠNG LỚN NHẤT):
+SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC:
+1. BẮT BUỘC tính MAX(s.salary) AS MaxSalary, MIN(s.salary) AS MinSalary, (MAX(s.salary) - MIN(s.salary)) AS SalarySpread!
+2. BẮT BUỘC lọc de.to_date = '9999-01-01' VÀ s.to_date = '9999-01-01'!
+3. GROUP BY d.dept_name và ORDER BY SalarySpread DESC LIMIT {req_limit}!
+4. TUYỆT ĐỐI KHÔNG xuất danh sách cá nhân từng nhân viên, TUYỆT ĐỐI CẤM dùng HireDate hay DATEDIFF!)
+"""
+        elif has_largest and has_smallest:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN CHÊNH LỆCH LƯƠNG LỚN NHẤT VÀ NHỎ NHẤT):
+WITH DeptSalarySpread AS (
+    SELECT 
+        d.dept_name AS Department,
+        MAX(s.salary) AS MaxSalary,
+        MIN(s.salary) AS MinSalary,
+        (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+    FROM departments d
+    JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+    JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+    GROUP BY d.dept_name
+)
+SELECT 
+    Department, 
+    MaxSalary, 
+    MinSalary, 
+    SalarySpread
+FROM DeptSalarySpread
+WHERE SalarySpread = (SELECT MAX(SalarySpread) FROM DeptSalarySpread)
+   OR SalarySpread = (SELECT MIN(SalarySpread) FROM DeptSalarySpread)
+ORDER BY SalarySpread DESC;
+(CẢNH BÁO BẮT BUỘC: Người dùng hỏi cả 2 cực trị LỚN NHẤT VÀ NHỎ NHẤT, BẮT BUỘC dùng CTE và mệnh đề WHERE SalarySpread = MAX OR MIN để CHỈ XUẤT ĐÚNG 2 PHÒNG BAN tương ứng!)
+"""
+        elif has_smallest and not is_all_or_comparison:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN CHÊNH LỆCH LƯƠNG NHỎ NHẤT / HẸP NHẤT):
+SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread ASC
+LIMIT 1;
+(CẢNH BÁO: BẮT BUỘC ORDER BY SalarySpread ASC LIMIT 1 để chỉ lấy 1 phòng ban có mức chênh lệch nhỏ nhất!)
+"""
+        elif has_largest and not is_all_or_comparison:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN CHÊNH LỆCH LƯƠNG LỚN NHẤT / RỘNG NHẤT):
+SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread DESC
+LIMIT 1;
+(CẢNH BÁO: BẮT BUỘC ORDER BY SalarySpread DESC LIMIT 1 để chỉ lấy 1 phòng ban có mức chênh lệch lớn nhất!)
+"""
+        else:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (MỨC CHÊNH LỆCH LƯƠNG CÁC PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread DESC;
+(CẢNH BÁO: Lấy đầy đủ các phòng ban để so sánh khoảng cách phân hóa lương, sắp xếp theo SalarySpread DESC!)
 """
 
     # 9. Quy mô các phòng ban lớn nhất và nhỏ nhất

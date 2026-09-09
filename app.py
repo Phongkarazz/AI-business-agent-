@@ -245,9 +245,10 @@ st.markdown("""
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
         border-radius: 16px;
-        padding: 16px 20px 12px 20px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-        margin-bottom: 18px;
+        padding: 12px 18px 8px 18px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+        margin-top: 0px !important;
+        margin-bottom: 14px;
     }
 
     /* 3 Live Data Health KPI Cards */
@@ -255,7 +256,7 @@ st.markdown("""
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 12px;
-        margin-bottom: 18px;
+        margin-bottom: 8px !important;
     }
     @media (max-width: 768px) {
         .data-health-grid {
@@ -583,7 +584,7 @@ else:
             with st.container():
                 st.markdown('<div class="center-search-card">', unsafe_allow_html=True)
                 with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
-                    c_in, c_btn = st.columns([5.8, 1.2])
+                    c_in, c_mic, c_btn = st.columns([6.0, 0.65, 1.35], gap="small", vertical_alignment="center")
                     with c_in:
                         hero_query = st.text_input(
                             "Search",
@@ -591,6 +592,8 @@ else:
                             label_visibility="collapsed",
                             key="hero_search_input"
                         )
+                    with c_mic:
+                        render_voice_input_button(compact=True)
                     with c_btn:
                         hero_submit = st.form_submit_button("Hỏi AI ↗", type="primary", use_container_width=True)
                     if hero_submit and hero_query.strip():
@@ -638,11 +641,7 @@ else:
                                     on_click=_make_click_handler(card["prompt"])
                                 )
 
-            st.markdown("<div style='margin-top: 18px; display: flex; justify-content: center;'>", unsafe_allow_html=True)
-            render_voice_input_button()
-            st.markdown("</div>", unsafe_allow_html=True)
-    elif not prompt_to_run:
-        render_voice_input_button()
+
 
 
     if prompt_to_run:

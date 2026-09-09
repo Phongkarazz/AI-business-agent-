@@ -376,8 +376,8 @@ ORDER BY Year ASC"""
 
 
 def auto_fix_title_assignments_query(sql: str, user_query: str) -> str:
-    """Tự động phát hiện và khắc phục lỗi mô hình AI truy vấn sai sang bảng salaries khi người dùng hỏi về số lượng nhân viên bổ nhiệm chức danh mới qua từng năm."""
-    if not sql or not user_query:
+    """Tự động phát hiện và khắc phục lỗi mô hình AI truy vấn sai sang bảng salaries hoặc nhầm sang tổng số nhân viên khi người dùng hỏi về số lượng nhân viên bổ nhiệm chức danh mới qua từng năm."""
+    if not user_query:
         return sql
     q_low = user_query.lower()
     is_title_assignment = any(k in q_low for k in ["bổ nhiệm", "thăng chức", "chức danh mới", "bổ nhiệm mới", "nhận chức"]) or (
@@ -386,16 +386,21 @@ def auto_fix_title_assignments_query(sql: str, user_query: str) -> str:
     if not is_title_assignment:
         return sql
 
-    lowered_sql = sql.lower()
-    is_off_topic = "salaries" in lowered_sql or "salary" in lowered_sql or "raisecount" in lowered_sql or not re.search(r"GROUP\s+BY\s+.*(?:YEAR|from_date)", sql, re.IGNORECASE)
+    lowered_sql = (sql or "").lower()
+    is_off_topic = "salaries" in lowered_sql or "salary" in lowered_sql or "raisecount" in lowered_sql or not re.search(r"GROUP\s+BY\s+.*(?:YEAR|from_date)", sql or "", re.IGNORECASE)
 
     if is_off_topic or "titles" not in lowered_sql:
         return """SELECT 
     YEAR(t.from_date) AS Year,
-    COUNT(DISTINCT t.emp_no) AS TotalEmployees
+    COUNT(DISTINCT t.emp_no) AS NewTitleAppointments
 FROM titles t
 GROUP BY YEAR(t.from_date)
-ORDER BY Year ASC"""
+ORDER BY Year ASC""".strip()
+
+    # Đảm bảo cột đếm là NewTitleAppointments (thay vì TotalEmployees gây hiểu nhầm sang tổng số nhân viên)
+    sql = re.sub(r"COUNT\s*\([^)]*\)\s+AS\s+TotalEmployees\b", "COUNT(DISTINCT t.emp_no) AS NewTitleAppointments", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"COUNT\s*\([^)]*\)\s+AS\s+total_employees\b", "COUNT(DISTINCT t.emp_no) AS NewTitleAppointments", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"COUNT\s*\([^)]*\)\s+AS\s+`?Tổng\s+Số\s+Nhân\s+Viên`?", "COUNT(DISTINCT t.emp_no) AS NewTitleAppointments", sql, flags=re.IGNORECASE)
 
     # Đảm bảo bỏ lọc to_date = 9999-01-01 nếu có
     sql = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", sql, flags=re.IGNORECASE)
@@ -935,6 +940,7 @@ def auto_fix_dept_size_min_max_query(sql: str, user_query: str) -> str:
         any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhất"])
         and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "đông nhất"])
         and any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"])
+        and not any(k in q_low for k in ["lương", "salary", "thu nhập", "chênh lệch lương", "khoảng cách lương"])
     )
     if not is_min_max_size:
         return sql
@@ -983,6 +989,125 @@ ORDER BY Headcount ASC
 LIMIT 1;""".strip()
 
     return sql
+
+
+def auto_fix_salary_spread_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu truy vấn mức chênh lệch lương giữa người cao nhất và thấp nhất theo phòng ban.
+    Đảm bảo:
+    - Nếu hỏi phòng ban lớn nhất -> LIMIT 1 (DESC)
+    - Nếu hỏi phòng ban nhỏ nhất -> LIMIT 1 (ASC)
+    - Nếu hỏi cả lớn nhất và nhỏ nhất -> CTE xuất đúng 2 phòng ban cực trị
+    - Nếu hỏi chung/so sánh -> ORDER BY SalarySpread DESC
+    - Tuyệt đối loại bỏ lỗi xuất hàng nghìn dòng nhân viên cá nhân kèm thâm niên/HireDate.
+    """
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    is_salary_spread = (
+        any(k in q_low for k in ["chênh lệch", "khoảng cách", "độ lệch", "spread", "gap", "phân hóa", "difference"])
+        and any(k in q_low for k in ["lương", "thu nhập", "salary", "income"])
+        and any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"])
+        and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "gender", "kỹ thuật", "tech"])
+    )
+    if not is_salary_spread:
+        return sql
+
+    cleaned = re.sub(r"(giữa|between)\s+(người|nhân viên|mức)?\s*(cao nhất|highest)\s+(và|and)\s+(thấp nhất|lowest)", "", q_low)
+    cleaned = re.sub(r"(giữa|between)\s+(người|nhân viên|mức)?\s*(thấp nhất|lowest)\s+(và|and)\s+(cao nhất|highest)", "", cleaned)
+    has_largest = any(k in cleaned for k in ["lớn nhất", "cao nhất", "nhiều nhất", "largest", "highest", "most", "rộng nhất", "dẫn đầu"])
+    has_smallest = any(k in cleaned for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "smallest", "lowest", "least", "hẹp nhất"])
+    is_all_or_comparison = (
+        any(k in cleaned for k in ["từng phòng", "các phòng", "tất cả", "toàn bộ", "so sánh", "danh sách", "bảng", "mỗi phòng", "all", "each", "compare"])
+        or not (has_largest or has_smallest)
+    )
+    top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
+    req_limit = int(top_m.group(1)) if top_m else None
+
+    lowered_sql = (sql or "").lower()
+    has_spread_calc = ("salaryspread" in lowered_sql or "salary_spread" in lowered_sql or 
+                       ("max(s.salary) - min(s.salary)" in lowered_sql) or 
+                       ("max(salary) - min(salary)" in lowered_sql))
+    has_dept_group = "group by" in lowered_sql and ("dept_name" in lowered_sql or "dept_no" in lowered_sql)
+    has_individual_leak = any(k in lowered_sql for k in ["fullname", "first_name", "last_name", "hire_date", "datediff", "yearsofservice", "years_of_service"])
+    has_current_filter = "to_date = '9999-01-01'" in lowered_sql or "to_date='9999-01-01'" in lowered_sql
+
+    is_broken = (not has_spread_calc or not has_dept_group or has_individual_leak or not has_current_filter or not sql)
+
+    if req_limit:
+        return f"""SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread DESC
+LIMIT {req_limit};""".strip()
+
+    elif has_largest and has_smallest:
+        return """WITH DeptSalarySpread AS (
+    SELECT 
+        d.dept_name AS Department,
+        MAX(s.salary) AS MaxSalary,
+        MIN(s.salary) AS MinSalary,
+        (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+    FROM departments d
+    JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+    JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+    GROUP BY d.dept_name
+)
+SELECT 
+    Department, 
+    MaxSalary, 
+    MinSalary, 
+    SalarySpread
+FROM DeptSalarySpread
+WHERE SalarySpread = (SELECT MAX(SalarySpread) FROM DeptSalarySpread)
+   OR SalarySpread = (SELECT MIN(SalarySpread) FROM DeptSalarySpread)
+ORDER BY SalarySpread DESC;""".strip()
+
+    elif has_smallest and not is_all_or_comparison:
+        return """SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread ASC
+LIMIT 1;""".strip()
+
+    elif has_largest and not is_all_or_comparison:
+        return """SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread DESC
+LIMIT 1;""".strip()
+
+    else:
+        if is_broken:
+            return """SELECT 
+    d.dept_name AS Department,
+    MAX(s.salary) AS MaxSalary,
+    MIN(s.salary) AS MinSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalarySpread DESC;""".strip()
+        return sql
 
 
 def auto_fix_chocolates_pnl_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
@@ -1939,19 +2064,22 @@ def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "My
     if is_location:
         return (
             "SELECT\n"
-            "    COALESCE(NULLIF(pe.Location, ''), '(Chưa xác định)') AS Location,\n"
+            "    pe.Location AS `Khu Vực`,\n"
             "    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`\n"
             "FROM people pe\n"
-            "GROUP BY Location\n"
+            "WHERE pe.Location != '' AND pe.Location IS NOT NULL\n"
+            "GROUP BY pe.Location\n"
             "ORDER BY `Số Lượng Nhân Viên` DESC;"
         )
     else:
         return (
             "SELECT\n"
-            "    COALESCE(NULLIF(pe.Team, ''), '(Chưa phân nhóm)') AS Team,\n"
-            "    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`\n"
+            "    pe.Team AS `Đội Ngũ`,\n"
+            "    COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`,\n"
+            "    ROUND(COUNT(DISTINCT pe.SPID) * 100.0 / (SELECT COUNT(*) FROM people WHERE Team != '' AND Team IS NOT NULL), 2) AS `Tỷ Lệ (%)`\n"
             "FROM people pe\n"
-            "GROUP BY Team\n"
+            "WHERE pe.Team != '' AND pe.Team IS NOT NULL\n"
+            "GROUP BY pe.Team\n"
             "ORDER BY `Số Lượng Nhân Viên` DESC;"
         )
 
@@ -2236,7 +2364,19 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             or "order by" not in sql_low
             or "pe.salesperson" not in sql_low
         )
+        specific_team = None
+        for tm in ["yummies", "delish", "jucies"]:
+            if tm in q_low:
+                specific_team = tm.capitalize()
+                break
+
         if needs_fix:
+            where_conditions = []
+            if specific_team:
+                where_conditions.append(f"pe.Team = '{specific_team}'")
+            if year_clause:
+                where_conditions.append(year_clause.replace("WHERE ", ""))
+
             lines = [
                 "SELECT",
                 "    pe.Salesperson,",
@@ -2244,8 +2384,8 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
                 "FROM sales s",
                 "JOIN people pe ON s.SPID = pe.SPID",
             ]
-            if year_clause:
-                lines.append(year_clause)
+            if where_conditions:
+                lines.append("WHERE " + " AND ".join(where_conditions))
             lines.append("GROUP BY pe.Salesperson")
             lines.append(f"ORDER BY {order_col} {order_dir}")
             if limit_clause:
@@ -2774,6 +2914,7 @@ def run_agent(
             sql_cur = auto_fix_department_single_vs_others_salary_query(sql_cur, user_query)
             sql_cur = auto_fix_department_single_vs_others_headcount_query(sql_cur, user_query)
             sql_cur = auto_fix_dept_size_min_max_query(sql_cur, user_query)
+            sql_cur = auto_fix_salary_spread_query(sql_cur, user_query, dialect=dialect)
         else:
             sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
             sql_cur = auto_fix_chocolates_pnl_query(sql_cur, user_query, dialect=dialect)
