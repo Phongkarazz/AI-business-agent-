@@ -47,13 +47,19 @@ st.markdown("""
     }
     
     /* Ẩn triệt để thanh Chrome thừa mặc định của Streamlit nhưng BẢO VỆ nút mở/đóng Sidebar */
-    #MainMenu {visibility: hidden; display: none !important;}
-    footer {visibility: hidden; display: none !important;}
-    .stDeployButton {display: none !important;}
-    div[data-testid="stDecoration"] {display: none !important;}
-    div[data-testid="stStatusWidget"] {display: none !important;}
+    #MainMenu,
+    [data-testid="stMainMenu"],
+    footer,
+    .stDeployButton,
+    [data-testid="stAppDeployButton"],
+    [data-testid="stToolbarActions"],
+    [data-testid="stToolbarActionButton"],
+    div[data-testid="stDecoration"],
+    div[data-testid="stStatusWidget"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
     header {background-color: transparent !important;}
-    header [data-testid="stToolbarActions"] {display: none !important;}
 
     /* BẢO ĐẢM NÚT MỞ/ĐÓNG SIDEBAR LUÔN HIỂN THỊ RÕ RÀNG VÀ BẤM ĐƯỢC */
     [data-testid="stExpandSidebarButton"] {
@@ -261,14 +267,25 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1) !important;
         transform: translateY(-1px) !important;
     }
-    .center-search-card {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 16px;
-        padding: 12px 18px 8px 18px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
-        margin-top: 0px !important;
-        margin-bottom: 14px;
+    /* Tối ưu ô tìm kiếm trung tâm Hero Search */
+    form[data-testid="stForm"] {
+        border: none !important;
+        padding: 4px 0 !important;
+        background: transparent !important;
+    }
+    div[data-testid="stTextInput"] input {
+        border-radius: 12px !important;
+        background-color: #F8FAFC !important;
+        border: 1.5px solid #CBD5E1 !important;
+        font-size: 0.95rem !important;
+        padding: 12px 16px !important;
+        transition: all 0.2s ease-in-out !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+    }
+    div[data-testid="stTextInput"] input:focus {
+        border-color: #2563EB !important;
+        background-color: #FFFFFF !important;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
     }
 
     /* 3 Live Data Health KPI Cards */
@@ -582,13 +599,13 @@ else:
 
         prov_clean = provider_name.split()[0]
 
-        # Thanh điều hướng trên cùng: Nhận diện Thương hiệu & Phím tắt Cấu hình
+        # Thanh điều hướng trên cùng: Trạng thái Hệ thống & Phím tắt Cấu hình
         top_bar_c1, top_bar_c2 = st.columns([6.8, 3.2], vertical_alignment="center")
         with top_bar_c1:
             st.markdown("""
             <div style="display: flex; align-items: center; gap: 8px; padding: 2px 0 6px 0;">
-                <span style="font-size: 1.12rem; font-weight: 800; color: #0F172A; letter-spacing: -0.02em;">💼 VERAXUS AI</span>
-                <span style="background: #F1F5F9; color: #475569; font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 6px; border: 1px solid #E2E8F0;">Enterprise Mode</span>
+                <span style="font-size: 0.96rem; font-weight: 700; color: #334155; letter-spacing: -0.01em;">📊 Bảng Điều Hành Doanh Nghiệp</span>
+                <span style="background: #F0FDF4; color: #166534; font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 6px; border: 1px solid #BBF7D0;">● Enterprise Live</span>
             </div>
             """, unsafe_allow_html=True)
         with top_bar_c2:
@@ -649,25 +666,22 @@ else:
             """, unsafe_allow_html=True)
 
             # Trục tương tác chính: Thanh Tìm kiếm Lớn tại Trung tâm
-            with st.container():
-                st.markdown('<div class="center-search-card">', unsafe_allow_html=True)
-                with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
-                    c_in, c_mic, c_btn = st.columns([6.0, 0.65, 1.35], gap="small", vertical_alignment="center")
-                    with c_in:
-                        hero_query = st.text_input(
-                            "Search",
-                            placeholder="🔍 Hỏi bất kỳ điều gì về doanh thu, chi phí, P&L, nhân sự...",
-                            label_visibility="collapsed",
-                            key="hero_search_input"
-                        )
-                    with c_mic:
-                        render_voice_input_button(compact=True)
-                    with c_btn:
-                        hero_submit = st.form_submit_button("Hỏi AI ↗", type="primary", use_container_width=True)
-                    if hero_submit and hero_query.strip():
-                        st.session_state["pending_prompt"] = hero_query.strip()
-                        st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
+            with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
+                c_in, c_mic, c_btn = st.columns([6.0, 0.65, 1.35], gap="small", vertical_alignment="center")
+                with c_in:
+                    hero_query = st.text_input(
+                        "Search",
+                        placeholder="🔍 Hỏi bất kỳ điều gì về doanh thu, chi phí, P&L, nhân sự...",
+                        label_visibility="collapsed",
+                        key="hero_search_input"
+                    )
+                with c_mic:
+                    render_voice_input_button(compact=True)
+                with c_btn:
+                    hero_submit = st.form_submit_button("Hỏi AI ↗", type="primary", use_container_width=True)
+                if hero_submit and hero_query.strip():
+                    st.session_state["pending_prompt"] = hero_query.strip()
+                    st.rerun()
 
             # Khám phá câu hỏi theo 3 lăng kính điều hành (Categorized Smart Prompts Tabs)
             categorized = generate_categorized_starter_prompts(tables, schema_context)
