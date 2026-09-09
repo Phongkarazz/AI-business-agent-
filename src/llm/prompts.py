@@ -370,6 +370,28 @@ def get_db_specific_rules(schema_context: str) -> str:
        GROUP BY pr.Product
        ORDER BY TotalSales DESC
        LIMIT 10;
+      + MẪU CHUẨN PHÂN TÍCH PARETO / CÁC SẢN PHẨM ĐEM LẠI 80% DOANH SỐ CHO CÔNG TY:
+        * Khi hỏi 'Liệt kê danh sách các sản phẩm đem lại 80% doanh số cho công ty trong năm 2021' hoặc 'Top sản phẩm chiếm 80% doanh thu':
+          BẮT BUỘC DÙNG CTE VÀ HÀM CỬA SỔ (WINDOW FUNCTION) ĐỂ TÍNH TỔNG TÍCH LŨY (TUYỆT ĐỐI CẤM DÙNG HAVING SUM(s.Amount) >= 0.8 * (SELECT...) VÌ SẼ TRẢ VỀ 0 DÒNG):
+          WITH ProductSales AS (
+              SELECT 
+                  pr.Product AS Product,
+                  SUM(s.Amount) AS TotalSales,
+                  SUM(SUM(s.Amount)) OVER () AS GrandTotal,
+                  SUM(SUM(s.Amount)) OVER (ORDER BY SUM(s.Amount) DESC) AS RunningTotal
+              FROM sales s
+              JOIN products pr ON s.PID = pr.PID
+              WHERE YEAR(s.SaleDate) = 2021
+              GROUP BY pr.Product
+          )
+          SELECT 
+              Product,
+              TotalSales,
+              ROUND((TotalSales / GrandTotal) * 100, 2) AS Percentage,
+              ROUND((RunningTotal / GrandTotal) * 100, 2) AS CumulativePercent
+          FROM ProductSales
+          WHERE (RunningTotal - TotalSales) / GrandTotal < 0.80
+          ORDER BY TotalSales DESC;
      + MẪU CHUẨN DOANH THU THEO TỪNG QUỐC GIA QUA CÁC THÁNG (CHUẨN XÁC 100%, TUYỆT ĐỐI KHÔNG DÙNG CTE):
        SELECT 
            DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month,

@@ -356,6 +356,47 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
 
     total_rows = len(df)
 
+    # 0.0 KIỂM TRA BÀI TOÁN PHÂN TÍCH PARETO 80/20 (CUMULATIVE PERCENTAGE / TOP CONTRIBUTORS)
+    cum_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy"])]
+    if cum_cols:
+        cum_col = cum_cols[0]
+        meas = [c for c in measure_cols if c != cum_col and not any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
+        if meas:
+            m_col = meas[0]
+            total_pareto_val = float(pd.to_numeric(df[m_col], errors="coerce").sum())
+            max_cum_pct = float(pd.to_numeric(df[cum_col], errors="coerce").max() or 80.0)
+            top_row = df.iloc[0]
+            top_entity = str(top_row[label_cols[0]]) if label_cols else "N/A"
+            top_val = float(top_row[m_col]) if m_col in top_row else 0.0
+            avg_per_item = total_pareto_val / total_rows if total_rows > 0 else 0.0
+
+            lbl_col_low = (label_cols[0] if label_cols else "").lower()
+            lbl_type = "Sản phẩm" if "product" in lbl_col_low else (
+                "Nhân sự" if "person" in lbl_col_low else (
+                    "Quốc gia" if any(k in lbl_col_low for k in ["country", "geo"]) else (
+                        "Phòng ban" if "dept" in lbl_col_low else "Đối tượng"
+                    )
+                )
+            )
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("🎯 " + ("Tổng Doanh Thu Nhóm 80%" if not is_en else "Top 80% Total"), f"${total_pareto_val:,.0f}", delta=f"Tích lũy {max_cum_pct:.1f}% tổng số")
+            with c2:
+                st.metric("📦 " + (f"Số Lượng {lbl_type}" if not is_en else "Key Items Count"), f"{total_rows} {lbl_type}", delta="Chiếm 80% tổng số")
+            with c3:
+                st.metric("🏆 " + (f"{lbl_type} Dẫn Đầu" if not is_en else "Top Contributor"), top_entity, delta=f"${top_val:,.0f}")
+            with c4:
+                st.metric("📈 " + ("Đóng Góp Bình Quân" if not is_en else "Avg per Item"), f"${avg_per_item:,.0f}", delta=f"Mỗi {lbl_type.lower()}")
+
+            st.caption(
+                f"ℹ️ **Phân tích Nguyên lý Pareto (Quy luật 80/20)**: Danh sách {total_rows} {lbl_type.lower()} chủ lực đóng góp đến {max_cum_pct:.1f}% tổng doanh số toàn hệ thống."
+                if not is_en else
+                f"ℹ️ **Pareto 80/20 Analysis**: Top {total_rows} key items contributing {max_cum_pct:.1f}% of total revenue."
+            )
+            st.write("")
+            return
+
     # 0. KIỂM TRA BÀI TOÁN PHÂN TÍCH TỶ LỆ GIỚI TÍNH (GENDER PARITY & BREAKDOWN)
     def _is_female_col(c: str) -> bool:
         cl = str(c).lower()

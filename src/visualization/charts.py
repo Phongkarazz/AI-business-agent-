@@ -23,6 +23,15 @@ from src.analytics.heuristics import (
 )
 
 VI_COLUMN_MAP = {
+    "totalsales": "Tổng Doanh Thu ($)",
+    "total_sales": "Tổng Doanh Thu ($)",
+    "product": "Sản Phẩm",
+    "percentage": "Tỷ Trọng (%)",
+    "percent": "Tỷ Trọng (%)",
+    "cumulativepercent": "Tích Lũy Doanh Số (%)",
+    "cumulative_percent": "Tích Lũy Doanh Số (%)",
+    "cumulativepercentage": "Tích Lũy Doanh Số (%)",
+    "cumulative_percentage": "Tích Lũy Doanh Số (%)",
     "departmentgroup": "Nhóm Phòng Ban",
     "department_group": "Nhóm Phòng Ban",
     "deptgroup": "Nhóm Phòng Ban",
@@ -509,6 +518,67 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             )
 
         elif chosen == "Bar" and measure_cols:
+            # 0. Trường hợp đặc biệt: Biểu đồ Pareto kết hợp 2 trục Y (Dual-Axis Pareto Combo Chart)
+            cum_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy"])]
+            main_meas_cols = [c for c in measure_cols if c not in cum_cols and not any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
+            if cum_cols and main_meas_cols and label_cols:
+                cum_col = cum_cols[0]
+                val_col = main_meas_cols[0]
+                lbl_col = label_cols[0]
+                plot_df = df.copy()
+
+                if len(plot_df) > 30:
+                    plot_df = plot_df.head(30)
+
+                tick_angle = 0 if len(plot_df) <= 8 else -35
+
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                fig.add_trace(
+                    go.Bar(
+                        x=plot_df[lbl_col],
+                        y=plot_df[val_col],
+                        name=format_col_title(val_col),
+                        marker_color="#2563EB",
+                        text=plot_df[val_col],
+                        texttemplate="$%{text:,.0f}" if any(k in val_col.lower() for k in ["sales", "salary", "amount", "budget"]) else "%{text:,.0f}",
+                        textposition="outside"
+                    ),
+                    secondary_y=False
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=plot_df[lbl_col],
+                        y=plot_df[cum_col],
+                        name=format_col_title(cum_col),
+                        mode="lines+markers+text",
+                        marker=dict(size=8, color="#D97706"),
+                        line=dict(width=3, color="#D97706"),
+                        text=plot_df[cum_col],
+                        texttemplate="%{text:.1f}%",
+                        textposition="top center"
+                    ),
+                    secondary_y=True
+                )
+                fig.add_hline(
+                    y=80,
+                    line_dash="dash",
+                    line_color="#EF4444",
+                    annotation_text="Ngưỡng 80% Pareto",
+                    annotation_position="bottom right",
+                    secondary_y=True
+                )
+                fig.update_layout(
+                    title=f"📊 Biểu Đồ Phân Tích Pareto 80/20: {format_col_title(val_col)} & {format_col_title(cum_col)} theo {format_col_title(lbl_col)}",
+                    template="plotly_white",
+                    xaxis=dict(type="category", tickangle=tick_angle, automargin=True, title=format_col_title(lbl_col)),
+                    yaxis=dict(title=format_col_title(val_col), tickprefix="$" if any(k in val_col.lower() for k in ["sales", "salary", "amount", "budget"]) else ""),
+                    yaxis2=dict(title=format_col_title(cum_col), ticksuffix="%", range=[0, 105], showgrid=False),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    margin=dict(l=40, r=40, t=60, b=85 if tick_angle != 0 else 50)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                return fig
+
             # 1. Trường hợp đặc biệt: 1 dòng so sánh nhiều chỉ số (VD: Cá nhân vs Toàn đội / Benchmark)
             if len(df) == 1 and len(measure_cols) >= 2:
                 entity_name = None

@@ -234,7 +234,8 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
         q_low = user_query.lower()
         is_time_trend = any(k in q_low for k in ["qua các tháng", "từng tháng", "theo tháng", "xu hướng", "biến động theo thời gian", "qua các năm", "theo từng năm"])
         is_threshold = any(k in q_low for k in ["vượt", "trên", "dưới", "cao hơn", "lớn hơn", "thấp hơn", "nhỏ hơn", "nhiều hơn", "ít hơn", "từ", "ít nhất", "tối thiểu", "tối đa", ">", "<", ">=", "<="]) and any(char.isdigit() for char in q_low)
-        if is_time_trend or is_threshold:
+        is_pareto = any(k in q_low for k in ["pareto", "80/20", "80-20", "tích lũy", "tích luỹ", "cumulative"]) or re.search(r'\b(4\d|5\d|6\d|7\d|8\d|9\d)\s*%', q_low)
+        if is_time_trend or is_threshold or is_pareto:
             sql = re.sub(r"\s+LIMIT\s+\d+\s*;?$", "", sql, flags=re.IGNORECASE).rstrip(";").strip()
         return sql
 
@@ -1807,6 +1808,174 @@ def auto_fix_datetime_year_filters(sql: str, dialect: str = "MySQL") -> str:
     return sql
 
 
+def auto_fix_pareto_cumulative_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa câu truy vấn phân tích Pareto (Quy luật 80/20 / Tỷ lệ tích lũy)
+    như 'Liệt kê danh sách các sản phẩm đem lại 80% doanh số cho công ty trong năm 2021',
+    'Top sản phẩm chiếm 80% doanh thu', 'Những sản phẩm tạo ra 80% doanh số'.
+    Sử dụng CTE và Window Functions (SUM() OVER) để tính Running Total chuẩn xác 100%,
+    tránh triệt để lỗi HAVING SUM >= 0.8 * (SELECT...) khiến kết quả trả về 0 dòng."""
+    if not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = (sql or "").lower()
+
+    # 1. Nhận diện tỷ lệ phần trăm (VD: 80%, 70%, 90%, 80/20, pareto) hoặc lỗi HAVING quá chặt
+    pct_m = re.search(r'\b(4\d|5\d|6\d|7\d|8\d|9\d)\s*%', q_low)
+    is_pareto_kw = any(k in q_low for k in ["80/20", "80-20", "pareto", "tích lũy", "tích luỹ", "cumulative"])
+    has_impossible_having = bool(re.search(r'having\s+sum\s*\([^)]+\)\s*>=\s*(?:0\.\d+|\(\s*select\b)', sql_low))
+
+    if not pct_m and not is_pareto_kw and not has_impossible_having:
+        return sql
+
+    cutoff_pct = float(pct_m.group(1)) / 100.0 if pct_m else 0.80
+
+    # Kiểm tra các động từ hành động đóng góp / đem lại / mang lại / chiếm / tạo ra
+    has_pareto_intent = (
+        any(k in q_low for k in [
+            "đem lại", "mang lại", "tạo ra", "chiếm", "đóng góp", "chiếm khoảng", "đạt", 
+            "tổng cộng", "chiếm tới", "chiếm hơn", "chiếm đến", "tạo nên", "cấu thành",
+            "nguồn thu", "doanh số", "doanh thu", "chủ lực", "hàng đầu",
+            "generate", "bring", "account for", "contribute", "sales", "revenue"
+        ])
+        or is_pareto_kw
+        or has_impossible_having
+    )
+    if not has_pareto_intent:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    is_chocolates = (
+        any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"])
+        or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "sản phẩm", "salesperson", "thị trường", "quốc gia"])
+    )
+    is_employees = (
+        any(k in sql_low for k in ["departments", "employees", "salaries", "titles", "dept_emp", "dept_manager"])
+        or any(k in q_low for k in ["phòng ban", "lương", "salary", "nhân sự", "chức danh", "quỹ lương"])
+    )
+
+    if is_chocolates:
+        yr_m = re.search(r'\b(20\d{2})\b', q_low)
+        yr_val = yr_m.group(1) if yr_m else None
+        yr_clause = (f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}") if yr_val else ""
+
+        has_boxes = any(k in q_low for k in ["hộp", "thùng", "boxes", "số lượng hộp"])
+        metric_expr = "SUM(s.Boxes)" if has_boxes else "SUM(s.Amount)"
+        metric_col = "TotalBoxesSold" if has_boxes else "TotalSales"
+
+        is_person = any(k in q_low for k in ["nhân viên", "salesperson", "người bán", "sales rep", "rep"]) and not any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
+        is_country = any(k in q_low for k in ["quốc gia", "thị trường", "country", "geo", "nước"]) and not any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
+        is_category = any(k in q_low for k in ["nhóm sản phẩm", "category", "danh mục", "dòng sản phẩm"]) and not any(k in q_low for k in ["sản phẩm cụ thể", "từng sản phẩm"])
+        is_product = not (is_person or is_country or is_category)
+
+        if is_product:
+            return f"""WITH ProductSales AS (
+    SELECT 
+        pr.Product AS Product,
+        {metric_expr} AS {metric_col},
+        SUM({metric_expr}) OVER () AS GrandTotal,
+        SUM({metric_expr}) OVER (ORDER BY {metric_expr} DESC) AS RunningTotal
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    {yr_clause}
+    GROUP BY pr.Product
+)
+SELECT 
+    Product,
+    {metric_col},
+    ROUND(({metric_col} / GrandTotal) * 100, 2) AS Percentage,
+    ROUND((RunningTotal / GrandTotal) * 100, 2) AS CumulativePercent
+FROM ProductSales
+WHERE (RunningTotal - {metric_col}) / GrandTotal < {cutoff_pct}
+ORDER BY {metric_col} DESC"""
+
+        elif is_person:
+            return f"""WITH PersonSales AS (
+    SELECT 
+        pe.Salesperson AS Salesperson,
+        {metric_expr} AS {metric_col},
+        SUM({metric_expr}) OVER () AS GrandTotal,
+        SUM({metric_expr}) OVER (ORDER BY {metric_expr} DESC) AS RunningTotal
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    {yr_clause}
+    GROUP BY pe.Salesperson
+)
+SELECT 
+    Salesperson,
+    {metric_col},
+    ROUND(({metric_col} / GrandTotal) * 100, 2) AS Percentage,
+    ROUND((RunningTotal / GrandTotal) * 100, 2) AS CumulativePercent
+FROM PersonSales
+WHERE (RunningTotal - {metric_col}) / GrandTotal < {cutoff_pct}
+ORDER BY {metric_col} DESC"""
+
+        elif is_country:
+            return f"""WITH CountrySales AS (
+    SELECT 
+        g.Geo AS Country,
+        {metric_expr} AS {metric_col},
+        SUM({metric_expr}) OVER () AS GrandTotal,
+        SUM({metric_expr}) OVER (ORDER BY {metric_expr} DESC) AS RunningTotal
+    FROM sales s
+    JOIN geo g ON s.GeoID = g.GeoID
+    {yr_clause}
+    GROUP BY g.Geo
+)
+SELECT 
+    Country,
+    {metric_col},
+    ROUND(({metric_col} / GrandTotal) * 100, 2) AS Percentage,
+    ROUND((RunningTotal / GrandTotal) * 100, 2) AS CumulativePercent
+FROM CountrySales
+WHERE (RunningTotal - {metric_col}) / GrandTotal < {cutoff_pct}
+ORDER BY {metric_col} DESC"""
+
+        elif is_category:
+            return f"""WITH CategorySales AS (
+    SELECT 
+        pr.Category AS Category,
+        {metric_expr} AS {metric_col},
+        SUM({metric_expr}) OVER () AS GrandTotal,
+        SUM({metric_expr}) OVER (ORDER BY {metric_expr} DESC) AS RunningTotal
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    {yr_clause}
+    GROUP BY pr.Category
+)
+SELECT 
+    Category,
+    {metric_col},
+    ROUND(({metric_col} / GrandTotal) * 100, 2) AS Percentage,
+    ROUND((RunningTotal / GrandTotal) * 100, 2) AS CumulativePercent
+FROM CategorySales
+WHERE (RunningTotal - {metric_col}) / GrandTotal < {cutoff_pct}
+ORDER BY {metric_col} DESC"""
+
+    elif is_employees:
+        return f"""WITH DeptSalaries AS (
+    SELECT 
+        d.dept_name AS Department,
+        SUM(s.salary) AS TotalSalaryBudget,
+        SUM(SUM(s.salary)) OVER () AS GrandTotal,
+        SUM(SUM(s.salary)) OVER (ORDER BY SUM(s.salary) DESC) AS RunningTotal
+    FROM departments d
+    JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+    JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+    GROUP BY d.dept_name
+)
+SELECT 
+    Department,
+    TotalSalaryBudget,
+    ROUND((TotalSalaryBudget / GrandTotal) * 100, 2) AS Percentage,
+    ROUND((RunningTotal / GrandTotal) * 100, 2) AS CumulativePercent
+FROM DeptSalaries
+WHERE (RunningTotal - TotalSalaryBudget) / GrandTotal < {cutoff_pct}
+ORDER BY TotalSalaryBudget DESC"""
+
+    return sql
+
+
 def auto_fix_contribution_percentage_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và đảm bảo câu truy vấn Tỷ lệ đóng góp / Tỷ trọng (Category, Country, Team, Product)
     trên CSDL Awesome Chocolates luôn trả về đầy đủ cột Tỷ lệ (Percentage) và Doanh số (TotalSales)."""
@@ -1818,6 +1987,10 @@ def auto_fix_contribution_percentage_query(sql: str, user_query: str, dialect: s
 
     # Không can thiệp nếu là câu hỏi xu hướng theo tháng / quý
     if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "quý", "quarter", "từng quý", "theo quý", "qua các quý"]):
+        return sql
+
+    # Không can thiệp nếu là câu hỏi Pareto / Tích lũy 80/20 (đã có auto_fix_pareto_cumulative_query xử lý)
+    if any(k in q_low for k in ["pareto", "80/20", "80-20", "tích lũy", "tích luỹ", "cumulative"]) or re.search(r'\b(4\d|5\d|6\d|7\d|8\d|9\d)\s*%', q_low) or any(k in sql_low for k in ["runningtotal", "cumulativepercent", "productsales", "grandtotal"]):
         return sql
 
     is_ratio_question = any(k in q_low for k in [
@@ -2107,6 +2280,10 @@ def auto_fix_chocolates_threshold_query(sql: str, user_query: str, dialect: str 
     if match_chocolates_specific_country(q_low):
         return sql
 
+    # 0.3 Tuyệt đối KHÔNG can thiệp nếu là câu hỏi Pareto / Tỷ lệ tích lũy
+    if any(k in q_low for k in ["pareto", "80/20", "80-20", "tích lũy", "tích luỹ", "cumulative"]) or re.search(r'\b(4\d|5\d|6\d|7\d|8\d|9\d)\s*%', q_low) or any(k in sql_low for k in ["runningtotal", "cumulativepercent", "productsales", "grandtotal"]):
+        return sql
+
     from src.llm.prompts import parse_threshold_query_info
     thresh_info = parse_threshold_query_info(q_low)
     if not thresh_info:
@@ -2289,6 +2466,14 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     # Không can thiệp nếu là câu hỏi xu hướng theo tháng / quý (đã có auto_fix_chocolates_monthly_sales_query & auto_fix_chocolates_quarterly_sales_query xử lý)
     if any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng", "quý", "quarter", "từng quý", "theo quý", "qua các quý"]):
+        return sql
+
+    # Không can thiệp nếu là câu hỏi phân tích Pareto / Tỷ lệ tích lũy (đã có auto_fix_pareto_cumulative_query xử lý)
+    if (
+        any(k in q_low for k in ["pareto", "80/20", "80-20", "tích lũy", "tích luỹ", "cumulative"])
+        or re.search(r'\b(4\d|5\d|6\d|7\d|8\d|9\d)\s*%', q_low)
+        or any(k in sql_low for k in ["runningtotal", "productsales", "cumulativepercent", "grandtotal"])
+    ):
         return sql
 
     # Không can thiệp nếu là câu hỏi tỷ lệ / đóng góp / phần trăm (đã có auto_fix_contribution_percentage_query xử lý)
@@ -2915,7 +3100,9 @@ def run_agent(
             sql_cur = auto_fix_department_single_vs_others_headcount_query(sql_cur, user_query)
             sql_cur = auto_fix_dept_size_min_max_query(sql_cur, user_query)
             sql_cur = auto_fix_salary_spread_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
         else:
+            sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
             sql_cur = auto_fix_chocolates_pnl_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_monthly_sales_query(sql_cur, user_query, dialect=dialect)
@@ -2998,6 +3185,14 @@ def run_agent(
 
             # Tự động phát hiện & sửa nếu kết quả trả về 0 dòng (0-Row Empty Result Recovery)
             if df is not None and df.empty and attempt < 3:
+                # Kiểm tra đặc biệt: nếu câu lệnh SQL có HAVING lọc tỷ lệ quá chặt khiến 0 dòng
+                if re.search(r'having\s+sum\s*\([^)]+\)\s*>=\s*(?:0\.\d+|\(\s*select\b)', sql_query, re.IGNORECASE):
+                    healed_sql = auto_fix_pareto_cumulative_query(sql_query, user_query, dialect=dialect)
+                    if healed_sql and healed_sql != sql_query:
+                        result["logs"].append("⚡ Tự động sửa lỗi HAVING lọc tỷ lệ quá chặt thành chuẩn phân tích Pareto tích lũy...")
+                        sql_query = healed_sql
+                        continue
+
                 result["logs"].append("⚠️ Kết quả trả về 0 dòng dữ liệu (dấu hiệu dùng CURRENT_DATE(), lọc WHERE quá chặt, hoặc năm không có dữ liệu). Đang tự động điều chỉnh và thử lại...")
                 empty_fix_reason = (
                     "SQL executed successfully but returned 0 ROWS OF DATA.\n"
