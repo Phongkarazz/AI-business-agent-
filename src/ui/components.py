@@ -18,192 +18,313 @@ from src.visualization.charts import render_smart_chart, format_col_title
 from src.llm.agent import generate_auto_insights
 
 
-def render_voice_input_button(key: str = "voice_input_widget", compact: bool = False):
-    """Hiển thị nút Micro nhập liệu bằng giọng nói tiếng Việt thời gian thực (Web Speech API).
-    Hỗ trợ chế độ compact (icon-only 42x42) đặt ngay trong thanh Search chính hoặc chế độ pill button truyền thống."""
-    is_compact_js = "true" if compact else "false"
+def render_voice_input_button(key: str = "voice_input_widget", compact: bool = True):
+    """Tích hợp nút Micro nhập liệu bằng giọng nói tiếng Việt thời gian thực (Web Speech API)
+    trực tiếp vào bên trong thanh tìm kiếm Hero Search (và Chat Input).
 
-    if compact:
-        btn_markup = """
-        <div style="display: flex; align-items: center; justify-content: center; height: 42px;">
-            <button id="micBtn" onclick="toggleSpeechRecognition()" title="Nói câu hỏi bằng Tiếng Việt (Voice Input)" style="
-                background: #F8FAFC;
-                color: #1E293B;
-                border: 1px solid #CBD5E1;
-                border-radius: 10px;
-                width: 42px;
-                height: 42px;
-                font-size: 18px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-                transition: all 0.2s ease;
-            " onmouseover="if(!isListening){this.style.background='#EFF6FF'; this.style.borderColor='#3B82F6';}" onmouseout="if(!isListening){this.style.background='#F8FAFC'; this.style.borderColor='#CBD5E1';}">
-                <span id="micIcon">🎙️</span>
-            </button>
-        </div>
-        """
-    else:
-        btn_markup = """
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-            <button id="micBtn" onclick="toggleSpeechRecognition()" style="
-                background: linear-gradient(135deg, #1F4E78 0%, #2563EB 100%);
-                color: #ffffff;
-                border: none;
-                border-radius: 20px;
-                padding: 7px 16px;
-                font-size: 13px;
-                font-weight: 600;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                transition: all 0.2s ease;
-            ">
-                <span id="micIcon">🎙️</span> <span id="micText">Nói câu hỏi (Tiếng Việt)</span>
-            </button>
-            <span id="speechStatus" style="font-size: 13px; color: #475569; font-style: italic;"></span>
-        </div>
-        """
-
-    voice_html = f"""
+    Quy tắc UX theo yêu cầu người dùng:
+    - Nút micro nằm ngay bên trong mép phải của thanh tìm kiếm (không nằm rời rạc ở cột riêng).
+    - Khi ô tìm kiếm rỗng: hiển thị icon micro 🎙️ trực quan.
+    - Khi người dùng gõ bất kỳ ký tự nào vào ô: nút micro TỰ ĐỘNG BIẾN MẤT ngay lập tức.
+    - Khi người dùng xóa hết chữ: nút micro TỰ ĐỘNG XUẤT HIỆN trở lại.
+    - Khi nói xong: tự động điền câu hỏi vào ô tìm kiếm và ẩn micro để người dùng sẵn sàng gửi.
+    """
+    voice_html = """
     <body style="margin: 0; padding: 0; overflow: hidden; background: transparent;">
-    {btn_markup}
     <script>
-        const isCompact = {is_compact_js};
-        let recognition = null;
+    (function() {
+        const parentDoc = window.parent.document;
+        const parentWin = window.parent;
+        if (!parentDoc || !parentWin) return;
+
+        // 1. Ẩn iframe container này để không chiếm diện tích trên giao diện
+        try {
+            if (window.frameElement) {
+                const f = window.frameElement;
+                f.style.cssText = "position:absolute !important; width:0px !important; height:0px !important; min-height:0px !important; max-height:0px !important; border:none !important; margin:0px !important; padding:0px !important; opacity:0 !important; pointer-events:none !important; z-index:-9999 !important;";
+                if (f.parentElement) {
+                    f.parentElement.style.cssText = "height:0px !important; min-height:0px !important; margin:0px !important; padding:0px !important; overflow:hidden !important;";
+                }
+            }
+        } catch(e) {}
+
+        // 2. Chèn CSS dùng chung cho Micro và Animation vào parent document nếu chưa có
+        if (!parentDoc.getElementById('integrated-voice-mic-styles')) {
+            const style = parentDoc.createElement('style');
+            style.id = 'integrated-voice-mic-styles';
+            style.textContent = `
+                @keyframes micWavePulse {
+                    0% { transform: translateY(-50%) scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+                    70% { transform: translateY(-50%) scale(1.1); box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+                    100% { transform: translateY(-50%) scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+                }
+                .integrated-hero-mic-btn {
+                    position: absolute !important;
+                    right: 12px !important;
+                    top: 50% !important;
+                    transform: translateY(-50%) !important;
+                    z-index: 10 !important;
+                    width: 32px !important;
+                    height: 32px !important;
+                    border-radius: 8px !important;
+                    border: 1px solid transparent !important;
+                    background: transparent !important;
+                    color: #64748B !important;
+                    cursor: pointer !important;
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    font-size: 17px !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                    transition: all 0.15s ease !important;
+                    outline: none !important;
+                    user-select: none !important;
+                }
+                .integrated-hero-mic-btn:hover {
+                    background: #F1F5F9 !important;
+                    color: #2563EB !important;
+                    border-color: #CBD5E1 !important;
+                }
+                .integrated-hero-mic-btn.recording {
+                    background: #FEF2F2 !important;
+                    color: #DC2626 !important;
+                    border-color: #F87171 !important;
+                    animation: micWavePulse 1.2s infinite ease-in-out !important;
+                }
+                .integrated-chat-mic-btn {
+                    border: none !important;
+                    background: transparent !important;
+                    color: #64748B !important;
+                    cursor: pointer !important;
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    font-size: 18px !important;
+                    padding: 6px !important;
+                    margin-right: 4px !important;
+                    border-radius: 6px !important;
+                    transition: all 0.15s ease !important;
+                    outline: none !important;
+                }
+                .integrated-chat-mic-btn:hover {
+                    background: #F1F5F9 !important;
+                    color: #2563EB !important;
+                }
+                .integrated-chat-mic-btn.recording {
+                    background: #FEF2F2 !important;
+                    color: #DC2626 !important;
+                    border-radius: 50% !important;
+                    animation: micWavePulse 1.2s infinite ease-in-out !important;
+                }
+            `;
+            parentDoc.head.appendChild(style);
+        }
+
+        let globalRecognition = null;
         let isListening = false;
 
-        function toggleSpeechRecognition() {{
-            const micBtn = document.getElementById('micBtn');
-            const micIcon = document.getElementById('micIcon');
-            const micText = document.getElementById('micText');
-            const speechStatus = document.getElementById('speechStatus');
-
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
-                alert('Trình duyệt của bạn chưa hỗ trợ nhận diện giọng nói (Web Speech API). Vui lòng sử dụng Google Chrome, Microsoft Edge hoặc Safari.');
+        function startVoiceCapture(targetInput, micBtn, isChatArea) {
+            const SpeechRec = parentWin.SpeechRecognition || parentWin.webkitSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRec) {
+                alert('Trình duyệt của bạn chưa hỗ trợ nhận diện giọng nói (Web Speech API). Vui lòng dùng Chrome, Edge hoặc Safari.');
                 return;
-            }}
+            }
 
-            if (isListening) {{
-                if (recognition) recognition.stop();
+            if (isListening) {
+                if (globalRecognition) {
+                    try { globalRecognition.stop(); } catch(e) {}
+                }
                 isListening = false;
-                if (isCompact) {{
-                    micBtn.style.background = '#F8FAFC';
-                    micBtn.style.borderColor = '#CBD5E1';
-                    micBtn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
-                    micBtn.title = 'Nói câu hỏi bằng Tiếng Việt (Voice Input)';
-                }} else {{
-                    micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
-                    if (micText) micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
-                    if (speechStatus) speechStatus.innerText = '';
-                }}
-                micIcon.innerText = '🎙️';
+                stopButtonUI(micBtn, targetInput);
                 return;
-            }}
+            }
 
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRecognition();
-            recognition.lang = 'vi-VN';
-            recognition.continuous = false;
-            recognition.interimResults = false;
+            try {
+                globalRecognition = new SpeechRec();
+                globalRecognition.lang = 'vi-VN';
+                globalRecognition.continuous = false;
+                globalRecognition.interimResults = false;
 
-            recognition.onstart = function() {{
-                isListening = true;
-                if (isCompact) {{
-                    micBtn.style.background = '#FEF2F2';
-                    micBtn.style.borderColor = '#EF4444';
-                    micBtn.style.boxShadow = '0 0 0 3px rgba(239, 68, 68, 0.25)';
-                    micBtn.title = 'Đang lắng nghe... Bấm để dừng';
-                }} else {{
-                    micBtn.style.background = '#DC2626';
-                    if (micText) micText.innerText = 'Đang lắng nghe...';
-                    if (speechStatus) speechStatus.innerText = 'Hãy nói câu hỏi của bạn vào micro...';
-                }}
-                micIcon.innerText = '🔴';
-            }};
+                globalRecognition.onstart = function() {
+                    isListening = true;
+                    micBtn.classList.add('recording');
+                    micBtn.innerHTML = '🔴';
+                    micBtn.title = 'Đang lắng nghe tiếng Việt... Bấm để dừng';
+                    micBtn.style.display = 'inline-flex';
+                };
 
-            recognition.onresult = function(event) {{
-                const transcript = event.results[0][0].transcript.trim();
-                if (!isCompact && speechStatus) {{
-                    speechStatus.innerText = 'Đã điền câu hỏi! Bạn có thể sửa nếu cần và nhấn Enter hoặc ⬆️ để gửi.';
-                }}
-                
-                // Cập nhật vào Streamlit chat_input hoặc text_input thông qua React Native Property Setter
-                const textAreas = window.parent.document.querySelectorAll('textarea, input[type="text"]');
-                for (let ta of textAreas) {{
-                    if (ta.placeholder && (
-                        ta.placeholder.includes('Hỏi bất kỳ') || 
-                        ta.placeholder.includes('Ask anything') ||
-                        ta.placeholder.includes('doanh thu') ||
-                        ta.placeholder.includes('Tìm kiếm') ||
-                        ta.placeholder.includes('Search')
-                    )) {{
-                        try {{
-                            const nativeSetter = Object.getOwnPropertyDescriptor(
-                                ta instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype, 
-                                "value"
-                            )?.set;
-                            if (nativeSetter) {{
-                                nativeSetter.call(ta, transcript);
-                            }} else {{
-                                ta.value = transcript;
-                            }}
-                        }} catch(e) {{
-                            ta.value = transcript;
-                        }}
-                        
-                        ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        ta.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                        
-                        // Đặt con trỏ chuột vào ô chat để người dùng xem và sửa tiếp
-                        ta.focus();
-                        try {{
-                            ta.setSelectionRange(ta.value.length, ta.value.length);
-                        }} catch(e) {{}}
-                        break;
-                    }}
-                }}
-            }};
+                globalRecognition.onresult = function(event) {
+                    isListening = false;
+                    const transcript = event.results[0][0].transcript.trim();
+                    if (transcript && targetInput) {
+                        const proto = isChatArea 
+                            ? parentWin.HTMLTextAreaElement.prototype 
+                            : parentWin.HTMLInputElement.prototype;
+                        const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                        if (setter) {
+                            setter.call(targetInput, transcript);
+                        } else {
+                            targetInput.value = transcript;
+                        }
+                        targetInput.dispatchEvent(new parentWin.Event('input', { bubbles: true }));
+                        targetInput.dispatchEvent(new parentWin.Event('change', { bubbles: true }));
 
-            recognition.onerror = function(event) {{
+                        targetInput.focus();
+                        try {
+                            targetInput.setSelectionRange(targetInput.value.length, targetInput.value.length);
+                        } catch(e) {}
+                    }
+                    stopButtonUI(micBtn, targetInput);
+                };
+
+                globalRecognition.onerror = function(event) {
+                    isListening = false;
+                    stopButtonUI(micBtn, targetInput);
+                };
+
+                globalRecognition.onend = function() {
+                    isListening = false;
+                    stopButtonUI(micBtn, targetInput);
+                };
+
+                globalRecognition.start();
+            } catch(err) {
                 isListening = false;
-                if (isCompact) {{
-                    micBtn.style.background = '#F8FAFC';
-                    micBtn.style.borderColor = '#CBD5E1';
-                    micBtn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
-                    micBtn.title = 'Lỗi nhận diện: ' + event.error;
-                }} else {{
-                    micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
-                    if (micText) micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
-                    if (speechStatus) speechStatus.innerText = 'Lỗi: ' + event.error;
-                }}
-                micIcon.innerText = '🎙️';
-            }};
+                stopButtonUI(micBtn, targetInput);
+            }
+        }
 
-            recognition.onend = function() {{
-                isListening = false;
-                if (isCompact) {{
-                    micBtn.style.background = '#F8FAFC';
-                    micBtn.style.borderColor = '#CBD5E1';
-                    micBtn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
-                    micBtn.title = 'Nói câu hỏi bằng Tiếng Việt (Voice Input)';
-                }} else {{
-                    micBtn.style.background = 'linear-gradient(135deg, #1F4E78 0%, #2563EB 100%)';
-                    if (micText) micText.innerText = 'Nói câu hỏi (Tiếng Việt)';
-                }}
-                micIcon.innerText = '🎙️';
-            }};
+        function stopButtonUI(micBtn, targetInput) {
+            if (!micBtn) return;
+            micBtn.classList.remove('recording');
+            micBtn.innerHTML = '🎙️';
+            micBtn.title = 'Nói câu hỏi bằng Tiếng Việt (Voice Input)';
 
-            recognition.start();
-        }}
+            if (targetInput) {
+                const hasVal = targetInput.value && targetInput.value.trim().length > 0;
+                micBtn.style.display = hasVal ? 'none' : 'inline-flex';
+            }
+        }
+
+        // 3. Tích hợp trực tiếp vào Hero Search Bar
+        function attachHeroSearchMic() {
+            const heroInput = parentDoc.querySelector('form[data-testid="stForm"] input[type="text"]') || 
+                              parentDoc.querySelector('div[data-testid="stTextInput"] input[type="text"]') ||
+                              parentDoc.querySelector('input[aria-label="Search"]');
+            if (!heroInput) return;
+
+            const container = heroInput.parentElement;
+            if (!container) return;
+
+            // Đảm bảo container relative và input có padding-right chống đè icon
+            container.style.position = 'relative';
+            heroInput.style.paddingRight = '46px';
+
+            let micBtn = container.querySelector('#integratedHeroMicBtn');
+            if (!micBtn) {
+                micBtn = parentDoc.createElement('button');
+                micBtn.id = 'integratedHeroMicBtn';
+                micBtn.type = 'button';
+                micBtn.className = 'integrated-hero-mic-btn';
+                micBtn.innerHTML = '🎙️';
+                micBtn.title = 'Nói câu hỏi bằng Tiếng Việt (Voice Input)';
+
+                micBtn.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startVoiceCapture(heroInput, micBtn, false);
+                };
+
+                container.appendChild(micBtn);
+            }
+
+            // Tự động biến mất khi nhập câu hỏi, tự động xuất hiện khi rỗng
+            function checkHeroVisibility() {
+                if (!micBtn) return;
+                if (micBtn.classList.contains('recording')) {
+                    micBtn.style.display = 'inline-flex';
+                    return;
+                }
+                const hasText = heroInput.value && heroInput.value.trim().length > 0;
+                micBtn.style.display = hasText ? 'none' : 'inline-flex';
+            }
+
+            ['input', 'keyup', 'keydown', 'change', 'paste', 'cut'].forEach(evt => {
+                heroInput.removeEventListener(evt, checkHeroVisibility);
+                heroInput.addEventListener(evt, checkHeroVisibility);
+            });
+
+            checkHeroVisibility();
+        }
+
+        // 4. Tích hợp vào Chat Input ở chân trang (khi đang trong hội thoại)
+        function attachChatInputMic() {
+            const chatInputContainer = parentDoc.querySelector('div[data-testid="stChatInput"]');
+            if (!chatInputContainer) return;
+
+            const chatTextArea = chatInputContainer.querySelector('textarea');
+            const submitBtn = chatInputContainer.querySelector('button[data-testid="stChatInputSubmitButton"]');
+            if (!chatTextArea) return;
+
+            let chatMicBtn = chatInputContainer.querySelector('#integratedChatMicBtn');
+            if (!chatMicBtn) {
+                chatMicBtn = parentDoc.createElement('button');
+                chatMicBtn.id = 'integratedChatMicBtn';
+                chatMicBtn.type = 'button';
+                chatMicBtn.className = 'integrated-chat-mic-btn';
+                chatMicBtn.innerHTML = '🎙️';
+                chatMicBtn.title = 'Nói câu hỏi bằng Tiếng Việt (Voice Input)';
+
+                chatMicBtn.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startVoiceCapture(chatTextArea, chatMicBtn, true);
+                };
+
+                if (submitBtn && submitBtn.parentElement) {
+                    submitBtn.parentElement.insertBefore(chatMicBtn, submitBtn);
+                } else {
+                    chatInputContainer.appendChild(chatMicBtn);
+                }
+            }
+
+            function checkChatVisibility() {
+                if (!chatMicBtn) return;
+                if (chatMicBtn.classList.contains('recording')) {
+                    chatMicBtn.style.display = 'inline-flex';
+                    return;
+                }
+                const hasText = chatTextArea.value && chatTextArea.value.trim().length > 0;
+                chatMicBtn.style.display = hasText ? 'none' : 'inline-flex';
+            }
+
+            ['input', 'keyup', 'keydown', 'change', 'paste', 'cut'].forEach(evt => {
+                chatTextArea.removeEventListener(evt, checkChatVisibility);
+                chatTextArea.addEventListener(evt, checkChatVisibility);
+            });
+
+            checkChatVisibility();
+        }
+
+        function init() {
+            attachHeroSearchMic();
+            attachChatInputMic();
+        }
+
+        init();
+
+        let count = 0;
+        const intervalId = setInterval(() => {
+            init();
+            count++;
+            if (count >= 10) clearInterval(intervalId);
+        }, 300);
+    })();
     </script>
     </body>
     """
-    st.components.v1.html(voice_html, height=44 if compact else 45)
+    st.components.v1.html(voice_html, height=0)
 
 
 def notify(message: str, detail: str = None, icon: str = "⚠️", toast_only: bool = False):

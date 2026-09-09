@@ -279,6 +279,7 @@ st.markdown("""
         border: 1.5px solid #CBD5E1 !important;
         font-size: 0.95rem !important;
         padding: 12px 16px !important;
+        padding-right: 48px !important;
         transition: all 0.2s ease-in-out !important;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
     }
@@ -516,6 +517,7 @@ else:
     user_input = None
     if has_active_conversation:
         user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
+        render_voice_input_button(compact=True)
 
     prompt_to_run = pending_prompt or user_input
 
@@ -667,7 +669,7 @@ else:
 
             # Trục tương tác chính: Thanh Tìm kiếm Lớn tại Trung tâm
             with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
-                c_in, c_mic, c_btn = st.columns([6.0, 0.65, 1.35], gap="small", vertical_alignment="center")
+                c_in, c_btn = st.columns([7.3, 1.2], gap="small", vertical_alignment="center")
                 with c_in:
                     hero_query = st.text_input(
                         "Search",
@@ -675,13 +677,14 @@ else:
                         label_visibility="collapsed",
                         key="hero_search_input"
                     )
-                with c_mic:
-                    render_voice_input_button(compact=True)
                 with c_btn:
                     hero_submit = st.form_submit_button("Hỏi AI ↗", type="primary", use_container_width=True)
                 if hero_submit and hero_query.strip():
                     st.session_state["pending_prompt"] = hero_query.strip()
                     st.rerun()
+
+            # Tích hợp Micro giọng nói tiếng Việt trực tiếp bên trong thanh tìm kiếm (tự ẩn khi gõ câu hỏi)
+            render_voice_input_button(compact=True)
 
             # Khám phá câu hỏi theo 3 lăng kính điều hành (Categorized Smart Prompts Tabs)
             categorized = generate_categorized_starter_prompts(tables, schema_context)
