@@ -140,7 +140,7 @@ def render_main_sidebar():
 
     with st.sidebar:
         # --- PHẦN 1: TOP SIDEBAR (NÚT CẤU HÌNH & TẠO CHAT MỚI) ---
-        st.markdown("### 🗄️ Veraxus for SQL")
+        st.markdown("### ⚙️ Bảng Cấu Hình & Dữ Liệu")
         db_badge = "🎮 SQLite Demo" if is_demo else "🔌 MySQL DB"
         st.caption(f"🟢 **{db_badge}** | {provider} (`{model_name}`)")
 

@@ -46,15 +46,35 @@ st.markdown("""
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     
-    /* Ẩn triệt để thanh Chrome thừa mặc định của Streamlit */
+    /* Ẩn triệt để thanh Chrome thừa mặc định của Streamlit nhưng BẢO VỆ nút mở/đóng Sidebar */
     #MainMenu {visibility: hidden; display: none !important;}
     footer {visibility: hidden; display: none !important;}
     .stDeployButton {display: none !important;}
     div[data-testid="stDecoration"] {display: none !important;}
-    div[data-testid="stToolbar"] {display: none !important;}
     div[data-testid="stStatusWidget"] {display: none !important;}
     header {background-color: transparent !important;}
     header [data-testid="stToolbarActions"] {display: none !important;}
+
+    /* BẢO ĐẢM NÚT MỞ/ĐÓNG SIDEBAR LUÔN HIỂN THỊ RÕ RÀNG VÀ BẤM ĐƯỢC */
+    [data-testid="stExpandSidebarButton"] {
+        visibility: visible !important;
+        display: inline-flex !important;
+        opacity: 1 !important;
+        position: fixed !important;
+        top: 14px !important;
+        left: 14px !important;
+        z-index: 999999 !important;
+        background: #FFFFFF !important;
+        border: 1.5px solid #2563EB !important;
+        border-radius: 8px !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18) !important;
+        cursor: pointer !important;
+    }
+    [data-testid="stSidebarCollapseButton"] {
+        visibility: visible !important;
+        display: inline-flex !important;
+        opacity: 1 !important;
+    }
 
     /* Tối ưu khoảng đệm trên cùng của trang để nội dung hiển thị ngay trong tầm mắt */
     .block-container {
@@ -442,6 +462,32 @@ else:
     # 4.1 Hiển thị Sidebar tra cứu bảng và lịch sử chat
     render_main_sidebar()
 
+    # Tự động khôi phục mở rộng Sidebar nếu bị thu gọn trong LocalStorage của trình duyệt
+    import streamlit.components.v1 as _components
+    _components.html("""
+    <script>
+        function autoExpandSidebar() {
+            try {
+                const pStorage = window.parent.localStorage;
+                if (pStorage) {
+                    for (let i = 0; i < pStorage.length; i++) {
+                        const k = pStorage.key(i);
+                        if (k && k.startsWith('stSidebarCollapsed')) {
+                            pStorage.setItem(k, 'false');
+                        }
+                    }
+                }
+                const expandBtn = window.parent.document.querySelector('[data-testid="stExpandSidebarButton"] button, [data-testid="stExpandSidebarButton"]');
+                if (expandBtn) {
+                    expandBtn.click();
+                }
+            } catch(e) {}
+        }
+        setTimeout(autoExpandSidebar, 80);
+        setTimeout(autoExpandSidebar, 400);
+    </script>
+    """, height=0, width=0)
+
     history = st.session_state.get("history", [])
     focused_turn_idx = st.session_state.get("focused_turn_idx", None)
 
@@ -536,9 +582,31 @@ else:
 
         prov_clean = provider_name.split()[0]
 
+        # Thanh điều hướng trên cùng: Nhận diện Thương hiệu & Phím tắt Cấu hình
+        top_bar_c1, top_bar_c2 = st.columns([6.8, 3.2], vertical_alignment="center")
+        with top_bar_c1:
+            st.markdown("""
+            <div style="display: flex; align-items: center; gap: 8px; padding: 2px 0 6px 0;">
+                <span style="font-size: 1.12rem; font-weight: 800; color: #0F172A; letter-spacing: -0.02em;">💼 VERAXUS AI</span>
+                <span style="background: #F1F5F9; color: #475569; font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 6px; border: 1px solid #E2E8F0;">Enterprise Mode</span>
+            </div>
+            """, unsafe_allow_html=True)
+        with top_bar_c2:
+            c_btn_cfg, c_btn_new = st.columns(2, gap="small")
+            with c_btn_cfg:
+                if st.button("⚙️ Cấu hình", key="hero_top_btn_settings", use_container_width=True, help="Mở màn hình Cài đặt Database và Model AI"):
+                    st.session_state["view_mode"] = "settings"
+                    st.rerun()
+            with c_btn_new:
+                if st.button("➕ Chat Mới", key="hero_top_btn_new_chat", use_container_width=True, help="Bắt đầu phiên hội thoại mới"):
+                    st.session_state["history"] = []
+                    st.session_state["query_cache"] = {}
+                    st.session_state["focused_turn_idx"] = None
+                    st.rerun()
+
         # Hero Header
         st.markdown("""
-        <div class="hero-container" style="padding: 8px 10px 14px 10px;">
+        <div class="hero-container" style="padding: 4px 10px 14px 10px;">
             <div class="hero-title" style="font-size: 2.25rem; font-weight: 800; color: #0F172A; margin-bottom: 6px; letter-spacing: -0.025em;">
                 VERAXUS AI
             </div>
