@@ -1937,8 +1937,51 @@ ORDER BY TotalSalaryBudget DESC;
 (CẢNH BÁO ĐẶC BIỆT: 'QUỸ LƯƠNG' LÀ TỔNG SỐ TIỀN CHI TRẢ LƯƠNG, BẮT BUỘC DÙNG SUM(s.salary) AS TotalSalaryBudget! TUYỆT ĐỐI KHÔNG DÙNG COUNT(de.emp_no) VÌ COUNT LÀ ĐẾM SỐ LƯỢNG NGƯỜI, KHÔNG PHẢI TIỀN LƯƠNG!)
 """
 
+    # 5.9 Nhân viên có số lần tăng lương ít hơn N lần nhưng lương thuộc top cao nhất / top X%
+    elif (
+        any(k in q_low for k in ["tăng lương", "lần tăng"])
+        and any(k in q_low for k in ["ít hơn", "dưới", "nhỏ hơn", "chưa quá", "chưa tới", "tối đa", "fewer", "less than", "under"])
+        and any(k in q_low for k in ["top", "cao nhất", "mức lương", "lương", "%", "phần trăm"])
+    ):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN ÍT TĂNG LƯƠNG NHƯNG LƯƠNG THUỘC TOP CAO NHẤT):
+Yêu cầu: Lọc nhân viên có số lần tăng lương < N lần nhưng mức lương hiện tại thuộc top 10% cao nhất toàn công ty (PERCENT_RANK() >= 0.90).
+MẪU TRUY VẤN CHUẨN XÁC:
+WITH TopPercentileActive AS (
+    SELECT 
+        e.emp_no,
+        CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+        d.dept_name AS Department,
+        s.salary AS CurrentSalary,
+        PERCENT_RANK() OVER (ORDER BY s.salary) AS SalaryPercentile
+    FROM employees e
+    JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+    JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+    JOIN departments d ON de.dept_no = d.dept_no
+)
+SELECT 
+    t.emp_no,
+    t.FullName,
+    t.Department,
+    t.CurrentSalary,
+    COUNT(s_all.salary) AS RaiseCount,
+    ROUND(t.SalaryPercentile * 100, 1) AS SalaryPercentile
+FROM TopPercentileActive t
+JOIN salaries s_all ON t.emp_no = s_all.emp_no
+WHERE t.SalaryPercentile >= 0.90
+GROUP BY t.emp_no, t.FullName, t.Department, t.CurrentSalary, t.SalaryPercentile
+HAVING COUNT(s_all.salary) < 5
+ORDER BY t.CurrentSalary DESC, RaiseCount ASC
+LIMIT 10;
+(BẮT BUỘC: Điều kiện HAVING COUNT(s_all.salary) < 5 và lọc SalaryPercentile >= 0.90! TUYỆT ĐỐI KHÔNG dùng COUNT(*) >= 5 hoặc ORDER BY RaiseCount DESC!)
+"""
+
     # 6. Nhân viên có từ N lần tăng lương trở lên
-    elif any(k in q_low for k in ["tăng lương", "lần tăng lương", "tăng lương trở lên", "được tăng lương"]):
+    elif (
+        any(k in q_low for k in ["tăng lương", "lần tăng lương", "tăng lương trở lên", "được tăng lương"])
+        and not any(k in q_low for k in ["ít hơn", "dưới", "nhỏ hơn", "chưa quá", "chưa tới", "tối đa", "fewer", "less than", "under"])
+        and not ("%" in q_low or "phần trăm" in q_low)
+    ):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN ĐƯỢC TĂNG LƯƠNG NHIỀU NHẤT):
 SELECT 

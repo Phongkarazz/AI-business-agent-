@@ -26,6 +26,13 @@ def classify_query_complexity(user_query: str) -> str:
     if any(k in q_low for k in ["tăng trưởng", "tốc độ tăng", "mỗi năm", "annual growth", "growth rate", "so sánh mức lương", "chênh lệch lương giữa", "cấp dưới", "lương thấp hơn"]):
         return "MULTI_STEP_ANALYTIC"
 
+    # 1.1 Nhận diện bài toán phân tích phân vị kết hợp lịch sử tăng lương (Percentile Cohort / Low raises with top salary)
+    if (
+        any(k in q_low for k in ["top 10%", "top 5%", "top 20%", "top %", "percentile", "bách phân vị"])
+        or (any(k in q_low for k in ["tăng lương", "lần tăng"]) and any(k in q_low for k in ["ít hơn", "dưới", "nhỏ hơn", "nhưng"]))
+    ):
+        return "MULTI_STEP_ANALYTIC"
+
     # 2. Nhận diện bài toán đa phòng ban hoặc chuyển đổi trạng thái
     if (
         any(k in q_low for k in ["nhiều phòng ban", "ít nhất 2 phòng", "từ 2 phòng", "qua 2 phòng", "luân chuyển", "chuyển phòng"])
@@ -39,7 +46,7 @@ def classify_query_complexity(user_query: str) -> str:
 
     # 4. Nhận diện bài toán so sánh cực trị (Lớn nhất VÀ nhỏ nhất)
     has_largest = any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "đông nhất", "highest", "largest"])
-    has_smallest = any(k in q_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "lowest", "smallest"])
+    has_smallest = any(k in q_low for k in ["nhỏ nhất", "thấp nhất", "lowest", "smallest"]) or bool(re.search(r"\bít nhất\b(?!\s*\d+)", q_low))
     if has_largest and has_smallest:
         return "BENCHMARK_EXTREMES"
 
@@ -54,6 +61,39 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
     """Phân rã câu hỏi thành chuỗi các nhiệm vụ con (Sub-tasks Decomposition) theo nguyên lý Chia để trị."""
     q_low = (user_query or "").lower()
     is_en = (lang == "en")
+
+    # Mẫu 0: Nhân viên có số lần tăng lương ít nhưng lương thuộc top cao nhất (Low Raises & Top Percentile Cohort)
+    if any(k in q_low for k in ["tăng lương", "lần tăng"]) and any(k in q_low for k in ["ít hơn", "dưới", "nhỏ hơn", "chưa quá", "tối đa"]):
+        m_r = re.search(r"(\d+)\s*lần", q_low)
+        limit_raises_str = m_r.group(1) if m_r else "5"
+        m_p = re.search(r"top\s*(\d+)\s*%", q_low)
+        pct_str = m_p.group(1) if m_p else "10"
+        return [
+            {
+                "step": 1,
+                "name": "Xác định phân vị lương hiện tại toàn công ty" if not is_en else "Compute company-wide salary percentile",
+                "desc": f"Tính toán phân vị PERCENT_RANK() cho nhân viên đang công tác (to_date = '9999-01-01') để định vị nhóm top {pct_str}% cao nhất." if not is_en else f"Compute PERCENT_RANK() for active employees to isolate top {pct_str}% earners.",
+                "status": "done"
+            },
+            {
+                "step": 2,
+                "name": "Thống kê số lần tăng lương trong lịch sử" if not is_en else "Aggregate historical salary raises",
+                "desc": f"Đếm số lần điều chỉnh lương trong lịch sử từ bảng salaries và lọc nhóm có số lần tăng lương ít hơn {limit_raises_str} lần: HAVING COUNT(s.salary) < {limit_raises_str}." if not is_en else f"Count distinct salary adjustments and filter: HAVING COUNT(s.salary) < {limit_raises_str}.",
+                "status": "done"
+            },
+            {
+                "step": 3,
+                "name": "Giao thoa đối chiếu 2 điều kiện nghiệp vụ" if not is_en else "Cross-reference cohort conditions",
+                "desc": f"Kết hợp nhóm nhân viên thuộc top {pct_str}% lương cao nhất với nhóm nhân viên có số lần tăng lương ít hơn {limit_raises_str} lần." if not is_en else f"Intersect top {pct_str}% salary cohort with employees having fewer than {limit_raises_str} raises.",
+                "status": "done"
+            },
+            {
+                "step": 4,
+                "name": "Trích xuất danh sách nhân sự & xếp hạng" if not is_en else "Extract ranked employee roster",
+                "desc": "Hiển thị họ tên, phòng ban, mức lương hiện tại, số lần tăng lương và bách phân vị lương, sắp xếp theo mức lương giảm dần." if not is_en else "Display FullName, Department, CurrentSalary, RaiseCount, and Percentile ordered by salary DESC.",
+                "status": "done"
+            }
+        ]
 
     # Mẫu 1: Tăng trưởng lương nhân viên theo thời gian (Salary Growth Rate)
     if any(k in q_low for k in ["tăng trưởng", "mỗi năm", "tốc độ"]) and any(k in q_low for k in ["lương", "salary"]):

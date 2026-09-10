@@ -89,6 +89,9 @@ VI_COLUMN_MAP = {
     "max_salary": "Lương Cao Nhất ($)",
     "minsalary": "Lương Thấp Nhất ($)",
     "min_salary": "Lương Thấp Nhất ($)",
+    "salarypercentile": "Bách Phân Vị Lương (%)",
+    "salary_percentile": "Bách Phân Vị Lương (%)",
+    "percentile": "Bách Phân Vị Lương (%)",
     "raisecount": "Số Lần Tăng Lương",
     "raise_count": "Số Lần Tăng Lương",
     "numberofincreases": "Số Lần Tăng Lương",
@@ -297,18 +300,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 "share", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp"
             ])
             non_pct_cols = [c for c in measure_cols if c not in pct_cols]
+            uq_low = (user_query or "").lower()
+            is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "danh sách", "liệt kê"])
             is_distribution_breakdown = (
                 (user_asked_pct or (has_single_pct_col and not non_pct_cols))
                 and (2 <= len(df) <= 10)
                 and (len(pct_cols) <= 1)
                 and (not time_col or n_time <= 1)
+                and not is_individual_entity
+                and not is_top_ranking
             )
 
             if is_distribution_breakdown:
                 chosen = "Pie"
             elif is_individual_entity and measure_cols:
-                uq_low = (user_query or "").lower()
-                is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "danh sách"])
                 if is_top_ranking and len(df) <= 15 and len(measure_cols) == 1:
                     chosen = "Bar Ngang"
                 else:

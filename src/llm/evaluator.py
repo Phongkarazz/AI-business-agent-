@@ -63,14 +63,27 @@ def evaluate_execution(
         cols_low = [str(c).lower() for c in df.columns]
 
         # Kiểm tra 2.1: Người dùng hỏi danh sách nhân viên nhưng kết quả lại chỉ có phòng ban
-        asked_for_employees = any(k in q_low for k in ["nhân viên", "nhân sự", "danh sách", "liệt kê", "ai là", "employee", "employees"])
+        is_aggregate_query = any(k in q_low for k in [
+            "số lượng", "tổng số", "tỷ lệ", "phân bổ", "cơ cấu", "bao nhiêu", "đếm", 
+            "count", "headcount", "bình quân", "quy mô", "trung bình", "tổng doanh số", 
+            "doanh thu", "top phòng ban", "theo phòng ban", "theo chức danh", "theo năm", 
+            "từng năm", "từng tháng", "từng quý", "thống kê"
+        ])
+        is_explicit_employee_list = any(k in q_low for k in [
+            "danh sách nhân viên", "những nhân viên", "các nhân viên", "liệt kê nhân viên", 
+            "ai là", "nhân viên nào", "top nhân viên", "top 5 nhân viên", "top 10 nhân viên",
+            "thông tin nhân viên", "họ và tên"
+        ])
+        asked_for_employees = (
+            any(k in q_low for k in ["nhân viên", "nhân sự", "danh sách", "liệt kê", "ai là", "employee", "employees"])
+            and (is_explicit_employee_list or not is_aggregate_query)
+        )
         has_employee_col = (
             any(k in cols_low for k in ["fullname", "full_name", "first_name", "last_name", "emp_no", "empno", "name", "tên nhân viên", "họ và tên"])
             or any(is_id_like(c) for c in df.columns)
         )
-        is_asking_only_dept_count = any(k in q_low for k in ["phòng ban nào", "mỗi phòng ban", "theo phòng ban", "từng phòng ban", "quy mô"]) and not any(k in q_low for k in ["những nhân viên", "các nhân viên", "danh sách nhân viên"])
 
-        if asked_for_employees and not has_employee_col and not is_asking_only_dept_count:
+        if asked_for_employees and not has_employee_col:
             criteria["semantic_alignment"]["passed"] = False
             msg = "Người dùng hỏi thông tin nhân sự nhưng dữ liệu chỉ trả về cấp phòng ban/đơn vị." if not is_en else "User queried employee-level records but result only provided department aggregates."
             criteria["semantic_alignment"]["detail"] = msg
@@ -94,8 +107,8 @@ def evaluate_execution(
             )
 
         # Kiểm tra 2.3: Người dùng hỏi nhân viên qua ít nhất 2 phòng ban nhưng thiếu cột số phòng ban
-        asked_multi_dept = any(k in q_low for k in ["nhiều phòng ban", "ít nhất 2 phòng", "từ 2 phòng", "qua 2 phòng"]) and asked_for_employees
-        has_dept_count = any(k in cols_low for k in ["departmentcount", "dept_count", "department_count", "số phòng ban", "count"])
+        asked_multi_dept = any(k in q_low for k in ["nhiều phòng ban", "ít nhất 2 phòng", "từ 2 phòng", "qua 2 phòng", "nhiều hơn 1 phòng"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "employee"])
+        has_dept_count = any(any(k in c for k in ["departmentcount", "dept_count", "department_count", "số phòng ban", "phòng ban", "count", "dept"]) for c in cols_low)
         if asked_multi_dept and not has_dept_count:
             criteria["semantic_alignment"]["passed"] = False
             msg = "Thiếu chỉ số đếm số phòng ban đã trải qua (COUNT(DISTINCT de.dept_no))." if not is_en else "Missing distinct department count metric (COUNT(DISTINCT de.dept_no))."
@@ -106,13 +119,30 @@ def evaluate_execution(
                 if not is_en else "MUST include COUNT(DISTINCT de.dept_no) AS DepartmentCount and HAVING COUNT(DISTINCT de.dept_no) >= 2."
             )
 
+        # Kiểm tra 2.4: Người dùng yêu cầu số lần tăng lương ít hơn N lần nhưng kết quả trả về có >= N lần
+        m_less_raises = re.search(r"(?:ít hơn|dưới|nhỏ hơn|chưa quá|không quá|tối đa)\s*(\d+)\s*lần", q_low)
+        if m_less_raises:
+            max_allowed = int(m_less_raises.group(1))
+            raise_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["raisecount", "raise_count", "lần tăng", "số lần"])), None)
+            if raise_col:
+                max_actual = pd.to_numeric(df[raise_col], errors="coerce").max()
+                if pd.notna(max_actual) and max_actual >= max_allowed:
+                    criteria["semantic_alignment"]["passed"] = False
+                    msg = f"Dữ liệu vi phạm điều kiện lọc số lần tăng lương: Yêu cầu ít hơn {max_allowed} lần nhưng kết quả ghi nhận tối đa {int(max_actual)} lần." if not is_en else f"Data violates raise count constraint: Requested fewer than {max_allowed} raises, but max in result is {int(max_actual)}."
+                    criteria["semantic_alignment"]["detail"] = msg
+                    fails.append(msg)
+                    actionable_feedbacks.append(
+                        f"BẮT BUỘC lọc HAVING COUNT(s_all.salary) < {max_allowed} để chỉ lấy nhân viên có số lần tăng lương ít hơn {max_allowed} lần!"
+                        if not is_en else f"MUST filter HAVING COUNT(s_all.salary) < {max_allowed} to satisfy raise count limit!"
+                    )
+
     # -------------------------------------------------------------
     # PILLAR 3: COMPARATIVE SUFFICIENCY (ĐỘ ĐẦY ĐỦ CÁC VẾ SO SÁNH & CỰC TRỊ)
     # -------------------------------------------------------------
     if df is not None and not df.empty:
         # Kiểm tra 3.1: Người dùng hỏi CẢ LỚN NHẤT VÀ NHỎ NHẤT nhưng chỉ trả về 1 dòng
         has_largest = any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "highest", "largest"])
-        has_smallest = any(k in q_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "lowest", "smallest"])
+        has_smallest = any(k in q_low for k in ["nhỏ nhất", "thấp nhất", "lowest", "smallest"]) or bool(re.search(r"\bít nhất\b(?!\s*\d+)", q_low))
         if has_largest and has_smallest and len(df) < 2:
             criteria["comparative_sufficiency"]["passed"] = False
             msg = f"Người dùng hỏi cả cực trị lớn nhất VÀ nhỏ nhất nhưng kết quả chỉ có {len(df)} dòng." if not is_en else f"User requested both largest AND smallest extremes, but only {len(df)} row returned."
@@ -142,8 +172,9 @@ def evaluate_execution(
     # -------------------------------------------------------------
     if sql_query:
         # Kiểm tra 4.1: Câu hỏi về trạng thái "hiện tại" nhưng SQL không lọc to_date = '9999-01-01'
+        is_employees_db = any(k in (schema_context or "").lower() for k in ["dept_emp", "titles", "to_date", "salaries"])
         asked_current = any(k in q_low for k in ["hiện tại", "hiện nay", "đang", "đang giữ", "currently", "active"])
-        has_current_filter = "9999-01-01" in sql_low
+        has_current_filter = ("9999-01-01" in sql_low) or (not is_employees_db)
         if asked_current and not has_current_filter:
             criteria["temporal_validity"]["passed"] = False
             msg = "Câu hỏi yêu cầu thông tin hiện tại nhưng câu lệnh SQL thiếu điều kiện lọc to_date = '9999-01-01'." if not is_en else "User requested current active status, but SQL lacks to_date = '9999-01-01' filter."

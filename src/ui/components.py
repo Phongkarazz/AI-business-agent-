@@ -934,8 +934,17 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             growth_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["avgannualsalarygrowth", "annualgrowth", "growth"])]
             m_col = growth_candidates[0]
         elif any(k in _uq_low for k in ["tăng lương", "lần tăng", "số lần", "được tăng"]):
+            is_top_salary_cohort = (
+                any(k in _uq_low for k in ["top", "cao nhất", "mức lương", "lương"])
+                and any(k in _uq_low for k in ["%", "phần trăm", "toàn công ty", "công ty"])
+                and any(k in _uq_low for k in ["ít hơn", "dưới", "nhỏ hơn", "chưa quá", "tối đa"])
+            )
+            salary_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["currentsalary", "current_salary", "salary", "mức lương", "lương"])]
             raises_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases", "lần tăng", "số lần", "raises", "num_raises"])]
-            if raises_candidates:
+
+            if is_top_salary_cohort and salary_candidates:
+                m_col = salary_candidates[0]
+            elif raises_candidates:
                 m_col = raises_candidates[0]
             else:
                 count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
