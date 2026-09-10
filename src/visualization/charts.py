@@ -57,7 +57,29 @@ VI_COLUMN_MAP = {
     "employee_name": "Họ và Tên",
     "salary": "Mức Lương",
     "current_salary": "Mức Lương Hiện Tại",
+    "avgannualsalarygrowth": "Tăng Trưởng Lương TB/Năm ($)",
+    "avg_annual_salary_growth": "Tăng Trưởng Lương TB/Năm ($)",
+    "startingsalary": "Lương Khởi Điểm ($)",
+    "starting_salary": "Lương Khởi Điểm ($)",
     "currentsalary": "Mức Lương Hiện Tại",
+    "managersalary": "Lương Quản Lý ($)",
+    "manager_salary": "Lương Quản Lý ($)",
+    "maxsubordinatesalary": "Lương Cấp Dưới Cao Nhất ($)",
+    "max_subordinate_salary": "Lương Cấp Dưới Cao Nhất ($)",
+    "salarygap": "Chênh Lệch Lương ($)",
+    "salary_gap": "Chênh Lệch Lương ($)",
+    "subordinateswithhighersalary": "Số Cấp Dưới Lương Cao Hơn",
+    "subordinates_with_higher_salary": "Số Cấp Dưới Lương Cao Hơn",
+    "subordinatename": "Tên Nhân Viên Cấp Dưới",
+    "subordinate_name": "Tên Nhân Viên Cấp Dưới",
+    "subordinatesalary": "Lương Cấp Dưới ($)",
+    "subordinate_salary": "Lương Cấp Dưới ($)",
+    "salarydifference": "Chênh Lệch Lương ($)",
+    "salary_difference": "Chênh Lệch Lương ($)",
+    "avgyearsofservice": "Thâm Niên Trung Bình (Năm)",
+    "avg_years_of_service": "Thâm Niên Trung Bình (Năm)",
+    "avgtenureyears": "Thâm Niên Trung Bình (Năm)",
+    "avg_tenure_years": "Thâm Niên Trung Bình (Năm)",
     "avg_salary": "Lương Trung Bình",
     "avgsalary": "Lương Trung Bình",
     "averagesalary": "Lương Trung Bình",
@@ -861,27 +883,41 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     # Kiểm tra độ tương thích về thang đo (tránh vẽ lương 150,000 chung trục với số lần 18)
                     if len(active_measures) >= 2:
                         numeric_ms = [m for m in active_measures if pd.api.types.is_numeric_dtype(plot_df[m])]
-                        max_vals = [float(plot_df[m].abs().max()) for m in numeric_ms if float(plot_df[m].abs().max()) > 0]
-                        if len(max_vals) >= 2 and (max(max_vals) / min(max_vals)) > 20:
-                            if user_asked_efficiency and any(c in numeric_ms for c in eff_cols):
-                                # Khi hỏi hiệu quả, ưu tiên chọn chỉ số hiệu quả (AvgOrderValue, ProfitMargin, ProfitPerBox...) thay vì rơi về TotalSales
-                                candidate_effs = [c for c in eff_cols if c in numeric_ms]
-                                if any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]) and any(any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"]) for c in candidate_effs):
-                                    primary_m = [c for c in candidate_effs if any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"])][0]
-                                elif any(k in uq_low for k in ["mỗi hộp", "per box", "hộp"]) and any(any(k in c.lower() for k in ["perbox", "per_box"]) for c in candidate_effs):
-                                    primary_m = [c for c in candidate_effs if any(k in c.lower() for k in ["perbox", "per_box"])][0]
+                        has_mgr_sal = [c for c in numeric_ms if any(k in c.lower() for k in ["managersalary", "manager_salary"])]
+                        has_sub_sal = [c for c in numeric_ms if any(k in c.lower() for k in ["maxsubordinatesalary", "max_subordinate_salary", "subordinatesalary", "subordinate_salary"])]
+
+                        if has_mgr_sal and has_sub_sal:
+                            active_measures = [has_mgr_sal[0], has_sub_sal[0]]
+                            chart_title = f"So Sánh Lương Quản Lý vs Lương Cấp Dưới Cao Nhất theo {format_col_title(label_name)} (Grouped Bar)"
+                        else:
+                            max_vals = [float(plot_df[m].abs().max()) for m in numeric_ms if float(plot_df[m].abs().max()) > 0]
+                            if len(max_vals) >= 2 and (max(max_vals) / min(max_vals)) > 20:
+                                if user_asked_efficiency and any(c in numeric_ms for c in eff_cols):
+                                    # Khi hỏi hiệu quả, ưu tiên chọn chỉ số hiệu quả (AvgOrderValue, ProfitMargin, ProfitPerBox...) thay vì rơi về TotalSales
+                                    candidate_effs = [c for c in eff_cols if c in numeric_ms]
+                                    if any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]) and any(any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"]) for c in candidate_effs):
+                                        primary_m = [c for c in candidate_effs if any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"])][0]
+                                    elif any(k in uq_low for k in ["mỗi hộp", "per box", "hộp"]) and any(any(k in c.lower() for k in ["perbox", "per_box"]) for c in candidate_effs):
+                                        primary_m = [c for c in candidate_effs if any(k in c.lower() for k in ["perbox", "per_box"])][0]
+                                    else:
+                                        primary_m = candidate_effs[0]
+                                elif any(k in uq_low for k in ["tăng trưởng", "tốc độ", "mức tăng", "tăng lương trung bình", "mỗi năm"]) and any(any(k in c.lower() for k in ["avgannualsalarygrowth", "annualgrowth", "growth"]) for c in numeric_ms):
+                                    primary_m = [c for c in numeric_ms if any(k in c.lower() for k in ["avgannualsalarygrowth", "annualgrowth", "growth"])][0]
+                                    active_measures = [primary_m]
+                                    chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
+                                elif any(k in uq_low for k in ["tăng lương", "lần tăng", "số lần", "được tăng"]) and any(any(k in c.lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "số lần", "lần tăng"]) for c in numeric_ms):
+                                    primary_m = [c for c in numeric_ms if any(k in c.lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "số lần", "lần tăng"])][0]
+                                    active_measures = [primary_m]
+                                    chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
+                                elif any(k in uq_low for k in ["thâm niên", "tenure", "years of service", "cống hiến", "gắn bó"]) and any(any(k in c.lower() for k in ["yearsofservice", "years_of_service", "avgyears", "tenure"]) for c in numeric_ms):
+                                    primary_m = [c for c in numeric_ms if any(k in c.lower() for k in ["yearsofservice", "years_of_service", "avgyears", "tenure"])][0]
+                                    active_measures = [primary_m]
+                                    chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
                                 else:
-                                    primary_m = candidate_effs[0]
-                                active_measures = [primary_m]
-                            elif any(k in uq_low for k in ["tăng lương", "lần tăng", "số lần", "được tăng"]) and any(any(k in c.lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "số lần", "lần tăng"]) for c in numeric_ms):
-                                primary_m = [c for c in numeric_ms if any(k in c.lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "số lần", "lần tăng"])][0]
-                                active_measures = [primary_m]
-                                chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
-                            else:
-                                # Chênh lệch trên 20 lần: Ưu tiên cột có độ lệch chuẩn và giá trị lớn nhất (ví dụ CurrentSalary)
-                                primary_m = max(numeric_ms, key=lambda m: (float(plot_df[m].std() or 0), float(plot_df[m].max() or 0)))
-                                active_measures = [primary_m]
-                                chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
+                                    # Chênh lệch trên 20 lần: Ưu tiên cột có độ lệch chuẩn và giá trị lớn nhất (ví dụ CurrentSalary)
+                                    primary_m = max(numeric_ms, key=lambda m: (float(plot_df[m].std() or 0), float(plot_df[m].max() or 0)))
+                                    active_measures = [primary_m]
+                                    chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
 
 
                     if total_rows > 30:
@@ -910,7 +946,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if not is_composition_100 and any("malepct" in c.lower() for c in active_measures) and any("femalepct" in c.lower() for c in active_measures):
                         is_composition_100 = True
 
-                    # Tùy chỉnh màu sắc chuyên nghiệp cho các phân loại đặc thù (như Giới tính Nam / Nữ)
+                    # Tùy chỉnh màu sắc chuyên nghiệp cho các phân loại đặc thù (như Giới tính Nam / Nữ, Quản lý / Cấp dưới)
                     color_map = {}
                     for col in active_measures:
                         cl = col.lower()
@@ -918,6 +954,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             color_map[col] = "#EC4899"  # Hồng/Cam san hô hiện đại cho Nữ
                         elif any(k in cl for k in ["male", "nam", "men"]):
                             color_map[col] = "#2563EB"  # Xanh dương hiện đại cho Nam
+                        elif any(k in cl for k in ["managersalary", "manager_salary"]):
+                            color_map[col] = "#2563EB"  # Xanh dương cho Quản lý
+                        elif any(k in cl for k in ["maxsubordinatesalary", "max_subordinate_salary", "subordinatesalary"]):
+                            color_map[col] = "#10B981"  # Xanh lá ngọc cho Nhân viên cấp dưới (nổi bật hơn)
 
                     is_salary_measure = any(
                         any(k in c.lower() for k in ["salary", "lương", "luong", "pay", "income", "wage", "thu nhập", "budget", "quỹ", "cost", "tiền"])
@@ -929,6 +969,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         is_salary_measure and
                         any(any(k in c.lower() for k in ["female", "nu", "nữ"]) for c in active_measures) and
                         any(any(k in c.lower() for k in ["male", "nam"]) for c in active_measures)
+                    )
+
+                    is_mgr_sub_salary_comp = (
+                        len(active_measures) == 2 and
+                        any(any(k in c.lower() for k in ["manager", "quản lý"]) for c in active_measures) and
+                        any(any(k in c.lower() for k in ["subordinate", "cấp dưới"]) for c in active_measures)
                     )
 
                     is_headcount_salary_comp = (
@@ -953,6 +999,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         chart_title = f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
                     elif is_gender_salary_comp:
                         chart_title = f"So Sánh Mức Lương Trung Bình Nam vs Nữ theo {format_col_title(label_name)} (Grouped Bar)"
+                    elif is_mgr_sub_salary_comp:
+                        chart_title = f"So Sánh Lương Quản Lý vs Lương Cấp Dưới Cao Nhất theo {format_col_title(label_name)} (Grouped Bar)"
                     elif is_headcount_salary_comp:
                         chart_title = f"So Sánh Quy Mô Nhân Sự & Mức Lương Trung Bình theo {format_col_title(label_name)} (Grouped Bar)"
 

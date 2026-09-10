@@ -25,6 +25,8 @@ from src.analytics.heuristics import (
 )
 from src.analytics.anomaly import analyze_data_anomalies
 from .client import call_llm
+from .router_planner import route_and_plan
+from .evaluator import evaluate_execution
 from .prompts import (
     build_sql_prompt,
     build_fix_prompt,
@@ -211,13 +213,16 @@ def extract_requested_limit(user_query: str) -> int | None:
     if m:
         return int(m.group(1))
 
+    # Loại trừ các biểu thức điều kiện ngưỡng (vd: 'ít nhất 2 phòng ban', 'từ 5 đơn hàng') để không nhận nhầm thành Limit
+    cleaned = re.sub(r"\b(?:ít nhất|tối thiểu|từ|qua|hơn|trên|dưới|nhiều hơn|nhỏ hơn|lớn hơn)\s+\d+\s+(?:nhân viên|người|chức danh|vị trí|phòng ban|phòng|sản phẩm|khách hàng|đơn hàng|món)\b", "", user_query, flags=re.IGNORECASE)
+
     # 2. Khớp các biến thể tiếng Việt: '10 nhân viên', '10 người', '10 chức danh', '10 sản phẩm'
-    m2 = re.search(r"\b(\d+)\s+(?:nhân viên|người|chức danh|vị trí|phòng ban|sản phẩm|khách hàng|đơn hàng|món)\b", user_query, re.IGNORECASE)
+    m2 = re.search(r"\b(\d+)\s+(?:nhân viên|người|chức danh|vị trí|phòng ban|phòng|sản phẩm|khách hàng|đơn hàng|món)\b", cleaned, re.IGNORECASE)
     if m2:
         return int(m2.group(1))
 
     # 3. Khớp 'danh sách 10', 'lấy 10', 'cho tôi 10'
-    m3 = re.search(r"\b(?:danh\s+sách|lấy|cho\s+tôi|xem)\s+(\d+)\b", user_query, re.IGNORECASE)
+    m3 = re.search(r"\b(?:danh\s+sách|lấy|cho\s+tôi|xem)\s+(\d+)\b", cleaned, re.IGNORECASE)
     if m3:
         return int(m3.group(1))
 
@@ -268,7 +273,7 @@ def auto_fix_top_employee_salary_query(sql: str, user_query: str, dialect: str =
             and any(k in q_low for k in ["lương", "thu nhập", "salary"])
             and any(k in q_low for k in ["cao nhất", "thấp nhất", "lớn nhất", "nhỏ nhất", "cao"])
         )
-    ) and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "sales", "phòng", "công ty", "toàn công ty", "emp", "employee", "employees"]) and not any(k in q_low for k in ["chức danh", "title", "nam và nữ", "quỹ lương", "chênh lệch lương", "so sánh", "manager", "trưởng phòng", "giám đốc", "lãnh đạo", "tăng lương", "thâm niên", "lâu nhất", "gắn bó"])
+    ) and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "sales", "phòng", "công ty", "toàn công ty", "emp", "employee", "employees"]) and not any(k in q_low for k in ["chức danh", "title", "nam và nữ", "quỹ lương", "chênh lệch lương", "so sánh", "manager", "trưởng phòng", "giám đốc", "lãnh đạo", "tăng lương", "thâm niên", "lâu nhất", "gắn bó", "tăng trưởng", "tốc độ", "mỗi năm", "tăng lương trung bình"])
 
     if not is_top_salary:
         return sql
@@ -324,6 +329,85 @@ LIMIT {req_limit}""".strip()
     # Nếu câu SQL đã có đủ cấu trúc, đảm bảo LIMIT đúng theo yêu cầu
     if not re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE):
         sql = sql.rstrip(";").strip() + f" LIMIT {req_limit}"
+
+    return sql
+
+
+def auto_fix_employee_salary_growth_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu truy vấn Top nhân viên có tốc độ / mức tăng trưởng lương trung bình mỗi năm cao nhất
+    (toàn công ty hoặc theo từng phòng ban cụ thể).
+    Tính toán hiệu quả dựa trên Lương khởi điểm (s_start.from_date = e.hire_date) và Lương hiện tại (s_curr.to_date = '9999-01-01').
+    """
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    is_salary_growth = (
+        any(k in q_low for k in ["tăng trưởng lương", "tốc độ tăng trưởng", "tăng lương trung bình", "tăng trưởng", "tốc độ tăng", "mức tăng lương"])
+        and any(k in q_low for k in ["mỗi năm", "hàng năm", "từng năm", "theo năm", "bình quân năm", "năm"])
+        and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "top", "danh sách", "ai có"])
+        and any(k in q_low for k in ["lương", "salary", "thu nhập"])
+    )
+    if not is_salary_growth:
+        return sql
+
+    req_limit = extract_requested_limit(user_query) or 5
+
+    # Nhận diện phòng ban mục tiêu
+    dept_map = [
+        (["sales", "kinh doanh", "bán hàng"], "Sales"),
+        (["marketing", "tiếp thị"], "Marketing"),
+        (["development", "phát triển", "lập trình", "dev"], "Development"),
+        (["research", "nghiên cứu", "r&d"], "Research"),
+        (["finance", "tài chính", "kế toán"], "Finance"),
+        (["production", "sản xuất"], "Production"),
+        (["human resources", "nhân sự", "hr", "tuyển dụng"], "Human Resources"),
+        (["quality management", "quản lý chất lượng", "qa", "qc", "chất lượng"], "Quality Management"),
+        (["customer service", "chăm sóc khách hàng", "cskh", "dịch vụ khách hàng"], "Customer Service"),
+    ]
+    target_dept = None
+    for keywords, dept_name in dept_map:
+        if any(k in q_low for k in keywords):
+            target_dept = dept_name
+            break
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    concat_expr = "e.first_name || ' ' || e.last_name" if is_sqlite else "CONCAT(e.first_name, ' ', e.last_name)"
+    date_diff_expr = "(julianday(s_curr.from_date) - julianday(s_start.from_date)) / 365.25" if is_sqlite else "(DATEDIFF(s_curr.from_date, s_start.from_date) / 365.25)"
+    min_days_filter = "julianday(s_curr.from_date) - julianday(s_start.from_date) >= 365" if is_sqlite else "DATEDIFF(s_curr.from_date, s_start.from_date) >= 365"
+
+    dept_filter = f"d.dept_name = '{target_dept}' AND " if target_dept else ""
+
+    lowered_sql = (sql or "").lower()
+    has_growth_calc = ("avgannualsalarygrowth" in lowered_sql or "salary_growth" in lowered_sql or 
+                       ("s_curr.salary - s_start.salary" in lowered_sql) or 
+                       ("max(s.salary) - min(s.salary)" in lowered_sql))
+    has_dept_filter = (target_dept is None) or (target_dept.lower() in lowered_sql)
+    has_name_col = ("fullname" in lowered_sql) or ("first_name" in lowered_sql)
+    has_necessary_tables = all(tbl in lowered_sql for tbl in ["salaries", "employees", "dept_emp", "departments"])
+
+    is_broken = (not has_growth_calc or not has_dept_filter or not has_name_col or not has_necessary_tables or not sql)
+
+    if is_broken:
+        return f"""SELECT 
+    e.emp_no,
+    {concat_expr} AS FullName,
+    d.dept_name AS Department,
+    s_start.salary AS StartingSalary,
+    s_curr.salary AS CurrentSalary,
+    ROUND((s_curr.salary - s_start.salary) / {date_diff_expr}, 2) AS AvgAnnualSalaryGrowth
+FROM dept_emp de
+JOIN departments d ON de.dept_no = d.dept_no
+JOIN employees e ON de.emp_no = e.emp_no
+JOIN salaries s_start ON e.emp_no = s_start.emp_no AND s_start.from_date = e.hire_date
+JOIN salaries s_curr ON e.emp_no = s_curr.emp_no AND s_curr.to_date = '9999-01-01'
+WHERE {dept_filter}de.to_date = '9999-01-01'
+  AND {min_days_filter}
+ORDER BY AvgAnnualSalaryGrowth DESC
+LIMIT {req_limit};""".strip()
+
+    if not re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE):
+        sql = sql.rstrip(";").strip() + f" LIMIT {req_limit};"
 
     return sql
 
@@ -522,6 +606,47 @@ ORDER BY e.hire_date ASC, YearsOfService DESC
 LIMIT {top_n}"""
 
     return sql
+
+
+def auto_fix_title_tenure_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu hỏi về top chức danh có thâm niên trung bình cao nhất tại công ty."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_title_tenure = (
+        any(k in q_low for k in ["chức danh", "title", "vị trí"])
+        and any(k in q_low for k in ["thâm niên", "tenure", "cống hiến", "gắn bó", "lâu năm", "lâu nhất"])
+        and any(k in q_low for k in ["trung bình", "avg", "cao nhất", "nhiều nhất", "top"])
+    )
+    if not is_title_tenure:
+        return sql
+
+    top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
+    req_limit = int(top_m.group(1)) if top_m else 5
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    if is_sqlite:
+        return f"""SELECT 
+    t.title AS Title,
+    ROUND(AVG((julianday(CASE WHEN t.to_date = '9999-01-01' THEN '2002-08-01' ELSE t.to_date END) - julianday(e.hire_date)) / 365.25), 2) AS AvgYearsOfService,
+    COUNT(DISTINCT e.emp_no) AS TotalEmployees
+FROM titles t
+JOIN employees e ON t.emp_no = e.emp_no
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY AvgYearsOfService DESC
+LIMIT {req_limit}"""
+    else:
+        return f"""SELECT 
+    t.title AS Title,
+    ROUND(AVG(DATEDIFF(IF(t.to_date = '9999-01-01', '2002-08-01', t.to_date), e.hire_date) / 365.25), 2) AS AvgYearsOfService,
+    COUNT(DISTINCT e.emp_no) AS TotalEmployees
+FROM titles t
+JOIN employees e ON t.emp_no = e.emp_no
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY AvgYearsOfService DESC
+LIMIT {req_limit}"""
 
 
 def auto_fix_payroll_query(sql: str, user_query: str) -> str:
@@ -799,6 +924,13 @@ def auto_fix_current_manager_salary_query(sql: str, user_query: str) -> str:
     if not sql or not user_query:
         return sql
     q_low = user_query.lower()
+    is_subordinate_compare = any(k in q_low for k in [
+        "cấp dưới", "dưới quyền", "nhân viên", "thấp hơn", "kém hơn", "cao hơn", 
+        "so sánh", "chênh lệch", "thấp hơn cả", "thua", "subordinate", "vượt"
+    ])
+    if is_subordinate_compare:
+        return sql
+
     is_manager_salary = (
         any(k in q_low for k in ["manager", "trưởng phòng", "ban quản lý", "lãnh đạo phòng"])
         and any(k in q_low for k in ["lương", "thu nhập", "salary"])
@@ -827,6 +959,71 @@ WHERE dm.to_date = '9999-01-01'
 ORDER BY CurrentSalary DESC"""
 
     return sql
+
+
+def auto_fix_manager_vs_subordinate_salary_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa câu hỏi so sánh mức lương giữa Quản lý (Manager) và nhân viên cấp dưới trực thuộc cùng phòng ban."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_mgr_sub_comp = (
+        any(k in q_low for k in ["manager", "trưởng phòng", "ban quản lý", "quản lý", "lãnh đạo phòng"])
+        and any(k in q_low for k in ["cấp dưới", "dưới quyền", "nhân viên", "trực thuộc", "cùng phòng"])
+        and any(k in q_low for k in ["thấp hơn", "kém hơn", "cao hơn", "lớn hơn", "vượt", "so sánh", "chênh lệch", "thấp hơn cả", "thua"])
+        and any(k in q_low for k in ["lương", "salary", "thu nhập"])
+    )
+    if not is_mgr_sub_comp:
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    concat_mgr = "em.first_name || ' ' || em.last_name" if is_sqlite else "CONCAT(em.first_name, ' ', em.last_name)"
+    concat_sub = "ee.first_name || ' ' || ee.last_name" if is_sqlite else "CONCAT(ee.first_name, ' ', ee.last_name)"
+
+    is_asking_subordinates = (
+        any(k in q_low for k in ["nhân viên nào", "ai là những nhân viên", "những nhân viên", "danh sách nhân viên"])
+        and not any(k in q_low for k in ["ai là những quản lý", "quản lý nào", "những quản lý"])
+    )
+
+    top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
+    req_limit = int(top_m.group(1)) if top_m else 10
+
+    if is_asking_subordinates:
+        return f"""SELECT 
+    d.dept_name AS Department,
+    {concat_sub} AS SubordinateName,
+    se.salary AS SubordinateSalary,
+    {concat_mgr} AS ManagerName,
+    sm.salary AS ManagerSalary,
+    se.salary - sm.salary AS SalaryDifference
+FROM dept_manager dm
+JOIN departments d ON dm.dept_no = d.dept_no
+JOIN employees em ON dm.emp_no = em.emp_no
+JOIN salaries sm ON dm.emp_no = sm.emp_no AND sm.to_date = '9999-01-01'
+JOIN dept_emp de ON dm.dept_no = de.dept_no AND de.to_date = '9999-01-01' AND de.emp_no != dm.emp_no
+JOIN employees ee ON de.emp_no = ee.emp_no
+JOIN salaries se ON de.emp_no = se.emp_no AND se.to_date = '9999-01-01'
+WHERE dm.to_date = '9999-01-01'
+  AND se.salary > sm.salary
+ORDER BY SalaryDifference DESC
+LIMIT {req_limit}"""
+    else:
+        return f"""SELECT 
+    d.dept_name AS Department,
+    {concat_mgr} AS ManagerName,
+    sm.salary AS ManagerSalary,
+    MAX(se.salary) AS MaxSubordinateSalary,
+    MAX(se.salary) - sm.salary AS SalaryGap,
+    COUNT(DISTINCT de.emp_no) AS SubordinatesWithHigherSalary
+FROM dept_manager dm
+JOIN departments d ON dm.dept_no = d.dept_no
+JOIN employees em ON dm.emp_no = em.emp_no
+JOIN salaries sm ON dm.emp_no = sm.emp_no AND sm.to_date = '9999-01-01'
+JOIN dept_emp de ON dm.dept_no = de.dept_no AND de.to_date = '9999-01-01' AND de.emp_no != dm.emp_no
+JOIN salaries se ON de.emp_no = se.emp_no AND se.to_date = '9999-01-01'
+WHERE dm.to_date = '9999-01-01'
+  AND se.salary > sm.salary
+GROUP BY d.dept_name, ManagerName, sm.salary
+ORDER BY SalaryGap DESC"""
 
 
 def auto_fix_department_group_salary_query(sql: str, user_query: str) -> str:
@@ -929,6 +1126,95 @@ GROUP BY d.dept_name
 ORDER BY Headcount DESC"""
 
 
+def auto_fix_multi_dept_employees_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu truy vấn liệt kê nhân viên từng làm việc ở nhiều phòng ban (>= 2 phòng ban),
+    kèm theo chức danh hiện tại và phòng ban hiện tại (nếu có yêu cầu chức danh như Senior Engineer, Engineer, v.v.).
+    """
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    # Nhận diện câu hỏi về nhân viên từng làm việc qua nhiều phòng ban
+    has_multi_dept_kw = (
+        any(k in q_low for k in [
+            "nhiều phòng ban", "nhiều phòng", "ít nhất 2 phòng", "ít nhất 2 phòng ban",
+            "từ 2 phòng", "từ 2 phòng ban", "qua 2 phòng", "qua 2 phòng ban",
+            "2 phòng ban", "2 phòng ban khác nhau", "2 phòng khác nhau",
+            "chuyển phòng ban", "luân chuyển phòng", "luân chuyển công tác",
+            "ít nhất hai phòng ban", "nhiều hơn một phòng ban", "nhiều hơn 1 phòng ban"
+        ])
+        or bool(re.search(r"(?:ít nhất|tối thiểu|từ|qua|hơn)\s*\d+\s*phòng", q_low))
+    )
+    has_emp_kw = any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "danh sách", "liệt kê", "employee", "employees"])
+    has_dept_kw = any(k in q_low for k in ["phòng ban", "phòng", "department"])
+
+    if not (has_multi_dept_kw and has_emp_kw and has_dept_kw):
+        return sql
+
+    # Trích xuất số phòng ban tối thiểu (mặc định là 2)
+    min_depts = 2
+    m_dept = re.search(r"(?:ít nhất|tối thiểu|từ|qua)\s*(\d+)\s*phòng", q_low)
+    if m_dept:
+        try:
+            min_depts = int(m_dept.group(1))
+        except ValueError:
+            min_depts = 2
+    elif any(k in q_low for k in ["nhiều hơn một", "nhiều hơn 1"]):
+        min_depts = 2
+
+    # Nhận diện chức danh mục tiêu nếu có
+    title_map = [
+        (["senior engineer", "kỹ sư cao cấp", "senior dev"], "Senior Engineer"),
+        (["senior staff", "nhân viên cao cấp"], "Senior Staff"),
+        (["assistant engineer", "trợ lý kỹ sư"], "Assistant Engineer"),
+        (["technique leader", "technical leader", "tech lead", "trưởng nhóm kỹ thuật", "trưởng kỹ thuật"], "Technique Leader"),
+        (["engineer", "kỹ sư"], "Engineer"),
+        (["manager", "trưởng phòng", "quản lý"], "Manager"),
+        (["staff", "chuyên viên"], "Staff"),
+    ]
+    target_title = None
+    for kws, t_name in title_map:
+        if any(k in q_low for k in kws):
+            target_title = t_name
+            break
+
+    req_limit = extract_requested_limit(user_query) or 10
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    concat_expr = "e.first_name || ' ' || e.last_name" if is_sqlite else "CONCAT(e.first_name, ' ', e.last_name)"
+
+    lowered_sql = (sql or "").lower()
+    has_necessary_tables = all(tbl in lowered_sql for tbl in ["employees", "titles", "dept_emp", "departments"])
+    has_having_dept_count = "having" in lowered_sql and ("count" in lowered_sql)
+    has_title_filter = (target_title is None) or (target_title.lower() in lowered_sql)
+    has_current_filter = "9999-01-01" in lowered_sql
+    has_leak = any(k in lowered_sql for k in ["datediff", "yearsofservice", "hireyear"])
+
+    is_broken = (not has_necessary_tables or not has_having_dept_count or not has_title_filter or not has_current_filter or has_leak or not sql)
+
+    if is_broken:
+        title_where = f"WHERE t.title = '{target_title}'\n" if target_title else ""
+        return f"""SELECT 
+    e.emp_no,
+    {concat_expr} AS FullName,
+    t.title AS CurrentTitle,
+    d.dept_name AS CurrentDepartment,
+    COUNT(DISTINCT de.dept_no) AS DepartmentCount
+FROM employees e
+JOIN titles t ON e.emp_no = t.emp_no AND t.to_date = '9999-01-01'
+JOIN dept_emp de ON e.emp_no = de.emp_no
+JOIN dept_emp de_curr ON e.emp_no = de_curr.emp_no AND de_curr.to_date = '9999-01-01'
+JOIN departments d ON de_curr.dept_no = d.dept_no
+{title_where}GROUP BY e.emp_no, FullName, t.title, d.dept_name
+HAVING COUNT(DISTINCT de.dept_no) >= {min_depts}
+ORDER BY DepartmentCount DESC, e.emp_no ASC
+LIMIT {req_limit};""".strip()
+
+    if not re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE):
+        sql = sql.rstrip(";").strip() + f" LIMIT {req_limit};"
+
+    return sql
+
+
 def auto_fix_dept_size_min_max_query(sql: str, user_query: str) -> str:
     """Tự động chuẩn hóa câu hỏi về quy mô nhân sự phòng ban lớn nhất và/hoặc nhỏ nhất.
     Khi người dùng hỏi phòng ban có quy mô lớn nhất VÀ nhỏ nhất, BẮT BUỘC chỉ xuất ra đúng 2 phòng ban tương ứng với 2 cực trị (lớn nhất & nhỏ nhất),
@@ -937,9 +1223,18 @@ def auto_fix_dept_size_min_max_query(sql: str, user_query: str) -> str:
     if not user_query:
         return sql
     q_low = user_query.lower()
+
+    # Guard 1: Tuyệt đối không can thiệp nếu là câu hỏi có ngưỡng số lượng (vd: "ít nhất 2 phòng ban", "từ 2 phòng", "trên 100 người")
+    if re.search(r"(?:ít nhất|tối thiểu|từ|trên|nhiều hơn|hơn)\s+\d+", q_low):
+        return sql
+
+    # Guard 2: Tuyệt đối không can thiệp nếu là câu hỏi liệt kê danh sách cá nhân nhân viên hoặc chức danh
+    if any(k in q_low for k in ["liệt kê", "danh sách", "những nhân viên", "các nhân viên", "nhân viên nào", "ai là", "từng làm", "chức danh", "title", "senior", "engineer", "staff", "manager", "leader"]):
+        return sql
+
     is_min_max_size = (
-        any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhất"])
-        and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "đông nhất"])
+        any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhân sự nhất", "ít nhân viên nhất", "ít người nhất"])
+        and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "đông nhất"])
         and any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"])
         and not any(k in q_low for k in ["lương", "salary", "thu nhập", "chênh lệch lương", "khoảng cách lương"])
     )
@@ -3061,6 +3356,14 @@ def run_agent(
         "anomalies_info": None,
         "insights": None,
         "followups": [],
+        "plan": None,
+        "evaluator": None,
+        "agent_trace": {
+            "router": None,
+            "planner": None,
+            "executor": None,
+            "evaluator": None,
+        },
     }
 
     # 0.1 Kiểm tra sự tương thích giữa câu hỏi và CSDL hiện tại (Domain Mismatch Pre-check)
@@ -3103,21 +3406,25 @@ def run_agent(
         if not sql_cur:
             return sql_cur
         if is_employees_db:
+            sql_cur = auto_fix_employee_salary_growth_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_top_employee_salary_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_yearly_salary_trend_query(sql_cur, user_query)
             sql_cur = auto_fix_title_assignments_query(sql_cur, user_query)
             sql_cur = auto_fix_company_hiring_trend_query(sql_cur, user_query)
             sql_cur = auto_fix_longest_managers_query(sql_cur, user_query)
             sql_cur = auto_fix_top_tenured_employees_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_title_tenure_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_payroll_query(sql_cur, user_query)
             sql_cur = auto_fix_gender_ratio_query(sql_cur, user_query)
             sql_cur = auto_fix_raises_query(sql_cur, user_query)
             sql_cur = auto_fix_department_comparison_query(sql_cur, user_query)
             sql_cur = auto_fix_title_gender_salary_query(sql_cur, user_query)
+            sql_cur = auto_fix_manager_vs_subordinate_salary_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_current_manager_salary_query(sql_cur, user_query)
             sql_cur = auto_fix_department_group_salary_query(sql_cur, user_query)
             sql_cur = auto_fix_department_single_vs_others_salary_query(sql_cur, user_query)
             sql_cur = auto_fix_department_single_vs_others_headcount_query(sql_cur, user_query)
+            sql_cur = auto_fix_multi_dept_employees_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_dept_size_min_max_query(sql_cur, user_query)
             sql_cur = auto_fix_salary_spread_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
@@ -3135,9 +3442,39 @@ def run_agent(
             sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         return sql_cur
 
+    # 0.2 TẦNG 1: ROUTER & TASK PLANNER (Chia để trị / Phân luồng & Lập kế hoạch thực thi)
+    if status_callback:
+        status_callback("🧭 [Router & Planner] Phân tích câu hỏi & Lập kế hoạch thực thi...")
+
+    plan = route_and_plan(
+        user_query=user_query,
+        schema_context=schema_context,
+        dialect=dialect,
+        client=client,
+        provider=provider,
+        model_name=model_name,
+        lang=lang
+    )
+    result["plan"] = plan
+    result["agent_trace"]["router"] = {
+        "complexity": plan["complexity"],
+        "intent": plan["intent"],
+        "target_entities": plan["target_entities"],
+        "target_metrics": plan["target_metrics"],
+        "time_horizon": plan["time_horizon"],
+    }
+    result["agent_trace"]["planner"] = {
+        "num_steps": plan["num_steps"],
+        "sub_tasks": plan["sub_tasks"],
+        "execution_strategy": plan["execution_strategy"],
+    }
+
+    sub_tasks_str = " ➔ ".join(f"[{st['step']}] {st['name']}" for st in plan["sub_tasks"])
+    result["logs"].append(f"🧭 [Router & Planner] Độ phức tạp: {plan['complexity']} ({plan['num_steps']} bước): {sub_tasks_str}")
+
     # 1. Sinh SQL ban đầu
     if status_callback:
-        status_callback("🤖 Đang phân tích câu hỏi & tạo câu lệnh SQL tối ưu...")
+        status_callback(f"🤖 [Task Planner] Khởi chạy kế hoạch {plan['num_steps']} bước & Tối ưu hóa câu lệnh SQL...")
 
     initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=300)
@@ -3241,62 +3578,89 @@ def run_agent(
                 if name_cols:
                     df = df.drop_duplicates(subset=[name_cols[0]]).reset_index(drop=True)
 
-            # Fast-path: Nếu câu lệnh thành công ngay lần đầu hoặc dùng Ollama cục bộ
-            # Bỏ qua lượt gọi QA LLM để tiết kiệm thời gian chờ cho người dùng
-            should_run_qa = enable_self_check and (provider != "Ollama (Local AI Offline)") and (attempt > 1)
-            if should_run_qa:
-                check = self_check_sql(client, provider, model_name, schema_context, user_query, sql_query, df, lang=lang)
-            else:
-                check = {"day_du": True, "ly_do": "SQL hợp lệ (Tối ưu tốc độ)."}
+            # 2.3 TẦNG 2: EVALUATOR GUARDRAIL (Tác tử Phản biện & Kiểm định Nghiệp vụ)
+            if status_callback:
+                status_callback("🛡️ [Evaluator Critic] Đang kiểm định 4 tiêu chí chất lượng...")
 
-            if check.get("day_du", True) or attempt == 3:
-                if check.get("day_du", True):
-                    result["logs"].append(f"✅ Kiểm định SQL OK: {check.get('ly_do', 'SQL hợp lệ')}")
-                else:
-                    result["logs"].append(f"⚠️ Chấp nhận kết quả sau {attempt} lần thử: {check.get('ly_do', '')}")
-
-                df = ensure_full_twelve_months(df, user_query)
-                df = ensure_full_four_quarters(df, user_query)
-                df = ensure_ratio_column_if_requested(df, user_query)
-                df = ensure_efficiency_columns_if_requested(df, user_query)
-                result["df"] = df
-                result["sql"] = sql_query
-
-                # 3. Tự động phát hiện bất thường & sinh Insight Kinh doanh song song với Gợi ý tiếp nối
-                if df is not None and not df.empty:
-                    if status_callback:
-                        status_callback("📊 Đang phân tích Insight & Trực quan hóa dữ liệu...")
-
-                    anomalies_info = analyze_data_anomalies(df)
-                    result["anomalies_info"] = anomalies_info
-
-                    # Tối ưu hóa siêu tốc (Instant Grounded Analytics):
-                    # 1. Sinh câu hỏi gợi ý tiếp nối ngay lập tức trong 0.0001s theo 3 chiều chiến lược
-                    result["followups"] = generate_grounded_fallback_followups(df, schema_context=schema_context, current_query=user_query, lang=lang)
-
-                    # 2. Sinh Insight Phân Tích
-                    if enable_auto_insights:
-                        if provider == "Ollama (Local AI Offline)":
-                            # Với Ollama cục bộ: Dùng Data-Grounded Engine tức thì (0.001s) để phản hồi trong chớp mắt
-                            from src.analytics.heuristics import split_insight_sections
-                            sec = split_insight_sections("", df=df, user_query=user_query, is_en=(lang == "en"))
-                            result["insights"] = (
-                                f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{sec['anomaly']}\n\n"
-                                f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{sec['hypothesis']}\n\n"
-                                f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{sec['action_plan']}"
-                            )
-                        else:
-                            # Với Cloud (Gemini / OpenRouter): Gọi API
-                            result["insights"] = generate_auto_insights(client, provider, model_name, user_query, df, anomalies_info, lang=lang)
-
-                return result
-
-            result["logs"].append(f"⚠️ QA Self-check phát hiện vấn đề: {check.get('ly_do', '')}")
-            fix_prompt = build_fix_prompt(
-                schema_context, dialect, user_query, sql_query, check.get("ly_do", ""), lang=lang
+            eval_res = evaluate_execution(
+                user_query=user_query,
+                sql_query=sql_query,
+                df=df,
+                schema_context=schema_context,
+                plan=plan,
+                lang=lang
             )
-            fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
-            sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
+            result["evaluator"] = eval_res
+            result["agent_trace"]["evaluator"] = eval_res
+
+            # Nếu Evaluator chấm FAIL và chưa đạt tối đa số lần thử -> Kích hoạt Vòng Phản tỉnh (Self-Correction Reflection Loop)
+            if eval_res.get("verdict") == "FAIL" and attempt < 3:
+                critique_msg = eval_res.get("critique", "")
+                result["logs"].append(f"🛡️ [Evaluator Critic - FAIL ({eval_res.get('score', 0)}/100)] {critique_msg}")
+                result["logs"].append("🔄 [Self-Correction Reflection] Tác tử phản biện kích hoạt vòng lặp sinh lại có định hướng...")
+
+                eval_fix_reason = (
+                    f"EVALUATOR GUARDRAIL REJECTED THE PREVIOUS SQL RESULT:\n"
+                    f"Critique: {critique_msg}\n"
+                    f"Actionable requirements:\n{eval_res.get('actionable_feedback', '')}\n"
+                    f"Rewrite the SQL query to strictly satisfy all criteria!"
+                    if lang == "en" else
+                    f"TÁC TỬ PHẢN BIỆN (EVALUATOR) ĐÃ TỪ CHỐI KẾT QUẢ SQL TRƯỚC ĐÓ:\n"
+                    f"Lý do chưa đạt: {critique_msg}\n"
+                    f"Yêu cầu bắt buộc khắc phục:\n{eval_res.get('actionable_feedback', '')}\n"
+                    f"Hãy viết lại câu lệnh SQL để khắc phục triệt để các điểm trên!"
+                )
+                fix_prompt = build_fix_prompt(
+                    schema_context, dialect, user_query, sql_query, eval_fix_reason, lang=lang
+                )
+                fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+                sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
+                continue
+
+            result["logs"].append(f"🛡️ [Evaluator Critic - {eval_res.get('verdict', 'PASS')} ({eval_res.get('score', 100)}/100)] {eval_res.get('critique', '')}")
+
+            result["agent_trace"]["executor"] = {
+                "engine": dialect,
+                "attempts": attempt,
+                "rows_retrieved": len(df) if df is not None else 0,
+                "sql": sql_query,
+            }
+
+            df = ensure_full_twelve_months(df, user_query)
+            df = ensure_full_four_quarters(df, user_query)
+            df = ensure_ratio_column_if_requested(df, user_query)
+            df = ensure_efficiency_columns_if_requested(df, user_query)
+            result["df"] = df
+            result["sql"] = sql_query
+
+            # 3. Tự động phát hiện bất thường & sinh Insight Kinh doanh song song với Gợi ý tiếp nối
+            if df is not None and not df.empty:
+                if status_callback:
+                    status_callback("📊 Đang phân tích Insight & Trực quan hóa dữ liệu...")
+
+                anomalies_info = analyze_data_anomalies(df)
+                result["anomalies_info"] = anomalies_info
+
+                # Tối ưu hóa siêu tốc (Instant Grounded Analytics):
+                # 1. Sinh câu hỏi gợi ý tiếp nối ngay lập tức trong 0.0001s theo 3 chiều chiến lược
+                result["followups"] = generate_grounded_fallback_followups(df, schema_context=schema_context, current_query=user_query, lang=lang)
+
+                # 2. Sinh Insight Phân Tích
+                if enable_auto_insights:
+                    if provider == "Ollama (Local AI Offline)":
+                        # Với Ollama cục bộ: Dùng Data-Grounded Engine tức thì (0.001s) để phản hồi trong chớp mắt
+                        from src.analytics.heuristics import split_insight_sections
+                        sec = split_insight_sections("", df=df, user_query=user_query, is_en=(lang == "en"))
+                        result["insights"] = (
+                            f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{sec['anomaly']}\n\n"
+                            f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{sec['hypothesis']}\n\n"
+                            f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{sec['action_plan']}"
+                        )
+                    else:
+                        # Với Cloud (Gemini / OpenRouter): Gọi API
+                        result["insights"] = generate_auto_insights(client, provider, model_name, user_query, df, anomalies_info, lang=lang)
+
+            return result
 
         except Exception as e:
             error_msg = sanitize_error(str(e), db_pass)

@@ -3,6 +3,8 @@ LLM package for multi-provider AI communication, SQL generation agent, and autom
 """
 
 from .client import get_llm_client, call_llm, normalize_model_for_openrouter
+from .router_planner import route_and_plan, classify_query_complexity, decompose_subtasks
+from .evaluator import evaluate_execution
 from .agent import (
     run_agent,
     is_safe_select,
@@ -21,6 +23,10 @@ __all__ = [
     "get_llm_client",
     "call_llm",
     "normalize_model_for_openrouter",
+    "route_and_plan",
+    "classify_query_complexity",
+    "decompose_subtasks",
+    "evaluate_execution",
     "run_agent",
     "is_safe_select",
     "detect_duplicate_entity_warning",

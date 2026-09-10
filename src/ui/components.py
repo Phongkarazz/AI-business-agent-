@@ -930,6 +930,9 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_col = m_candidates[0] if m_candidates else eff_like_cols[0]
             else:
                 m_col = eff_like_cols[0]
+        elif any(k in _uq_low for k in ["tăng trưởng", "tốc độ", "mức tăng", "tăng lương trung bình", "mỗi năm"]) and any(any(k in str(c).lower() for k in ["avgannualsalarygrowth", "annualgrowth", "growth"]) for c in measure_cols):
+            growth_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["avgannualsalarygrowth", "annualgrowth", "growth"])]
+            m_col = growth_candidates[0]
         elif any(k in _uq_low for k in ["tăng lương", "lần tăng", "số lần", "được tăng"]):
             raises_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases", "lần tăng", "số lần", "raises", "num_raises"])]
             if raises_candidates:
@@ -952,7 +955,9 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             raw_m = str(m_col).replace("_", " ").strip()
         m_low = raw_m.lower()
         if not is_en:
-            if any(k in m_low for k in ["lợi nhuận", "profit", "net profit", "netprofit", "lãi"]) and not any(k in m_low for k in ["margin", "tỷ suất", "tỉ suất"]):
+            if any(k in m_low for k in ["avg annual salary growth", "avgannualsalarygrowth", "tăng trưởng lương"]):
+                m_clean = "Tăng Trưởng Lương TB/Năm"
+            elif any(k in m_low for k in ["lợi nhuận", "profit", "net profit", "netprofit", "lãi"]) and not any(k in m_low for k in ["margin", "tỷ suất", "tỉ suất"]):
                 m_clean = "Lợi Nhuận"
             elif any(k in m_low for k in ["chi phí", "cost", "tổng chi phí", "giá vốn", "cogs"]):
                 m_clean = "Tổng Chi Phí"
@@ -984,6 +989,8 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 m_clean = "Thâm Niên (Năm)"
             elif any(k in m_low for k in ["boxes", "boxessold", "totalboxessold", "total_boxes", "hộp", "thùng"]):
                 m_clean = "Tổng Số Hộp Bán Ra"
+            elif any(k in m_low for k in ["departmentcount", "department count", "dept count", "số phòng ban"]):
+                m_clean = "Số Phòng Ban Từng Công Tác"
             elif any(k in m_low for k in ["raisecount", "raise count", "numberofincreases", "salaryincreases", "salary increases", "lần tăng", "số lần", "num raises"]):
                 m_clean = "Số Lần Tăng Lương"
             else:
@@ -1089,9 +1096,14 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
                 "titleassignments", "title_assignments", "appointedemployees", "appointed_employees",
                 "bổ nhiệm", "chức danh mới",
             ])
+            _is_dept_count_measure = any(k in _m_col_lower for k in [
+                "departmentcount", "department_count", "dept_count", "deptcount", "phòng ban"
+            ])
             _year_unit = " Năm" if _is_years_measure else (
                 (" Lần" if not is_en else " times") if _is_raises_measure else (
-                    (" Lượt" if not is_en else " turns") if _is_appointment_measure else ""
+                    (" Lượt" if not is_en else " turns") if _is_appointment_measure else (
+                        (" Phòng" if not is_en else " Depts") if _is_dept_count_measure else ""
+                    )
                 )
             )
 
@@ -1103,9 +1115,9 @@ def render_executive_kpi_cards(df: pd.DataFrame, is_en: bool = False, user_query
             is_avg_or_rate = any(k in m_col.lower() for k in [
                 "avg", "average", "mean", "trung_bình", "rate", "ratio", "pct", "percent", "tỷ_lệ", "max", "min",
                 "profitmargin", "profit_margin", "profitperbox", "profit_per_box", "margin", "revenueperbox",
-                # Duration/Tenure measures — KHÔNG nên cộng tổng
+                # Duration/Tenure/Count per person measures — KHÔNG nên cộng tổng
                 "years", "yearsas", "year_as", "tenure", "thâm niên", "tham_nien",
-                "service", "duration", "thamnien",
+                "service", "duration", "thamnien", "departmentcount", "department_count", "dept_count"
             ])
 
             # Kiểm tra xem có phải là chuỗi thời gian (Time-series: Year, Month, Date...)
@@ -1601,6 +1613,54 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             st.markdown(p23)
 
 
+def render_agent_workflow_badges(result: dict, turn_id: str):
+    """Hiển thị dải tiến trình Tác tử Tự chủ (Autonomous Agent Trace) trên đầu giao diện:
+    - Tầng 1: Router & Planner (Độ phức tạp & số bước chia để trị)
+    - Tầng 2: SQL Execution (Công cụ truy vấn CSDL có chỉ mục)
+    - Tầng 3: Evaluator Guardrail (Tác tử phản biện kiểm định 4 tiêu chí)
+    """
+    lang = result.get("lang", "vi")
+    is_en = (lang == "en")
+    plan = result.get("plan") or {}
+    evaluator = result.get("evaluator") or {}
+
+    complexity = plan.get("complexity", "DIRECT_SQL")
+    num_steps = plan.get("num_steps", 2)
+    score = evaluator.get("score", 100)
+    verdict = evaluator.get("verdict", "PASS")
+
+    comp_badge_map = {
+        "MULTI_STEP_ANALYTIC": ("🧩 Phân tích Đa bước (Multi-step)", "#1E40AF", "#DBEAFE"),
+        "BENCHMARK_EXTREMES": ("⚖️ So sánh Cực trị (Dual Extremes)", "#065F46", "#D1FAE5"),
+        "TIME_SERIES_COHORT": ("📈 Chuỗi thời gian (Time-series)", "#9D174D", "#FCE7F3"),
+        "DIRECT_SQL": ("⚡ Truy vấn Trực tiếp (Direct SQL)", "#374151", "#F3F4F6"),
+    }
+    comp_text, comp_color, comp_bg = comp_badge_map.get(complexity, ("⚡ Truy vấn Trực tiếp", "#374151", "#F3F4F6"))
+    if is_en:
+        comp_text = complexity.replace("_", " ").title()
+
+    verdict_badge = "✅ PASS (100/100)" if verdict == "PASS" else f"⚠️ {verdict} ({score}/100)"
+    verdict_bg = "#ECFDF5" if verdict == "PASS" else "#FEF3C7"
+    verdict_color = "#065F46" if verdict == "PASS" else "#92400E"
+
+    title_label = "🧭 QUY TRÌNH TÁC TỬ TỰ CHỦ (AUTONOMOUS AGENT):" if not is_en else "🧭 AUTONOMOUS DATA AGENT WORKFLOW:"
+    hint_text = "Xem chi tiết tại tab <b>'Tiến trình Agent & SQL'</b>" if not is_en else "See full trace in <b>'Agent Trace & SQL'</b> tab"
+
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%); border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-weight: 700; font-size: 0.84rem; color: #334155;">{title_label}</span>
+            <span style="font-size: 0.78rem; font-weight: 600; background: {comp_bg}; color: {comp_color}; padding: 3px 8px; border-radius: 6px;">{comp_text} ({num_steps} bước)</span>
+            <span style="font-size: 0.78rem; font-weight: 600; background: #EEF2FF; color: #4338CA; padding: 3px 8px; border-radius: 6px;">⚡ Tối ưu SQL có Index</span>
+            <span style="font-size: 0.78rem; font-weight: 600; background: {verdict_bg}; color: {verdict_color}; padding: 3px 8px; border-radius: 6px;">🛡️ Phản biện: {verdict_badge}</span>
+        </div>
+        <div style="font-size: 0.75rem; color: #64748B;">
+            <i>{hint_text}</i>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def render_result(result: dict, turn_id: str):
     """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với thẻ KPI, bảng, biểu đồ, insight, dự báo và bộ xuất báo cáo đa định dạng."""
     lang = result.get("lang", "vi")
@@ -1717,11 +1777,14 @@ def render_result(result: dict, turn_id: str):
         caption_anom = f"🚨 **Detected {n_findings} statistical anomalies/trends**. See details in **'Insights & Analysis'** tab." if is_en else f"🚨 **Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Xem chi tiết tại tab **'Insight & Hành động'**."
         st.caption(caption_anom)
 
+    # Dải tiến trình Tác tử Tự chủ (Autonomous Agent Trace Badges)
+    render_agent_workflow_badges(result, turn_id)
+
     # 5. Cụm Tab Phân loại Thông tin (Progressive Disclosure Tabs)
     tab_data_label = "📋 Bảng số liệu & Báo cáo" if not is_en else "📋 Data Table & Reports"
     tab_insight_label = "💡 Insight & Hành động 🚨" if (has_anomaly and not is_en) else ("💡 Insight & Phân tích" if not is_en else ("💡 Insights & Anomalies 🚨" if has_anomaly else "💡 Insights & Analysis"))
     tab_forecast_label = "🔮 Dự báo xu hướng" if not is_en else "🔮 Forecast"
-    tab_sql_label = "🛠️ Câu lệnh SQL & Debug" if not is_en else "🛠️ SQL Query & Logs"
+    tab_sql_label = "🧭 Tiến trình Agent & SQL" if not is_en else "🧭 Agent Trace & SQL"
 
     tab_data, tab_insight, tab_forecast, tab_sql = st.tabs([tab_data_label, tab_insight_label, tab_forecast_label, tab_sql_label])
 
@@ -1967,9 +2030,69 @@ def render_result(result: dict, turn_id: str):
             st.caption(f"Phương pháp: {method}" if not is_en else f"Method: {method}")
 
     # -----------------------------------------------------
-    # TAB 4: CÂU LỆNH SQL & DEBUG LOGS
+    # TAB 4: TIẾN TRÌNH AGENT & CÂU LỆNH SQL
     # -----------------------------------------------------
     with tab_sql:
+        # PHẦN 1: KẾ HOẠCH PHÂN RÃ NHIỆM VỤ CON (Chia để trị - Plan-and-Solve)
+        plan = result.get("plan")
+        if plan and plan.get("sub_tasks"):
+            st.markdown("#### 🧭 " + ("Kế Hoạch Phân Rã Nhiệm Vụ Con (Chia để trị / Plan-and-Solve)" if not is_en else "Decomposed Sub-tasks Execution Plan"))
+            st.caption(
+                f"**Độ phức tạp bài toán**: `{plan.get('complexity')}` | **Chiến lược**: {plan.get('execution_strategy')}"
+                if not is_en else
+                f"**Query Complexity**: `{plan.get('complexity')}` | **Strategy**: {plan.get('execution_strategy')}"
+            )
+            for st_item in plan.get("sub_tasks", []):
+                st.markdown(f"""
+                <div style="background: #FFFFFF; border-left: 3px solid #2563EB; border-radius: 0 6px 6px 0; padding: 8px 12px; margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+                    <div style="font-weight: 700; font-size: 0.88rem; color: #1E293B;">
+                        <span style="background: #EFF6FF; color: #2563EB; padding: 1px 6px; border-radius: 4px; font-size: 0.75rem; margin-right: 6px;">Bước {st_item['step']}</span>
+                        {st_item['name']}
+                    </div>
+                    <div style="font-size: 0.82rem; color: #475569; margin-top: 3px; line-height: 1.4;">
+                        {st_item['desc']}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            st.write("")
+
+        # PHẦN 2: BIÊN BẢN KIỂM ĐỊNH TÁC TỬ PHẢN BIỆN (Evaluator Guardrail Audit)
+        evaluator = result.get("evaluator")
+        if evaluator and evaluator.get("criteria"):
+            st.markdown("#### 🛡️ " + ("Biên Bản Kiểm Định Chất Lượng Tác Tử (Evaluator Guardrail Audit)" if not is_en else "Evaluator Guardrail Quality Audit Scorecard"))
+            score = evaluator.get("score", 100)
+            verdict = evaluator.get("verdict", "PASS")
+            critique = evaluator.get("critique", "")
+
+            v_color = "#10B981" if verdict == "PASS" else "#F59E0B"
+            st.markdown(f"**Kết luận Đánh giá**: <span style='color: {v_color}; font-weight: 800;'>{verdict} ({score}/100)</span> — *{critique}*", unsafe_allow_html=True)
+
+            c_c1, c_c2 = st.columns(2)
+            crits = evaluator.get("criteria", {})
+            with c_c1:
+                sem = crits.get("semantic_alignment", {})
+                icon_sem = "✅" if sem.get("passed") else "❌"
+                st.markdown(f"**{icon_sem} Khớp Ngữ Nghĩa & Thực Thể (Semantic Alignment)**")
+                st.caption(sem.get("detail", ""))
+
+                temp = crits.get("temporal_validity", {})
+                icon_temp = "✅" if temp.get("passed") else "❌"
+                st.markdown(f"**{icon_temp} Toàn Vẹn Mốc Thời Gian (Temporal Validity)**")
+                st.caption(temp.get("detail", ""))
+
+            with c_c2:
+                comp = crits.get("comparative_sufficiency", {})
+                icon_comp = "✅" if comp.get("passed") else "❌"
+                st.markdown(f"**{icon_comp} Đầy Đủ Vế Đối Chiếu (Comparative Sufficiency)**")
+                st.caption(comp.get("detail", ""))
+
+                hlth = crits.get("data_health", {})
+                icon_hlth = "✅" if hlth.get("passed") else "❌"
+                st.markdown(f"**{icon_hlth} Tính Lành Mạnh Dữ Liệu (Data Health)**")
+                st.caption(hlth.get("detail", ""))
+            st.write("")
+
+        # PHẦN 3: CÂU LỆNH SQL ĐÃ THỰC THI & LIVE SQL EDITOR
         if sql_query:
             st.markdown("#### ⚡ " + ("Câu Lệnh SQL Đã Thực Thi" if not is_en else "Executed SQL Query"))
             st.code(sql_query, language="sql")

@@ -222,6 +222,70 @@ def get_db_specific_rules(schema_context: str) -> str:
         ORDER BY EmployeeCount DESC;
         * QUY TẮC BẮT BUỘC: Khi hỏi về 'Tỷ lệ phân bố nhân sự theo từng chức danh' hoặc 'Số lượng / tỷ lệ nhân sự theo chức danh': BẮT BUỘC dùng bảng `titles t` (cột `t.title`), đếm `COUNT(t.emp_no) AS EmployeeCount`, tính `Percentage`, lọc `WHERE t.to_date = '9999-01-01'` và `GROUP BY t.title` (TUYỆT ĐỐI KHÔNG JOIN `salaries` hay `departments`, KHÔNG LỌC THEO PHÒNG BAN SALES)!
 
+      + MẪU CHUẨN TOP N CHỨC DANH CÓ THÂM NIÊN TRUNG BÌNH CAO NHẤT TẠI CÔNG TY (Ví dụ: Top 5):
+        SELECT 
+            t.title AS Title,
+            ROUND(AVG(DATEDIFF(IF(t.to_date = '9999-01-01', '2002-08-01', t.to_date), e.hire_date) / 365.25), 2) AS AvgYearsOfService,
+            COUNT(DISTINCT e.emp_no) AS TotalEmployees
+        FROM titles t
+        JOIN employees e ON t.emp_no = e.emp_no
+        WHERE t.to_date = '9999-01-01'
+        GROUP BY t.title
+        ORDER BY AvgYearsOfService DESC
+        LIMIT 5;
+        * CẢNH BÁO QUAN TRỌNG:
+          1. Bảng `employees` KHÔNG CÓ CỘT `YearsOfService` và KHÔNG CÓ CỘT `to_date`!
+          2. Thâm niên tại công ty BẮT BUỘC tính bằng DATEDIFF(IF(t.to_date = '9999-01-01', '2002-08-01', t.to_date), e.hire_date) / 365.25!
+          3. TUYỆT ĐỐI KHÔNG JOIN bảng `salaries` hay `departments`!
+          4. BẮT BUỘC GROUP BY `t.title`, ORDER BY `AvgYearsOfService DESC` và LIMIT N theo yêu cầu!
+
+      + MẪU CHUẨN LIỆT KÊ NHÂN VIÊN TỪNG LÀM VIỆC Ở TỪ 2 PHÒNG BAN TRỞ LÊN (KÈM CHỨC DANH HIỆN TẠI):
+        SELECT 
+            e.emp_no,
+            CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+            t.title AS CurrentTitle,
+            d.dept_name AS CurrentDepartment,
+            COUNT(DISTINCT de.dept_no) AS DepartmentCount
+        FROM employees e
+        JOIN titles t ON e.emp_no = t.emp_no AND t.to_date = '9999-01-01'
+        JOIN dept_emp de ON e.emp_no = de.emp_no
+        JOIN dept_emp de_curr ON e.emp_no = de_curr.emp_no AND de_curr.to_date = '9999-01-01'
+        JOIN departments d ON de_curr.dept_no = d.dept_no
+        WHERE t.title = 'Senior Engineer' -- (hoặc chức danh được yêu cầu nếu có)
+        GROUP BY e.emp_no, FullName, t.title, d.dept_name
+        HAVING COUNT(DISTINCT de.dept_no) >= 2
+        ORDER BY DepartmentCount DESC, e.emp_no ASC
+        LIMIT 10;
+        * QUY TẮC BẮT BUỘC:
+          1. Số lượng phòng ban từng làm việc BẮT BUỘC đếm bằng COUNT(DISTINCT de.dept_no) trên bảng dept_emp de và lọc HAVING COUNT(DISTINCT de.dept_no) >= 2!
+          2. Chức danh hiện tại lấy từ bảng `titles t` với `t.to_date = '9999-01-01'`!
+          3. Phòng ban hiện tại lấy từ bảng `dept_emp de_curr` với `de_curr.to_date = '9999-01-01'` và `departments d`!
+          4. BẮT BUỘC có LIMIT 10 (hoặc LIMIT N theo yêu cầu) để tối ưu hiệu năng!
+
+      + MẪU CHUẨN TOP N NHÂN VIÊN CÓ TỐC ĐỘ TĂNG TRƯỞNG LƯƠNG TRUNG BÌNH MỖI NĂM CAO NHẤT (THEO PHÒNG BAN HOẶC TOÀN CÔNG TY):
+        SELECT 
+            e.emp_no,
+            CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+            d.dept_name AS Department,
+            s_start.salary AS StartingSalary,
+            s_curr.salary AS CurrentSalary,
+            ROUND((s_curr.salary - s_start.salary) / (DATEDIFF(s_curr.from_date, s_start.from_date) / 365.25), 2) AS AvgAnnualSalaryGrowth
+        FROM dept_emp de
+        JOIN departments d ON de.dept_no = d.dept_no
+        JOIN employees e ON de.emp_no = e.emp_no
+        JOIN salaries s_start ON e.emp_no = s_start.emp_no AND s_start.from_date = e.hire_date
+        JOIN salaries s_curr ON e.emp_no = s_curr.emp_no AND s_curr.to_date = '9999-01-01'
+        WHERE d.dept_name = 'Sales' -- (hoặc phòng ban được yêu cầu)
+          AND de.to_date = '9999-01-01'
+          AND DATEDIFF(s_curr.from_date, s_start.from_date) >= 365
+        ORDER BY AvgAnnualSalaryGrowth DESC
+        LIMIT 5;
+        * QUY TẮC BẮT BUỘC:
+          1. Lương khởi điểm lấy từ bảng `salaries s_start` với `s_start.from_date = e.hire_date`!
+          2. Lương hiện tại lấy từ `salaries s_curr` với `s_curr.to_date = '9999-01-01'` và `de.to_date = '9999-01-01'`!
+          3. Tốc độ tăng trưởng lương TB mỗi năm = `ROUND((s_curr.salary - s_start.salary) / (DATEDIFF(...) / 365.25), 2) AS AvgAnnualSalaryGrowth`!
+          4. BẮT BUỘC ORDER BY `AvgAnnualSalaryGrowth DESC` và `LIMIT N` theo yêu cầu!
+
       + MẪU CHUẨN TỶ LỆ GIỚI TÍNH TRONG BAN QUẢN LÝ (DEPT_MANAGER):
         SELECT 
             d.dept_name AS Department,
@@ -277,6 +341,48 @@ def get_db_specific_rules(schema_context: str) -> str:
         JOIN salaries s ON e.emp_no = s.emp_no
         WHERE dm.to_date = '9999-01-01' AND s.to_date = '9999-01-01'
         ORDER BY s.salary DESC;
+
+      + MẪU CHUẨN QUẢN LÝ (MANAGER) CÓ MỨC LƯƠNG THẤP HƠN NHÂN VIÊN CẤP DƯỚI CÙNG PHÒNG BAN:
+        * Khi câu hỏi có 'Quản lý / Manager / Trưởng phòng' VÀ 'lương thấp hơn / kém hơn' VÀ 'nhân viên / cấp dưới / trực thuộc / cùng phòng':
+        SELECT 
+            d.dept_name AS Department,
+            CONCAT(em.first_name, ' ', em.last_name) AS ManagerName,
+            sm.salary AS ManagerSalary,
+            MAX(se.salary) AS MaxSubordinateSalary,
+            MAX(se.salary) - sm.salary AS SalaryGap,
+            COUNT(DISTINCT de.emp_no) AS SubordinatesWithHigherSalary
+        FROM dept_manager dm
+        JOIN departments d ON dm.dept_no = d.dept_no
+        JOIN employees em ON dm.emp_no = em.emp_no
+        JOIN salaries sm ON dm.emp_no = sm.emp_no AND sm.to_date = '9999-01-01'
+        JOIN dept_emp de ON dm.dept_no = de.dept_no AND de.to_date = '9999-01-01' AND de.emp_no != dm.emp_no
+        JOIN salaries se ON de.emp_no = se.emp_no AND se.to_date = '9999-01-01'
+        WHERE dm.to_date = '9999-01-01'
+          AND se.salary > sm.salary
+        GROUP BY d.dept_name, ManagerName, sm.salary
+        ORDER BY SalaryGap DESC;
+        * CẢNH BÁO QUAN TRỌNG: TUYỆT ĐỐI KHÔNG chỉ liệt kê lương của Manager! BẮT BUỘC phải JOIN dept_emp de và salaries se của nhân viên trong cùng phòng (de.dept_no = dm.dept_no AND de.emp_no != dm.emp_no) và lọc se.salary > sm.salary!
+
+      + MẪU CHUẨN NHÂN VIÊN CẤP DƯỚI CÓ MỨC LƯƠNG CAO HƠN QUẢN LÝ CÙNG PHÒNG BAN:
+        * Khi câu hỏi hỏi về 'Những nhân viên nào có mức lương cao hơn quản lý / trưởng phòng':
+        SELECT 
+            d.dept_name AS Department,
+            CONCAT(ee.first_name, ' ', ee.last_name) AS SubordinateName,
+            se.salary AS SubordinateSalary,
+            CONCAT(em.first_name, ' ', em.last_name) AS ManagerName,
+            sm.salary AS ManagerSalary,
+            se.salary - sm.salary AS SalaryDifference
+        FROM dept_manager dm
+        JOIN departments d ON dm.dept_no = d.dept_no
+        JOIN employees em ON dm.emp_no = em.emp_no
+        JOIN salaries sm ON dm.emp_no = sm.emp_no AND sm.to_date = '9999-01-01'
+        JOIN dept_emp de ON dm.dept_no = de.dept_no AND de.to_date = '9999-01-01' AND de.emp_no != dm.emp_no
+        JOIN employees ee ON de.emp_no = ee.emp_no
+        JOIN salaries se ON de.emp_no = se.emp_no AND se.to_date = '9999-01-01'
+        WHERE dm.to_date = '9999-01-01'
+          AND se.salary > sm.salary
+        ORDER BY SalaryDifference DESC
+        LIMIT 10;
 
       + MẪU CHUẨN NHÂN VIÊN CÓ TỪ N LẦN TĂNG LƯƠNG TRỞ LÊN (TỐI ƯU SIÊU TỐC):
         SELECT 
@@ -1520,6 +1626,72 @@ ORDER BY TotalSales DESC;
 (CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Cột đội ngũ là pe.Team!)
 """
 
+    # 0.99 Nhân viên từng làm việc ở ít nhất N phòng ban (kèm chức danh nếu có)
+    is_multi_dept_q = (
+        any(k in q_low for k in [
+            "nhiều phòng ban", "nhiều phòng", "ít nhất 2 phòng", "ít nhất 2 phòng ban",
+            "từ 2 phòng", "từ 2 phòng ban", "qua 2 phòng", "qua 2 phòng ban",
+            "2 phòng ban", "2 phòng ban khác nhau", "2 phòng khác nhau",
+            "chuyển phòng ban", "luân chuyển phòng", "luân chuyển công tác",
+            "ít nhất hai phòng ban", "nhiều hơn một phòng ban", "nhiều hơn 1 phòng ban"
+        ])
+        or bool(re.search(r"(?:ít nhất|tối thiểu|từ|qua|hơn)\s*\d+\s*phòng", q_low))
+    ) and any(k in q_low for k in ["phòng ban", "phòng", "department"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "danh sách", "liệt kê", "employee", "employees"])
+
+    if is_multi_dept_q:
+        min_depts = 2
+        m_dept = re.search(r"(?:ít nhất|tối thiểu|từ|qua)\s*(\d+)\s*phòng", q_low)
+        if m_dept:
+            try:
+                min_depts = int(m_dept.group(1))
+            except ValueError:
+                min_depts = 2
+        elif any(k in q_low for k in ["nhiều hơn một", "nhiều hơn 1"]):
+            min_depts = 2
+
+        title_map = [
+            (["senior engineer", "kỹ sư cao cấp", "senior dev"], "Senior Engineer"),
+            (["senior staff", "nhân viên cao cấp"], "Senior Staff"),
+            (["assistant engineer", "trợ lý kỹ sư"], "Assistant Engineer"),
+            (["technique leader", "technical leader", "tech lead", "trưởng nhóm kỹ thuật", "trưởng kỹ thuật"], "Technique Leader"),
+            (["engineer", "kỹ sư"], "Engineer"),
+            (["manager", "trưởng phòng", "quản lý"], "Manager"),
+            (["staff", "chuyên viên"], "Staff"),
+        ]
+        target_title = None
+        for kws, t_name in title_map:
+            if any(k in q_low for k in kws):
+                target_title = t_name
+                break
+
+        title_filter = f"WHERE t.title = '{target_title}'\n" if target_title else ""
+        title_comment = f"Lọc đúng chức danh t.title = '{target_title}'" if target_title else "Nếu không chỉ định chức danh, lấy chức danh hiện tại của nhân viên"
+        concat_expr = "e.first_name || ' ' || e.last_name" if is_sqlite else "CONCAT(e.first_name, ' ', e.last_name)"
+
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN TỪNG LÀM VIỆC Ở ÍT NHẤT {min_depts} PHÒNG BAN KHÁC NHAU):
+SELECT 
+    e.emp_no,
+    {concat_expr} AS FullName,
+    t.title AS CurrentTitle,
+    d.dept_name AS CurrentDepartment,
+    COUNT(DISTINCT de.dept_no) AS DepartmentCount
+FROM employees e
+JOIN titles t ON e.emp_no = t.emp_no AND t.to_date = '9999-01-01'
+JOIN dept_emp de ON e.emp_no = de.emp_no
+JOIN dept_emp de_curr ON e.emp_no = de_curr.emp_no AND de_curr.to_date = '9999-01-01'
+JOIN departments d ON de_curr.dept_no = d.dept_no
+{title_filter}GROUP BY e.emp_no, FullName, t.title, d.dept_name
+HAVING COUNT(DISTINCT de.dept_no) >= {min_depts}
+ORDER BY DepartmentCount DESC, e.emp_no ASC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC:
+1. Đếm số lượng phòng ban từng làm việc bằng COUNT(DISTINCT de.dept_no) từ bảng lịch sử dept_emp de và lọc HAVING COUNT(DISTINCT de.dept_no) >= {min_depts}!
+2. Lấy chức danh hiện tại từ bảng titles t với điều kiện t.to_date = '9999-01-01'. {title_comment}!
+3. Lấy phòng ban hiện tại từ de_curr.to_date = '9999-01-01' và departments d!
+4. BẮT BUỘC dùng LIMIT {req_limit} để tối ưu tốc độ truy vấn!)
+"""
+
     # 1. Câu hỏi liên quan đến chức danh (Title)
     if any(k in q_low for k in ["chức danh", "title", "vị trí", "bổ nhiệm", "thăng chức", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
         # 1.0 Số lượng nhân viên được bổ nhiệm chức danh mới qua từng năm
@@ -1639,6 +1811,61 @@ ORDER BY HireYear ASC;
 (BẮT BUỘC dùng YEAR(hire_date) AS HireYear, COUNT(*) AS TotalHires, GROUP BY HireYear ORDER BY HireYear ASC!)
 """
 
+    # 3.9 Top nhân viên có tốc độ / mức tăng trưởng lương trung bình mỗi năm cao nhất
+    elif (
+        any(k in q_low for k in ["tăng trưởng lương", "tốc độ tăng trưởng", "tăng lương trung bình", "tăng trưởng", "tốc độ tăng", "mức tăng lương"])
+        and any(k in q_low for k in ["mỗi năm", "hàng năm", "từng năm", "theo năm", "bình quân năm", "năm"])
+        and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "top", "danh sách", "ai có"])
+        and any(k in q_low for k in ["lương", "salary", "thu nhập"])
+    ):
+        dept_map = [
+            (["sales", "kinh doanh", "bán hàng"], "Sales"),
+            (["marketing", "tiếp thị"], "Marketing"),
+            (["development", "phát triển", "lập trình", "dev"], "Development"),
+            (["research", "nghiên cứu", "r&d"], "Research"),
+            (["finance", "tài chính", "kế toán"], "Finance"),
+            (["production", "sản xuất"], "Production"),
+            (["human resources", "nhân sự", "hr", "tuyển dụng"], "Human Resources"),
+            (["quality management", "quản lý chất lượng", "qa", "qc", "chất lượng"], "Quality Management"),
+            (["customer service", "chăm sóc khách hàng", "cskh", "dịch vụ khách hàng"], "Customer Service"),
+        ]
+        target_dept = None
+        for keywords, d_name in dept_map:
+            if any(k in q_low for k in keywords):
+                target_dept = d_name
+                break
+
+        concat_expr = "e.first_name || ' ' || e.last_name" if is_sqlite else "CONCAT(e.first_name, ' ', e.last_name)"
+        date_diff_expr = "(julianday(s_curr.from_date) - julianday(s_start.from_date)) / 365.25" if is_sqlite else "(DATEDIFF(s_curr.from_date, s_start.from_date) / 365.25)"
+        min_days_filter = "julianday(s_curr.from_date) - julianday(s_start.from_date) >= 365" if is_sqlite else "DATEDIFF(s_curr.from_date, s_start.from_date) >= 365"
+        dept_filter = f"d.dept_name = '{target_dept}' AND " if target_dept else ""
+        dept_title = f" PHÒNG BAN {target_dept.upper()}" if target_dept else ""
+
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} NHÂN VIÊN CÓ TỐC ĐỘ TĂNG TRƯỞNG LƯƠNG TRUNG BÌNH MỖI NĂM CAO NHẤT{dept_title}):
+SELECT 
+    e.emp_no,
+    {concat_expr} AS FullName,
+    d.dept_name AS Department,
+    s_start.salary AS StartingSalary,
+    s_curr.salary AS CurrentSalary,
+    ROUND((s_curr.salary - s_start.salary) / {date_diff_expr}, 2) AS AvgAnnualSalaryGrowth
+FROM dept_emp de
+JOIN departments d ON de.dept_no = d.dept_no
+JOIN employees e ON de.emp_no = e.emp_no
+JOIN salaries s_start ON e.emp_no = s_start.emp_no AND s_start.from_date = e.hire_date
+JOIN salaries s_curr ON e.emp_no = s_curr.emp_no AND s_curr.to_date = '9999-01-01'
+WHERE {dept_filter}de.to_date = '9999-01-01'
+  AND {min_days_filter}
+ORDER BY AvgAnnualSalaryGrowth DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC:
+1. Lấy lương khởi điểm từ s_start với điều kiện s_start.from_date = e.hire_date!
+2. Lấy lương hiện tại từ s_curr với điều kiện s_curr.to_date = '9999-01-01' và de.to_date = '9999-01-01'!
+3. Tính mức tăng trưởng trung bình mỗi năm bằng: (s_curr.salary - s_start.salary) / (DATEDIFF / 365.25)!
+4. BẮT BUỘC sắp xếp ORDER BY AvgAnnualSalaryGrowth DESC LIMIT {req_limit}!)
+"""
+
     # 4. Top nhân viên lương cao nhất hiện tại toàn công ty hoặc theo phòng ban
     elif (
         any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "mức lương cao nhất", "lương thấp nhất", "thu nhập thấp nhất", "highest paid", "highest salary"])
@@ -1647,7 +1874,7 @@ ORDER BY HireYear ASC;
             and any(k in q_low for k in ["lương", "thu nhập", "salary"])
             and any(k in q_low for k in ["cao nhất", "thấp nhất", "cao"])
         )
-    ) and any(k in q_low for k in ["nhân viên", "nhân sự", "toàn công ty", "công ty", "người", "ai", "sales", "phòng", "employee", "employees"]):
+    ) and any(k in q_low for k in ["nhân viên", "nhân sự", "toàn công ty", "công ty", "người", "ai", "sales", "phòng", "employee", "employees"]) and not any(k in q_low for k in ["tăng trưởng", "tốc độ", "mỗi năm", "tăng lương trung bình"]):
         dept_map = [
             (["sales", "kinh doanh", "bán hàng"], "Sales"),
             (["marketing", "tiếp thị"], "Marketing"),
@@ -1735,8 +1962,67 @@ ORDER BY s_agg.RaiseCount DESC, s_agg.CurrentSalary DESC;
 (BẮT BUỘC dùng subquery s_agg có LIMIT 10 để chạy trong 0.5s và không tràn 5,000 dòng, sắp xếp theo RaiseCount DESC, CurrentSalary DESC!)
 """
 
+    # 7.0 Quản lý có lương thấp hơn nhân viên cấp dưới trực thuộc cùng phòng ban
+    elif (
+        any(k in q_low for k in ["manager", "trưởng phòng", "ban quản lý", "quản lý", "lãnh đạo phòng"])
+        and any(k in q_low for k in ["cấp dưới", "dưới quyền", "nhân viên", "trực thuộc", "cùng phòng"])
+        and any(k in q_low for k in ["thấp hơn", "kém hơn", "cao hơn", "lớn hơn", "vượt", "so sánh", "chênh lệch", "thấp hơn cả", "thua"])
+        and any(k in q_low for k in ["lương", "salary", "thu nhập"])
+    ):
+        is_asking_subordinates = any(k in q_low for k in ["nhân viên nào", "ai là những nhân viên", "những nhân viên", "danh sách nhân viên"]) and not any(k in q_low for k in ["ai là những quản lý", "quản lý nào", "những quản lý"])
+        if is_asking_subordinates:
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN CẤP DƯỚI CÓ LƯƠNG CAO HƠN QUẢN LÝ CÙNG PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    CONCAT(ee.first_name, ' ', ee.last_name) AS SubordinateName,
+    se.salary AS SubordinateSalary,
+    CONCAT(em.first_name, ' ', em.last_name) AS ManagerName,
+    sm.salary AS ManagerSalary,
+    se.salary - sm.salary AS SalaryDifference
+FROM dept_manager dm
+JOIN departments d ON dm.dept_no = d.dept_no
+JOIN employees em ON dm.emp_no = em.emp_no
+JOIN salaries sm ON dm.emp_no = sm.emp_no AND sm.to_date = '9999-01-01'
+JOIN dept_emp de ON dm.dept_no = de.dept_no AND de.to_date = '9999-01-01' AND de.emp_no != dm.emp_no
+JOIN employees ee ON de.emp_no = ee.emp_no
+JOIN salaries se ON de.emp_no = se.emp_no AND se.to_date = '9999-01-01'
+WHERE dm.to_date = '9999-01-01'
+  AND se.salary > sm.salary
+ORDER BY SalaryDifference DESC
+LIMIT {req_limit};
+(BẮT BUỘC lọc dm.to_date = '9999-01-01', de.to_date = '9999-01-01', sm.to_date = '9999-01-01', se.to_date = '9999-01-01' VÀ se.salary > sm.salary!)
+"""
+        else:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (QUẢN LÝ CÓ MỨC LƯƠNG THẤP HƠN NHÂN VIÊN CẤP DƯỚI TRỰC THUỘC CÙNG PHÒNG BAN):
+SELECT 
+    d.dept_name AS Department,
+    CONCAT(em.first_name, ' ', em.last_name) AS ManagerName,
+    sm.salary AS ManagerSalary,
+    MAX(se.salary) AS MaxSubordinateSalary,
+    MAX(se.salary) - sm.salary AS SalaryGap,
+    COUNT(DISTINCT de.emp_no) AS SubordinatesWithHigherSalary
+FROM dept_manager dm
+JOIN departments d ON dm.dept_no = d.dept_no
+JOIN employees em ON dm.emp_no = em.emp_no
+JOIN salaries sm ON dm.emp_no = sm.emp_no AND sm.to_date = '9999-01-01'
+JOIN dept_emp de ON dm.dept_no = de.dept_no AND de.to_date = '9999-01-01' AND de.emp_no != dm.emp_no
+JOIN salaries se ON de.emp_no = se.emp_no AND se.to_date = '9999-01-01'
+WHERE dm.to_date = '9999-01-01'
+  AND se.salary > sm.salary
+GROUP BY d.dept_name, ManagerName, sm.salary
+ORDER BY SalaryGap DESC;
+(BẮT BUỘC lọc dm.to_date = '9999-01-01', de.to_date = '9999-01-01', sm.to_date = '9999-01-01', se.to_date = '9999-01-01' VÀ se.salary > sm.salary! TUYỆT ĐỐI KHÔNG chỉ liệt kê mỗi bảng dept_manager!)
+"""
+
     # 7. Danh sách Manager hiện tại của từng phòng ban kèm mức lương mới nhất
-    elif any(k in q_low for k in ["manager", "trưởng phòng", "ban quản lý", "lãnh đạo phòng"]) and any(k in q_low for k in ["lương", "thu nhập", "salary"]) and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ"]):
+    elif (
+        any(k in q_low for k in ["manager", "trưởng phòng", "ban quản lý", "lãnh đạo phòng"])
+        and any(k in q_low for k in ["lương", "thu nhập", "salary"])
+        and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "tỷ lệ"])
+        and not any(k in q_low for k in ["cấp dưới", "dưới quyền", "nhân viên", "thấp hơn", "kém hơn", "cao hơn", "so sánh", "chênh lệch", "thấp hơn cả", "thua", "subordinate", "vượt"])
+    ):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DANH SÁCH MANAGER HIỆN TẠI CỦA TỪNG PHÒNG BAN KÈM LƯƠNG MỚI NHẤT):
 SELECT 
@@ -1769,6 +2055,27 @@ JOIN departments d ON dm.dept_no = d.dept_no
 ORDER BY YearsAsManager DESC
 LIMIT {req_limit};
 (BẮT BUỘC tính YearsAsManager bằng DATEDIFF, ORDER BY YearsAsManager DESC LIMIT {req_limit}, TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01' để lấy đủ lịch sử các Manager tiền nhiệm!)
+"""
+
+    # 7.2 Top N chức danh có thâm niên trung bình cao nhất tại công ty
+    elif (
+        any(k in q_low for k in ["chức danh", "title", "vị trí"])
+        and any(k in q_low for k in ["thâm niên", "tenure", "cống hiến", "gắn bó", "lâu năm", "lâu nhất"])
+        and any(k in q_low for k in ["trung bình", "avg", "cao nhất", "nhiều nhất", "top"])
+    ):
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} CHỨC DANH CÓ THÂM NIÊN TRUNG BÌNH CAO NHẤT TẠI CÔNG TY):
+SELECT 
+    t.title AS Title,
+    ROUND(AVG(DATEDIFF(IF(t.to_date = '9999-01-01', '2002-08-01', t.to_date), e.hire_date) / 365.25), 2) AS AvgYearsOfService,
+    COUNT(DISTINCT e.emp_no) AS TotalEmployees
+FROM titles t
+JOIN employees e ON t.emp_no = e.emp_no
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY AvgYearsOfService DESC
+LIMIT {req_limit};
+(CẢNH BÁO: Bảng employees KHÔNG CÓ CỘT YearsOfService và KHÔNG CÓ to_date! BẮT BUỘC tính thâm niên bằng DATEDIFF(IF(t.to_date = '9999-01-01', '2002-08-01', t.to_date), e.hire_date) / 365.25! TUYỆT ĐỐI KHÔNG JOIN salaries hay departments!)
 """
 
     # 7.9 So sánh mức lương trung bình giữa các phòng ban Kỹ thuật (Development, Research) và phòng Kinh doanh (Sales, Marketing)
@@ -1941,7 +2248,13 @@ ORDER BY SalarySpread DESC;
 """
 
     # 9. Quy mô các phòng ban lớn nhất và nhỏ nhất
-    elif any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhất"]) and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "đông nhất", "ít nhất"]) and any(k in q_low for k in ["phòng ban", "phòng", "department"]):
+    elif (
+        any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "đông nhất", "ít nhân sự nhất", "ít nhân viên nhất", "ít người nhất"])
+        and any(k in q_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "đông nhất"])
+        and any(k in q_low for k in ["phòng ban", "phòng", "department"])
+        and not re.search(r"(?:ít nhất|tối thiểu|từ|trên|nhiều hơn|hơn)\s+\d+", q_low)
+        and not any(k in q_low for k in ["liệt kê", "danh sách", "những nhân viên", "các nhân viên", "nhân viên nào", "ai là", "từng làm", "chức danh", "title", "senior", "engineer", "staff", "manager", "leader"])
+    ):
         has_largest = any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "đông nhất", "largest", "highest", "most"])
         has_smallest = any(k in q_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "smallest", "lowest", "least"])
         if has_largest and has_smallest:
