@@ -5,11 +5,58 @@ Module for Multi-Channel Enterprise Report Sharing:
 """
 
 import smtplib
+import urllib.parse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import requests
+
+
+def build_gmail_compose_url(
+    receiver_emails: list[str] | str,
+    subject: str,
+    body_text: str
+) -> str:
+    """
+    Tạo link mở thẳng giao diện soạn thư Gmail Web (mail.google.com).
+    Tự động điền trước người nhận, tiêu đề và nội dung phân tích mà không cần mật khẩu SMTP.
+    """
+    if isinstance(receiver_emails, list):
+        to_str = ", ".join([e.strip() for e in receiver_emails if e.strip()])
+    else:
+        to_str = str(receiver_emails).strip()
+
+    params = {
+        "view": "cm",
+        "fs": "1",
+        "to": to_str,
+        "su": subject or "Báo cáo Phân tích Kinh doanh - Veraxus",
+        "body": body_text or ""
+    }
+    return f"https://mail.google.com/mail/?{urllib.parse.urlencode(params, quote_via=urllib.parse.quote)}"
+
+
+def build_mailto_url(
+    receiver_emails: list[str] | str,
+    subject: str,
+    body_text: str
+) -> str:
+    """
+    Tạo link giao thức mailto: mở ứng dụng email mặc định trên thiết bị (Apple Mail, Outlook, v.v.).
+    """
+    if isinstance(receiver_emails, list):
+        to_str = ",".join([e.strip() for e in receiver_emails if e.strip()])
+    else:
+        to_str = str(receiver_emails).strip()
+
+    params = {
+        "subject": subject or "Báo cáo Phân tích Kinh doanh - Veraxus",
+        "body": body_text or ""
+    }
+    encoded_params = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+    return f"mailto:{urllib.parse.quote(to_str)}?{encoded_params}"
+
 
 
 def send_telegram_report(

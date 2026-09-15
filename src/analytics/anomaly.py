@@ -3,10 +3,43 @@ Comprehensive anomaly detection and trend disruption analysis module.
 Detects IQR outliers, sudden rate spikes/dips, trend inversions, and concentration risks.
 """
 
+import re
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List
 from .heuristics import get_axis_columns, pick_label_column
+
+
+def format_anomaly_label(val, col_name: str = "") -> str:
+    """Chuyển đổi nhãn thời gian hoặc thực thể sang định dạng tự nhiên thân thiện kinh doanh:
+    - Loại bỏ đuôi .0
+    - Định dạng Tháng 1..12, Quý 1..4, Năm YYYY
+    """
+    if val is None or (hasattr(pd, "isna") and pd.isna(val) is True):
+        return "N/A"
+    s = str(val).strip()
+    if re.match(r"^-?\d+\.0+$", s):
+        s = s.split(".")[0]
+    c_low = str(col_name).lower() if col_name else ""
+    try:
+        f_val = float(val)
+        if f_val.is_integer():
+            i_val = int(f_val)
+            if any(k in c_low for k in ["month", "tháng", "thang"]) and 1 <= i_val <= 12:
+                return f"Tháng {i_val}"
+            elif any(k in c_low for k in ["quarter", "quý", "quy"]) and 1 <= i_val <= 4:
+                return f"Quý {i_val}"
+            elif any(k in c_low for k in ["year", "năm", "nam"]) and 1900 <= i_val <= 2100:
+                return f"Năm {i_val}"
+            elif 1 <= i_val <= 12 and "month" in c_low:
+                return f"Tháng {i_val}"
+            return str(i_val)
+    except Exception:
+        pass
+    m_ym = re.match(r"^(\d{4})-(\d{1,2})$", s)
+    if m_ym:
+        return f"Tháng {int(m_ym.group(2))}/{m_ym.group(1)}"
+    return s
 
 
 def detect_outliers(df: pd.DataFrame, y_col: str) -> pd.DataFrame:
@@ -86,14 +119,19 @@ def analyze_data_anomalies(df: pd.DataFrame) -> Dict[str, Any]:
         analysis["anomaly_types"].append("Đột biến giá trị (Statistical Outlier)")
         label_col_name = time_col or (cat_cols[0] if cat_cols else "index")
         for _, row in outliers_df.iterrows():
-            lbl = str(row.get(label_col_name, "N/A"))
+            raw_lbl = row.get(label_col_name, "N/A")
+            lbl = format_anomaly_label(raw_lbl, label_col_name)
             val = float(row[y_col])
             diff_pct = ((val - mean_val) / mean_val * 100) if mean_val != 0 else 0
+            if any(lbl.startswith(k) for k in ["Tháng", "Quý", "Năm"]):
+                prefix = lbl
+            else:
+                prefix = f"Đối tượng '{lbl}'"
             analysis["findings"].append({
                 "type": "outlier",
                 "label": lbl,
                 "value": val,
-                "message": f"Điểm '{lbl}' có giá trị {val:,.2f} lệch {diff_pct:+.1f}% so với trung bình ({mean_val:,.2f}).",
+                "message": f"{prefix} có giá trị {val:,.2f} lệch {diff_pct:+.1f}% so với trung bình ({mean_val:,.2f}).",
             })
 
     # 2. Phân tích chuỗi thời gian (nếu có time_col)
@@ -105,10 +143,13 @@ def analyze_data_anomalies(df: pd.DataFrame) -> Dict[str, Any]:
             pct_changes = np.diff(y_time) / np.where(y_time[:-1] == 0, 1e-9, y_time[:-1]) * 100
 
             for i, pct in enumerate(pct_changes):
-                prev_t = str(df_time[time_col].iloc[i])
-                curr_t = str(df_time[time_col].iloc[i+1])
+                prev_t = format_anomaly_label(df_time[time_col].iloc[i], time_col)
+                curr_t = format_anomaly_label(df_time[time_col].iloc[i+1], time_col)
                 curr_v = float(y_time[i+1])
                 prev_v = float(y_time[i])
+
+                curr_lbl = curr_t if any(curr_t.startswith(k) for k in ["Tháng", "Quý", "Năm"]) else f"Kỳ {curr_t}"
+                prev_lbl = prev_t if any(prev_t.startswith(k) for k in ["Tháng", "Quý", "Năm"]) else f"kỳ trước ({prev_t})"
 
                 if pct >= 100.0:  # Tăng gấp đôi trở lên
                     analysis["has_anomaly"] = True
@@ -118,7 +159,7 @@ def analyze_data_anomalies(df: pd.DataFrame) -> Dict[str, Any]:
                         "type": "spike",
                         "period": curr_t,
                         "pct_change": pct,
-                        "message": f"Kỳ {curr_t} tăng vọt {pct:+.1f}% (từ {prev_v:,.2f} lên {curr_v:,.2f}) so với kỳ trước ({prev_t}).",
+                        "message": f"{curr_lbl} tăng vọt {pct:+.1f}% (từ {prev_v:,.2f} lên {curr_v:,.2f}) so với {prev_lbl}.",
                     })
                 elif pct <= -50.0:  # Giảm hơn 50%
                     analysis["has_anomaly"] = True
@@ -128,7 +169,7 @@ def analyze_data_anomalies(df: pd.DataFrame) -> Dict[str, Any]:
                         "type": "drop",
                         "period": curr_t,
                         "pct_change": pct,
-                        "message": f"Kỳ {curr_t} sụt giảm mạnh {pct:.1f}% (từ {prev_v:,.2f} xuống {curr_v:,.2f}) so với kỳ trước ({prev_t}).",
+                        "message": f"{curr_lbl} sụt giảm mạnh {pct:.1f}% (từ {prev_v:,.2f} xuống {curr_v:,.2f}) so với {prev_lbl}.",
                     })
         except Exception:
             pass

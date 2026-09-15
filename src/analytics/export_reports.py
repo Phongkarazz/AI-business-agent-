@@ -5,6 +5,7 @@ Export utilities for Multi-format Reporting:
 - Executive PDF Report (.pdf) with 100% Vietnamese Unicode font support, clean typography,
   complete emoji stripping (no white boxes), and professional business layout.
 """
+from __future__ import annotations
 
 import io
 import os
@@ -59,6 +60,9 @@ def clean_text_for_pdf(text: str) -> str:
 
     # 7. Xóa các ký tự markdown header #### dư thừa trong dòng
     text = re.sub(r"#+\s*", "", text)
+
+    # 7.1. Chuyển đổi \$ (nếu có từ markdown escaping) về $ cho ReportLab
+    text = text.replace(r"\$", "$")
 
     # 8. Dọn dẹp khoảng trắng thừa và ký tự rác đầu mục
     text = re.sub(r"[ \t]+", " ", text)

@@ -14,9 +14,14 @@ from .agent import (
 )
 from .prompts import (
     build_sql_prompt,
+    build_fix_prompt,
     build_self_check_prompt,
     build_anomaly_prompt,
     build_auto_insight_prompt,
+)
+from .few_shot_selector import (
+    select_dynamic_few_shots,
+    format_few_shots_for_prompt,
 )
 
 __all__ = [
@@ -33,7 +38,10 @@ __all__ = [
     "generate_auto_insights",
     "explain_anomalies_agent",
     "build_sql_prompt",
+    "build_fix_prompt",
     "build_self_check_prompt",
     "build_anomaly_prompt",
     "build_auto_insight_prompt",
+    "select_dynamic_few_shots",
+    "format_few_shots_for_prompt",
 ]

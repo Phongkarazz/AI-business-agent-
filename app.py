@@ -6,6 +6,7 @@ Smart Starter Cards (1-Click), and Follow-up Question Suggestions.
 
 import re
 import sys
+import textwrap
 import streamlit as st
 
 # Tự động giải phóng cache submodules trong src/ để Python luôn tải mã nguồn mới nhất từ ổ đĩa
@@ -25,28 +26,30 @@ from src.analytics.heuristics import generate_starter_prompts, generate_categori
 from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
 from src.ui.sidebar import perform_connection, render_main_sidebar
-from src.ui.components import render_result, render_voice_input_button
+from src.ui.components import render_result, render_voice_input_button, render_veraxus_loading_html
 from src.llm.agent import run_agent
 
 # ---------------------------------------------------------
 # 1. Cấu hình Trang Streamlit & Custom CSS Giao Diện Doanh Nghiệp
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Veraxus for SQL",
-    page_icon="🗄️",
+    page_title="Veraxus - Enterprise Intelligence",
+    page_icon="💎",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     
     html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }
     
-    /* Ẩn triệt để thanh Chrome thừa mặc định của Streamlit nhưng BẢO VỆ nút mở/đóng Sidebar */
+    /* Ẩn thanh Chrome thừa mặc định của Streamlit nhưng BẢO VỆ nút mở/đóng Sidebar */
     #MainMenu,
     [data-testid="stMainMenu"],
     footer,
@@ -59,9 +62,9 @@ st.markdown("""
         display: none !important;
         visibility: hidden !important;
     }
-    header {background-color: transparent !important;}
+    header { background-color: transparent !important; }
 
-    /* BẢO ĐẢM NÚT MỞ/ĐÓNG SIDEBAR LUÔN HIỂN THỊ RÕ RÀNG VÀ BẤM ĐƯỢC */
+    /* Nút mở/đóng Sidebar tinh gọn, trực quan, luôn bấm được */
     [data-testid="stExpandSidebarButton"] {
         visibility: visible !important;
         display: inline-flex !important;
@@ -71,9 +74,9 @@ st.markdown("""
         left: 14px !important;
         z-index: 999999 !important;
         background: #FFFFFF !important;
-        border: 1.5px solid #2563EB !important;
+        border: 1.5px solid #0068FF !important;
         border-radius: 8px !important;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18) !important;
+        box-shadow: 0 2px 8px rgba(0, 104, 255, 0.18) !important;
         cursor: pointer !important;
     }
     [data-testid="stSidebarCollapseButton"] {
@@ -82,48 +85,103 @@ st.markdown("""
         opacity: 1 !important;
     }
 
-    /* Tối ưu khoảng đệm trên cùng của trang để nội dung hiển thị ngay trong tầm mắt */
-    .block-container {
+    /* Tinh chỉnh Sidebar - Thoáng đãng, Chống cắt viền & Tràn mép */
+    section[data-testid="stSidebar"] {
+        border-right: 1px solid #E2E8F0 !important;
+        background-color: #FFFFFF !important;
+        min-width: 320px !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+        padding-left: 1.65rem !important;
+        padding-right: 1.25rem !important;
         padding-top: 1.25rem !important;
-        padding-bottom: 2.5rem !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+    section[data-testid="stSidebar"] .stCaption {
+        margin-left: 0 !important;
+        padding-left: 2px !important;
+    }
+
+    /* Tối ưu khoảng đệm trên cùng & Căn giữa cân xứng khi full màn hình */
+    .block-container {
+        padding-top: 1.4rem !important;
+        padding-bottom: 2.8rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: 1040px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
     }
     
-    /* Modern KPI Cards */
+    /* Thẻ Chỉ số Điều hành (Executive KPI Cards) - Tỷ lệ tiêu chuẩn & Thẩm mỹ hài hòa */
     div[data-testid="stMetric"] {
-        background-color: #F8FAFC;
+        background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
-        padding: 14px 18px;
-        border-radius: 12px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        padding: 12px 14px !important;
+        border-radius: 14px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
         transition: all 0.2s ease-in-out;
+        min-width: 0 !important;
+        overflow: hidden !important;
     }
     div[data-testid="stMetric"]:hover {
         border-color: #CBD5E1;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.05);
         transform: translateY(-1px);
     }
     div[data-testid="stMetricLabel"] {
-        font-size: 0.82rem !important;
-        font-weight: 600 !important;
+        font-size: clamp(0.7rem, 0.88vw, 0.74rem) !important;
+        font-weight: 700 !important;
         color: #64748B !important;
         text-transform: uppercase;
-        letter-spacing: 0.03em;
+        letter-spacing: 0.01em;
+        margin-bottom: 4px;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    div[data-testid="stMetricLabel"] > div,
+    div[data-testid="stMetricLabel"] p {
+        font-size: clamp(0.7rem, 0.88vw, 0.74rem) !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        line-height: 1.3 !important;
     }
     div[data-testid="stMetricValue"] {
-        font-size: 1.45rem !important;
-        font-weight: 700 !important;
+        font-size: clamp(1.15rem, 1.4vw, 1.35rem) !important;
+        font-weight: 800 !important;
         color: #0F172A !important;
+        letter-spacing: -0.01em;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        line-height: 1.25 !important;
+    }
+    div[data-testid="stMetricValue"] > div {
+        font-size: inherit !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    div[data-testid="stMetricDelta"] {
+        font-size: 0.8rem !important;
+        font-weight: 600 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
 
-    /* Sleek, readable buttons */
+    /* Hệ thống Nút bấm Chuẩn Zalo Blue (#0068FF) - Thao tác 1-Chạm Mượt mà */
     .stButton > button {
         border-radius: 10px !important;
-        font-weight: 500 !important;
+        font-weight: 600 !important;
         font-size: 0.88rem !important;
         line-height: 1.45 !important;
-        letter-spacing: 0.015em !important;
-        padding: 10px 14px !important;
-        min-height: 56px !important;
+        padding: 9px 16px !important;
+        min-height: 48px !important;
         height: auto !important;
         transition: all 0.15s ease-in-out !important;
         white-space: normal !important;
@@ -133,187 +191,104 @@ st.markdown("""
         justify-content: center !important;
         text-align: center !important;
     }
-    .stButton > button p {
-        font-size: 0.88rem !important;
-        font-weight: 500 !important;
-        line-height: 1.45 !important;
-        letter-spacing: 0.015em !important;
-        margin: 0 !important;
+    .stButton > button[kind="primary"] {
+        background-color: #0068FF !important;
+        border-color: #0068FF !important;
+        color: #FFFFFF !important;
+        box-shadow: 0 2px 6px rgba(0, 104, 255, 0.2) !important;
     }
-    .stButton > button:hover {
-        border-color: #2563EB !important;
+    .stButton > button[kind="primary"]:hover {
+        background-color: #0056D6 !important;
+        border-color: #0056D6 !important;
+        box-shadow: 0 4px 12px rgba(0, 104, 255, 0.3) !important;
+        transform: translateY(-1px) !important;
+    }
+    .stButton > button[kind="secondary"] {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E2E8F0 !important;
+        color: #334155 !important;
+    }
+    .stButton > button[kind="secondary"]:hover {
+        border-color: #0068FF !important;
         background-color: #F8FAFC !important;
-        color: #1E40AF !important;
-        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08) !important;
+        color: #0068FF !important;
+        box-shadow: 0 2px 8px rgba(0, 104, 255, 0.08) !important;
         transform: translateY(-1px) !important;
     }
 
-    /* Hero Section & Database Live Snapshot */
+    /* Hero Section - Tối giản, Tập trung, Tỷ lệ Cân đối (Chuẩn Zalo/CPO) */
     .hero-container {
         text-align: center;
-        padding: 20px 10px 6px 10px;
+        padding: 10px 10px 6px 10px;
         max-width: 860px;
         margin: 0 auto;
     }
     .hero-badge {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
-        border: 1px solid #BFDBFE;
-        color: #1E40AF;
-        font-size: 0.82rem;
-        font-weight: 600;
-        padding: 5px 14px;
+        gap: 6px;
+        background: #F0FDF4;
+        color: #15803D;
+        border: 1px solid #BBF7D0;
+        padding: 4px 12px;
         border-radius: 9999px;
+        font-size: 0.76rem;
+        font-weight: 700;
         letter-spacing: 0.02em;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
+    .hero-badge-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #10B981;
+        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
     }
     .hero-title {
-        font-size: 2.1rem;
-        font-weight: 800;
+        font-size: 2.35rem;
+        font-weight: 850;
         color: #0F172A;
-        letter-spacing: -0.025em;
-        line-height: 1.25;
-        margin-bottom: 8px;
+        letter-spacing: -0.035em;
+        line-height: 1.2;
+        margin-bottom: 6px;
     }
     .hero-subtitle {
-        font-size: 0.98rem;
+        font-size: 1.05rem;
         color: #64748B;
         line-height: 1.5;
-        max-width: 660px;
+        max-width: 640px;
         margin: 0 auto 18px auto;
+        font-weight: 400;
     }
-    .snapshot-bar {
+
+    /* 3 Thẻ Trạng thái Hệ thống Live Snapshot - Trực quan, Tin cậy, Riêng tư */
+    .micro-trust-ribbon {
         display: flex;
+        align-items: center;
         justify-content: center;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-bottom: 24px;
+        gap: 12px;
+        margin: 4px auto 26px auto;
+        font-size: 0.8rem;
+        color: #64748B;
+        font-weight: 500;
     }
-    .snapshot-pill {
+    .micro-trust-pill {
         display: inline-flex;
         align-items: center;
-        gap: 7px;
+        gap: 6px;
         background: #F8FAFC;
         border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 6px 14px;
-        font-size: 0.84rem;
-        color: #334155;
-        font-weight: 500;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        padding: 4px 12px;
+        border-radius: 9999px;
+        font-size: 0.76rem;
+        color: #475569;
         transition: all 0.2s ease;
     }
-    .snapshot-pill:hover {
+    .micro-trust-pill:hover {
+        background: #F1F5F9;
         border-color: #CBD5E1;
-        background: #FFFFFF;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.05);
-        transform: translateY(-1px);
-    }
-    .snapshot-pill b {
         color: #0F172A;
-        font-weight: 700;
-    }
-
-    /* Agent Loading Spinner */
-    .agent-loading-card {
-        display: inline-flex;
-        align-items: center;
-        gap: 12px;
-        padding: 12px 20px;
-        background: linear-gradient(135deg, #EFF6FF 0%, #F8FAFC 100%);
-        border: 1.5px solid #BFDBFE;
-        border-radius: 12px;
-        margin: 8px 0;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
-    }
-    .agent-spinner {
-        width: 20px;
-        height: 20px;
-        border: 2.5px solid #DBEAFE;
-        border-top: 2.5px solid #2563EB;
-        border-radius: 50%;
-        animation: agent-spin 0.8s linear infinite;
-        flex-shrink: 0;
-    }
-    .agent-spinner-text {
-        color: #1E40AF;
-        font-weight: 600;
-        font-size: 0.94rem;
-        letter-spacing: -0.01em;
-    }
-    @keyframes agent-spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-
-    /* Quick Action Chip Buttons & Central Search */
-    .quick-chip-container .stButton > button {
-        border-radius: 9999px !important;
-        min-height: 44px !important;
-        font-weight: 600 !important;
-        font-size: 0.88rem !important;
-        background-color: #F8FAFC !important;
-        border: 1px solid #E2E8F0 !important;
-        color: #1E293B !important;
-        padding: 8px 16px !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
-    }
-    .quick-chip-container .stButton > button:hover {
-        border-color: #2563EB !important;
-        background-color: #EFF6FF !important;
-        color: #1D4ED8 !important;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1) !important;
-        transform: translateY(-1px) !important;
-    }
-    /* Tối ưu ô tìm kiếm trung tâm Hero Search */
-    form[data-testid="stForm"] {
-        border: none !important;
-        padding: 4px 0 !important;
-        background: transparent !important;
-    }
-    div[data-testid="stTextInput"] input {
-        border-radius: 12px !important;
-        background-color: #F8FAFC !important;
-        border: 1.5px solid #CBD5E1 !important;
-        font-size: 0.95rem !important;
-        padding: 12px 16px !important;
-        padding-right: 48px !important;
-        transition: all 0.2s ease-in-out !important;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
-    }
-    div[data-testid="stTextInput"] input:focus {
-        border-color: #2563EB !important;
-        background-color: #FFFFFF !important;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
-    }
-
-    /* 3 Live Data Health KPI Cards */
-    .data-health-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-        margin-bottom: 8px !important;
-    }
-    @media (max-width: 768px) {
-        .data-health-grid {
-            grid-template-columns: 1fr;
-        }
-    }
-    .health-card {
-        background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 13px 16px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-        transition: all 0.2s ease-in-out;
-        text-align: left;
-    }
-    .health-card:hover {
-        border-color: #CBD5E1;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        transform: translateY(-1px);
     }
     .health-card-header {
         display: flex;
@@ -322,7 +297,7 @@ st.markdown("""
         margin-bottom: 6px;
     }
     .health-card-title {
-        font-size: 0.74rem;
+        font-size: 0.76rem;
         font-weight: 700;
         color: #64748B;
         text-transform: uppercase;
@@ -334,31 +309,35 @@ st.markdown("""
     .health-badge {
         font-size: 0.72rem;
         font-weight: 600;
-        padding: 2px 8px;
+        padding: 2px 9px;
         border-radius: 9999px;
+        white-space: nowrap;
     }
     .health-badge-green {
         background: #F0FDF4;
-        color: #166534;
+        color: #15803D;
         border: 1px solid #BBF7D0;
     }
     .health-badge-blue {
         background: #EFF6FF;
-        color: #1D4ED8;
+        color: #0068FF;
         border: 1px solid #BFDBFE;
     }
     .health-badge-purple {
         background: #FAF5FF;
-        color: #6B21A8;
+        color: #7E22CE;
         border: 1px solid #E9D5FF;
     }
     .health-card-value {
         font-size: 1.15rem;
-        font-weight: 800;
+        font-weight: 750;
         color: #0F172A;
-        line-height: 1.25;
-        margin-bottom: 3px;
-        letter-spacing: -0.01em;
+        line-height: 1.35;
+        margin: 4px 0 2px 0;
+        letter-spacing: -0.015em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .health-card-sub {
         font-size: 0.78rem;
@@ -366,28 +345,212 @@ st.markdown("""
         line-height: 1.35;
     }
 
-    /* Categorized Prompt Tabs Styling */
+    /* Trục Tìm kiếm Trung tâm Hero Search - Tỷ lệ Vàng Căn giữa 760px, Thoáng đãng & Tinh tế (Chuẩn Vương Quang Khải) */
+    form[data-testid="stForm"] {
+        border: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+        margin: 20px auto 16px auto !important;
+        max-width: 760px !important;
+    }
+    form[data-testid="stForm"] div[data-testid="stTextInput"] {
+        margin-bottom: 0 !important;
+    }
+    form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"],
+    form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"] {
+        border-radius: 16px !important;
+        background-color: #FFFFFF !important;
+        border: 1.5px solid #CBD5E1 !important;
+        box-shadow: 0 4px 20px -2px rgba(0, 104, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.03) !important;
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+    form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"]:hover,
+    form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"]:hover {
+        border-color: #94A3B8 !important;
+    }
+    form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within,
+    form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"]:focus-within {
+        border-color: #0068FF !important;
+        box-shadow: 0 0 0 3px rgba(0, 104, 255, 0.18), 0 8px 24px -4px rgba(0, 104, 255, 0.15) !important;
+    }
+    form[data-testid="stForm"] div[data-testid="stTextInput"] input {
+        height: 52px !important;
+        min-height: 52px !important;
+        border-radius: 16px !important;
+        background-color: transparent !important;
+        border: none !important;
+        font-size: 1.02rem !important;
+        padding: 0 20px !important;
+        color: #0F172A !important;
+        box-shadow: none !important;
+    }
+    form[data-testid="stForm"] .stButton > button {
+        height: 52px !important;
+        min-height: 52px !important;
+        border-radius: 16px !important;
+        font-size: 0.98rem !important;
+        font-weight: 700 !important;
+        background-color: #0068FF !important;
+        border: 1px solid #0068FF !important;
+        color: #FFFFFF !important;
+        white-space: nowrap !important;
+        box-shadow: 0 4px 16px rgba(0, 104, 255, 0.28) !important;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+    form[data-testid="stForm"] .stButton > button:hover {
+        background-color: #0056D6 !important;
+        border-color: #0056D6 !important;
+        box-shadow: 0 6px 22px rgba(0, 104, 255, 0.40) !important;
+        transform: translateY(-2px) !important;
+    }
+
+    /* Khám phá Theo Lăng Kính Điều Hành (Tabs) - Nhẹ nhàng, Ngăn nắp */
     .prompt-tab-intro {
-        margin-top: 14px;
-        margin-bottom: 8px;
-        font-size: 0.85rem;
+        margin: 18px auto 10px auto;
+        max-width: 880px;
+        font-size: 0.9rem;
         font-weight: 600;
-        color: #475569;
+        color: #334155;
         display: flex;
         align-items: center;
         gap: 6px;
     }
+    .stTabs {
+        max-width: 880px;
+        margin: 0 auto;
+    }
     .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-        margin-bottom: 10px;
+        gap: 8px;
+        margin-bottom: 14px;
+        border-bottom: 1px solid #E2E8F0;
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 6px 14px;
-        border-radius: 8px;
-        font-size: 0.86rem;
+        padding: 8px 16px;
+        border-radius: 8px 8px 0 0;
+        font-size: 0.88rem;
         font-weight: 600;
+        color: #64748B;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #0068FF !important;
+        border-bottom: 2px solid #0068FF !important;
     }
 
+    /* Thẻ Gợi Ý Hành Động (Prompt Action Cards) - Hover lift & 1-Chạm mượt mà */
+    div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 14px !important;
+        border: 1px solid #E2E8F0 !important;
+        background: #FFFFFF !important;
+        padding: 14px 16px !important;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+        min-height: 142px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+    }
+    div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: #0068FF !important;
+        box-shadow: 0 6px 18px rgba(0, 104, 255, 0.08) !important;
+        transform: translateY(-2px);
+    }
+    div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
+        min-height: 38px !important;
+        height: 38px !important;
+        font-size: 0.84rem !important;
+        font-weight: 600 !important;
+        border-radius: 9px !important;
+        background-color: #F8FAFC !important;
+        border: 1px solid #E2E8F0 !important;
+        color: #0068FF !important;
+        white-space: nowrap !important;
+    }
+    div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button:hover {
+        background-color: #0068FF !important;
+        color: #FFFFFF !important;
+        border-color: #0068FF !important;
+        box-shadow: 0 2px 8px rgba(0, 104, 255, 0.22) !important;
+    }
+
+    /* Veraxus Signature Loading Animation - Mũi tên xoay đặc trưng & Lõi khiên pha lê */
+    .veraxus-loading-card, .agent-loading-card {
+        display: inline-flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 24px;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(240, 247, 255, 0.95) 100%);
+        border: 1.5px solid #BFDBFE;
+        border-radius: 16px;
+        margin: 12px 0;
+        box-shadow: 0 6px 20px rgba(0, 104, 255, 0.10), 0 2px 6px rgba(15, 23, 42, 0.04);
+        backdrop-filter: blur(10px);
+    }
+    .veraxus-spinner-wrapper {
+        position: relative;
+        width: 38px;
+        height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .veraxus-orbit-arrow {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        animation: veraxus-orbit-spin 1.05s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        filter: drop-shadow(0 0 6px rgba(0, 104, 255, 0.35));
+    }
+    .veraxus-spinner-core {
+        position: relative;
+        z-index: 2;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: veraxus-core-pulse 2.2s ease-in-out infinite;
+    }
+    .veraxus-spinner-text-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .veraxus-spinner-brand {
+        font-size: 0.70rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: linear-gradient(135deg, #0068FF 0%, #00A3FF 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        line-height: 1;
+    }
+    .veraxus-spinner-status, .agent-spinner-text {
+        color: #0F172A;
+        font-weight: 600;
+        font-size: 0.93rem;
+        letter-spacing: -0.01em;
+        line-height: 1.3;
+    }
+    @keyframes veraxus-orbit-spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    @keyframes veraxus-core-pulse {
+        0%, 100% { transform: scale(0.95); opacity: 0.92; }
+        50% { transform: scale(1.06); opacity: 1; filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6)); }
+    }
+    .agent-spinner {
+        width: 22px;
+        height: 22px;
+        border: 2.5px solid #DBEAFE;
+        border-top: 2.5px solid #0068FF;
+        border-radius: 50%;
+        animation: veraxus-orbit-spin 0.8s linear infinite;
+        flex-shrink: 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -516,7 +679,7 @@ else:
     # Chỉ hiển thị chat_input ở chân trang khi ĐÃ CÓ lịch sử trò chuyện (tránh trùng lặp với Hero Search)
     user_input = None
     if has_active_conversation:
-        user_input = st.chat_input("Hỏi bất kỳ điều gì về dữ liệu kinh doanh của bạn...")
+        user_input = st.chat_input(" Ask Veraxus...")
         render_voice_input_button(compact=True)
 
     prompt_to_run = pending_prompt or user_input
@@ -578,153 +741,130 @@ else:
         elif "claude" in model_disp.lower():
             clean_model = "Claude 3.5 Sonnet"
 
-        # Scale metrics
-        if is_emp:
-            scale_val = f"{len(tables)} Bảng • 300,000+ Hồ sơ"
-            scale_sub = "Quan hệ N-N: Lương, Phòng ban, Chức danh"
-        elif is_choc:
-            scale_val = f"{len(tables)} Bảng • Đơn hàng Bán lẻ"
-            scale_sub = "Doanh thu, Chi phí, Đội ngũ, Sản phẩm"
-        else:
-            scale_val = f"{len(tables)} Bảng Cơ Sở Dữ Liệu"
-            scale_sub = "Sẵn sàng truy vấn và tổng hợp dữ liệu"
 
-        # Security & engine
-        if is_demo:
-            sec_val = "SQLite In-Memory"
-            sec_badge = "🟢 Sẵn sàng"
-            sec_sub = "Độ trễ < 5ms • 100% Cục bộ Offline"
-        else:
-            sec_val = "MySQL Enterprise"
-            sec_badge = "🟢 Live"
-            sec_sub = "Độ trễ < 15ms • Zero Data Leakage"
-
-        prov_clean = provider_name.split()[0]
-
-        # Thanh điều hướng trên cùng: Trạng thái Hệ thống & Phím tắt Cấu hình
-        top_bar_c1, top_bar_c2 = st.columns([6.8, 3.2], vertical_alignment="center")
-        with top_bar_c1:
-            st.markdown("""
-            <div style="display: flex; align-items: center; gap: 8px; padding: 2px 0 6px 0;">
-                <span style="font-size: 0.96rem; font-weight: 700; color: #334155; letter-spacing: -0.01em;">📊 Bảng Điều Hành Doanh Nghiệp</span>
-                <span style="background: #F0FDF4; color: #166534; font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 6px; border: 1px solid #BBF7D0;">● Enterprise Live</span>
+        # Hero Header - Tối giản & Thẩm mỹ (Chuẩn Zalo/CPO)
+        st.markdown(textwrap.dedent("""
+        <div class="hero-container">
+            <div class="hero-badge">
+                <span class="hero-badge-dot"></span> <span>Doanh Nghiệp • Sẵn Sàng Phân Tích</span>
             </div>
-            """, unsafe_allow_html=True)
-        with top_bar_c2:
-            c_btn_cfg, c_btn_new = st.columns(2, gap="small")
-            with c_btn_cfg:
-                if st.button("⚙️ Cấu hình", key="hero_top_btn_settings", use_container_width=True, help="Mở màn hình Cài đặt Database và Model AI"):
-                    st.session_state["view_mode"] = "settings"
-                    st.rerun()
-            with c_btn_new:
-                if st.button("➕ Chat Mới", key="hero_top_btn_new_chat", use_container_width=True, help="Bắt đầu phiên hội thoại mới"):
-                    st.session_state["history"] = []
-                    st.session_state["query_cache"] = {}
-                    st.session_state["focused_turn_idx"] = None
-                    st.rerun()
-
-        # Hero Header
-        st.markdown("""
-        <div class="hero-container" style="padding: 4px 10px 14px 10px;">
-            <div class="hero-title" style="font-size: 2.25rem; font-weight: 800; color: #0F172A; margin-bottom: 6px; letter-spacing: -0.025em;">
-                VERAXUS AI
+            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 6px 0;">
+                <svg width="44" height="44" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 6px 16px rgba(0, 104, 255, 0.32)); flex-shrink: 0;">
+                    <defs>
+                        <linearGradient id="heroFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
+                            <stop offset="0%" stop-color="#38BDF8"/>
+                            <stop offset="60%" stop-color="#0068FF"/>
+                            <stop offset="100%" stop-color="#0047BA"/>
+                        </linearGradient>
+                        <linearGradient id="heroFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#BAE6FD"/>
+                            <stop offset="100%" stop-color="#38BDF8"/>
+                        </linearGradient>
+                        <linearGradient id="heroFacetRightFront" x1="80%" y1="10%" x2="50%" y2="90%">
+                            <stop offset="0%" stop-color="#00A3FF"/>
+                            <stop offset="50%" stop-color="#0052CC"/>
+                            <stop offset="100%" stop-color="#02388A"/>
+                        </linearGradient>
+                        <linearGradient id="heroFacetRightTop" x1="100%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#E0F2FE"/>
+                            <stop offset="100%" stop-color="#7DD3FC"/>
+                        </linearGradient>
+                        <linearGradient id="heroFacetCenterGlow" x1="50%" y1="40%" x2="50%" y2="92%">
+                            <stop offset="0%" stop-color="#67E8F9"/>
+                            <stop offset="100%" stop-color="#0068FF"/>
+                        </linearGradient>
+                    </defs>
+                    <polygon points="18,22 36,12 50,88 34,74" fill="url(#heroFacetLeftFront)"/>
+                    <polygon points="18,22 36,12 48,22 30,32" fill="url(#heroFacetLeftTop)"/>
+                    <polygon points="82,22 64,12 50,88 66,74" fill="url(#heroFacetRightFront)"/>
+                    <polygon points="82,22 64,12 52,22 70,32" fill="url(#heroFacetRightTop)"/>
+                    <polygon points="30,32 48,22 50,54 38,58" fill="#0052CC"/>
+                    <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
+                    <polygon points="38,58 50,54 62,58 50,88" fill="url(#heroFacetCenterGlow)"/>
+                </svg>
+                <div class="hero-title" style="margin-bottom: 0;">
+                    VERAXUS
+                </div>
             </div>
-            <div class="hero-subtitle" style="font-size: 1.02rem; color: #64748B; margin-bottom: 12px;">
-                Trợ lý Điều hành & Phân tích Dữ liệu Kinh doanh Độc lập
+            <div class="hero-subtitle">
+                Trợ lý Dữ liệu Kinh doanh Thông minh • Trực quan, Tức thì & Tuyệt đối Tin cậy
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """).strip(), unsafe_allow_html=True)
 
-        col_c_l, col_c_mid, col_c_r = st.columns([1, 8, 1])
-        with col_c_mid:
-            # 3 Thẻ Sức Khỏe Dữ Liệu Live Snapshot
-            st.markdown(f"""
-            <div class="data-health-grid">
-                <div class="health-card">
-                    <div class="health-card-header">
-                        <span class="health-card-title">🗄️ QUY MÔ DỮ LIỆU</span>
-                        <span class="health-badge health-badge-blue">Ready</span>
-                    </div>
-                    <div class="health-card-value">{scale_val}</div>
-                    <div class="health-card-sub">{scale_sub}</div>
-                </div>
-                <div class="health-card">
-                    <div class="health-card-header">
-                        <span class="health-card-title">🛡️ ĐỘ TIN CẬY & AN TOÀN</span>
-                        <span class="health-badge health-badge-green">{sec_badge}</span>
-                    </div>
-                    <div class="health-card-value">{sec_val}</div>
-                    <div class="health-card-sub">{sec_sub}</div>
-                </div>
-                <div class="health-card">
-                    <div class="health-card-header">
-                        <span class="health-card-title">🧠 TRÍ TUỆ NHÂN TẠO</span>
-                        <span class="health-badge health-badge-purple">{prov_clean}</span>
-                    </div>
-                    <div class="health-card-value">{clean_model}</div>
-                    <div class="health-card-sub">Schema Injected • Tự sửa lỗi 3 chu kỳ</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Trục tương tác chính: Thanh Tìm kiếm Lớn tại Trung tâm
+        # Trục tương tác chính: Thanh Tìm kiếm Lớn tại Trung tâm (Spotlight Search)
+        # Căn giữa tỷ lệ vàng cân xứng [1.1, 5.8, 1.1] tạo khoảng thở thoáng đãng hai bên
+        col_sp_l, col_center_search, col_sp_r = st.columns([1.1, 5.8, 1.1])
+        with col_center_search:
             with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
-                c_in, c_btn = st.columns([7.3, 1.2], gap="small", vertical_alignment="center")
+                c_in, c_btn = st.columns([4.4, 1.3], gap="small", vertical_alignment="center")
                 with c_in:
                     hero_query = st.text_input(
                         "Search",
-                        placeholder="🔍 Hỏi bất kỳ điều gì về doanh thu, chi phí, P&L, nhân sự...",
+                        placeholder=" Ask Veraxus...",
                         label_visibility="collapsed",
                         key="hero_search_input"
                     )
                 with c_btn:
-                    hero_submit = st.form_submit_button("Hỏi AI ↗", type="primary", use_container_width=True)
+                    hero_submit = st.form_submit_button("Phân tích ↗", type="primary", use_container_width=True)
                 if hero_submit and hero_query.strip():
                     st.session_state["pending_prompt"] = hero_query.strip()
                     st.rerun()
 
-            # Tích hợp Micro giọng nói tiếng Việt trực tiếp bên trong thanh tìm kiếm (tự ẩn khi gõ câu hỏi)
+            # Tích hợp Micro giọng nói tiếng Việt trực tiếp bên trong thanh tìm kiếm
             render_voice_input_button(compact=True)
 
-            # Khám phá câu hỏi theo 3 lăng kính điều hành (Categorized Smart Prompts Tabs)
-            categorized = generate_categorized_starter_prompts(tables, schema_context)
-            cat_keys = list(categorized.keys())
+        # Dải Nhận diện Tin cậy Vi mô (Micro-Trust Ribbon - Triết lý "Ẩn giấu công nghệ")
+        # Thay thế 3 thẻ kỹ thuật cồng kềnh bằng chỉ báo trạng thái nhẹ nhàng, thanh lịch
+        st.markdown(textwrap.dedent("""
+        <div class="micro-trust-ribbon">
+            <span class="micro-trust-pill">🔒 Bảo mật 100% nội bộ</span>
+            <span style="color: #CBD5E1;">•</span>
+            <span class="micro-trust-pill">⚡ Kết nối trực tiếp CSDL</span>
+            <span style="color: #CBD5E1;">•</span>
+            <span class="micro-trust-pill">✨ Sẵn sàng phân tích tức thì</span>
+        </div>
+        """).strip(), unsafe_allow_html=True)
 
-            st.markdown("""
-            <div class="prompt-tab-intro">
-                <span>🎯</span> <span><b>Khám phá nhanh theo lăng kính điều hành:</b></span>
-            </div>
-            """, unsafe_allow_html=True)
+        # Khám phá câu hỏi theo 3 lăng kính điều hành (Categorized Smart Prompts Tabs)
+        categorized = generate_categorized_starter_prompts(tables, schema_context)
+        cat_keys = list(categorized.keys())
 
-            prompt_tabs = st.tabs(cat_keys)
-            for tab_idx, cat_name in enumerate(cat_keys):
-                with prompt_tabs[tab_idx]:
-                    card_list = categorized[cat_name]
-                    cols = st.columns(len(card_list), gap="small")
-                    for card_idx, card in enumerate(card_list):
-                        with cols[card_idx]:
-                            with st.container(border=True):
-                                st.markdown(f"""
-                                <div style="font-size: 0.92rem; font-weight: 700; color: #0F172A; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-                                    <span>{card['icon']}</span> <span>{card['title']}</span>
-                                </div>
-                                <div style="font-size: 0.8rem; color: #64748B; min-height: 42px; line-height: 1.4; margin-bottom: 8px;">
-                                    {card['desc']}
-                                </div>
-                                """, unsafe_allow_html=True)
+        st.markdown("""
+        <div class="prompt-tab-intro">
+            <span>🎯</span> <span><b>Gợi ý phân tích theo lăng kính điều hành:</b></span>
+        </div>
+        """, unsafe_allow_html=True)
 
-                                def _make_click_handler(prompt_text=card["prompt"]):
-                                    def _handler():
-                                        st.session_state["pending_prompt"] = prompt_text
-                                    return _handler
+        prompt_tabs = st.tabs(cat_keys)
+        for tab_idx, cat_name in enumerate(cat_keys):
+            with prompt_tabs[tab_idx]:
+                card_list = categorized[cat_name]
+                cols = st.columns(len(card_list), gap="medium")
+                for card_idx, card in enumerate(card_list):
+                    with cols[card_idx]:
+                        with st.container(border=True):
+                            st.markdown(f"""
+                            <div style="font-size: 0.92rem; font-weight: 700; color: #0F172A; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                <span>{card['icon']}</span> <span>{card['title']}</span>
+                            </div>
+                            <div style="font-size: 0.8rem; color: #64748B; min-height: 40px; line-height: 1.4; margin-bottom: 8px;">
+                                {card['desc']}
+                            </div>
+                            """, unsafe_allow_html=True)
 
-                                st.button(
-                                    "Phân tích ngay ⚡",
-                                    key=f"btn_cat_{tab_idx}_{card_idx}",
-                                    use_container_width=True,
-                                    help=f"Chạy truy vấn: \"{card['prompt']}\"",
-                                    on_click=_make_click_handler(card["prompt"])
-                                )
+                            def _make_click_handler(prompt_text=card["prompt"]):
+                                def _handler():
+                                    st.session_state["pending_prompt"] = prompt_text
+                                return _handler
+
+                            st.button(
+                                "Phân tích ngay ⚡",
+                                key=f"btn_cat_{tab_idx}_{card_idx}",
+                                use_container_width=True,
+                                help=f"Chạy truy vấn: \"{card['prompt']}\"",
+                                on_click=_make_click_handler(card["prompt"])
+                            )
 
 
 
@@ -745,16 +885,11 @@ else:
                 status_placeholder = st.empty()
                 def update_status(text: str):
                     status_placeholder.markdown(
-                        f"""
-                        <div class="agent-loading-card">
-                            <div class="agent-spinner"></div>
-                            <span class="agent-spinner-text">{text}</span>
-                        </div>
-                        """,
+                        render_veraxus_loading_html(text),
                         unsafe_allow_html=True
                     )
 
-                update_status("🤖 Đang phân tích câu hỏi & tạo câu lệnh SQL tối ưu...")
+                update_status("Đang phân tích câu hỏi & đối chiếu dữ liệu doanh nghiệp...")
                 current_engine = st.session_state.get("engine")
                 current_schema = st.session_state.get("schema_context", "")
                 if current_engine and (not current_schema or not current_schema.strip()):

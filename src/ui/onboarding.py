@@ -24,28 +24,31 @@ def render_onboarding():
     col_head1, col_head2 = st.columns([3, 1])
     with col_head1:
         if is_already_connected:
-            st.markdown("""
-            <div style="margin-bottom: 8px;">
-                <h1 style="font-size: 1.85rem; font-weight: 800; color: #0F172A; margin: 0 0 4px 0;">⚙️ Cài đặt & Cấu hình Kết nối</h1>
-                <p style="color: #64748B; font-size: 0.92rem; margin: 0;">Thay đổi nguồn dữ liệu, nhà cung cấp AI hoặc tùy biến tham số phân tích.</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(
+                '<div style="margin-bottom: 8px;">'
+                '<h1 style="font-size: 1.85rem; font-weight: 850; color: #0F172A; margin: 0 0 4px 0; letter-spacing: -0.025em;">⚙️ Cài đặt & Cấu hình VERAXUS</h1>'
+                '<p style="color: #64748B; font-size: 0.92rem; margin: 0;">Tùy biến nguồn cơ sở dữ liệu doanh nghiệp và thông số mô hình AI.</p>'
+                '</div>',
+                unsafe_allow_html=True
+            )
         else:
-            st.markdown("""
-            <div style="margin-bottom: 8px;">
-                <h1 style="font-size: 1.85rem; font-weight: 800; color: #0F172A; margin: 0 0 4px 0;">🗄️ Chào mừng đến với Veraxus AI</h1>
-                <p style="color: #64748B; font-size: 0.92rem; margin: 0;">Trợ lý AI phân tích và điều hành dữ liệu kinh doanh thông minh</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(
+                '<div style="margin-bottom: 8px;">'
+                '<h1 style="font-size: 1.85rem; font-weight: 850; color: #0F172A; margin: 0 0 4px 0; letter-spacing: -0.025em;">💎 Chào mừng đến với VERAXUS</h1>'
+                '<p style="color: #64748B; font-size: 0.92rem; margin: 0;">Trợ lý Dữ liệu Kinh doanh Thông minh & Tin cậy</p>'
+                '</div>',
+                unsafe_allow_html=True
+            )
 
     with col_head2:
-        st.markdown("""
-        <div style="text-align: right; padding-top: 6px;">
-            <span style="background: #F1F5F9; color: #334155; border: 1px solid #E2E8F0; padding: 5px 12px; border-radius: 9999px; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em;">
-                • Local Engine (Offline & Secured)
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            '<div style="text-align: right; padding-top: 6px;">'
+            '<span style="background: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; padding: 5px 12px; border-radius: 9999px; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em;">'
+            '● Local & Secured Engine'
+            '</span>'
+            '</div>',
+            unsafe_allow_html=True
+        )
         if is_already_connected:
             st.write("")
             if st.button("← Quay lại Chat", type="secondary", use_container_width=True, key="btn_back_to_chat_top"):
@@ -60,7 +63,7 @@ def render_onboarding():
             "👉 Vui lòng kiểm tra và cập nhật lại thông tin MySQL ở bảng **Chế độ Doanh nghiệp** bên dưới."
         )
 
-    st.markdown("---")
+    st.markdown("<hr style='margin: 12px 0 20px 0; border: none; border-top: 1px solid #E2E8F0;' />", unsafe_allow_html=True)
 
     # 2. Hai chế độ trải nghiệm rõ ràng (Triết lý 1-Click Connect)
     col_demo, col_enterprise = st.columns(2, gap="large")
@@ -70,32 +73,32 @@ def render_onboarding():
     # =========================================================
     with col_demo:
         with st.container(border=True):
-            st.markdown("### ⚡ Chế độ Thẩm định (Demo)")
+            st.markdown("### ⚡ Trải nghiệm Nhanh (Demo 1-Chạm)")
             st.caption("Dành cho Ban Giám khảo & Người dùng muốn trải nghiệm ngay tức thì.")
 
             st.markdown("""
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 14px 16px; margin: 12px 0 16px 0;">
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 14px 18px; margin: 12px 0 16px 0;">
                 <div style="margin-bottom: 8px; font-size: 0.88rem; color: #1E293B;">
-                    📊 <b>CSDL Mẫu:</b> Awesome Chocolates (Sales, P&L, Nhân sự thực tế)
+                    📊 <b>CSDL Mẫu:</b> Awesome Chocolates (Doanh thu, Đơn hàng, Nhân sự)
                 </div>
                 <div style="margin-bottom: 8px; font-size: 0.88rem; color: #1E293B;">
-                    🛡️ <b>Mô hình AI:</b> Local Qwen 2.5 / Ollama (100% Cục bộ & Bảo mật)
+                    🛡️ <b>Mô hình AI:</b> Qwen 2.5 Cục bộ / SQLite In-Memory
                 </div>
                 <div style="font-size: 0.88rem; color: #1E293B;">
-                    ⏱️ <b>Thời gian khởi tạo:</b> <b>1 Click • 1 Giây</b> (Zero-Friction)
+                    ⏱️ <b>Thời gian khởi tạo:</b> <b>1 Chạm • Dưới 1 giây</b> (Zero-Friction)
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
             btn_demo_connect = st.button(
-                "🚀 Khám phá ngay (Demo 1-Click)",
+                "🚀 Khám phá ngay (1-Chạm)",
                 type="primary",
                 use_container_width=True,
                 key="btn_demo_1click",
                 help="Tự động kết nối cơ sở dữ liệu mẫu Awesome Chocolates và mô hình AI để bắt đầu hỏi đáp ngay lập tức."
             )
 
-            st.caption("🔒 *Không yêu cầu nhập API Key. Không gửi dữ liệu tài chính ra ngoài internet.*")
+            st.caption("🔒 *Không cần nhập API Key. Dữ liệu xử lý an toàn tại chỗ 100%.*")
 
     # =========================================================
     # CỘT 2: CHẾ ĐỘ TÙY CHỈNH DOANH NGHIỆP (ENTERPRISE MODE)
@@ -313,8 +316,9 @@ def render_onboarding():
                     smtp_server = st.text_input("SMTP Server", value=saved.get("smtp_server", "smtp.gmail.com"), key="onboarding_smtp_server")
                     smtp_port = st.text_input("SMTP Port", value=saved.get("smtp_port", "587"), key="onboarding_smtp_port")
                     smtp_user = st.text_input("Email Người gửi", value=saved.get("smtp_user", ""), key="onboarding_smtp_user")
-                    smtp_pass = st.text_input("Mật khẩu Ứng dụng SMTP", value=saved.get("smtp_pass", ""), type="password", key="onboarding_smtp_pass")
+                    smtp_pass = st.text_input("Mật khẩu Ứng dụng SMTP (Tùy chọn)", value=saved.get("smtp_pass", ""), type="password", key="onboarding_smtp_pass")
                     email_receivers = st.text_input("Email Người nhận", value=saved.get("email_receivers", ""), key="onboarding_email_receivers")
+                    st.info("💡 **Mẹo:** Bạn không bắt buộc phải nhập Mật khẩu ứng dụng SMTP! Khi phân tích báo cáo, hệ thống có sẵn nút **'Mở Gmail Gửi Ngay'** để gửi thẳng cho người nhận trong 1-chạm mà không cần bất kỳ mật khẩu nào.")
 
             st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
             btn_custom_connect = st.button(

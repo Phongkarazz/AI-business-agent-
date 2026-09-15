@@ -3,6 +3,7 @@ Multi-provider LLM client supporting Google Gemini, OpenRouter, and Alibaba Qwen
 with intelligent key detection, automatic model routing, max_tokens optimization (fixing 402 errors),
 and robust SQL extraction.
 """
+from __future__ import annotations
 
 import re
 import time

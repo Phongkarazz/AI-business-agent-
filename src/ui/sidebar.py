@@ -3,6 +3,7 @@ Sidebar UI component for Session Management, Database Table Explorer, and Intera
 Allows clicking on any historical question to view its result directly.
 """
 
+import textwrap
 import streamlit as st
 from src.database.connection import try_connect
 from src.database.demo_data import build_demo_engine
@@ -139,49 +140,104 @@ def render_main_sidebar():
     model_name = st.session_state.get("model_name", "deepseek/deepseek-chat")
 
     with st.sidebar:
-        # --- PHẦN 1: TOP SIDEBAR (NÚT CẤU HÌNH & TẠO CHAT MỚI) ---
-        st.markdown("### ⚙️ Bảng Cấu Hình & Dữ Liệu")
-        db_badge = "🎮 SQLite Demo" if is_demo else "🔌 MySQL DB"
-        st.caption(f"🟢 **{db_badge}** | {provider} (`{model_name}`)")
+        # --- PHẦN 1: TOP SIDEBAR (THƯƠNG HIỆU & ĐIỀU HÀNH) ---
+        db_badge = "Dữ liệu Mẫu (Demo)" if is_demo else "CSDL Doanh Nghiệp"
+        if "qwen" in model_name.lower() or "ollama" in provider.lower():
+            engine_badge = "Nội bộ (Local Engine)"
+        elif "deepseek" in model_name.lower():
+            engine_badge = "DeepSeek V3"
+        elif "gemini" in model_name.lower():
+            engine_badge = "Gemini 2.0"
+        elif "claude" in model_name.lower():
+            engine_badge = "Claude 3.5"
+        else:
+            engine_badge = "Veraxus Engine"
+
+        st.markdown(textwrap.dedent(f"""
+        <div style="padding: 4px 4px 14px 4px;">
+            <div style="font-size: 1.22rem; font-weight: 850; color: #0F172A; display: flex; align-items: center; gap: 8px;">
+                <svg width="22" height="22" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 6px rgba(0, 104, 255, 0.30)); flex-shrink: 0;">
+                    <defs>
+                        <linearGradient id="sbFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
+                            <stop offset="0%" stop-color="#38BDF8"/>
+                            <stop offset="60%" stop-color="#0068FF"/>
+                            <stop offset="100%" stop-color="#0047BA"/>
+                        </linearGradient>
+                        <linearGradient id="sbFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#BAE6FD"/>
+                            <stop offset="100%" stop-color="#38BDF8"/>
+                        </linearGradient>
+                        <linearGradient id="sbFacetRightFront" x1="80%" y1="10%" x2="50%" y2="90%">
+                            <stop offset="0%" stop-color="#00A3FF"/>
+                            <stop offset="50%" stop-color="#0052CC"/>
+                            <stop offset="100%" stop-color="#02388A"/>
+                        </linearGradient>
+                        <linearGradient id="sbFacetRightTop" x1="100%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#E0F2FE"/>
+                            <stop offset="100%" stop-color="#7DD3FC"/>
+                        </linearGradient>
+                        <linearGradient id="sbFacetCenterGlow" x1="50%" y1="40%" x2="50%" y2="92%">
+                            <stop offset="0%" stop-color="#67E8F9"/>
+                            <stop offset="100%" stop-color="#0068FF"/>
+                        </linearGradient>
+                    </defs>
+                    <polygon points="18,22 36,12 50,88 34,74" fill="url(#sbFacetLeftFront)"/>
+                    <polygon points="18,22 36,12 48,22 30,32" fill="url(#sbFacetLeftTop)"/>
+                    <polygon points="82,22 64,12 50,88 66,74" fill="url(#sbFacetRightFront)"/>
+                    <polygon points="82,22 64,12 52,22 70,32" fill="url(#sbFacetRightTop)"/>
+                    <polygon points="30,32 48,22 50,54 38,58" fill="#0052CC"/>
+                    <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
+                    <polygon points="38,58 50,54 62,58 50,88" fill="url(#sbFacetCenterGlow)"/>
+                </svg>
+                <span style="color: #0068FF; letter-spacing: -0.025em; font-weight: 900;">VERAXUS</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-left: 2px;">
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10B981; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);"></span>
+                <span style="font-size: 0.78rem; font-weight: 600; color: #15803D;">{db_badge}</span>
+                <span style="font-size: 0.72rem; color: #CBD5E1;">•</span>
+                <span style="font-size: 0.76rem; color: #64748B; font-weight: 500;">{engine_badge}</span>
+            </div>
+        </div>
+        """).strip(), unsafe_allow_html=True)
 
         c_top1, c_top2 = st.columns(2)
         with c_top1:
-            if st.button("⚙️ Cấu hình", use_container_width=True, key="sidebar_btn_settings", help="Mở màn hình cài đặt để đổi Database hoặc AI Provider"):
-                st.session_state["view_mode"] = "settings"
-                st.rerun()
-
-        with c_top2:
             if st.button("➕ Chat Mới", type="primary", use_container_width=True, key="sidebar_btn_new_chat", help="Bắt đầu một phiên hội thoại mới"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
                 st.session_state["focused_turn_idx"] = None
                 st.rerun()
 
-        st.markdown("---")
+        with c_top2:
+            if st.button("⚙️ Cấu hình", use_container_width=True, key="sidebar_btn_settings", help="Mở màn hình Cài đặt Database hoặc AI Provider"):
+                st.session_state["view_mode"] = "settings"
+                st.rerun()
 
-        # --- PHẦN 2: BÊN DƯỚI TOP SIDEBAR (KHÁM PHÁ BẢNG DATABASE) ---
-        st.subheader("🗄️ Khám phá Bảng DB")
+        st.markdown("<hr style='margin: 12px 0; border: none; border-top: 1px solid #E2E8F0;' />", unsafe_allow_html=True)
+
+        # --- PHẦN 2: KHÁM PHÁ BẢNG DỮ LIỆU ---
+        st.markdown("<div style='font-size: 0.88rem; font-weight: 700; color: #334155; margin-bottom: 6px; padding-left: 2px;'>🗄️ Danh mục Bảng Dữ liệu</div>", unsafe_allow_html=True)
 
         if engine:
             tables = get_table_names(engine)
             if tables:
-                st.caption(f"Cơ sở dữ liệu gồm **{len(tables)} bảng** nghiệp vụ:")
+                st.caption(f"Cơ sở dữ liệu gồm **{len(tables)} danh mục** nghiệp vụ:")
                 selected_table = st.selectbox(
                     "Chọn bảng",
                     tables,
                     key="sidebar_selected_table",
                     label_visibility="collapsed",
-                    help="Chọn một bảng để xem cấu trúc và mẫu dữ liệu toàn màn hình."
+                    help="Chọn một bảng để xem cấu trúc schema và 10 dòng dữ liệu mẫu."
                 )
                 cols_info = get_table_columns_info(engine, selected_table)
-                st.caption(f"📊 Bảng `{selected_table}`: **{len(cols_info)} cột**")
+                st.caption(f"📊 Bảng `{selected_table}`: **{len(cols_info)} trường thông tin**")
 
                 if st.button(
                     f"👁️ Mở bảng `{selected_table}`",
                     key=f"sidebar_btn_preview_{selected_table}",
                     use_container_width=True,
                     type="secondary",
-                    help=f"Mở hộp thoại toàn màn hình xem cấu trúc schema và 10 dòng mẫu của bảng {selected_table}"
+                    help=f"Xem cấu trúc schema và 10 dòng mẫu của bảng {selected_table}"
                 ):
                     show_table_preview_dialog(engine, tables, selected_table)
             else:
@@ -189,26 +245,25 @@ def render_main_sidebar():
         else:
             st.caption("Chưa kết nối cơ sở dữ liệu.")
 
-        st.markdown("---")
+        st.markdown("<hr style='margin: 12px 0; border: none; border-top: 1px solid #E2E8F0;' />", unsafe_allow_html=True)
 
-        # --- PHẦN 3: LỊCH SỬ CÁC CUỘC TRÒ CHUYỆN (INTERACTIVE CHAT HISTORY) ---
-        st.subheader("💬 Lịch sử Trò chuyện")
+        # --- PHẦN 3: LỊCH SỬ HỘI THOẠI ---
+        st.markdown("<div style='font-size: 0.88rem; font-weight: 700; color: #334155; margin-bottom: 6px; padding-left: 2px;'>💬 Lịch sử Hội thoại</div>", unsafe_allow_html=True)
 
         history = st.session_state.get("history", [])
         focused_turn_idx = st.session_state.get("focused_turn_idx", None)
 
         if history:
-            # Nút quay về xem toàn bộ nếu đang ở chế độ xem tập trung 1 câu
             if focused_turn_idx is not None:
                 if st.button("🌐 Xem toàn bộ hội thoại", use_container_width=True, key="sidebar_btn_show_all_chat", type="secondary"):
                     st.session_state["focused_turn_idx"] = None
                     st.rerun()
 
-            st.caption("💡 *Nhấp vào câu hỏi bất kỳ để xem trực tiếp:*")
+            st.caption("💡 *Bấm vào câu hỏi để xem lại kết quả tức thì:*")
 
             for i, turn in enumerate(history):
                 query_text = turn.get("query", "")
-                short_q = query_text if len(query_text) <= 32 else query_text[:29] + "..."
+                short_q = query_text if len(query_text) <= 30 else query_text[:27] + "..."
                 is_active = (focused_turn_idx == i)
 
                 btn_label = f"👉 {i+1}. {short_q}" if is_active else f"💬 {i+1}. {short_q}"
@@ -225,11 +280,11 @@ def render_main_sidebar():
                     st.rerun()
 
             st.markdown("###")
-            if st.button("🗑️ Xóa lịch sử chat", use_container_width=True, key="sidebar_btn_clear_history"):
+            if st.button("🗑️ Dọn dẹp lịch sử", use_container_width=True, key="sidebar_btn_clear_history"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
                 st.session_state["focused_turn_idx"] = None
-                st.toast("🧹 Đã xóa toàn bộ lịch sử trò chuyện!", icon="🗑️")
+                st.toast("🧹 Đã dọn dẹp toàn bộ lịch sử trò chuyện!", icon="🗑️")
                 st.rerun()
         else:
-            st.caption("Chưa có câu hỏi nào trong phiên này. Hãy đặt câu hỏi đầu tiên ở khung chat bên phải!")
+            st.caption("Chưa có câu hỏi nào. Hãy nhập câu hỏi đầu tiên ở khung chat bên phải!")
