@@ -135,8 +135,10 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
         return _OpenAIClient(
             api_key=api_key,
             base_url=target_url,
+            timeout=60.0,
+            max_retries=2,
             default_headers={
-                "HTTP-Referer": "https://localhost:8501",
+                "HTTP-Referer": "https://veraxus-agent.streamlit.app",
                 "X-Title": "Veraxus for SQL",
             }
         )
@@ -144,7 +146,7 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
         if _OpenAIClient is None:
             raise ImportError("Thiếu thư viện `openai`. Vui lòng cài đặt: pip install openai")
         target_url = (base_url or "").strip() or DASHSCOPE_BASE_URL
-        return _OpenAIClient(api_key=api_key, base_url=target_url)
+        return _OpenAIClient(api_key=api_key, base_url=target_url, timeout=60.0, max_retries=2)
     else:
         raise ValueError(f"Provider không được hỗ trợ: {provider}")
 
@@ -198,7 +200,7 @@ def _call_openai_compatible_impl(client, model_name: str, prompt: str, max_token
 
 
 def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: int = 3, max_tokens: int = 2048) -> tuple[str | None, str | None]:
-    """Gọi LLM với cấu hình max_tokens tối ưu, cơ chế Exponential Backoff trên lỗi 429/503 và tự động fallback."""
+    """Gọi LLM với cấu hình max_tokens tối ưu, cơ chế Exponential Backoff trên lỗi 429/503/ConnectionError và tự động fallback."""
     if not client:
         return None, "Chưa khởi tạo client AI."
 
@@ -250,9 +252,16 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
                     wait_time = 2 * (attempt + 1)
                     time.sleep(wait_time)
                     continue
-            # 5. Xử lý lỗi kết nối Ollama khi chưa bật ứng dụng
-            if provider == "Ollama (Local AI Offline)" and any(k in err.lower() for k in ["connection refused", "connecterror", "failed to connect", "connection error"]):
-                return None, "Không thể kết nối đến Ollama tại http://localhost:11434. Vui lòng đảm bảo bạn đã mở ứng dụng Ollama trên máy tính của bạn."
+
+            # 5. Xử lý lỗi kết nối tạm thời / Timeout / Connection Error
+            if any(k in err.lower() for k in ["connection error", "connecterror", "connect_error", "timeout", "remotedisconnected", "connection reset", "econnreset", "apiconnectionerror"]):
+                if provider == "Ollama (Local AI Offline)":
+                    return None, "Không thể kết nối đến Ollama tại http://localhost:11434. Vui lòng đảm bảo bạn đã mở ứng dụng Ollama trên máy tính của bạn."
+                if attempt < max_retries - 1:
+                    wait_time = 2 * (attempt + 1)
+                    time.sleep(wait_time)
+                    continue
+                return None, f"Lỗi kết nối tới {provider} ({model_name}): {err}. Vui lòng thử lại hoặc chuyển sang model khác như google/gemini-2.0-flash-001 hoặc openai/gpt-4o-mini."
 
             else:
                 return None, f"Lỗi {provider} ({model_name}): {err}"

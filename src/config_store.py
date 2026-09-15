@@ -52,6 +52,34 @@ def load_saved_config() -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Tự động đọc cấu hình từ Streamlit Cloud Secrets nếu có
+    try:
+        import streamlit as _st
+        if hasattr(_st, "secrets"):
+            sec = _st.secrets
+            for k in sec:
+                val = sec[k]
+                if isinstance(val, str):
+                    k_upper = k.upper()
+                    if k_upper in ("OPENROUTER_API_KEY", "API_KEY_OPENROUTER"):
+                        config["api_key_openrouter"] = val
+                    elif k_upper in ("GEMINI_API_KEY", "API_KEY_GEMINI"):
+                        config["api_key_gemini"] = val
+                    elif k_upper in ("DEFAULT_PROVIDER", "PROVIDER"):
+                        config["provider"] = val
+                    elif k_upper in ("OPENROUTER_MODEL", "MODEL_NAME", "MODEL"):
+                        config["model_name"] = val
+                    elif k_upper in ("DB_HOST", "HOST"):
+                        config["db_host"] = val
+                    elif k_upper in ("DB_USER", "USER"):
+                        config["db_user"] = val
+                    elif k_upper in ("DB_PASSWORD", "DB_PASS", "PASSWORD"):
+                        config["db_pass"] = val
+                    elif k_upper in ("DB_NAME", "DATABASE"):
+                        config["db_name"] = val
+    except Exception:
+        pass
+
     return config
 
 
