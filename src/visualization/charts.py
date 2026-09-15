@@ -200,6 +200,12 @@ VI_COLUMN_MAP = {
     "age": "Tuổi",
     "totalsalarybudget": "Tổng Quỹ Lương ($)",
     "total_salary_budget": "Tổng Quỹ Lương ($)",
+    "totalsalary": "Tổng Quỹ Lương ($)",
+    "total_salary": "Tổng Quỹ Lương ($)",
+    "deptpayroll": "Tổng Quỹ Lương ($)",
+    "dept_payroll": "Tổng Quỹ Lương ($)",
+    "totalsalarycost": "Tổng Quỹ Lương ($)",
+    "total_salary_cost": "Tổng Quỹ Lương ($)",
     "totalcompanysalary": "Tổng Chi Phí Lương Toàn Công Ty ($)",
     "total_company_salary": "Tổng Chi Phí Lương Toàn Công Ty ($)",
     "companytotalsalary": "Tổng Chi Phí Lương Toàn Công Ty ($)",
@@ -1162,6 +1168,134 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         )
                         st.plotly_chart(fig, use_container_width=True)
                         return fig
+                    # Ưu tiên vẽ Dual Axis khi có Tổng Quỹ Lương ($) và Lương Trung Bình ($) hoặc Quy Mô Nhân Sự (Người)
+                    # Giúp hiển thị trực quan cả quy mô quỹ lương lẫn mức thu nhập bình quân/nhân sự mà không bị lệch thang đo (Visual Scale Contradiction)
+                    elif (
+                        [c for c in non_pct_cols if any(k in c.lower() for k in ["totalpayroll", "total_payroll", "totalsalarybudget", "total_salary_budget", "totalsalary", "total_salary", "quỹ lương", "tổng quỹ lương", "salarybudget", "salary_budget", "deptsalary", "dept_salary", "tổng chi phí lương", "totalcompanysalary", "total_company_salary", "companytotalsalary", "tổng quỹ"]) and not any(k in c.lower() for k in ["avg", "trung bình", "median", "mean"])]
+                        and (
+                            [c for c in non_pct_cols if any(k in c.lower() for k in ["avgsalary", "avg_salary", "averagesalary", "currentavgsalary", "current_avg_salary", "lương trung bình", "trung bình", "titleavgsalary", "title_avg_salary"]) and not any(k in c.lower() for k in ["totalpayroll", "total_payroll", "totalsalarybudget", "total_salary_budget", "totalsalary", "total_salary", "quỹ lương", "tổng quỹ lương", "salarybudget", "salary_budget", "deptsalary", "dept_salary", "tổng chi phí lương"])]
+                            or [c for c in non_pct_cols if any(k in c.lower() for k in ["headcount", "employeecount", "employee_count", "totalemployees", "total_employees", "số lượng nhân sự", "nhân sự", "quy mô", "total_emp"]) and not any(k in c.lower() for k in ["totalpayroll", "total_payroll", "totalsalarybudget", "total_salary_budget", "totalsalary", "total_salary", "quỹ lương", "tổng quỹ lương", "salarybudget", "salary_budget", "deptsalary", "dept_salary", "tổng chi phí lương"])]
+                        )
+                    ):
+                        p_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["totalpayroll", "total_payroll", "totalsalarybudget", "total_salary_budget", "totalsalary", "total_salary", "quỹ lương", "tổng quỹ lương", "salarybudget", "salary_budget", "deptsalary", "dept_salary", "tổng chi phí lương", "totalcompanysalary", "total_company_salary", "companytotalsalary", "tổng quỹ"]) and not any(k in c.lower() for k in ["avg", "trung bình", "median", "mean"])]
+                        a_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["avgsalary", "avg_salary", "averagesalary", "currentavgsalary", "current_avg_salary", "lương trung bình", "trung bình", "titleavgsalary", "title_avg_salary"]) and c not in p_cands]
+                        h_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["headcount", "employeecount", "employee_count", "totalemployees", "total_employees", "số lượng nhân sự", "nhân sự", "quy mô", "total_emp"]) and c not in p_cands and c not in a_cands]
+
+                        payroll_c = p_cands[0]
+                        if a_cands:
+                            secondary_c = a_cands[0]
+                            is_sec_sal = True
+                        else:
+                            secondary_c = h_cands[0]
+                            is_sec_sal = False
+
+                        if total_rows > 30:
+                            max_display = st.slider(
+                                f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng: {total_rows:,})",
+                                min_value=min(10, total_rows),
+                                max_value=total_rows,
+                                value=min(total_rows, MAX_BAR_CATEGORIES),
+                                step=5 if total_rows <= 100 else 10,
+                                key=f"bar_limit_{turn_id}"
+                            )
+                            plot_df = plot_df.head(max_display)
+
+                        max_label_len = max((len(str(v)) for v in plot_df[label_name]), default=0)
+                        tick_angle = -35 if (max_label_len > 8 or len(plot_df) > 8) else 0
+
+                        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+                        bar_texts = []
+                        for v in plot_df[payroll_c]:
+                            try:
+                                val = float(v) if pd.notna(v) else 0.0
+                            except Exception:
+                                val = 0.0
+                            if abs(val) >= 1_000_000_000:
+                                bar_texts.append(f"${val / 1e9:,.2f}B")
+                            elif abs(val) >= 1_000_000:
+                                bar_texts.append(f"${val / 1e6:,.1f}M")
+                            else:
+                                bar_texts.append(f"${val:,.0f}")
+
+                        hover_bars = [
+                            f"<b>{r[label_name]}</b><br>{format_col_title(payroll_c)}: <b>${float(r[payroll_c]):,.0f}</b>"
+                            for _, r in plot_df.iterrows()
+                        ]
+
+                        fig.add_trace(
+                            go.Bar(
+                                x=plot_df[label_name],
+                                y=plot_df[payroll_c],
+                                name=format_col_title(payroll_c),
+                                marker_color="#1E40AF",
+                                text=bar_texts,
+                                textposition="inside" if len(plot_df) <= 12 else "outside",
+                                textfont=dict(color="#FFFFFF" if len(plot_df) <= 12 else "#1E40AF", size=11, family="sans-serif"),
+                                hovertext=hover_bars,
+                                hovertemplate="%{hovertext}<extra></extra>",
+                            ),
+                            secondary_y=False
+                        )
+
+                        if is_sec_sal:
+                            sec_texts = [f"${float(v):,.0f}" if pd.notna(v) else "N/A" for v in plot_df[secondary_c]]
+                            hover_sec = [
+                                f"<b>{r[label_name]}</b><br>{format_col_title(secondary_c)}: <b>${float(r[secondary_c]):,.0f}</b>"
+                                for _, r in plot_df.iterrows()
+                            ]
+                            sec_name = format_col_title(secondary_c)
+                            sec_axis_title = format_col_title(secondary_c)
+                            sec_tickprefix = "$"
+                            sec_ticksuffix = ""
+                        else:
+                            sec_texts = [f"{float(v):,.0f} ng" if pd.notna(v) else "N/A" for v in plot_df[secondary_c]]
+                            hover_sec = [
+                                f"<b>{r[label_name]}</b><br>{format_col_title(secondary_c)}: <b>{float(r[secondary_c]):,.0f} người</b>"
+                                for _, r in plot_df.iterrows()
+                            ]
+                            sec_name = format_col_title(secondary_c)
+                            sec_axis_title = format_col_title(secondary_c)
+                            sec_tickprefix = ""
+                            sec_ticksuffix = " ng"
+
+                        fig.add_trace(
+                            go.Scatter(
+                                x=plot_df[label_name],
+                                y=plot_df[secondary_c],
+                                name=sec_name,
+                                mode="lines+markers+text",
+                                marker=dict(size=9, color="#D97706"),
+                                line=dict(width=3, color="#D97706"),
+                                text=sec_texts,
+                                textposition="top center",
+                                hovertext=hover_sec,
+                                hovertemplate="%{hovertext}<extra></extra>",
+                                textfont=dict(color="#B45309", size=11, family="sans-serif"),
+                            ),
+                            secondary_y=True
+                        )
+
+                        try:
+                            max_p = float(pd.to_numeric(plot_df[payroll_c], errors="coerce").max() or 1000)
+                        except Exception:
+                            max_p = 1000.0
+                        try:
+                            max_s = float(pd.to_numeric(plot_df[secondary_c], errors="coerce").max() or 100)
+                        except Exception:
+                            max_s = 100.0
+
+                        fig.update_layout(
+                            title=f"Biểu đồ Kết Hợp (Dual Axis): {format_col_title(payroll_c)} & {format_col_title(secondary_c)} theo {format_col_title(label_name)}",
+                            template="plotly_white",
+                            xaxis=dict(type="category", tickangle=tick_angle, automargin=True, title=format_col_title(label_name)),
+                            yaxis=dict(title=format_col_title(payroll_c), tickprefix="$", range=[0, max_p * 1.22]),
+                            yaxis2=dict(title=sec_axis_title, tickprefix=sec_tickprefix, ticksuffix=sec_ticksuffix, range=[0, max_s * 1.35], showgrid=False),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            margin=dict(l=40, r=40, t=60, b=85 if tick_angle != 0 else 50)
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        return fig
                     elif user_asked_efficiency and eff_cols:
                         # Kiểm tra xem có sự xung đột đơn vị (% và $) giữa các cột hiệu quả không
                         has_pct_eff = [c for c in eff_cols if any(k in c.lower() for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
@@ -1250,11 +1384,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     # Ưu tiên vẽ Chênh lệch lương khi người dùng hỏi về khoảng cách / chênh lệch lương
                     user_asked_spread = any(k in uq_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa"]) and not any(k in uq_low for k in ["chuẩn", "stddev", "standard deviation", "phân tán"])
                     spread_meas = [c for c in non_pct_cols if any(k in c.lower() for k in ["salaryspread", "salary_spread", "spread", "chênh lệch", "gap", "diff"])]
-                    sal_meas = [c for c in non_pct_cols if any(k in c.lower() for k in ["salary", "lương", "thu nhập"]) and not any(k in c.lower() for k in ["diff", "chênh lệch", "gap", "spread"])]
-                    user_asked_salary = any(k in uq_low for k in ["lương", "salary", "thu nhập"]) and not any(k in uq_low for k in ["tỷ lệ tăng", "tỉ lệ tăng", "số lần"])
+                    sal_meas = [c for c in non_pct_cols if any(k in c.lower() for k in ["salary", "lương", "thu nhập", "payroll", "quỹ"]) and not any(k in c.lower() for k in ["diff", "chênh lệch", "gap", "spread"])]
+                    user_asked_salary = any(k in uq_low for k in ["lương", "salary", "thu nhập", "payroll", "quỹ lương"]) and not any(k in uq_low for k in ["tỷ lệ tăng", "tỉ lệ tăng", "số lần"])
+                    user_asked_payroll = any(k in uq_low for k in ["tổng quỹ lương", "quỹ lương", "tổng chi phí lương", "tổng lương", "payroll", "salary budget", "total salary", "ngân sách lương", "chi phí lương"])
+                    user_asked_avg_salary = any(k in uq_low for k in ["lương trung bình", "trung bình", "thu nhập bình quân", "average salary", "avg salary"])
                     
                     user_asked_stddev = any(k in uq_low for k in ["độ lệch chuẩn", "stddev", "phân tán", "độ phân tán", "standard deviation"])
                     has_stddev_sal = [c for c in non_pct_cols if any(k in c.lower() for k in ["salarystddev", "salary_std_dev", "stddev", "độ lệch chuẩn"])]
+
+                    payroll_cands_meas = [c for c in sal_meas if any(k in c.lower() for k in ["totalpayroll", "total_payroll", "totalsalarybudget", "total_salary_budget", "totalsalary", "total_salary", "quỹ lương", "tổng quỹ lương", "salarybudget", "salary_budget", "deptsalary", "dept_salary", "tổng chi phí lương", "totalcompanysalary", "total_company_salary", "companytotalsalary", "tổng quỹ"]) and not any(k in c.lower() for k in ["avg", "trung bình", "median", "mean"])]
 
                     if user_asked_stddev and has_stddev_sal:
                         has_avg_sal = [c for c in sal_meas if any(k in c.lower() for k in ["avg", "trung bình"])]
@@ -1267,7 +1405,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     elif user_asked_spread and spread_meas:
                         active_measures = [spread_meas[0]]
                         chart_title = f"Chênh Lệch Lương ($) theo {format_col_title(label_name)}"
-                    # Ưu tiên vẽ Lương (AvgSalary / Salary) khi người dùng hỏi so sánh Lương
+                    # Ưu tiên vẽ Lương (TotalPayroll / AvgSalary / Salary) khi người dùng hỏi so sánh Lương
                     elif user_asked_salary and sal_meas:
                         has_male_sal = [c for c in sal_meas if any(k in c.lower() for k in ["male", "nam"]) and not any(k in c.lower() for k in ["female", "nu", "nữ"])]
                         has_female_sal = [c for c in sal_meas if any(k in c.lower() for k in ["female", "nu", "nữ"])]
@@ -1302,7 +1440,16 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             chart_title = f"So Sánh ({', '.join([format_col_title(c) for c in active_measures])}) theo {format_col_title(label_name)} (Grouped Bar)"
                         else:
                             avg_sal_c = [c for c in sal_meas if any(k in c.lower() for k in ["avg", "trung bình"])]
-                            chosen_sal = avg_sal_c[0] if avg_sal_c else sal_meas[0]
+                            if user_asked_payroll and payroll_cands_meas:
+                                chosen_sal = payroll_cands_meas[0]
+                            elif user_asked_avg_salary and avg_sal_c:
+                                chosen_sal = avg_sal_c[0]
+                            elif payroll_cands_meas:
+                                chosen_sal = payroll_cands_meas[0]
+                            elif avg_sal_c:
+                                chosen_sal = avg_sal_c[0]
+                            else:
+                                chosen_sal = sal_meas[0]
                             active_measures = [chosen_sal]
                             chart_title = f"{format_col_title(chosen_sal)} theo {format_col_title(label_name)}"
                     elif pct_cols and (user_asked_pct or not non_pct_cols):
@@ -1341,7 +1488,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         else:
                             max_vals = [float(plot_df[m].abs().max()) for m in numeric_ms if float(plot_df[m].abs().max()) > 0]
                             if len(max_vals) >= 2 and (max(max_vals) / min(max_vals)) > 20 and not user_asked_pnl:
-                                if user_asked_efficiency and any(c in numeric_ms for c in eff_cols):
+                                if user_asked_payroll and any(c in numeric_ms for c in payroll_cands_meas):
+                                    primary_m = [c for c in numeric_ms if c in payroll_cands_meas][0]
+                                    active_measures = [primary_m]
+                                    chart_title = f"{format_col_title(primary_m)} theo {format_col_title(label_name)}"
+                                elif user_asked_efficiency and any(c in numeric_ms for c in eff_cols):
                                     # Khi hỏi hiệu quả, ưu tiên chọn chỉ số hiệu quả (AvgOrderValue, ProfitMargin, ProfitPerBox...) thay vì rơi về TotalSales
                                     candidate_effs = [c for c in eff_cols if c in numeric_ms]
                                     if any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]) and any(any(k in c.lower() for k in ["margin", "tỷ suất", "tỉ suất"]) for c in candidate_effs):
