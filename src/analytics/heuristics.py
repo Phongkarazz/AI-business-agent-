@@ -1847,6 +1847,7 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
     lead_vs_bot = (diff / bot_val * 100) if bot_val != 0 else 0
 
     cols_str = " ".join(str(c).lower() for c in cols)
+    q_low = (user_query or "").lower()
     is_time_series = any(k in cols_str for k in ["year", "month", "date", "năm", "tháng", "ngày", "hire", "hiredate", "hireyear"])
     is_salary = any(k in cols_str for k in ["salary", "lương", "wage", "pay", "thu_nhập", "raisecount", "raise"])
     is_headcount = any(k in cols_str for k in ["headcount", "nhân viên", "nhân sự", "slngnhnvin", "totalemployees"]) and not is_salary
