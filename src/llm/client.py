@@ -152,17 +152,17 @@ def get_llm_client(provider: str, api_key: str, base_url: str = None):
 
 
 def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
-    # Chuẩn hóa tên model Gemini và tự động chuyển tiếp lên Gemini 3 Series
+    # Chuẩn hóa tên model Gemini chính thức trên Google AI Studio
     clean_model = (model_name or "").strip().lower()
     if "/" in clean_model:
         clean_model = clean_model.split("/")[-1]
 
-    if clean_model in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-flash", "gemini-pro", ""):
-        clean_model = "gemini-3.7-flash"
+    if not clean_model or clean_model in ("gemini-flash", "gemini-pro", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"):
+        clean_model = "gemini-2.5-flash"
 
-    # Danh sách model dự phòng ưu tiên theo thứ tự chịu tải tốt và tốc độ cao
+    # Danh sách model dự phòng theo thứ tự tối ưu
     target_models = [clean_model]
-    for fallback in ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-3.7-flash", "gemini-3.1-pro-preview"]:
+    for fallback in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-pro"]:
         if fallback not in target_models:
             target_models.append(fallback)
 
@@ -181,7 +181,7 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
                 "429", "resource_exhausted", "quota", "rate_limit", "exhausted"
             ])
             if should_fallback:
-                time.sleep(1.0)
+                time.sleep(0.5)
                 continue
             raise e
 
