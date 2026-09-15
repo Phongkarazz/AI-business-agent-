@@ -663,6 +663,35 @@ ORDER BY Year ASC""".strip()
     return sql
 
 
+def auto_fix_title_headcount_distribution_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa câu hỏi tỷ lệ phân bổ nhân sự theo từng chức danh (Senior Staff, Engineer, Staff...).
+    Đảm bảo:
+    - Lấy đúng bảng titles t với t.to_date = '9999-01-01'
+    - Đếm COUNT(t.emp_no) AS EmployeeCount (hoặc TotalEmployees)
+    - Tính đúng Percentage = ROUND(COUNT(t.emp_no) * 100.0 / (SELECT COUNT(*) FROM titles WHERE to_date = '9999-01-01'), 2)
+    - Tuyệt đối không để xảy ra lỗi tính COUNT(*) / COUNT(*) = 1.00% cho tất cả chức danh!
+    """
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+    is_title_dist = (
+        any(k in q_low for k in ["chức danh", "title", "job title", "vị trí", "senior staff", "senior engineer", "technique leader", "assistant engineer"])
+        and any(k in q_low for k in ["phân bổ", "phân bố", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "cơ cấu", "phần trăm", "%", "nhân sự theo", "nhân viên theo"])
+        and not any(k in q_low for k in ["nam", "nữ", "gender", "giới tính", "lương", "salary", "thu nhập", "thâm niên", "bổ nhiệm", "thăng chức", "qua từng năm", "qua các năm", "theo năm", "chênh lệch", "gap", "spread", "lớn nhất", "nhỏ nhất"])
+    )
+    if not is_title_dist:
+        return sql
+
+    return """SELECT 
+    t.title AS JobTitle,
+    COUNT(t.emp_no) AS EmployeeCount,
+    ROUND(COUNT(t.emp_no) * 100.0 / (SELECT COUNT(*) FROM titles WHERE to_date = '9999-01-01'), 2) AS Percentage
+FROM titles t
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY EmployeeCount DESC"""
+
+
 def auto_fix_company_hiring_trend_query(sql: str, user_query: str) -> str:
     """Tự động sửa câu hỏi thống kê số lượng nhân viên tuyển dụng theo từng năm từ trước đến nay."""
     if not sql or not user_query:
@@ -5955,6 +5984,7 @@ def run_agent(
             sql_cur = auto_fix_yearly_salary_trend_query(sql_cur, user_query)
             sql_cur = auto_fix_promoted_managers_by_hire_date_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_title_assignments_query(sql_cur, user_query)
+            sql_cur = auto_fix_title_headcount_distribution_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_company_hiring_trend_query(sql_cur, user_query)
             sql_cur = auto_fix_longest_managers_query(sql_cur, user_query)
             sql_cur = auto_fix_top_percentile_salary_low_tenure_query(sql_cur, user_query, dialect=dialect)

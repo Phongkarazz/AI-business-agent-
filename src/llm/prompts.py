@@ -3358,7 +3358,10 @@ LIMIT {req_limit};
 """
 
     # 1. Câu hỏi liên quan đến chức danh (Title)
-    is_asking_individual = any(k in q_low for k in ["nhân sự", "nhân viên", "danh sách", "liệt kê", "ai là", "họ và tên"])
+    is_asking_individual = (
+        any(k in q_low for k in ["danh sách", "liệt kê", "ai là", "họ và tên", "từng nhân viên", "những nhân viên", "các nhân viên", "list", "nhân viên nào"])
+        and not any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "phân bổ", "phân bố", "cơ cấu", "số lượng nhân sự theo", "nhân sự theo", "nhân viên theo", "bổ nhiệm"])
+    )
     if not is_asking_individual and any(k in q_low for k in ["chức danh", "title", "vị trí", "bổ nhiệm", "thăng chức", "senior staff", "senior engineer", "technique leader", "assistant engineer"]):
         # 1.0.0 Tỷ lệ phần trăm nhân viên nam và nữ được thăng chức (đổi chức danh ít nhất 1 lần)
         if any(k in q_low for k in ["thăng chức", "đổi chức danh", "chuyển chức danh", "thay đổi chức danh"]) and any(k in q_low for k in ["nam", "nữ", "gender", "giới tính"]) and any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "%", "so với", "tương ứng"]):
@@ -3463,9 +3466,9 @@ GROUP BY t.title, e.gender
 ORDER BY t.title, e.gender;
 (BẮT BUỘC dùng bảng titles t, TUYỆT ĐỐI KHÔNG JOIN departments hay dept_emp!)
 """
-        elif any(k in q_low for k in ["phân bố", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "phần trăm", "cơ cấu", "số lượng", "bao nhiêu nhân sự", "nhân viên theo", "nhân sự theo"]) and not any(k in q_low for k in ["qua từng năm", "qua các năm", "theo năm", "hàng năm", "từng năm", "bổ nhiệm"]):
+        elif any(k in q_low for k in ["phân bổ", "phân bố", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "phần trăm", "%", "cơ cấu", "số lượng", "bao nhiêu nhân sự", "nhân viên theo", "nhân sự theo"]) and not any(k in q_low for k in ["qua từng năm", "qua các năm", "theo năm", "hàng năm", "từng năm", "bổ nhiệm"]):
             return """
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHÂN BỐ NHÂN SỰ THEO TỪNG CHỨC DANH):
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHÂN BỔ NHÂN SỰ THEO TỪNG CHỨC DANH):
 SELECT 
     t.title AS JobTitle,
     COUNT(t.emp_no) AS EmployeeCount,
@@ -3474,7 +3477,7 @@ FROM titles t
 WHERE t.to_date = '9999-01-01'
 GROUP BY t.title
 ORDER BY EmployeeCount DESC;
-(BẮT BUỘC dùng bảng titles t, đếm EmployeeCount và tính Percentage, TUYỆT ĐỐI KHÔNG JOIN salaries hay departments, KHÔNG LỌC THEO PHÒNG BAN SALES!)
+(BẮT BUỘC dùng bảng titles t, đếm EmployeeCount và tính Percentage = ROUND(COUNT(t.emp_no) * 100.0 / (SELECT COUNT(*) FROM titles WHERE to_date = '9999-01-01'), 2), TUYỆT ĐỐI KHÔNG JOIN salaries hay departments, KHÔNG LỌC THEO PHÒNG BAN SALES!)
 """
         # 1.0.3 Mức chênh lệch lương giữa người cao nhất và thấp nhất theo chức danh (Title Salary Spread / Gap)
         elif any(k in q_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa", "difference"]) and any(k in q_low for k in ["lương", "thu nhập", "salary", "income"]) and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "gender", "chuẩn", "stddev", "standard deviation", "std("]):
