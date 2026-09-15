@@ -596,6 +596,11 @@ if (
 
         if can_connect:
             custom_base_url = saved.get("openrouter_base_url" if effective_provider == "OpenRouter" else "qwen_base_url", "")
+            default_model_for_p = "gemini-3.7-flash" if effective_provider == "Gemini (Google)" else ("deepseek/deepseek-chat" if effective_provider == "OpenRouter" else "qwen-plus")
+            target_model = saved.get("model_name") or default_model_for_p
+            if effective_provider == "Gemini (Google)" and "deepseek" in target_model.lower():
+                target_model = "gemini-3.7-flash"
+
             with st.spinner(f"⚡ Đang tự động kết nối lại {effective_provider} & {'SQLite Demo' if use_demo else 'MySQL'}..."):
                 success, detail = perform_connection(
                     use_demo=use_demo,
@@ -609,7 +614,7 @@ if (
                     effective_provider=effective_provider,
                     clean_api_key=clean_api_key,
                     custom_base_url=custom_base_url,
-                    selected_model=saved.get("model_name", "deepseek/deepseek-chat"),
+                    selected_model=target_model,
                     schema_context_input="",
                 )
                 if success:

@@ -124,20 +124,32 @@ def render_onboarding():
             forecast_periods = saved.get("forecast_periods", 3)
             schema_context_input = ""
 
-            tab_mysql, tab_ai, tab_opts = st.tabs(["🔌 CSDL MySQL", "🤖 Cấu hình AI", "⚡ Tham số & Kênh"])
+            tab_mysql, tab_ai, tab_opts = st.tabs(["🔌 Nguồn Dữ liệu", "🤖 Cấu hình AI", "⚡ Tham số & Kênh"])
 
             with tab_mysql:
-                is_local_saved = saved.get("run_local", True) or (saved.get("db_host", "") in ("localhost", "127.0.0.1", ""))
-                conn_mode = st.radio(
-                    "Môi trường MySQL Database",
-                    ["🖥️ Máy tính này (Localhost)", "☁️ Máy chủ / Cloud (Từ xa)"],
-                    index=0 if is_local_saved else 1,
-                    horizontal=True,
-                    key="onboarding_conn_mode"
+                saved_mode_idx = saved.get("data_mode_index", 0)
+                db_source = st.radio(
+                    "Chọn Nguồn Cơ sở Dữ liệu",
+                    ["📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)", "🖥️ MySQL Máy tính này (Localhost)", "☁️ MySQL Máy chủ / Cloud (Từ xa)"],
+                    index=0 if saved_mode_idx == 0 else (1 if saved.get("run_local", True) else 2),
+                    key="onboarding_db_source"
                 )
-                run_local = (conn_mode == "🖥️ Máy tính này (Localhost)")
+                use_demo_db = (db_source == "📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)")
+                run_local = (db_source == "🖥️ MySQL Máy tính này (Localhost)")
 
-                if run_local:
+                if use_demo_db:
+                    db_host = ""
+                    db_user = ""
+                    db_pass = ""
+                    db_name = "demo_sqlite"
+                    db_port = "3306"
+                    use_ssl = False
+                    st.markdown("""
+                    <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #166534;">
+                        📊 <b>Dữ liệu Mẫu (In-Memory SQLite):</b> Tích hợp sẵn CSDL Awesome Chocolates (bảng <code>sales</code>, <code>products</code>, <code>salespersons</code>, <code>geo</code>). Không cần cài đặt MySQL!
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif run_local:
                     db_host = "localhost"
                     use_ssl = False
 
@@ -157,6 +169,8 @@ def render_onboarding():
 
                     with st.expander("⚙️ Tùy chọn Port nâng cao (Mặc định: 3306)", expanded=False):
                         db_port_raw = st.text_input("Port", value=saved.get("db_port", "3306") or "3306", key="onboarding_db_port_local")
+                    db_port_digits = "".join(ch for ch in str(db_port_raw) if ch.isdigit())
+                    db_port = db_port_digits or "3306"
                 else:
                     default_cloud_host = saved.get("db_host", "")
                     if default_cloud_host in ("localhost", "127.0.0.1"):
@@ -176,29 +190,30 @@ def render_onboarding():
                         value=saved.get("use_ssl", True),
                         key="onboarding_use_ssl"
                     )
+                    db_port_digits = "".join(ch for ch in str(db_port_raw) if ch.isdigit())
+                    db_port = db_port_digits or "3306"
 
-                db_host = (db_host or "localhost" if run_local else db_host or "").strip()
-                db_user = db_user.strip()
-                db_name = db_name.strip()
-                db_port_digits = "".join(ch for ch in str(db_port_raw) if ch.isdigit())
-                db_port = db_port_digits or "3306"
+                if not use_demo_db:
+                    db_host = (db_host or "localhost" if run_local else db_host or "").strip()
+                    db_user = db_user.strip()
+                    db_name = db_name.strip()
 
-                # Nút kiểm tra kết nối nhanh (Ping Test)
-                if st.button("🔍 Kiểm tra kết nối MySQL (Ping Test)", use_container_width=True, key="btn_ping_mysql"):
-                    if not db_user or not db_name or (not run_local and not db_host):
-                        st.warning("⚠️ Vui lòng điền đủ User và Database Name trước khi kiểm tra.")
-                    else:
-                        try:
-                            with st.spinner(f"Đang kiểm tra kết nối tới MySQL ({db_host}:{db_port})..."):
-                                test_eng = try_connect(db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local)
-                                test_eng.dispose()
-                            st.success(f"✅ Kết nối thành công tới database `{db_name}` ({db_host}:{db_port})!")
-                        except Exception as p_err:
-                            st.error(f"❌ Kết nối thất bại: {p_err}")
+                    # Nút kiểm tra kết nối nhanh (Ping Test)
+                    if st.button("🔍 Kiểm tra kết nối MySQL (Ping Test)", use_container_width=True, key="btn_ping_mysql"):
+                        if not db_user or not db_name or (not run_local and not db_host):
+                            st.warning("⚠️ Vui lòng điền đủ User và Database Name trước khi kiểm tra.")
+                        else:
+                            try:
+                                with st.spinner(f"Đang kiểm tra kết nối tới MySQL ({db_host}:{db_port})..."):
+                                    test_eng = try_connect(db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local)
+                                    test_eng.dispose()
+                                st.success(f"✅ Kết nối thành công tới database `{db_name}` ({db_host}:{db_port})!")
+                            except Exception as p_err:
+                                st.error(f"❌ Kết nối thất bại: {p_err}")
 
             with tab_ai:
                 provider_list = list(PROVIDER_CONFIGS.keys())
-                saved_provider = saved.get("provider", "OpenRouter")
+                saved_provider = saved.get("provider", "Gemini (Google)")
                 provider_idx = provider_list.index(saved_provider) if saved_provider in provider_list else 0
 
                 provider = st.selectbox("Chọn Provider AI", provider_list, index=provider_idx, key="onboarding_provider")
@@ -223,7 +238,7 @@ def render_onboarding():
                         type="password",
                         help=provider_cfg["key_help"],
                         placeholder=provider_cfg["key_placeholder"],
-                        key="onboarding_api_key"
+                        key=f"onboarding_api_key_{provider}"
                     )
 
                 clean_api_key = api_key.strip()
@@ -247,7 +262,7 @@ def render_onboarding():
 
                 saved_model = saved.get("model_name", "")
                 model_idx = model_options.index(saved_model) if saved_model in model_options else 0
-                selected_model = st.selectbox("Chọn Model AI", model_options, index=model_idx, key="onboarding_model")
+                selected_model = st.selectbox("Chọn Model AI", model_options, index=model_idx, key=f"onboarding_model_{provider}")
 
                 custom_base_url = ""
                 if provider == "OpenRouter" or is_openrouter_key:
@@ -322,7 +337,7 @@ def render_onboarding():
 
             st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
             btn_custom_connect = st.button(
-                "🚀 Kết nối MySQL Doanh nghiệp",
+                "💾 Lưu & Áp dụng Cấu hình AI" if is_already_connected else "🚀 Bắt đầu Sử dụng VERAXUS",
                 type="primary",
                 use_container_width=True,
                 key="btn_onboarding_connect"
@@ -342,10 +357,19 @@ def render_onboarding():
     # 4. Xử lý Logic Kết nối khi bấm nút
     # A. Xử lý nút 1-Click Demo
     if btn_demo_connect:
-        effective_provider = saved.get("provider", "Ollama (Local AI Offline)")
-        clean_api_key = saved.get("api_key_ollama", "ollama")
-        custom_base_url = saved.get("ollama_base_url", OLLAMA_BASE_URL)
-        selected_model = saved.get("model_name", "qwen2.5-coder:3b")
+        effective_provider = saved.get("provider", "Gemini (Google)" if saved.get("api_key_gemini") else ("OpenRouter" if saved.get("api_key_openrouter") else "Ollama (Local AI Offline)"))
+        if effective_provider == "Gemini (Google)":
+            clean_api_key = saved.get("api_key_gemini", "")
+            selected_model = saved.get("model_name", "gemini-3.7-flash")
+            custom_base_url = ""
+        elif effective_provider == "OpenRouter":
+            clean_api_key = saved.get("api_key_openrouter", "")
+            selected_model = saved.get("model_name", "deepseek/deepseek-chat")
+            custom_base_url = saved.get("openrouter_base_url", OPENROUTER_BASE_URL)
+        else:
+            clean_api_key = saved.get("api_key_ollama", "ollama")
+            selected_model = saved.get("model_name", "qwen2.5-coder:3b")
+            custom_base_url = saved.get("ollama_base_url", OLLAMA_BASE_URL)
 
         def on_demo_success(model_used):
             config_to_save = saved.copy()
@@ -376,7 +400,7 @@ def render_onboarding():
             on_success_callback=on_demo_success,
         )
 
-    # B. Xử lý nút Kết nối Tùy chỉnh (Enterprise Mode)
+    # B. Xử lý nút Kết nối Tùy chỉnh (Enterprise / Custom Mode)
     if btn_custom_connect:
         effective_provider = "OpenRouter" if is_openrouter_key else provider
         if effective_provider == "Ollama (Local AI Offline)" and not clean_api_key:
@@ -384,13 +408,13 @@ def render_onboarding():
 
         if not clean_api_key and effective_provider != "Ollama (Local AI Offline)":
             st.error(f"❌ Vui lòng nhập API Key cho {effective_provider}!")
-        elif run_local and not db_name:
+        elif not use_demo_db and run_local and not db_name:
             st.error("❌ Vui lòng nhập Database Name (VD: employees)!")
-        elif run_local and not db_user:
+        elif not use_demo_db and run_local and not db_user:
             st.error("❌ Vui lòng nhập User MySQL (mặc định: root)!")
-        elif not run_local and not db_host:
-            st.error("❌ Vui lòng nhập Host máy chủ MySQL Cloud (hoặc chọn 'Máy tính này (Localhost)')!")
-        elif not run_local and not (db_user and db_name):
+        elif not use_demo_db and not run_local and not db_host:
+            st.error("❌ Vui lòng nhập Host máy chủ MySQL Cloud (hoặc chọn 'Dữ liệu Mẫu (Awesome Chocolates SQLite)')!")
+        elif not use_demo_db and not run_local and not (db_user and db_name):
             st.error("❌ Vui lòng điền đầy đủ User và Database Name!")
         else:
             # Đồng bộ session state
@@ -410,14 +434,14 @@ def render_onboarding():
                 if remember_config:
                     config_to_save = saved.copy()
                     config_to_save.update({
-                        "data_mode_index": 1,
+                        "data_mode_index": 0 if use_demo_db else 1,
                         "run_local": run_local,
-                        "db_host": db_host,
-                        "db_port": db_port,
-                        "db_user": db_user,
-                        "db_pass": db_pass,
-                        "db_name": db_name,
-                        "use_ssl": use_ssl,
+                        "db_host": db_host if not use_demo_db else "",
+                        "db_port": db_port if not use_demo_db else "3306",
+                        "db_user": db_user if not use_demo_db else "",
+                        "db_pass": db_pass if not use_demo_db else "",
+                        "db_name": db_name if not use_demo_db else "",
+                        "use_ssl": use_ssl if not use_demo_db else False,
                         "provider": effective_provider,
                         "model_name": model_used,
                         "enable_auto_insights": enable_auto_insights,
@@ -449,14 +473,14 @@ def render_onboarding():
                     save_user_config(config_to_save)
 
             show_connecting_dialog(
-                use_demo=False,
-                db_host=db_host,
-                db_port=db_port,
-                db_user=db_user,
-                db_pass=db_pass,
-                db_name=db_name,
-                use_ssl=use_ssl,
-                run_local=run_local,
+                use_demo=use_demo_db,
+                db_host=db_host if not use_demo_db else "",
+                db_port=db_port if not use_demo_db else "3306",
+                db_user=db_user if not use_demo_db else "",
+                db_pass=db_pass if not use_demo_db else "",
+                db_name=db_name if not use_demo_db else "",
+                use_ssl=use_ssl if not use_demo_db else False,
+                run_local=run_local if not use_demo_db else False,
                 effective_provider=effective_provider,
                 clean_api_key=clean_api_key,
                 custom_base_url=custom_base_url,
