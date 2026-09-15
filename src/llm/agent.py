@@ -5636,7 +5636,7 @@ def generate_auto_insights(client, provider: str, model_name: str, user_query: s
 
     sample_str = df_sample.to_string(index=False)
     prompt = build_auto_insight_prompt(user_query, sample_str, anomalies_info, lang=lang)
-    insight, _ = call_llm(client, provider, model_name, prompt)
+    insight, _ = call_llm(client, provider, model_name, prompt, max_tokens=650)
     if insight:
         return sanitize_insight_markdown(insight)
     return None
