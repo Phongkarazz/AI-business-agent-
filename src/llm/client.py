@@ -157,12 +157,12 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
     if "/" in clean_model:
         clean_model = clean_model.split("/")[-1]
 
-    if not clean_model or clean_model in ("gemini-flash", "gemini-pro", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"):
+    if not clean_model or clean_model in ("gemini-flash", "gemini-pro", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-2.5-pro"):
         clean_model = "gemini-2.5-flash"
 
     # Danh sách model dự phòng theo thứ tự tối ưu
     target_models = [clean_model]
-    for fallback in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-pro"]:
+    for fallback in ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-2.0-flash", "gemini-1.5-flash"]:
         if fallback not in target_models:
             target_models.append(fallback)
 
