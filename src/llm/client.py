@@ -107,7 +107,7 @@ def normalize_model_for_openrouter(model_name: str) -> str:
 
 def get_llm_client(provider: str, api_key: str, base_url: str = None):
     """Tạo client AI tương ứng với provider được chọn với tính năng tự động nhận diện OpenRouter và Ollama."""
-    api_key = (api_key or "").strip()
+    api_key = (api_key or "").strip().strip('"').strip("'").strip()
     if not api_key and provider != "Ollama (Local AI Offline)":
         raise ValueError("API Key không được để trống.")
     if provider == "Ollama (Local AI Offline)" and not api_key:
@@ -243,8 +243,8 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
                 return None, f"Đạt giới hạn tần suất gọi hoặc hết quota ({provider} - {model_name}). Hệ thống đã tự động thử lại {max_retries} lần nhưng chưa thành công. Vui lòng chờ 1 phút hoặc chuyển sang model khác."
 
             # 3. Xử lý lỗi API Key
-            if "401" in err or "invalid_api_key" in err or "Incorrect API key" in err:
-                return None, f"API Key không hợp lệ cho {provider}. (Nếu dùng OpenRouter, hãy đảm bảo chọn đúng Provider: OpenRouter hoặc dán key dạng sk-or-v1-...)."
+            if "401" in err or "invalid_api_key" in err or "Incorrect API key" in err or "API_KEY_INVALID" in err or "API key not valid" in err:
+                return None, f"API Key không hợp lệ cho {provider}. Vui lòng kiểm tra lại key (Đối với Gemini: lấy key tại https://aistudio.google.com/apikey; Đối với OpenRouter: lấy key tại https://openrouter.ai/keys)."
 
             # 4. Xử lý lỗi 503 (Server quá tải)
             if "503" in err or "UNAVAILABLE" in err:
