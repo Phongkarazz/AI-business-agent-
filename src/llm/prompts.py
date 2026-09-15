@@ -4478,8 +4478,13 @@ ORDER BY d.AvgSalary DESC;
     ) or (
         ("development" in q_low or "research" in q_low)
         and ("sales" in q_low or "marketing" in q_low)
-        and any(k in q_low for k in ["so sánh", "đối chiếu", "compare", "vs"])
-        and any(k in q_low for k in ["khối", "nhóm", "group", "cả hai", "các phòng"])
+        and any(k in q_low for k in ["so sánh", "đối chiếu", "compare", "vs", "lương", "salary"])
+    ) or (
+        any(k in q_low for k in ["kỹ thuật", "tech"])
+        and ("sales" in q_low or "marketing" in q_low)
+    ) or (
+        any(k in q_low for k in ["kinh doanh", "commercial"])
+        and ("development" in q_low or "research" in q_low)
     ):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH LƯƠNG KHỐI KỸ THUẬT VS KHỐI KINH DOANH):
@@ -4497,7 +4502,7 @@ JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing')
 GROUP BY DepartmentGroup, d.dept_name
 ORDER BY DepartmentGroup, AvgSalary DESC;
-(CẢNH BÁO TỐI QUAN TRỌNG: TUYỆT ĐỐI KHÔNG LẤY TẤT CẢ 9 PHÒNG BAN! CHỈ LỌC ĐÚNG 4 PHÒNG BAN ĐƯỢC HỎI: WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing') VÀ PHÂN LOẠI CASE WHEN RA CỘT DepartmentGroup ĐỂ SO SÁNH TRỰC QUAN 2 KHỐI!)
+(CẢNH BÁO TỐI QUAN TRỌNG: TUYỆT ĐỐI KHÔNG DÙNG LIMIT 1 HAY LIMIT! BẮT BUỘC TRẢ VỀ ĐẦY ĐỦ CẢ 4 PHÒNG BAN THUỘC 2 KHỐI: WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing') VÀ PHÂN LOẠI CASE WHEN RA CỘT DepartmentGroup ĐỂ SO SÁNH TRỰC QUAN!)
 """
 
     # 7.8 So sánh mức lương trung bình giữa nhân viên kỳ cựu (> 5 năm) và nhân viên mới (< 2 năm) theo từng phòng ban

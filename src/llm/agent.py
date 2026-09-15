@@ -2150,10 +2150,10 @@ def auto_fix_department_group_salary_query(sql: str, user_query: str) -> str:
         return sql
     q_low = user_query.lower()
 
-    # Guard: Tuyệt đối không can thiệp nếu câu hỏi chỉ so sánh đúng 2 phòng ban cụ thể
+    # Guard: Tuyệt đối không can thiệp nếu câu hỏi chỉ so sánh đúng 2 phòng ban cụ thể (không chứa từ khóa khối/nhóm/kỹ thuật/kinh doanh)
     known_depts = ["sales", "development", "research", "marketing", "finance", "production", "customer service", "quality management", "human resources"]
     depts_mentioned = [d for d in known_depts if d in q_low]
-    if len(depts_mentioned) == 2 and not any(k in q_low for k in ["khối", "nhóm", "group", "block"]):
+    if len(depts_mentioned) == 2 and not any(k in q_low for k in ["kỹ thuật", "kinh doanh", "khối", "nhóm", "group", "block", "cả hai", "các phòng", "từng khối"]):
         return sql
 
     is_tech_vs_comm = (
@@ -2164,19 +2164,19 @@ def auto_fix_department_group_salary_query(sql: str, user_query: str) -> str:
         ) or (
             ("development" in q_low or "research" in q_low)
             and ("sales" in q_low or "marketing" in q_low)
-            and any(k in q_low for k in ["so sánh", "đối chiếu", "compare", "vs"])
+            and any(k in q_low for k in ["so sánh", "đối chiếu", "compare", "vs", "lương", "salary"])
+        ) or (
+            any(k in q_low for k in ["kỹ thuật", "tech"])
+            and ("sales" in q_low or "marketing" in q_low)
+        ) or (
+            any(k in q_low for k in ["kinh doanh", "commercial"])
+            and ("development" in q_low or "research" in q_low)
         )
     )
     if not is_tech_vs_comm:
         return sql
 
-    lowered_sql = sql.lower()
-    has_filter_4 = all(d in lowered_sql for d in ["development", "research", "sales", "marketing"])
-    has_group = "departmentgroup" in lowered_sql or "nhóm" in lowered_sql or "case when" in lowered_sql
-    has_unwanted = any(d in lowered_sql for d in ["human resources", "customer service", "quality management", "finance", "production"])
-
-    if not (has_filter_4 and has_group) or has_unwanted:
-        return """SELECT 
+    return """SELECT 
     CASE 
         WHEN d.dept_name IN ('Sales', 'Marketing') THEN 'Kinh doanh (Sales, Marketing)'
         WHEN d.dept_name IN ('Development', 'Research') THEN 'Kỹ thuật (Development, Research)'
@@ -2190,8 +2190,6 @@ JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing')
 GROUP BY DepartmentGroup, d.dept_name
 ORDER BY DepartmentGroup, AvgSalary DESC"""
-
-    return sql
 
 
 def auto_fix_department_single_vs_others_salary_query(sql: str, user_query: str) -> str:
