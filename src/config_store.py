@@ -65,9 +65,11 @@ def load_saved_config() -> Dict[str, Any]:
                         config["api_key_openrouter"] = val
                     elif k_upper in ("GEMINI_API_KEY", "API_KEY_GEMINI"):
                         config["api_key_gemini"] = val
+                        if "provider" not in sec and "PROVIDER" not in sec:
+                            config["provider"] = "Gemini (Google)"
                     elif k_upper in ("DEFAULT_PROVIDER", "PROVIDER"):
                         config["provider"] = val
-                    elif k_upper in ("OPENROUTER_MODEL", "MODEL_NAME", "MODEL"):
+                    elif k_upper in ("OPENROUTER_MODEL", "MODEL_NAME", "MODEL", "GEMINI_MODEL"):
                         config["model_name"] = val
                     elif k_upper in ("DB_HOST", "HOST"):
                         config["db_host"] = val
@@ -79,6 +81,13 @@ def load_saved_config() -> Dict[str, Any]:
                         config["db_name"] = val
     except Exception:
         pass
+
+    # Chuẩn hóa tên Provider
+    p_val = str(config.get("provider", "")).strip()
+    if p_val.lower() in ("gemini", "google", "google gemini", "gemini (google)"):
+        config["provider"] = "Gemini (Google)"
+    elif p_val.lower() in ("openrouter", "open router"):
+        config["provider"] = "OpenRouter"
 
     return config
 
