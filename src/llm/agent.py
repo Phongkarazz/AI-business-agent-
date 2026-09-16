@@ -265,6 +265,120 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
     return sql
 
 
+def auto_fix_top_employee_per_year_query(sql: str, user_query: str, schema_context: str = "", dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu hỏi: Danh sách nhân viên đạt mức lương / tổng doanh thu lớn nhất qua từng năm."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+    schema_low = (schema_context or "").lower()
+
+    is_per_year = any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó", "per year", "each year", "by year"])
+    if not is_per_year:
+        return sql
+
+    is_top_person = (
+        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "salesperson", "sales person", "rep", "danh sách"])
+        and any(k in q_low for k in [
+            "lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "thu nhập lớn nhất",
+            "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất",
+            "cao nhất", "lớn nhất", "nhiều nhất", "khủng nhất", "highest", "top 1", "dẫn đầu"
+        ])
+        and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng"])
+    )
+
+    if not is_top_person:
+        return sql
+
+    is_choco_db = (
+        any(k in schema_low for k in ["spid", "boxes", "people", "salesperson", "geoid", "`sales`", "bảng sales"])
+        or (any(k in schema_low for k in ["sales", "products", "geo"]) and not any(k in schema_low for k in ["dept_emp", "salaries", "employees", "titles"]))
+    )
+    is_sqlite = "sqlite" in (dialect or "").lower() or "sqlite" in schema_low
+
+    if is_choco_db:
+        # Chocolates database
+        if is_sqlite:
+            return """WITH YearlySales AS (
+    SELECT 
+        pe.SPID,
+        pe.Salesperson,
+        CAST(strftime('%Y', s.SaleDate) AS INTEGER) AS Year,
+        SUM(s.Amount) AS TotalSales,
+        ROW_NUMBER() OVER (PARTITION BY strftime('%Y', s.SaleDate) ORDER BY SUM(s.Amount) DESC) AS rn
+    FROM people pe
+    JOIN sales s ON pe.SPID = s.SPID
+    GROUP BY pe.SPID, pe.Salesperson, strftime('%Y', s.SaleDate)
+)
+SELECT 
+    SPID,
+    Salesperson,
+    Year,
+    TotalSales
+FROM YearlySales
+WHERE rn = 1
+ORDER BY Year ASC"""
+        else:
+            return """WITH YearlySales AS (
+    SELECT 
+        pe.SPID,
+        pe.Salesperson,
+        YEAR(s.SaleDate) AS Year,
+        SUM(s.Amount) AS TotalSales,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(s.SaleDate) ORDER BY SUM(s.Amount) DESC) AS rn
+    FROM people pe
+    JOIN sales s ON pe.SPID = s.SPID
+    GROUP BY pe.SPID, pe.Salesperson, YEAR(s.SaleDate)
+)
+SELECT 
+    SPID,
+    Salesperson,
+    Year,
+    TotalSales
+FROM YearlySales
+WHERE rn = 1
+ORDER BY Year ASC"""
+    else:
+        # Employees database
+        if is_sqlite:
+            return """WITH RankedSalaries AS (
+    SELECT 
+        e.emp_no,
+        e.first_name || ' ' || e.last_name AS FullName,
+        CAST(strftime('%Y', s.from_date) AS INTEGER) AS Year,
+        s.salary AS MaxSalary,
+        ROW_NUMBER() OVER (PARTITION BY strftime('%Y', s.from_date) ORDER BY s.salary DESC, e.emp_no ASC) AS rn
+    FROM employees e
+    JOIN salaries s ON e.emp_no = s.emp_no
+)
+SELECT 
+    emp_no,
+    FullName,
+    Year,
+    MaxSalary
+FROM RankedSalaries
+WHERE rn = 1
+ORDER BY Year ASC"""
+        else:
+            return """WITH RankedSalaries AS (
+    SELECT 
+        e.emp_no,
+        CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+        YEAR(s.from_date) AS Year,
+        s.salary AS MaxSalary,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(s.from_date) ORDER BY s.salary DESC, e.emp_no ASC) AS rn
+    FROM employees e
+    JOIN salaries s ON e.emp_no = s.emp_no
+)
+SELECT 
+    emp_no,
+    FullName,
+    Year,
+    MaxSalary
+FROM RankedSalaries
+WHERE rn = 1
+ORDER BY Year ASC"""
+
+
 def auto_fix_top_employee_salary_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động phát hiện và chuẩn hóa câu hỏi Top N nhân viên có mức lương cao nhất / thấp nhất (toàn công ty hoặc theo từng phòng ban).
     Đảm bảo luôn lọc đúng s.to_date = '9999-01-01' và de.to_date = '9999-01-01' để lấy lương hiện tại duy nhất, tránh trùng lặp năm lịch sử gây hao hụt hoặc sai lệch số dòng.
@@ -5968,6 +6082,7 @@ def run_agent(
             sql_cur = auto_fix_department_salary_fluctuation_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_top_payroll_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_employee_salary_growth_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_top_employee_per_year_query(sql_cur, user_query, schema_context=schema_context, dialect=dialect)
             sql_cur = auto_fix_top_employee_salary_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_yearly_salary_trend_query(sql_cur, user_query)
             sql_cur = auto_fix_promoted_managers_by_hire_date_query(sql_cur, user_query, dialect=dialect)
@@ -6007,6 +6122,7 @@ def run_agent(
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
         else:
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_top_employee_per_year_query(sql_cur, user_query, schema_context=schema_context, dialect=dialect)
             sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
             sql_cur = auto_fix_chocolates_pnl_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_monthly_sales_query(sql_cur, user_query, dialect=dialect)

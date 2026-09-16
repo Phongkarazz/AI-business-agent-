@@ -2533,6 +2533,60 @@ ORDER BY TotalSales DESC;
 4. TUYỆT ĐỐI KHÔNG ĐƯỢC BỎ SÓT BẢNG geo (g.Geo) HAY products (pr.Category) TRONG CÂU TRUY VẤN!)
 """
 
+        # 0.58 Nhân viên có doanh số / số lượng bán ra cao nhất qua từng năm
+        elif (
+            any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "salesperson", "sales person", "rep", "danh sách"])
+            and any(k in q_low for k in ["doanh số cao nhất", "doanh thu cao nhất", "doanh số lớn nhất", "doanh thu lớn nhất", "cao nhất", "lớn nhất", "nhiều nhất"])
+            and any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó"])
+            and not any(k in q_low for k in ["quý", "tháng", "sản phẩm", "quốc gia", "team"])
+        ):
+            if is_sqlite:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN CÓ DOANH SỐ CAO NHẤT QUA TỪNG NĂM):
+WITH YearlySales AS (
+    SELECT 
+        pe.SPID,
+        pe.Salesperson,
+        CAST(strftime('%Y', s.SaleDate) AS INTEGER) AS Year,
+        SUM(s.Amount) AS TotalSales,
+        ROW_NUMBER() OVER (PARTITION BY strftime('%Y', s.SaleDate) ORDER BY SUM(s.Amount) DESC) AS rn
+    FROM people pe
+    JOIN sales s ON pe.SPID = s.SPID
+    GROUP BY pe.SPID, pe.Salesperson, strftime('%Y', s.SaleDate)
+)
+SELECT 
+    SPID,
+    Salesperson,
+    Year,
+    TotalSales
+FROM YearlySales
+WHERE rn = 1
+ORDER BY Year ASC;
+"""
+            else:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN CÓ DOANH SỐ CAO NHẤT QUA TỪNG NĂM):
+WITH YearlySales AS (
+    SELECT 
+        pe.SPID,
+        pe.Salesperson,
+        YEAR(s.SaleDate) AS Year,
+        SUM(s.Amount) AS TotalSales,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(s.SaleDate) ORDER BY SUM(s.Amount) DESC) AS rn
+    FROM people pe
+    JOIN sales s ON pe.SPID = s.SPID
+    GROUP BY pe.SPID, pe.Salesperson, YEAR(s.SaleDate)
+)
+SELECT 
+    SPID,
+    Salesperson,
+    Year,
+    TotalSales
+FROM YearlySales
+WHERE rn = 1
+ORDER BY Year ASC;
+"""
+
         # 0.6 Top N nhân viên bán hàng / nhân sự (Salesperson) có doanh số / số lượng bán ra cao nhất
         elif (
             any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "sales rep", "rep", "thành viên", "ai bán", "ai có doanh số", "người", "ai có"])
@@ -3629,6 +3683,66 @@ JOIN departments d ON de.dept_no = d.dept_no
 ORDER BY e.hire_date ASC, YearsOfService DESC
 LIMIT {req_limit};
 (TUYỆT ĐỐI KHÔNG DÙNG MAX(salary) LƯƠNG CAO NHẤT, TUYỆT ĐỐI CẤM DÙNG YEAR(de.to_date) hay tạo cột mang giá trị 9999, BẮT BUỘC TÍNH CỘT YearsOfService DÙNG DATEDIFF và ORDER BY e.hire_date ASC LIMIT {req_limit}!)
+"""
+
+    # 2.4 Danh sách nhân viên đạt mức lương / tổng doanh thu lớn nhất qua từng năm
+    elif (
+        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "danh sách"])
+        and any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất", "lớn nhất", "cao nhất", "nhiều nhất", "khủng nhất"])
+        and any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó"])
+        and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng"])
+    ):
+        if is_sqlite:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN ĐẠT MỨC LƯƠNG/DOANH THU CAO NHẤT QUA TỪNG NĂM):
+WITH RankedSalaries AS (
+    SELECT 
+        e.emp_no,
+        e.first_name || ' ' || e.last_name AS FullName,
+        CAST(strftime('%Y', s.from_date) AS INTEGER) AS Year,
+        s.salary AS MaxSalary,
+        ROW_NUMBER() OVER (PARTITION BY strftime('%Y', s.from_date) ORDER BY s.salary DESC, e.emp_no ASC) AS rn
+    FROM employees e
+    JOIN salaries s ON e.emp_no = s.emp_no
+)
+SELECT 
+    emp_no,
+    FullName,
+    Year,
+    MaxSalary
+FROM RankedSalaries
+WHERE rn = 1
+ORDER BY Year ASC;
+(CẢNH BÁO BẮT BUỘC:
+1. Trả về đúng 4 cột: emp_no (Mã NV), FullName (Tên Nhân viên), Year (Năm), MaxSalary (Lương cao nhất từng năm).
+2. Dùng CTE và ROW_NUMBER() OVER (PARTITION BY strftime('%Y', s.from_date) ORDER BY s.salary DESC) để lấy chính xác người có mức lương cao nhất trong từng năm.
+3. Lọc WHERE rn = 1 và ORDER BY Year ASC để liệt kê đầy đủ từng năm từ trước đến nay! TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10 đơn thuần!)
+"""
+        else:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN VIÊN ĐẠT MỨC LƯƠNG/DOANH THU CAO NHẤT QUA TỪNG NĂM):
+WITH RankedSalaries AS (
+    SELECT 
+        e.emp_no,
+        CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+        YEAR(s.from_date) AS Year,
+        s.salary AS MaxSalary,
+        ROW_NUMBER() OVER (PARTITION BY YEAR(s.from_date) ORDER BY s.salary DESC, e.emp_no ASC) AS rn
+    FROM employees e
+    JOIN salaries s ON e.emp_no = s.emp_no
+)
+SELECT 
+    emp_no,
+    FullName,
+    Year,
+    MaxSalary
+FROM RankedSalaries
+WHERE rn = 1
+ORDER BY Year ASC;
+(CẢNH BÁO BẮT BUỘC:
+1. Trả về đúng 4 cột: emp_no (Mã NV), FullName (Tên Nhân viên), Year (Năm), MaxSalary (Lương cao nhất từng năm).
+2. Dùng CTE và ROW_NUMBER() OVER (PARTITION BY YEAR(s.from_date) ORDER BY s.salary DESC) để lấy chính xác người có mức lương cao nhất trong từng năm.
+3. Lọc WHERE rn = 1 và ORDER BY Year ASC để liệt kê đầy đủ từng năm từ trước đến nay! TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10 đơn thuần!)
 """
 
     # 2.5 Xu hướng mức lương trung bình của toàn công ty qua các năm
