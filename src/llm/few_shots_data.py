@@ -1459,6 +1459,125 @@ JOIN staff s ON st.store_id = s.store_id
 JOIN payment p ON s.staff_id = p.staff_id
 GROUP BY st.store_id
 ORDER BY st.store_id ASC;"""
+    },
+    # =========================================================================
+    # NHÓM 4: CSDL TỔNG QUÁT / TÙY Ý (GENERIC / ARBITRARY DATABASE PATTERNS)
+    # =========================================================================
+    {
+        "id": "generic_monthly_trend",
+        "domain": "generic",
+        "category": "monthly_trend",
+        "tags": [
+            "tháng", "từng tháng", "qua các tháng", "xu hướng", "biến động", "doanh thu", "số lượng"
+        ],
+        "question": "Biến động tổng doanh thu hoặc số lượng giao dịch theo từng tháng trong năm",
+        "question_en": "Monthly total revenue and transaction volume trend over time",
+        "intent_explanation": "Định dạng tháng (DATE_FORMAT hoặc strftime '%Y-%m') làm trục thời gian liên tục, tính tổng số tiền SUM(amount) và đếm số lượng COUNT(id), nhóm theo Month và sắp xếp tăng dần.",
+        "sql_mysql": """SELECT 
+    DATE_FORMAT(t.transaction_date, '%Y-%m') AS Month,
+    SUM(t.amount) AS TotalRevenue,
+    COUNT(t.id) AS TotalCount
+FROM transactions t
+GROUP BY DATE_FORMAT(t.transaction_date, '%Y-%m')
+ORDER BY Month ASC;""",
+        "sql_sqlite": """SELECT 
+    strftime('%Y-%m', t.transaction_date) AS Month,
+    SUM(t.amount) AS TotalRevenue,
+    COUNT(t.id) AS TotalCount
+FROM transactions t
+GROUP BY strftime('%Y-%m', t.transaction_date)
+ORDER BY Month ASC;"""
+    },
+    {
+        "id": "generic_top_entities_ranking",
+        "domain": "generic",
+        "category": "ranking",
+        "tags": [
+            "top", "cao nhất", "lớn nhất", "nhiều nhất", "danh sách", "xếp hạng"
+        ],
+        "question": "Top 10 thực thể (khách hàng/sản phẩm/danh mục) có giá trị cao nhất",
+        "question_en": "Top 10 entities (customers/products/categories) with the highest total value",
+        "intent_explanation": "JOIN bảng danh mục/thực thể với bảng giao dịch, tính tổng SUM(amount) theo tên thực thể, sắp xếp giảm dần và lấy LIMIT N.",
+        "sql_mysql": """SELECT 
+    e.name AS EntityName,
+    SUM(t.amount) AS TotalAmount
+FROM entities e
+JOIN transactions t ON e.id = t.entity_id
+GROUP BY e.id, e.name
+ORDER BY TotalAmount DESC
+LIMIT 10;""",
+        "sql_sqlite": """SELECT 
+    e.name AS EntityName,
+    SUM(t.amount) AS TotalAmount
+FROM entities e
+JOIN transactions t ON e.id = t.entity_id
+GROUP BY e.id, e.name
+ORDER BY TotalAmount DESC
+LIMIT 10;"""
+    },
+    {
+        "id": "generic_multi_step_cte_benchmark",
+        "domain": "generic",
+        "category": "benchmark_cte",
+        "tags": [
+            "cao hơn trung bình", "so với trung bình", "mức bình quân", "chênh lệch", "cte"
+        ],
+        "question": "Các đối tượng có giá trị cao hơn mức trung bình của toàn hệ thống",
+        "question_en": "Items with values higher than the overall system average",
+        "intent_explanation": "Sử dụng CTE để tính mức trung bình toàn hệ thống trước, sau đó JOIN/CROSS JOIN với dữ liệu chi tiết và lọc WHERE item_value > AvgValue.",
+        "sql_mysql": """WITH SystemAvg AS (
+    SELECT AVG(amount) AS AvgAmount
+    FROM transactions
+)
+SELECT 
+    t.name AS ItemName,
+    t.amount AS ItemAmount,
+    sa.AvgAmount AS BenchmarkAvg,
+    (t.amount - sa.AvgAmount) AS Difference
+FROM transactions t
+CROSS JOIN SystemAvg sa
+WHERE t.amount > sa.AvgAmount
+ORDER BY Difference DESC;""",
+        "sql_sqlite": """WITH SystemAvg AS (
+    SELECT AVG(amount) AS AvgAmount
+    FROM transactions
+)
+SELECT 
+    t.name AS ItemName,
+    t.amount AS ItemAmount,
+    sa.AvgAmount AS BenchmarkAvg,
+    (t.amount - sa.AvgAmount) AS Difference
+FROM transactions t
+CROSS JOIN SystemAvg sa
+WHERE t.amount > sa.AvgAmount
+ORDER BY Difference DESC;"""
+    },
+    {
+        "id": "generic_category_distribution_percentage",
+        "domain": "generic",
+        "category": "distribution",
+        "tags": [
+            "tỷ lệ", "phân bố", "cơ cấu", "phần trăm", "tỉ trọng", "share"
+        ],
+        "question": "Tỷ lệ phân bố số lượng và phần trăm đóng góp theo từng danh mục",
+        "question_en": "Distribution count and contribution percentage by category",
+        "intent_explanation": "Nhóm theo danh mục, tính COUNT(item_id) và tính tỷ lệ phần trăm so với tổng thể bằng Subquery tính tổng toàn bộ bảng.",
+        "sql_mysql": """SELECT 
+    c.name AS CategoryName,
+    COUNT(i.id) AS ItemCount,
+    ROUND(COUNT(i.id) * 100.0 / (SELECT COUNT(*) FROM items), 2) AS Percentage
+FROM categories c
+JOIN items i ON c.id = i.category_id
+GROUP BY c.id, c.name
+ORDER BY ItemCount DESC;""",
+        "sql_sqlite": """SELECT 
+    c.name AS CategoryName,
+    COUNT(i.id) AS ItemCount,
+    ROUND(COUNT(i.id) * 100.0 / (SELECT COUNT(*) FROM items), 2) AS Percentage
+FROM categories c
+JOIN items i ON c.id = i.category_id
+GROUP BY c.id, c.name
+ORDER BY ItemCount DESC;"""
     }
 ]
 

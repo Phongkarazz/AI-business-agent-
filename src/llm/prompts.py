@@ -24,6 +24,49 @@ def get_dialect_hints(dialect: str, lang: str = "vi") -> str:
     return ""
 
 
+def extract_schema_metadata_summary(schema_context: str) -> str:
+    """Tự động phân tích và trích xuất bảng, cột thời gian, cột số liệu, cột định danh và khóa ngoại từ Schema bất kỳ."""
+    if not schema_context or "Chưa kết nối" in schema_context:
+        return ""
+
+    table_lines = re.findall(r"-\s*Bảng\s+`?([a-zA-Z0-9_]+)`?:\s*([^\n]+)", schema_context, re.IGNORECASE)
+    if not table_lines:
+        return ""
+
+    table_names = [t[0] for t in table_lines]
+    date_cols = []
+    metric_cols = []
+    entity_cols = []
+
+    for tbl, col_str in table_lines:
+        cols = [c.strip().split()[0].strip("`,()") for c in col_str.split(",")]
+        for c in cols:
+            c_low = c.lower()
+            full_c = f"`{tbl}`.`{c}`"
+            if any(k in c_low for k in ["date", "time", "year", "month", "day", "created_at", "updated_at", "payment_date", "rental_date", "hire_date", "from_date", "saledate", "order_date"]):
+                date_cols.append(full_c)
+            elif any(k in c_low for k in ["amount", "salary", "price", "cost", "total", "revenue", "sales", "boxes", "rate", "fee", "quantity", "length", "duration", "replacement_cost", "spend", "balance"]):
+                metric_cols.append(full_c)
+            elif any(k in c_low for k in ["name", "title", "category", "product", "country", "city", "region", "team", "salesperson", "gender", "status", "type", "description"]):
+                entity_cols.append(full_c)
+
+    summary_lines = [
+        "   - BẢN ĐỒ SCHEMA TỰ ĐỘNG CHO TRUY VẤN (DYNAMIC SCHEMA NAVIGATION):",
+        f"     + Danh sách bảng tồn tại trong CSDL: {', '.join(f'`{t}`' for t in table_names)}",
+    ]
+    if date_cols:
+        summary_lines.append(f"     + Cột Ngày tháng / Thời gian phát hiện: {', '.join(date_cols[:8])}")
+    if metric_cols:
+        summary_lines.append(f"     + Cột Số liệu đo lường / Tiền tệ / Số lượng phát hiện: {', '.join(metric_cols[:10])}")
+    if entity_cols:
+        summary_lines.append(f"     + Cột Phân loại / Thực thể / Tên gọi phát hiện: {', '.join(entity_cols[:10])}")
+    summary_lines.extend([
+        "     + QUY TẮC BẮT BUỘC: CHỈ ĐƯỢC PHÉP TRUY VẤN CÁC BẢNG VÀ CỘT NÊU TRÊN.",
+        "       TUYỆT ĐỐI CẤM BỊA ĐẶT TÊN BẢNG HAY TÊN CỘT KHÔNG XUẤT HIỆN TRONG SCHEMA!"
+    ])
+    return "\n".join(summary_lines)
+
+
 def get_db_specific_rules(schema_context: str) -> str:
     """Tự động nhận diện CSDL và sinh quy tắc chi tiết theo từng bảng."""
     schema_low = (schema_context or "").lower()
@@ -649,6 +692,9 @@ def get_db_specific_rules(schema_context: str) -> str:
        LIMIT 10;
      + CẢNH BÁO BẮT BUỘC: CSDL Sakila KHÔNG CÓ BẢNG `sales`, `products`, `salaries`, `employees`! TUYỆT ĐỐI KHÔNG DÙNG CÁC BẢNG KHÔNG TỒN TẠI!"""
     else:
+        schema_summary = extract_schema_metadata_summary(schema_context)
+        if schema_summary:
+            return schema_summary
         return """   - QUY TẮC SCHEMA CHUNG:
      + CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng và cột xuất hiện thực tế trong SCHEMA ở trên.
      + Mỗi bảng được JOIN phải có bí danh phân biệt, không được trùng nhau."""
