@@ -6038,19 +6038,28 @@ def run_agent(
     if "departments" in valid_tbls_low and "employees" in valid_tbls_low:
         is_employees_db = True
         is_chocolates_db = False
+        is_sakila_db = False
     elif "people" in valid_tbls_low and "products" in valid_tbls_low:
         is_employees_db = False
         is_chocolates_db = True
+        is_sakila_db = False
+    elif any(k in valid_tbls_low for k in ["film", "rental", "payment", "actor", "customer", "inventory"]):
+        is_employees_db = False
+        is_chocolates_db = False
+        is_sakila_db = True
     else:
         # Fallback dựa trên schema_context chỉ khi không có engine thực tế
         schema_low = (schema_context or "").lower()
+        is_sakila_db = any(k in schema_low for k in ["film_id", "rental_id", "payment_id", "inventory_id", "actor_id", "customer_id", "staff_id", "`film`", "`rental`", "`payment`", "`actor`", "`inventory`"])
         is_employees_db = (
             any(k in schema_low for k in ["dept_emp", "dept_manager", "departments", "employees", "titles", "salaries", "hire_date"])
             and not any(k in schema_low for k in ["geoid", "spid", "boxes"])
+            and not is_sakila_db
         )
         is_chocolates_db = (
             any(k in schema_low for k in ["geoid", "spid", "boxes", "products", "people"])
             and not any(k in schema_low for k in ["dept_emp", "dept_manager", "hire_date"])
+            and not is_sakila_db
         )
 
     user_query_low = user_query.lower()
@@ -6073,6 +6082,17 @@ def run_agent(
             "👉 **Gợi ý:** Nếu bạn muốn truy vấn về **Tiền lương nhân viên**, vui lòng chọn cơ sở dữ liệu **`employees`** ở thanh menu bên trái (Sidebar) nhé!"
             if lang != "en" else
             "💡 **Notice:** The current database (**`awesome chocolates`**) is for **Products and Sales**, and does not contain salary tables.\n\n"
+            "👉 Please switch to the **`employees`** database in the Sidebar to query employee salaries!"
+        )
+        return result
+
+    # Nếu đang ở DB sakila mà người dùng hỏi mức lương / salary
+    if is_sakila_db and any(k in user_query_low for k in ["mức lương", "bảng lương", "lương trung bình", "tiền lương", "salary", "salaries"]):
+        result["explanation"] = (
+            "💡 **Thông báo từ Trợ lý:** Cơ sở dữ liệu hiện tại (**`sakila`**) là cơ sở dữ liệu về **Cho thuê phim (DVD Rentals)** (gồm các bảng `film`, `actor`, `rental`, `payment`, `customer`, `category`), không chứa bảng tiền lương nhân viên.\n\n"
+            "👉 **Gợi ý:** Nếu bạn muốn truy vấn về **Tiền lương nhân viên**, vui lòng chọn cơ sở dữ liệu **`employees`** ở thanh menu bên trái (Sidebar) nhé!"
+            if lang != "en" else
+            "💡 **Notice:** The current database (**`sakila`**) is for **Movie Rentals**, and does not contain employee salary tables.\n\n"
             "👉 Please switch to the **`employees`** database in the Sidebar to query employee salaries!"
         )
         return result
@@ -6125,7 +6145,7 @@ def run_agent(
             sql_cur = auto_fix_dept_size_min_max_query(sql_cur, user_query)
             sql_cur = auto_fix_salary_spread_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
-        else:
+        elif is_chocolates_db:
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_top_employee_per_year_query(sql_cur, user_query, schema_context=schema_context, dialect=dialect)
             sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
@@ -6141,6 +6161,9 @@ def run_agent(
             sql_cur = auto_fix_chocolates_threshold_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_top_transactions_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_top_rankings_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
+        elif is_sakila_db:
+            sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         return sql_cur
 

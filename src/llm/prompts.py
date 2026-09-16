@@ -27,8 +27,9 @@ def get_dialect_hints(dialect: str, lang: str = "vi") -> str:
 def get_db_specific_rules(schema_context: str) -> str:
     """Tự động nhận diện CSDL và sinh quy tắc chi tiết theo từng bảng."""
     schema_low = (schema_context or "").lower()
-    is_employees_db = "departments" in schema_low or "dept_emp" in schema_low or "hire_date" in schema_low or "salaries" in schema_low
-    is_chocolates_db = "people" in schema_low and "products" in schema_low
+    is_sakila_db = any(k in schema_low for k in ["film_id", "rental_id", "payment_id", "inventory_id", "actor_id", "customer_id", "staff_id", "`film`", "`rental`", "`payment`", "`actor`", "`inventory`"])
+    is_employees_db = ("departments" in schema_low or "dept_emp" in schema_low or "hire_date" in schema_low or "salaries" in schema_low) and not is_sakila_db
+    is_chocolates_db = ("people" in schema_low and "products" in schema_low) and not is_sakila_db
 
     if is_employees_db:
         return """   - QUY TẮC CSDL EMPLOYEES:
@@ -580,6 +581,73 @@ def get_db_specific_rules(schema_context: str) -> str:
           WHERE YEAR(s.SaleDate) = 2021
           GROUP BY `Tháng`, `Quý`, `Quốc Gia`
           ORDER BY `Tháng` ASC, `Lợi Nhuận ($)` DESC;"""
+    elif is_sakila_db:
+        return """   - QUY TẮC CSDL SAKILA (DVD RENTAL STORE):
+     + Bảng `payment` (Bí danh bắt buộc: `p`):
+       * Cột: `payment_id`, `customer_id`, `staff_id`, `rental_id`, `amount` (Doanh thu / Tiền thanh toán), `payment_date` (Ngày thanh toán).
+       * Doanh thu theo tháng: DATE_FORMAT(p.payment_date, '%Y-%m') AS Month, SUM(p.amount) AS TotalRevenue, COUNT(p.rental_id) AS TotalRentals.
+     + Bảng `rental` (Bí danh bắt buộc: `r`):
+       * Cột: `rental_id`, `rental_date`, `inventory_id`, `customer_id`, `return_date`, `staff_id`.
+     + Bảng `film` (Bí danh bắt buộc: `f`):
+       * Cột: `film_id`, `title`, `description`, `release_year`, `language_id`, `rental_duration`, `rental_rate`, `length`, `replacement_cost`, `rating`.
+     + Bảng `inventory` (Bí danh bắt buộc: `i`):
+       * Cột: `inventory_id`, `film_id`, `store_id`.
+     + Bảng `category` (Bí danh bắt buộc: `c`):
+       * Cột: `category_id`, `name` (Tên thể loại: 'Action', 'Comedy', 'Drama'...).
+     + Bảng `film_category` (Bí danh bắt buộc: `fc`):
+       * Cột: `film_id`, `category_id`.
+     + Bảng `actor` (Bí danh bắt buộc: `a`):
+       * Cột: `actor_id`, `first_name`, `last_name`. Ghép họ tên: CONCAT(a.first_name, ' ', a.last_name) AS ActorName.
+     + Bảng `film_actor` (Bí danh bắt buộc: `fa`):
+       * Cột: `actor_id`, `film_id`.
+     + Bảng `customer` (Bí danh bắt buộc: `cu`):
+       * Cột: `customer_id`, `store_id`, `first_name`, `last_name`, `email`, `address_id`, `active`. Ghép họ tên: CONCAT(cu.first_name, ' ', cu.last_name) AS CustomerName.
+     + Bảng `store` (Bí danh bắt buộc: `st`):
+       * Cột: `store_id`, `manager_staff_id`, `address_id`.
+     + Bảng `staff` (Bí danh bắt buộc: `s`):
+       * Cột: `staff_id`, `first_name`, `last_name`, `store_id`.
+     + MẪU CHUẨN DOANH THU VÀ SỐ LƯỢT THUÊ THEO THÁNG:
+       SELECT 
+           DATE_FORMAT(p.payment_date, '%Y-%m') AS Month,
+           SUM(p.amount) AS TotalRevenue,
+           COUNT(p.rental_id) AS TotalRentals
+       FROM payment p
+       GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m')
+       ORDER BY Month ASC;
+     + MẪU CHUẨN TOP THỂ LOẠI PHIM THEO DOANH THU:
+       SELECT 
+           c.name AS Category,
+           SUM(p.amount) AS TotalRevenue
+       FROM category c
+       JOIN film_category fc ON c.category_id = fc.category_id
+       JOIN film f ON fc.film_id = f.film_id
+       JOIN inventory i ON f.film_id = i.film_id
+       JOIN rental r ON i.inventory_id = r.inventory_id
+       JOIN payment p ON r.rental_id = p.rental_id
+       GROUP BY c.name
+       ORDER BY TotalRevenue DESC
+       LIMIT 5;
+     + MẪU CHUẨN TOP DIỄN VIÊN THAM GIA NHIỀU PHIM NHẤT:
+       SELECT 
+           a.actor_id,
+           CONCAT(a.first_name, ' ', a.last_name) AS ActorName,
+           COUNT(fa.film_id) AS TotalFilms
+       FROM actor a
+       JOIN film_actor fa ON a.actor_id = fa.actor_id
+       GROUP BY a.actor_id, ActorName
+       ORDER BY TotalFilms DESC
+       LIMIT 10;
+     + MẪU CHUẨN TOP KHÁCH HÀNG CHI TIÊU CAO NHẤT:
+       SELECT 
+           cu.customer_id,
+           CONCAT(cu.first_name, ' ', cu.last_name) AS CustomerName,
+           SUM(p.amount) AS TotalSpent
+       FROM customer cu
+       JOIN payment p ON cu.customer_id = p.customer_id
+       GROUP BY cu.customer_id, CustomerName
+       ORDER BY TotalSpent DESC
+       LIMIT 10;
+     + CẢNH BÁO BẮT BUỘC: CSDL Sakila KHÔNG CÓ BẢNG `sales`, `products`, `salaries`, `employees`! TUYỆT ĐỐI KHÔNG DÙNG CÁC BẢNG KHÔNG TỒN TẠI!"""
     else:
         return """   - QUY TẮC SCHEMA CHUNG:
      + CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng và cột xuất hiện thực tế trong SCHEMA ở trên.
@@ -826,18 +894,106 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
     req_limit = int(top_m.group(1)) if top_m else 10
 
-    # 0. Phân biệt ngữ cảnh CSDL (Employees vs Awesome Chocolates)
+    # 0. Phân biệt ngữ cảnh CSDL (Sakila vs Employees vs Awesome Chocolates)
+    is_sakila_db = any(k in schema_low for k in ["film_id", "rental_id", "payment_id", "inventory_id", "actor_id", "customer_id", "staff_id", "`film`", "`rental`", "`payment`", "`actor`", "`inventory`"])
     is_employees_db = (
         ("dept_emp" in schema_low or "dept_manager" in schema_low or "titles" in schema_low or "salaries" in schema_low or "hire_date" in schema_low)
         and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`sales`", "bảng sales", "bảng `sales`"])
+        and not is_sakila_db
     )
     is_choco_context = (
         (any(k in schema_low for k in ["geo", "products", "spid", "geoid", "boxes"])
-         or ("`sales`" in schema_low or "bảng sales" in schema_low or "table sales" in schema_low)
-         or any(k in q_low for k in ["chocolates", "chocolate", "kẹo", "hộp kẹo", "hộp", "thùng", "sản phẩm", "bán hàng", "doanh số", "doanh thu"]))
+         or ("`sales`" in schema_low or "bảng sales" in schema_low or "table sales" in schema_low))
         and not is_employees_db
+        and not is_sakila_db
     )
-    if is_choco_context or (not is_employees_db and any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
+
+    if is_sakila_db:
+        # Biến động doanh thu theo tháng / số lượt thuê
+        if any(k in q_low for k in ["theo tháng", "từng tháng", "hàng tháng", "qua các tháng", "biến động", "xu hướng"]) and any(k in q_low for k in ["doanh thu", "doanh số", "thuê", "rentals", "payment", "tiền"]):
+            if is_sqlite:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU & SỐ LƯỢT THUÊ THEO THÁNG TRONG CSDL SAKILA):
+SELECT 
+    strftime('%Y-%m', p.payment_date) AS Month,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.rental_id) AS TotalRentals
+FROM payment p
+GROUP BY strftime('%Y-%m', p.payment_date)
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: Bảng thanh toán doanh thu là `payment` (cột `amount`, `payment_date`, `rental_id`), TUYỆT ĐỐI KHÔNG DÙNG BẢNG `sales` hay cột `SaleDate` vì CSDL Sakila không có bảng `sales`!)
+"""
+            else:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU & SỐ LƯỢT THUÊ THEO THÁNG TRONG CSDL SAKILA):
+SELECT 
+    DATE_FORMAT(p.payment_date, '%Y-%m') AS Month,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.rental_id) AS TotalRentals
+FROM payment p
+GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m')
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: Bảng thanh toán doanh thu là `payment` (cột `amount`, `payment_date`, `rental_id`), TUYỆT ĐỐI KHÔNG DÙNG BẢNG `sales` hay cột `SaleDate` vì CSDL Sakila không có bảng `sales`!)
+"""
+        elif any(k in q_low for k in ["thể loại", "category", "categories"]) and any(k in q_low for k in ["doanh thu", "cao nhất", "phổ biến", "top"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP THỂ LOẠI PHIM DOANH THU CAO NHẤT TRONG SAKILA):
+SELECT 
+    c.name AS Category,
+    SUM(p.amount) AS TotalRevenue
+FROM category c
+JOIN film_category fc ON c.category_id = fc.category_id
+JOIN film f ON fc.film_id = f.film_id
+JOIN inventory i ON f.film_id = i.film_id
+JOIN rental r ON i.inventory_id = r.inventory_id
+JOIN payment p ON r.rental_id = p.rental_id
+GROUP BY c.name
+ORDER BY TotalRevenue DESC
+LIMIT {req_limit};
+"""
+        elif any(k in q_low for k in ["diễn viên", "actor", "actors"]) and any(k in q_low for k in ["nhiều phim", "tham gia", "đóng nhiều", "top"]):
+            name_concat = "a.first_name || ' ' || a.last_name" if is_sqlite else "CONCAT(a.first_name, ' ', a.last_name)"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP DIỄN VIÊN THAM GIA NHIỀU PHIM NHẤT TRONG SAKILA):
+SELECT 
+    a.actor_id,
+    {name_concat} AS ActorName,
+    COUNT(fa.film_id) AS TotalFilms
+FROM actor a
+JOIN film_actor fa ON a.actor_id = fa.actor_id
+GROUP BY a.actor_id, ActorName
+ORDER BY TotalFilms DESC
+LIMIT {req_limit};
+"""
+        elif any(k in q_low for k in ["khách hàng", "customer", "customers"]) and any(k in q_low for k in ["chi tiêu", "nhiều tiền", "doanh thu", "top"]):
+            name_concat = "cu.first_name || ' ' || cu.last_name" if is_sqlite else "CONCAT(cu.first_name, ' ', cu.last_name)"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP KHÁCH HÀNG CHI TIÊU CAO NHẤT TRONG SAKILA):
+SELECT 
+    cu.customer_id,
+    {name_concat} AS CustomerName,
+    SUM(p.amount) AS TotalSpent
+FROM customer cu
+JOIN payment p ON cu.customer_id = p.customer_id
+GROUP BY cu.customer_id, CustomerName
+ORDER BY TotalSpent DESC
+LIMIT {req_limit};
+"""
+        elif any(k in q_low for k in ["so sánh", "chi nhánh", "cửa hàng", "store"]) and any(k in q_low for k in ["doanh thu", "giao dịch"]):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH CÁC CHI NHÁNH CỬA HÀNG TRONG SAKILA):
+SELECT 
+    st.store_id AS StoreID,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.payment_id) AS TotalTransactions
+FROM store st
+JOIN staff s ON st.store_id = s.store_id
+JOIN payment p ON s.staff_id = p.staff_id
+GROUP BY st.store_id
+ORDER BY st.store_id ASC;
+"""
+
+    if is_choco_context or (not is_employees_db and not is_sakila_db and any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
         # 0.00000 Top N Giao dịch / Đơn hàng cá nhân có giá trị hoặc sản lượng lớn nhất (Top N Individual Transactions / Orders Ranking)
         # Ví dụ: "Cho biết thông tin top 5 giao dịch có giá trị đơn hàng cao nhất tại thị trường India: hiển thị ngày bán, tên nhân viên, tên sản phẩm và số tiền."
         is_top_tx = (

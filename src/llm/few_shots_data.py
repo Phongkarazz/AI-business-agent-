@@ -1308,6 +1308,157 @@ JOIN people pe ON s.SPID = pe.SPID
 WHERE pe.Team = 'Yummies' AND strftime('%Y', s.SaleDate) = '2021'
 GROUP BY Month
 ORDER BY Month ASC;"""
+    },
+    # =========================================================================
+    # NHÓM 3: CSDL SAKILA (DVD RENTAL STORE)
+    # =========================================================================
+    {
+        "id": "sakila_monthly_revenue_and_rentals",
+        "domain": "sakila",
+        "category": "monthly_trend",
+        "tags": [
+            "biến động", "doanh thu", "từng tháng", "qua các tháng", "theo tháng",
+            "số lượt thuê", "thuê phim", "payment", "rental", "sakila"
+        ],
+        "question": "Biến động tổng doanh thu theo từng tháng trong năm (kèm số lượt thuê phim)",
+        "question_en": "Monthly total revenue and rental count trend over time",
+        "intent_explanation": "Truy vấn bảng payment p của Sakila, định dạng tháng bằng DATE_FORMAT(p.payment_date, '%Y-%m') AS Month, tính SUM(p.amount) AS TotalRevenue và COUNT(p.rental_id) AS TotalRentals, nhóm theo Month và sắp xếp tăng dần.",
+        "sql_mysql": """SELECT 
+    DATE_FORMAT(p.payment_date, '%Y-%m') AS Month,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.rental_id) AS TotalRentals
+FROM payment p
+GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m')
+ORDER BY Month ASC;""",
+        "sql_sqlite": """SELECT 
+    strftime('%Y-%m', p.payment_date) AS Month,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.rental_id) AS TotalRentals
+FROM payment p
+GROUP BY strftime('%Y-%m', p.payment_date)
+ORDER BY Month ASC;"""
+    },
+    {
+        "id": "sakila_top_categories_by_revenue",
+        "domain": "sakila",
+        "category": "category_ranking",
+        "tags": [
+            "thể loại", "thể loại phim", "category", "doanh thu", "cao nhất", "top 5", "sakila"
+        ],
+        "question": "Top 5 thể loại phim có tổng doanh thu cho thuê cao nhất là những thể loại nào?",
+        "question_en": "Top 5 film categories with the highest rental revenue",
+        "intent_explanation": "JOIN category c -> film_category fc -> film f -> inventory i -> rental r -> payment p, tính SUM(p.amount) AS TotalRevenue theo từng c.name và lấy Top 5.",
+        "sql_mysql": """SELECT 
+    c.name AS Category,
+    SUM(p.amount) AS TotalRevenue
+FROM category c
+JOIN film_category fc ON c.category_id = fc.category_id
+JOIN film f ON fc.film_id = f.film_id
+JOIN inventory i ON f.film_id = i.film_id
+JOIN rental r ON i.inventory_id = r.inventory_id
+JOIN payment p ON r.rental_id = p.rental_id
+GROUP BY c.name
+ORDER BY TotalRevenue DESC
+LIMIT 5;""",
+        "sql_sqlite": """SELECT 
+    c.name AS Category,
+    SUM(p.amount) AS TotalRevenue
+FROM category c
+JOIN film_category fc ON c.category_id = fc.category_id
+JOIN film f ON fc.film_id = f.film_id
+JOIN inventory i ON f.film_id = i.film_id
+JOIN rental r ON i.inventory_id = r.inventory_id
+JOIN payment p ON r.rental_id = p.rental_id
+GROUP BY c.name
+ORDER BY TotalRevenue DESC
+LIMIT 5;"""
+    },
+    {
+        "id": "sakila_top_actors_by_films",
+        "domain": "sakila",
+        "category": "actor_ranking",
+        "tags": [
+            "diễn viên", "actor", "tham gia nhiều phim", "đóng nhiều phim nhất", "top 10", "sakila"
+        ],
+        "question": "Top 10 diễn viên tham gia nhiều bộ phim nhất",
+        "question_en": "Top 10 actors who have appeared in the most films",
+        "intent_explanation": "JOIN actor a với film_actor fa ON a.actor_id = fa.actor_id, đếm COUNT(fa.film_id) AS TotalFilms, nhóm theo a.actor_id và CONCAT(a.first_name, ' ', a.last_name) AS ActorName, sắp xếp giảm dần LIMIT 10.",
+        "sql_mysql": """SELECT 
+    a.actor_id,
+    CONCAT(a.first_name, ' ', a.last_name) AS ActorName,
+    COUNT(fa.film_id) AS TotalFilms
+FROM actor a
+JOIN film_actor fa ON a.actor_id = fa.actor_id
+GROUP BY a.actor_id, ActorName
+ORDER BY TotalFilms DESC
+LIMIT 10;""",
+        "sql_sqlite": """SELECT 
+    a.actor_id,
+    a.first_name || ' ' || a.last_name AS ActorName,
+    COUNT(fa.film_id) AS TotalFilms
+FROM actor a
+JOIN film_actor fa ON a.actor_id = fa.actor_id
+GROUP BY a.actor_id, ActorName
+ORDER BY TotalFilms DESC
+LIMIT 10;"""
+    },
+    {
+        "id": "sakila_top_customers_by_spent",
+        "domain": "sakila",
+        "category": "customer_ranking",
+        "tags": [
+            "khách hàng", "customer", "chi tiêu", "nhiều tiền nhất", "thuê phim", "top 10", "sakila"
+        ],
+        "question": "Top 10 khách hàng chi tiêu nhiều tiền nhất cho việc thuê phim",
+        "question_en": "Top 10 customers who spent the most money on rentals",
+        "intent_explanation": "JOIN customer cu với payment p ON cu.customer_id = p.customer_id, tính SUM(p.amount) AS TotalSpent, nhóm theo cu.customer_id và họ tên, sắp xếp giảm dần LIMIT 10.",
+        "sql_mysql": """SELECT 
+    cu.customer_id,
+    CONCAT(cu.first_name, ' ', cu.last_name) AS CustomerName,
+    SUM(p.amount) AS TotalSpent
+FROM customer cu
+JOIN payment p ON cu.customer_id = p.customer_id
+GROUP BY cu.customer_id, CustomerName
+ORDER BY TotalSpent DESC
+LIMIT 10;""",
+        "sql_sqlite": """SELECT 
+    cu.customer_id,
+    cu.first_name || ' ' || cu.last_name AS CustomerName,
+    SUM(p.amount) AS TotalSpent
+FROM customer cu
+JOIN payment p ON cu.customer_id = p.customer_id
+GROUP BY cu.customer_id, CustomerName
+ORDER BY TotalSpent DESC
+LIMIT 10;"""
+    },
+    {
+        "id": "sakila_store_comparison",
+        "domain": "sakila",
+        "category": "store_comparison",
+        "tags": [
+            "so sánh", "chi nhánh", "cửa hàng", "store", "doanh thu", "giao dịch", "sakila"
+        ],
+        "question": "So sánh tổng doanh thu và số lượng giao dịch giữa 2 chi nhánh cửa hàng",
+        "question_en": "Compare total revenue and transaction counts between the two stores",
+        "intent_explanation": "JOIN store st với staff s ON st.store_id = s.store_id và payment p ON s.staff_id = p.staff_id, tính SUM(p.amount) AS TotalRevenue và COUNT(p.payment_id) AS TotalTransactions theo st.store_id.",
+        "sql_mysql": """SELECT 
+    st.store_id AS StoreID,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.payment_id) AS TotalTransactions
+FROM store st
+JOIN staff s ON st.store_id = s.store_id
+JOIN payment p ON s.staff_id = p.staff_id
+GROUP BY st.store_id
+ORDER BY st.store_id ASC;""",
+        "sql_sqlite": """SELECT 
+    st.store_id AS StoreID,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.payment_id) AS TotalTransactions
+FROM store st
+JOIN staff s ON st.store_id = s.store_id
+JOIN payment p ON s.staff_id = p.staff_id
+GROUP BY st.store_id
+ORDER BY st.store_id ASC;"""
     }
 ]
 

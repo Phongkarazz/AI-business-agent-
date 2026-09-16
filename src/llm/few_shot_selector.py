@@ -29,15 +29,22 @@ def tokenize(text: str) -> set[str]:
 
 
 def detect_database_domain(schema_context: str) -> str:
-    """Phân loại CSDL hiện tại: 'employees', 'awesome_chocolates', hoặc 'generic'."""
+    """Phân loại CSDL hiện tại: 'employees', 'awesome_chocolates', 'sakila', hoặc 'generic'."""
     s_low = (schema_context or "").lower()
     
-    is_employees = any(k in s_low for k in ["dept_emp", "dept_manager", "salaries", "titles", "birth_date", "emp_no"])
-    is_choco = any(k in s_low for k in ["spid", "geoid", "boxes", "cost_per_box", "category", "salesperson"]) or (
-        "`sales`" in s_low and "`products`" in s_low
+    is_sakila = any(k in s_low for k in ["film_id", "rental_id", "payment_id", "inventory_id", "actor_id", "customer_id", "staff_id", "`film`", "`rental`", "`payment`", "`actor`", "`inventory`"])
+    is_employees = (
+        any(k in s_low for k in ["dept_emp", "dept_manager", "salaries", "titles", "birth_date", "emp_no"])
+        and not is_sakila
     )
+    is_choco = (
+        any(k in s_low for k in ["spid", "geoid", "boxes", "cost_per_box", "salesperson"])
+        or ("`sales`" in s_low and "`products`" in s_low)
+    ) and not is_sakila and not is_employees
     
-    if is_employees and not is_choco:
+    if is_sakila:
+        return "sakila"
+    elif is_employees:
         return "employees"
     elif is_choco:
         return "awesome_chocolates"
@@ -157,15 +164,14 @@ def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect:
     # Lọc ví dụ theo Domain CSDL (ưu tiên các ví dụ cùng domain nếu xác định được)
     candidate_examples = []
     for ex in FEW_SHOT_EXAMPLES:
-        # Nếu đã xác định rõ domain (employees vs awesome_chocolates), chỉ chọn ví dụ thuộc domain đó
-        if target_domain in ("employees", "awesome_chocolates"):
+        # Nếu đã xác định rõ domain (employees, awesome_chocolates, sakila), chỉ chọn ví dụ thuộc domain đó
+        if target_domain in ("employees", "awesome_chocolates", "sakila"):
             if ex.get("domain") == target_domain:
                 candidate_examples.append(ex)
-        else:
-            candidate_examples.append(ex)
 
-    if not candidate_examples:
-        candidate_examples = FEW_SHOT_EXAMPLES
+    if not candidate_examples and target_domain not in ("employees", "awesome_chocolates", "sakila"):
+        # Với generic domain, chỉ chọn các ví dụ chung nếu có
+        candidate_examples = [ex for ex in FEW_SHOT_EXAMPLES if ex.get("domain") == "generic"]
 
     # Chấm điểm và sắp xếp
     scored_examples = []
