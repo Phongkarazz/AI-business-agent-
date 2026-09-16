@@ -1717,13 +1717,25 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     bar_kwargs = {
                         "data_frame": plot_df,
                         "x": label_name,
-                        "y": active_measures,
+                        "y": active_measures if len(active_measures) > 1 or not color_col else active_measures[0],
                         "barmode": barmode_val,
                         "title": chart_title,
                         "category_orders": {label_name: category_order},
                         "template": "plotly_white",
                     }
-                    if color_map and len(color_map) == len(active_measures):
+                    if color_col and len(active_measures) == 1:
+                        bar_kwargs["color"] = color_col
+                        if any(k in color_col.lower() for k in ["group", "nhóm", "khối"]):
+                            group_color_map = {}
+                            for g in plot_df[color_col].dropna().unique():
+                                g_str = str(g).lower()
+                                if any(k in g_str for k in ["kinh doanh", "sales", "commercial"]):
+                                    group_color_map[g] = "#0068FF"
+                                elif any(k in g_str for k in ["kỹ thuật", "tech", "development", "research", "engineering"]):
+                                    group_color_map[g] = "#8B5CF6"
+                            if group_color_map:
+                                bar_kwargs["color_discrete_map"] = group_color_map
+                    elif color_map and len(color_map) == len(active_measures):
                         bar_kwargs["color_discrete_map"] = color_map
 
                     fig = px.bar(**bar_kwargs)
@@ -2022,58 +2034,69 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             or (any(k in meas_lower for k in ["count", "số lượng", "so_luong"]) and not any(k in meas_lower for k in ["box", "thùng", "hộp", "order", "đơn", "raise", "lần", "sản phẩm", "product", "item"]))
                         ) and not is_curr and not is_raises and not is_boxes and not is_orders
 
+                        trace_up = {"textposition": "outside"}
+                        if not color_col:
+                            trace_up["marker_color"] = "#0068FF"
+
                         if is_pct:
-                            fig.update_traces(texttemplate="%{y:.2f}%", textposition="outside", marker_color="#0068FF")
+                            trace_up["texttemplate"] = "%{y:.2f}%"
+                            fig.update_traces(**trace_up)
                             try:
                                 max_val = float(plot_df[meas].max() or 0)
                             except Exception:
                                 max_val = 100.0
                             fig.update_layout(
-                                showlegend=False,
+                                showlegend=bool(color_col),
                                 yaxis=dict(title=format_col_title(meas), ticksuffix="%", range=[0, max(100.0, max_val * 1.15)])
                             )
                         elif is_curr:
-                            fig.update_traces(texttemplate="$%{y:,.2f}" if any('.' in str(v) for v in plot_df[meas]) else "$%{y:,.0f}", textposition="outside", marker_color="#0068FF")
+                            trace_up["texttemplate"] = "$%{y:,.2f}" if any('.' in str(v) for v in plot_df[meas]) else "$%{y:,.0f}"
+                            fig.update_traces(**trace_up)
                             try:
                                 max_val = float(plot_df[meas].max() or 0)
                             except Exception:
                                 max_val = 100.0
                             fig.update_layout(
-                                showlegend=False,
+                                showlegend=bool(color_col),
                                 yaxis=dict(title=format_col_title(meas), range=[0, max_val * 1.15])
                             )
                         elif is_raises:
                             u_r = " lần" if not is_en else " times"
-                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_r}", textposition="outside", marker_color="#0068FF")
+                            trace_up["texttemplate"] = f"%{{y:,.0f}}{u_r}"
+                            fig.update_traces(**trace_up)
                             fig.update_layout(
-                                showlegend=False,
+                                showlegend=bool(color_col),
                                 yaxis=dict(title=format_col_title(meas))
                             )
                         elif is_boxes:
                             u_b = " hộp" if not is_en else " boxes"
-                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_b}", textposition="outside", marker_color="#0068FF")
+                            trace_up["texttemplate"] = f"%{{y:,.0f}}{u_b}"
+                            fig.update_traces(**trace_up)
                             fig.update_layout(
-                                showlegend=False,
+                                showlegend=bool(color_col),
                                 yaxis=dict(title=format_col_title(meas))
                             )
                         elif is_orders:
                             u_o = " đơn" if not is_en else " orders"
-                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_o}", textposition="outside", marker_color="#0068FF")
+                            trace_up["texttemplate"] = f"%{{y:,.0f}}{u_o}"
+                            fig.update_traces(**trace_up)
                             fig.update_layout(
-                                showlegend=False,
+                                showlegend=bool(color_col),
                                 yaxis=dict(title=format_col_title(meas))
                             )
                         elif is_hc:
                             u_h = " người" if not is_en else " reps"
-                            fig.update_traces(texttemplate=f"%{{y:,.0f}}{u_h}", textposition="outside", marker_color="#0068FF")
+                            trace_up["texttemplate"] = f"%{{y:,.0f}}{u_h}"
+                            fig.update_traces(**trace_up)
                             fig.update_layout(
-                                showlegend=False,
+                                showlegend=bool(color_col),
                                 yaxis=dict(title=format_col_title(meas))
                             )
                         else:
-                            fig.update_traces(texttemplate="%{y:,.0f}", textposition="outside", marker_color="#0068FF")
+                            trace_up["texttemplate"] = "%{y:,.0f}"
+                            fig.update_traces(**trace_up)
                             fig.update_layout(
-                                showlegend=False,
+                                showlegend=bool(color_col),
                                 yaxis=dict(title=format_col_title(meas))
                             )
 
@@ -2227,12 +2250,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             g_str = str(g).lower()
                             if any(k in g_str for k in ["kinh doanh", "sales", "commercial"]):
                                 group_color_map[g] = "#0068FF"  # Xanh Zalo Blue cho Kinh doanh
-                            elif any(k in g_str for k in ["kỹ thuật", "tech", "development"]):
-                                group_color_map[g] = "#10B981"  # Xanh ngọc cho Kỹ thuật
+                            elif any(k in g_str for k in ["kỹ thuật", "tech", "development", "research", "engineering"]):
+                                group_color_map[g] = "#8B5CF6"  # Tím Violet hiện đại cho Kỹ thuật
                         if group_color_map:
                             bar_kwargs["color_discrete_map"] = group_color_map
                         else:
-                            bar_kwargs["color_discrete_sequence"] = ["#0068FF", "#10B981", "#F59E0B", "#6366F1", "#EC4899"]
+                            bar_kwargs["color_discrete_sequence"] = ["#0068FF", "#8B5CF6", "#10B981", "#F59E0B", "#EC4899"]
 
                     fig = px.bar(**bar_kwargs)
 

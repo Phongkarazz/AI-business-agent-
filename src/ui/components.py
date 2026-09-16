@@ -2493,6 +2493,16 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             delta_high = f"{g_high['tot_hc']:,} nhân sự" if hc_col else f"{g_high['count']} phòng ban"
             delta_low = f"{g_low['tot_hc']:,} nhân sự" if hc_col else f"{g_low['count']} phòng ban"
 
+            st.markdown(
+                """<style>
+                [data-testid="stMetricDelta"] > div {
+                    font-size: 0.82rem !important;
+                    white-space: normal !important;
+                    word-break: break-word !important;
+                }
+                </style>""",
+                unsafe_allow_html=True
+            )
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.metric(
@@ -2510,13 +2520,13 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 st.metric(
                     "⚖️ " + ("Chênh lệch Thu nhập" if not is_en else "Pay Difference"),
                     f"+${diff_val:,.0f}",
-                    delta=f"+{diff_pct:.1f}% nghiêng về {g_high['short_name']}" if not is_en else f"+{diff_pct:.1f}% higher in {g_high['short_name']}"
+                    delta=f"+{diff_pct:.1f}% ({g_high['short_name']})" if not is_en else f"+{diff_pct:.1f}% ({g_high['short_name']})"
                 )
             with c4:
                 st.metric(
                     "🏆 " + (f"Cao nhất ({max_dept})" if not is_en else f"Top Entity ({max_dept})"),
                     f"${max_val:,.0f}",
-                    delta=f"Thấp nhất: {min_dept} (${min_val:,.0f})" if not is_en else f"Lowest: {min_dept} (${min_val:,.0f})"
+                    delta=f"Sàn: {min_dept} (${min_val:,.0f})" if not is_en else f"Min: {min_dept} (${min_val:,.0f})"
                 )
 
             st.caption(
