@@ -23,6 +23,34 @@ from src.analytics.heuristics import (
 )
 
 VI_COLUMN_MAP = {
+    "totalrentals": "Số Lượt Thuê Phim",
+    "total_rentals": "Số Lượt Thuê Phim",
+    "rentalcount": "Số Lượt Thuê Phim",
+    "rental_count": "Số Lượt Thuê Phim",
+    "rentals": "Số Lượt Thuê Phim",
+    "num_rentals": "Số Lượt Thuê Phim",
+    "rental_qty": "Số Lượt Thuê Phim",
+    "totalfilms": "Số Lượng Phim",
+    "total_films": "Số Lượng Phim",
+    "filmcount": "Số Lượng Phim",
+    "film_count": "Số Lượng Phim",
+    "number_of_films": "Số Lượng Phim",
+    "totalspent": "Tổng Chi Tiêu ($)",
+    "total_spent": "Tổng Chi Tiêu ($)",
+    "totalpayments": "Tổng Thanh Toán ($)",
+    "total_payments": "Tổng Thanh Toán ($)",
+    "totalpayment": "Tổng Thanh Toán ($)",
+    "total_payment": "Tổng Thanh Toán ($)",
+    "actorname": "Tên Diễn Viên",
+    "actor_name": "Tên Diễn Viên",
+    "customername": "Tên Khách Hàng",
+    "customer_name": "Tên Khách Hàng",
+    "filmtitle": "Tên Phim",
+    "film_title": "Tên Phim",
+    "categoryname": "Thể Loại",
+    "category_name": "Thể Loại",
+    "store_id": "Mã Cửa Hàng",
+    "storeid": "Mã Cửa Hàng",
     "largeorderscount": "Số Lượng Đơn Hàng Lớn",
     "large_orders_count": "Số Lượng Đơn Hàng Lớn",
     "totallargeordersrevenue": "Tổng Doanh Thu Đơn Lớn ($)",
@@ -722,57 +750,148 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: {curr_sym}%{{y:,.0f}}<extra></extra>"
                     )
             else:
-                clean_m = format_col_title(measure_cols[0])
                 clean_time = format_col_title(time_col)
                 min_t = str(sorted_df[time_col].min())
                 max_t = str(sorted_df[time_col].max())
                 time_range_str = f" ({min_t} – {max_t})" if min_t != max_t else ""
-                chart_title = f"Xu hướng {clean_m} qua từng {clean_time}{time_range_str}" if len(measure_cols) == 1 else f"Xu hướng qua từng {clean_time}{time_range_str}"
 
-                fig = px.line(
-                    sorted_df,
-                    x=time_col,
-                    y=measure_cols if len(measure_cols) > 1 else measure_cols[0],
-                    markers=True,
-                    title=chart_title,
-                    template="plotly_white"
-                )
+                if len(measure_cols) == 1:
+                    clean_m = format_col_title(measure_cols[0])
+                    chart_title = f"Xu hướng {clean_m} qua từng {clean_time}{time_range_str}"
+                    fig = px.line(
+                        sorted_df,
+                        x=time_col,
+                        y=measure_cols[0],
+                        markers=True,
+                        title=chart_title,
+                        template="plotly_white"
+                    )
+                    trace_kwargs = dict(
+                        line=dict(width=3, color="#0068FF"),
+                        marker=dict(size=8, color="#0068FF")
+                    )
 
-                trace_kwargs = dict(
-                    line=dict(width=3, color="#0068FF"),
-                    marker=dict(size=8, color="#0068FF")
-                )
-
-                # Tính toán % tăng trưởng YoY (Year-over-Year) và Hover text chuyên sâu nếu là chuỗi thời gian 1 chỉ số
-                if len(measure_cols) == 1 and pd.api.types.is_numeric_dtype(sorted_df[measure_cols[0]]):
-                    m_c = measure_cols[0]
-                    yoy_series = sorted_df[m_c].pct_change() * 100.0
-                    m_low = str(m_c).lower()
-                    is_curr = any(k in m_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$"])
-                    is_monthly = any(k in str(time_col).lower() for k in ["month", "tháng"]) or any(re.match(r"^\d{4}-\d{2}$", str(x)) for x in sorted_df[time_col].dropna().head(3))
-                    growth_label = "MoM" if is_monthly else "YoY"
-                    hover_texts = []
-                    for idx, (_, row) in enumerate(sorted_df.iterrows()):
-                        val = float(row[m_c])
-                        yoy_val = yoy_series.iloc[idx]
-                        yoy_str = f" ({yoy_val:+.1f}% {growth_label})" if pd.notna(yoy_val) else " (Khởi đầu)"
-                        if is_curr:
-                            if abs(val) >= 1_000_000_000:
-                                fmt_compact = f"${val / 1e9:,.2f} Tỷ"
-                            elif abs(val) >= 1_000_000:
-                                fmt_compact = f"${val / 1e6:,.2f} Tr"
+                    # Tính toán % tăng trưởng YoY (Year-over-Year) và Hover text chuyên sâu nếu là chuỗi thời gian 1 chỉ số
+                    if pd.api.types.is_numeric_dtype(sorted_df[measure_cols[0]]):
+                        m_c = measure_cols[0]
+                        yoy_series = sorted_df[m_c].pct_change() * 100.0
+                        m_low = str(m_c).lower()
+                        is_curr = any(k in m_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                        is_monthly = any(k in str(time_col).lower() for k in ["month", "tháng"]) or any(re.match(r"^\d{4}-\d{2}$", str(x)) for x in sorted_df[time_col].dropna().head(3))
+                        growth_label = "MoM" if is_monthly else "YoY"
+                        hover_texts = []
+                        for idx, (_, row) in enumerate(sorted_df.iterrows()):
+                            val = float(row[m_c])
+                            yoy_val = yoy_series.iloc[idx]
+                            yoy_str = f" ({yoy_val:+.1f}% {growth_label})" if pd.notna(yoy_val) else " (Khởi đầu)"
+                            if is_curr:
+                                if abs(val) >= 1_000_000_000:
+                                    fmt_compact = f"${val / 1e9:,.2f} Tỷ"
+                                elif abs(val) >= 1_000_000:
+                                    fmt_compact = f"${val / 1e6:,.2f} Tr"
+                                else:
+                                    fmt_compact = f"${val:,.0f}"
+                                val_detail = f" (${val:,.0f})" if abs(val) >= 1_000_000 else ""
                             else:
-                                fmt_compact = f"${val:,.0f}"
-                            val_detail = f" (${val:,.0f})" if abs(val) >= 1_000_000 else ""
-                        else:
-                            fmt_compact = f"{val:,.0f}"
-                            val_detail = ""
-                        hover_texts.append(f"<b>{clean_time} {row[time_col]}</b><br>{clean_m}: {fmt_compact}{val_detail}{yoy_str}")
+                                fmt_compact = f"{val:,.0f}"
+                                val_detail = ""
+                            hover_texts.append(f"<b>{clean_time} {row[time_col]}</b><br>{clean_m}: {fmt_compact}{val_detail}{yoy_str}")
 
-                    trace_kwargs["text"] = hover_texts
-                    trace_kwargs["hovertemplate"] = "%{text}<extra></extra>"
+                        trace_kwargs["text"] = hover_texts
+                        trace_kwargs["hovertemplate"] = "%{text}<extra></extra>"
 
-                fig.update_traces(**trace_kwargs)
+                    fig.update_traces(**trace_kwargs)
+
+                elif len(measure_cols) == 2:
+                    m1, m2 = measure_cols[0], measure_cols[1]
+                    clean_m1 = format_col_title(m1)
+                    clean_m2 = format_col_title(m2)
+                    m1_low = str(m1).lower()
+                    m2_low = str(m2).lower()
+                    is_curr1 = any(k in m1_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                    is_curr2 = any(k in m2_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                    is_pct1 = any(k in m1_low for k in ["margin", "tỷ suất", "tỉ suất", "%", "pct", "percent", "rate", "ratio"])
+                    is_pct2 = any(k in m2_low for k in ["margin", "tỷ suất", "tỉ suất", "%", "pct", "percent", "rate", "ratio"])
+
+                    max1 = sorted_df[m1].abs().max() if pd.api.types.is_numeric_dtype(sorted_df[m1]) and not sorted_df[m1].dropna().empty else 1
+                    max2 = sorted_df[m2].abs().max() if pd.api.types.is_numeric_dtype(sorted_df[m2]) and not sorted_df[m2].dropna().empty else 1
+                    scale_ratio = (max1 / max2) if (max1 and max2 and max2 > 0) else 1
+
+                    diff_unit_or_scale = (is_curr1 != is_curr2) or (is_pct1 != is_pct2) or (scale_ratio > 2.5 or scale_ratio < 0.4)
+
+                    if diff_unit_or_scale:
+                        chart_title = f"Xu hướng {clean_m1} & {clean_m2} qua từng {clean_time}{time_range_str}"
+                        fig = make_subplots(specs=[[{"secondary_y": True}]])
+                        fig.add_trace(
+                            go.Scatter(
+                                x=sorted_df[time_col],
+                                y=sorted_df[m1],
+                                name=clean_m1,
+                                mode="lines+markers",
+                                line=dict(width=3, color="#0068FF"),
+                                marker=dict(size=8, color="#0068FF"),
+                                hovertemplate=f"<b>{clean_time} %{{x}}</b><br>{clean_m1}: " + ("$%{y:,.2f}" if is_curr1 else ("%{y:.1f}%" if is_pct1 else "%{y:,.0f}")) + "<extra></extra>"
+                            ),
+                            secondary_y=False
+                        )
+                        fig.add_trace(
+                            go.Scatter(
+                                x=sorted_df[time_col],
+                                y=sorted_df[m2],
+                                name=clean_m2,
+                                mode="lines+markers",
+                                line=dict(width=3, color="#FF7A00"),
+                                marker=dict(size=8, color="#FF7A00"),
+                                hovertemplate=f"<b>{clean_time} %{{x}}</b><br>{clean_m2}: " + ("$%{y:,.2f}" if is_curr2 else ("%{y:.1f}%" if is_pct2 else "%{y:,.0f}")) + "<extra></extra>"
+                            ),
+                            secondary_y=True
+                        )
+                        fig.update_layout(
+                            title=chart_title,
+                            template="plotly_white",
+                            yaxis=dict(
+                                title=clean_m1,
+                                tickprefix="$" if is_curr1 else "",
+                                ticksuffix="%" if is_pct1 else "",
+                                showgrid=True
+                            ),
+                            yaxis2=dict(
+                                title=clean_m2,
+                                tickprefix="$" if is_curr2 else "",
+                                ticksuffix="%" if is_pct2 else "",
+                                showgrid=False
+                            ),
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                    else:
+                        chart_title = f"Xu hướng qua từng {clean_time}{time_range_str}"
+                        labels_map = {c: format_col_title(c) for c in measure_cols}
+                        fig = px.line(
+                            sorted_df,
+                            x=time_col,
+                            y=measure_cols,
+                            markers=True,
+                            title=chart_title,
+                            template="plotly_white",
+                            color_discrete_sequence=["#0068FF", "#FF7A00"],
+                            labels=labels_map
+                        )
+                        fig.update_traces(line=dict(width=3), marker=dict(size=8))
+                else:
+                    chart_title = f"Xu hướng qua từng {clean_time}{time_range_str}"
+                    labels_map = {c: format_col_title(c) for c in measure_cols}
+                    palette = ["#0068FF", "#FF7A00", "#10B981", "#8B5CF6", "#EC4899", "#F59E0B", "#3B82F6", "#14B8A6"]
+                    fig = px.line(
+                        sorted_df,
+                        x=time_col,
+                        y=measure_cols,
+                        markers=True,
+                        title=chart_title,
+                        template="plotly_white",
+                        color_discrete_sequence=palette,
+                        labels=labels_map
+                    )
+                    fig.update_traces(line=dict(width=3), marker=dict(size=8))
             fig.update_layout(
                 xaxis=dict(
                     type="category" if n_time_points <= 36 else None,

@@ -3732,10 +3732,14 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 is_year_unit = any(k in str(dim_c).lower() for k in ["year", "nam"])
                 is_month_unit = any(k in str(dim_c).lower() for k in ["month", "thang", "tháng"])
                 dim_unit = ("Năm" if not is_en else "Years") if is_year_unit else (("Tháng" if not is_en else "Months") if is_month_unit else ("Kỳ" if not is_en else "Periods"))
-                n_periods = dim_vals.nunique()
-                period_display = f"{n_periods} {dim_unit}" if (n_periods < total_rows and n_periods > 0) else f"{total_rows} {dim_unit}"
+                range_str = f"{min_dim} – {max_dim}" if min_dim != max_dim else min_dim
                 with col1:
-                    st.metric("📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"), f"{period_display}" + (f" ({min_dim} – {max_dim})" if min_dim != max_dim else ""))
+                    st.metric(
+                        "📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"),
+                        f"{period_display}",
+                        delta=f"({range_str})" if range_str else None,
+                        delta_color="off"
+                    )
                 with col2:
                     st.metric("📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg, help=_fmt_kpi_val_full(avg_val))
                 time_c = None
