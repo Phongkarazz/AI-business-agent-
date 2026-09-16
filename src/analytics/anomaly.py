@@ -63,10 +63,39 @@ def detect_outliers(df: pd.DataFrame, y_col: str) -> pd.DataFrame:
         return df.iloc[0:0]
 
 
+def parse_time_point_index(val, col_name: str = "") -> tuple:
+    """Chuyển đổi mốc thời gian thành chỉ số số học để tính khoảng cách bước nhảy (gap detection).
+    Trả về (index, unit) ví dụ: (2005*12 + 5, 'month') hoặc (2005, 'year').
+    """
+    if val is None or (hasattr(pd, "isna") and pd.isna(val) is True):
+        return -1, "unknown"
+    s = str(val).strip()
+    m_ym = re.match(r"^(\d{4})[-/](\d{1,2})$", s)
+    if m_ym:
+        return int(m_ym.group(1)) * 12 + int(m_ym.group(2)), "month"
+    m_yq = re.match(r"^(\d{4})[-/]?Q(\d)$", s, re.IGNORECASE)
+    if m_yq:
+        return int(m_yq.group(1)) * 4 + int(m_yq.group(2)), "quarter"
+    try:
+        f_val = float(s)
+        if f_val.is_integer():
+            i_val = int(f_val)
+            c_low = str(col_name).lower() if col_name else ""
+            if any(k in c_low for k in ["year", "năm", "nam"]) or (1900 <= i_val <= 2100):
+                return i_val, "year"
+            if any(k in c_low for k in ["month", "tháng", "thang"]) or (1 <= i_val <= 12):
+                return i_val, "month"
+            if any(k in c_low for k in ["quarter", "quý", "quy"]) or (1 <= i_val <= 4):
+                return i_val, "quarter"
+    except Exception:
+        pass
+    return -1, "unknown"
+
+
 def analyze_data_anomalies(df: pd.DataFrame) -> Dict[str, Any]:
     """Phân tích toàn diện dữ liệu để tìm các dấu hiệu bất thường:
     1. Đột biến giá trị (IQR Outliers)
-    2. Tăng/giảm đột ngột theo chuỗi thời gian (Spikes & Drops)
+    2. Tăng/giảm đột ngột theo chuỗi thời gian (Spikes & Drops) kèm phát hiện độ trũng dữ liệu (Sparse Time Series)
     3. Rủi ro tập trung quá mức (Pareto / Concentration Anomaly)
     """
     analysis: Dict[str, Any] = {
@@ -76,6 +105,7 @@ def analyze_data_anomalies(df: pd.DataFrame) -> Dict[str, Any]:
         "metric_col": None,
         "time_col": None,
         "label_col": None,
+        "has_sparsity_gap": False,
         "summary_stats": {},
     }
 
@@ -135,42 +165,87 @@ def analyze_data_anomalies(df: pd.DataFrame) -> Dict[str, Any]:
             })
 
     # 2. Phân tích chuỗi thời gian (nếu có time_col)
-    if time_col and len(df) >= 3:
+    if time_col and len(df) >= 2:
         try:
             df_time = df.copy()
             df_time = df_time.sort_values(time_col).reset_index(drop=True)
             y_time = pd.to_numeric(df_time[y_col], errors="coerce").values
             pct_changes = np.diff(y_time) / np.where(y_time[:-1] == 0, 1e-9, y_time[:-1]) * 100
 
+            sparsity_gaps = []
+
             for i, pct in enumerate(pct_changes):
-                prev_t = format_anomaly_label(df_time[time_col].iloc[i], time_col)
-                curr_t = format_anomaly_label(df_time[time_col].iloc[i+1], time_col)
+                prev_raw = df_time[time_col].iloc[i]
+                curr_raw = df_time[time_col].iloc[i+1]
+                prev_t = format_anomaly_label(prev_raw, time_col)
+                curr_t = format_anomaly_label(curr_raw, time_col)
                 curr_v = float(y_time[i+1])
                 prev_v = float(y_time[i])
 
                 curr_lbl = curr_t if any(curr_t.startswith(k) for k in ["Tháng", "Quý", "Năm"]) else f"Kỳ {curr_t}"
                 prev_lbl = prev_t if any(prev_t.startswith(k) for k in ["Tháng", "Quý", "Năm"]) else f"kỳ trước ({prev_t})"
 
-                if pct >= 100.0:  # Tăng gấp đôi trở lên
+                # Kiểm tra xem giữa 2 kỳ có bị đứt quãng (sparsity gap) không
+                prev_idx, prev_unit = parse_time_point_index(prev_raw, time_col)
+                curr_idx, curr_unit = parse_time_point_index(curr_raw, time_col)
+                is_gap = False
+                gap_span = 0
+                if prev_unit == curr_unit and prev_unit != "unknown" and prev_idx > 0 and curr_idx > 0:
+                    diff_steps = curr_idx - prev_idx
+                    if diff_steps > 1:
+                        is_gap = True
+                        gap_span = diff_steps
+                        unit_str = "tháng" if prev_unit == "month" else ("quý" if prev_unit == "quarter" else "năm")
+                        sparsity_gaps.append(f"{gap_span} {unit_str} giữa {prev_lbl} và {curr_lbl}")
+
+                if is_gap:
                     analysis["has_anomaly"] = True
-                    if "Tăng trưởng đột biến (Growth Spike)" not in analysis["anomaly_types"]:
-                        analysis["anomaly_types"].append("Tăng trưởng đột biến (Growth Spike)")
-                    analysis["findings"].append({
-                        "type": "spike",
-                        "period": curr_t,
-                        "pct_change": pct,
-                        "message": f"{curr_lbl} tăng vọt {pct:+.1f}% (từ {prev_v:,.2f} lên {curr_v:,.2f}) so với {prev_lbl}.",
-                    })
-                elif pct <= -50.0:  # Giảm hơn 50%
-                    analysis["has_anomaly"] = True
-                    if "Sụt giảm nghiêm trọng (Severe Drop)" not in analysis["anomaly_types"]:
-                        analysis["anomaly_types"].append("Sụt giảm nghiêm trọng (Severe Drop)")
-                    analysis["findings"].append({
-                        "type": "drop",
-                        "period": curr_t,
-                        "pct_change": pct,
-                        "message": f"{curr_lbl} sụt giảm mạnh {pct:.1f}% (từ {prev_v:,.2f} xuống {curr_v:,.2f}) so với {prev_lbl}.",
-                    })
+                    analysis["has_sparsity_gap"] = True
+                    unit_str = "tháng" if prev_unit == "month" else ("quý" if prev_unit == "quarter" else "năm")
+                    if "Độ trũng dữ liệu (Sparse Time-Series)" not in analysis["anomaly_types"]:
+                        analysis["anomaly_types"].append("Độ trũng dữ liệu (Sparse Time-Series)")
+
+                    if pct <= -50.0:
+                        analysis["findings"].append({
+                            "type": "sparsity_drop",
+                            "period": curr_t,
+                            "gap": gap_span,
+                            "pct_change": pct,
+                            "message": f"{curr_lbl} ghi nhận {curr_v:,.2f} sau khoảng gián đoạn {gap_span} {unit_str} (so với {prev_lbl}: {prev_v:,.2f}, không phải 2 kỳ liền kề).",
+                        })
+                    elif pct >= 100.0:
+                        analysis["findings"].append({
+                            "type": "sparsity_spike",
+                            "period": curr_t,
+                            "gap": gap_span,
+                            "pct_change": pct,
+                            "message": f"{curr_lbl} ghi nhận {curr_v:,.2f} sau khoảng gián đoạn {gap_span} {unit_str} (so với {prev_lbl}: {prev_v:,.2f}).",
+                        })
+                else:
+                    if pct >= 100.0:  # Tăng gấp đôi trở lên
+                        analysis["has_anomaly"] = True
+                        if "Tăng trưởng đột biến (Growth Spike)" not in analysis["anomaly_types"]:
+                            analysis["anomaly_types"].append("Tăng trưởng đột biến (Growth Spike)")
+                        analysis["findings"].append({
+                            "type": "spike",
+                            "period": curr_t,
+                            "pct_change": pct,
+                            "message": f"{curr_lbl} tăng vọt {pct:+.1f}% (từ {prev_v:,.2f} lên {curr_v:,.2f}) so với {prev_lbl}.",
+                        })
+                    elif pct <= -50.0:  # Giảm hơn 50%
+                        analysis["has_anomaly"] = True
+                        if "Sụt giảm nghiêm trọng (Severe Drop)" not in analysis["anomaly_types"]:
+                            analysis["anomaly_types"].append("Sụt giảm nghiêm trọng (Severe Drop)")
+                        analysis["findings"].append({
+                            "type": "drop",
+                            "period": curr_t,
+                            "pct_change": pct,
+                            "message": f"{curr_lbl} sụt giảm mạnh {pct:.1f}% (từ {prev_v:,.2f} xuống {curr_v:,.2f}) so với {prev_lbl}.",
+                        })
+
+            if sparsity_gaps:
+                analysis["summary_stats"]["is_sparse_time_series"] = True
+                analysis["summary_stats"]["sparsity_details"] = "; ".join(sparsity_gaps)
         except Exception:
             pass
 

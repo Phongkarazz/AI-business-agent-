@@ -1950,20 +1950,51 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
 
     entity_type = detect_analysis_entity_type(df, user_query=user_query, name_col=name_col)
 
+    # Kiểm tra độ trũng dữ liệu (Sparse / Discontinuous Time Series)
+    is_sparse_ts = False
+    if is_time_series or entity_type == "time_series":
+        try:
+            from src.analytics.anomaly import parse_time_point_index
+            t_col_name = name_col if any(k in str(name_col).lower() for k in ["year", "month", "date", "tháng", "năm"]) else next((c for c in cols if any(k in str(c).lower() for k in ["year", "month", "date", "tháng", "năm"])), None)
+            if t_col_name:
+                time_vals = df[t_col_name].dropna().tolist()
+                indices = [parse_time_point_index(tv, t_col_name) for tv in time_vals]
+                valid_indices = [idx for idx, u in indices if idx > 0 and u != "unknown"]
+                if len(valid_indices) >= 2:
+                    valid_sorted = sorted(valid_indices)
+                    if any((valid_sorted[i+1] - valid_sorted[i]) > 1 for i in range(len(valid_sorted)-1)):
+                        is_sparse_ts = True
+        except Exception:
+            pass
+
     if is_en:
         if is_time_series or entity_type == "time_series":
-            urgent = (
-                f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit sales cycles and investigate root causes behind the sharpest decline in {bot_name} ({format_metric_value(bot_val, val_col)} vs peak {top_name}: {format_metric_value(top_val, val_col)}); "
-                f"execute inventory clearance and promotional bundling during off-peak summer months (July - September) to liberate working capital."
-            )
-            medium = (
-                f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Formulate inventory buildup and production schedules ahead of peak festive and holiday seasons (October - December); "
-                f"standardize operational quotas around the period average of {format_metric_value(mean_val, val_col)} units and maintain flexible cross-quarter logistics capacity."
-            )
-            longterm = (
-                f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize seasonality-adaptive demand forecasting and predictive supply chain planning; "
-                f"align production batch schedules with retail channel purchasing cycles to sustainably mitigate cyclical disruptions."
-            )
+            if is_sparse_ts:
+                urgent = (
+                    f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit operational drivers behind data discontinuity and investigate business activity at {bot_name} ({format_metric_value(bot_val, val_col)} vs peak {top_name}: {format_metric_value(top_val, val_col)}); "
+                    f"evaluate transactional consistency across recorded periods."
+                )
+                medium = (
+                    f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Establish continuous period-over-period tracking mechanisms; "
+                    f"avoid rigid adherence to the raw average benchmark of {format_metric_value(mean_val, val_col)} across sparse intervals and strengthen core product/service capacity."
+                )
+                longterm = (
+                    f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize an end-to-end enterprise data warehouse & BI analytics pipeline, "
+                    f"standardize business reporting cycles, and sustain long-term operating resilience."
+                )
+            else:
+                urgent = (
+                    f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit sales cycles and investigate root causes behind the sharpest decline in {bot_name} ({format_metric_value(bot_val, val_col)} vs peak {top_name}: {format_metric_value(top_val, val_col)}); "
+                    f"deploy targeted promotional campaigns during off-peak periods to protect working capital."
+                )
+                medium = (
+                    f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Formulate inventory buildup and capacity schedules ahead of peak demand periods; "
+                    f"standardize operational quotas around the period average of {format_metric_value(mean_val, val_col)} units and maintain flexible cross-quarter logistics capacity."
+                )
+                longterm = (
+                    f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize seasonality-adaptive demand forecasting and predictive supply chain planning; "
+                    f"align operational batch schedules with channel purchasing cycles to sustainably mitigate cyclical disruptions."
+                )
         elif entity_type == "geo":
             # MARKET / COUNTRY (g.Geo / Country):
             # Strategy: Local distribution partner networks, cross-border shipping/logistics, consumer localization, regional hubs.
@@ -2007,18 +2038,32 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
             longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Expand strategic portfolio initiatives, institutionalize enterprise risk governance, and sustain market leadership."
     else:
         if is_time_series or entity_type == "time_series":
-            urgent = (
-                f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chu kỳ bán hàng và nguyên nhân sụt giảm sâu nhất tại {bot_name} ({format_metric_value(bot_val, val_col)} so với đỉnh {top_name}: {format_metric_value(top_val, val_col)}); "
-                f"chủ động giải phóng hàng tồn kho và triển khai các gói combo ưu đãi trong các tháng thấp điểm (đặc biệt giai đoạn hè Tháng 7 - Tháng 9) để thu hồi vốn lưu động."
-            )
-            medium = (
-                f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Thiết lập kế hoạch tồn kho và sản xuất đón đầu mùa mua sắm lễ hội cao điểm (Tháng 10 - Tháng 12); "
-                f"chuẩn hóa định mức phân bổ hàng hóa quanh mức trung bình {format_metric_value(mean_val, val_col)}/kỳ và dự phòng công suất vận chuyển linh hoạt theo quý."
-            )
-            longterm = (
-                f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện mô hình hoạch định dự báo nhu cầu theo mùa vụ (Seasonal Demand Forecasting); "
-                f"đồng bộ chuỗi cung ứng từ nhà máy sản xuất đến các kênh bán lẻ để chủ động thích ứng với các biến động chu kỳ tiêu dùng hàng năm."
-            )
+            if is_sparse_ts:
+                urgent = (
+                    f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát nguyên nhân gián đoạn chu kỳ và phân tích chất lượng kinh doanh tại kỳ ghi nhận {bot_name} ({format_metric_value(bot_val, val_col)} so với đỉnh {top_name}: {format_metric_value(top_val, val_col)}); "
+                    f"đánh giá mức độ ổn định của luồng giao dịch giữa các mốc phát sinh thực tế."
+                )
+                medium = (
+                    f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Thiết lập cơ chế ghi nhận và theo dõi giao dịch liên tục qua từng tháng; "
+                    f"tránh áp dụng máy móc định mức trung bình {format_metric_value(mean_val, val_col)}/kỳ cho các khoảng trũng dữ liệu, đồng thời củng cố năng lực khai thác các danh mục chủ lực."
+                )
+                longterm = (
+                    f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện hệ thống quản trị dữ liệu kinh doanh tập trung (BI/Analytics Data Warehouse) đồng bộ xuyên suốt, "
+                    f"chuẩn hóa chu kỳ vận hành và nâng cao khả năng giữ chân khách hàng dài hạn."
+                )
+            else:
+                urgent = (
+                    f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chu kỳ bán hàng/hoạt động và nguyên nhân sụt giảm tại {bot_name} ({format_metric_value(bot_val, val_col)} so với đỉnh {top_name}: {format_metric_value(top_val, val_col)}); "
+                    f"chủ động triển khai các chương trình kích cầu và tối ưu chi phí trong các kỳ thấp điểm để bảo toàn dòng tiền."
+                )
+                medium = (
+                    f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tối ưu hóa kế hoạch vận hành và cân đối nguồn lực đón đầu các đợt cao điểm; "
+                    f"chuẩn hóa định mức quanh mức trung bình {format_metric_value(mean_val, val_col)}/kỳ và dự phòng công suất linh hoạt theo quý."
+                )
+                longterm = (
+                    f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện mô hình hoạch định dự báo nhu cầu thích ứng theo chu kỳ (Dynamic Demand Forecasting); "
+                    f"đồng bộ quy trình từ khâu cung ứng đến các kênh phân phối để chủ động thích ứng với biến động thị trường."
+                )
         elif entity_type == "geo":
             # THỊ TRƯỜNG / QUỐC GIA (g.Geo / Country):
             # Chiến lược: Mở rộng kênh phân phối địa phương, thâm nhập thị trường, thích ứng văn hóa tiêu dùng (Localization), tối ưu chuỗi cung ứng/logistics xuất nhập khẩu.

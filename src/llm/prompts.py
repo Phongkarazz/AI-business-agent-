@@ -5501,6 +5501,22 @@ def build_auto_insight_prompt(user_query: str, df_summary_str: str, anomalies_in
     findings_text = "\n".join(f"- {f.get('message')}" for f in findings) if findings else ("No significant anomalies detected." if lang == "en" else "Không có dấu hiệu bất thường rõ rệt.")
     types_text = ", ".join(anomaly_types) if anomaly_types else ("Normal" if lang == "en" else "Bình thường")
 
+    sparsity_note_en = ""
+    sparsity_note_vi = ""
+    if anomalies_info.get("has_sparsity_gap") or stats.get("is_sparse_time_series"):
+        sparsity_desc = stats.get('sparsity_details', 'intermittent intervals between recorded periods')
+        sparsity_note_en = f"""
+SPECIAL NOTICE ON DATA SPARSITY (DISCONTINUOUS TIME-SERIES):
+- The time-series data contains discontinuous gaps ({sparsity_desc}).
+- NEVER assume hypothetical seasonality for missing months (e.g. do NOT invent Q4 holiday peaks or Q3 summer clearance if those months are missing or inapplicable).
+- Explicitly acknowledge the data gaps and formulate realistic recommendations grounded strictly in recorded periods."""
+        sparsity_note_vi = f"""
+LƯU Ý ĐẶC BIỆT VỀ ĐỘ TRŨNG DỮ LIỆU (CHUỖI THỜI GIAN KHÔNG LIÊN TỤC):
+- Dữ liệu chuỗi thời gian bị đứt quãng / không liên tục ({stats.get('sparsity_details', 'có các khoảng gián đoạn giữa các tháng/kỳ ghi nhận')}).
+- TUYỆT ĐỐI KHÔNG SUY DIỄN MÙA VỤ LÝ THUYẾT cho các tháng không tồn tại trong dữ liệu (ví dụ: TUYỆT ĐỐI KHÔNG giả định mùa mua sắm cao điểm Tháng 10 - Tháng 12 hay xả hàng Tháng 7 - Tháng 9 nếu các tháng này không có trong bảng kết quả hoặc không phù hợp với ngành kinh doanh).
+- TUYỆT ĐỐI KHÔNG coi mức trung bình đơn giản toàn bảng là định mức phân bổ chuẩn khi các kỳ bị đứt quãng lớn.
+- BẮT BUỘC cảnh báo dữ liệu gián đoạn và đưa ra đề xuất chiến lược thực tế bám sát các kỳ ghi nhận thực tế và lĩnh vực thực tế (ví dụ: Cho thuê phim/DVD, Nhân sự, Bán hàng...)."""
+
     if lang == "en":
         return f"""You are a Chief BI & Analytics Officer (Executive Data Analyst).
 
@@ -5512,6 +5528,7 @@ Statistical Summary:
 
 Sample Query Results:
 {df_summary_str}
+{sparsity_note_en}
 
 Statistical Anomaly Findings:
 - Types: {types_text}
@@ -5530,10 +5547,9 @@ STRICT BUSINESS ANALYTICS DISCIPLINE & GUIDELINES:
 4. SEASONALITY & TEMPORAL ANALYSIS RULE (TIME-SERIES):
    - When analyzing trends or fluctuations over MONTHS or YEARS (Time-series data):
      * NEVER output raw numbers or floats like 'Point 3.0', 'Period 3', '(8)', '(9)'. Always refer to them naturally as 'March', 'August', 'September', 'Quarter 1', or 'Year 2022'.
-     * Tie root causes and action plans directly to retail/confectionery business cycles:
-       - Plan and build inventory ahead of peak holiday seasons (October - December).
-       - Clear inventory and launch promotional combos during off-peak summer months (July - September).
-       - Dynamically adapt factory production capacity and logistics shipping schedules across quarters.
+     * Base analysis STRICTLY on the actual business domain and recorded periods:
+       - If continuous: Identify real seasonal peaks and demand cycles.
+       - If discontinuous / sparse: Explicitly note data gaps and avoid assuming unrecorded intervals.
 5. PARETO 80/20 & CUMULATIVE PERCENTAGE DISCIPLINE:
    - When analyzing Pareto Analysis / Cumulative Percentage data (e.g. Products contributing to 80% of sales with columns Product, TotalSales, Percentage, CumulativePercent):
      * STRICT METRIC DISTINCTION:
@@ -5591,6 +5607,7 @@ Câu hỏi phân tích của người dùng: "{user_query}"
 Dữ liệu kết quả truy vấn thực tế:
 {df_summary_str}
 {ratio_note}
+{sparsity_note_vi}
 
 KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & THƯƠNG MẠI (BẮT BUỘC TUÂN THỦ):
 1. PHÂN ĐỊNH RÕ BẢN CHẤT CHỈ SỐ:
@@ -5605,14 +5622,13 @@ KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & THƯƠNG MẠI (BẮT BUỘC TUÂN THỦ):
 3. LOẠI BỎ CON SỐ TOÁN HỌC VỤN VẶT (DATA NOISE):
    - TUYỆT ĐỐI CẤM viết các chuỗi tính toán trừ/chia % rườm rà (kiểu: "thấp hơn 7.8%... khoảng cách chênh lệch 7.67%; nhóm dẫn đầu vượt +8.4%...").
    - Nêu thẳng nhận định điều hành sắc gọn: Thực thể dẫn đầu biên độ, Nghịch lý đánh đổi (Trade-off Matrix) và Mặt bằng chung chuẩn toàn bảng.
-4. QUY TẮC PHÂN TÍCH CHUỖI THỜI GIAN THEO MÙA VỤ (SEASONALITY / TEMPORAL RULE):
+4. QUY TẮC PHÂN TÍCH CHUỖI THỜI GIAN (TIME-SERIES & TEMPORAL RULE):
    - Khi phân tích biến động theo THÁNG / NĂM / QUÝ (Dữ liệu chuỗi thời gian):
      * TUYỆT ĐỐI KHÔNG xuất số thực trơ trọi hay nhãn thô như 'Điểm 3.0', 'Giai đoạn 3', '(8)', '(9)'. BẮT BUỘC dùng danh xưng tự nhiên như 'Tháng 3', 'Tháng 8', 'Tháng 9', 'Quý 1', 'Năm 2022'.
-     * Hãy gắn liền với đặc thù chu kỳ kinh doanh ngành bán lẻ/bánh kẹo:
-       - Lập kế hoạch tồn kho đón đầu mùa lễ hội cao điểm (Tháng 10 - Tháng 12).
-       - Giải phóng hàng tồn và tung combo kích cầu vào các tháng thấp điểm mùa hè (Tháng 7 - Tháng 9).
-       - Điều chỉnh công suất nhà máy và điều phối vận chuyển linh hoạt theo quý.
-     * TUYỆT ĐỐI CẤM các câu văn sáo rỗng vô thưởng vô phạt như 'tổ chức đối thoại với các đơn vị liên quan để kiểm soát rủi ro gián đoạn vận hành' hay 'hoạch định dự báo nhu cầu bằng AI; xây dựng chuỗi cung ứng bền vững'.
+     * Gắn liền với bản chất thực tế của lĩnh vực đang phân tích (Cho thuê phim/DVD, Nhân sự/lương, Bán hàng B2B...):
+       - Nếu chuỗi thời gian liên tục: Phân tích tính chu kỳ và cao điểm dựa trên các mốc thời gian thực tế có trong bảng.
+       - Nếu chuỗi thời gian đứt quãng (sparse): Chỉ ra các khoảng gián đoạn, tránh suy đoán chủ quan về các tháng bị khuyết thiếu.
+     * TUYỆT ĐỐI CẤM các câu văn sáo rỗng vô thưởng vô phạt hoặc áp đặt lý thuyết mùa vụ không có căn cứ số liệu thực tế.
 5. QUY TẮC PHÂN BIỆT PARETO 80/20 & TỶ LỆ TÍCH LŨY DỒN:
    - Khi dữ liệu chứa bảng phân tích Pareto (các sản phẩm tạo 80% doanh thu) với các cột như Product, TotalSales, Percentage, CumulativePercent:
      * `Percentage` (%): Là tỷ trọng đóng góp cá nhân của từng sản phẩm đơn lẻ (ví dụ: Almond Choco chiếm 4.86%, là sản phẩm BÁN CHẠY NHẤT).

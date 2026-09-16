@@ -2687,34 +2687,47 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                 if is_val_pct and any(k in (user_query or "").lower() for k in ["lương", "salary", "chi phí"]):
                     chart_title = f"Cơ Cấu Chi Phí Lương theo {clean_label}"
-                elif any(k in clean_pie_val.lower() for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "cơ cấu"]):
-                    chart_title = f"{clean_pie_val} theo {clean_label}"
-                else:
-                    chart_title = f"Cơ Cấu {clean_pie_val} theo {clean_label}"
+                # Bảng màu tương phản cao chuyên dụng cho Donut/Pie chart (Distinct Color Palette)
+                # Ngăn chặn hoàn toàn hiện tượng 2 màu tương đồng (như cam - đỏ cam) nằm kề nhau
+                pie_palette = [
+                    "#2563EB",  # Xanh dương hoàng gia (Royal Blue)
+                    "#059669",  # Xanh ngọc lục bảo (Emerald Green)
+                    "#D97706",  # Vàng hổ phách đậm (Amber)
+                    "#7C3AED",  # Tím violet rực rỡ (Purple)
+                    "#DC2626",  # Đỏ tươi (Crimson Red)
+                    "#0891B2",  # Xanh cyan đậm (Teal Cyan)
+                    "#EA580C",  # Cam đậm tương phản (Vibrant Orange)
+                    "#4F46E5",  # Chàm (Indigo)
+                    "#10B981",  # Xanh bạc hà (Mint Green)
+                    "#DB2777",  # Hồng đậm (Pink)
+                    "#475569",  # Xám đá phiến (Slate)
+                ]
 
                 chart_title = clean_chart_title(chart_title)
+                is_curr_pie = any(k in str(pie_val_col).lower() for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                
                 fig = px.pie(
                     plot_df,
                     names=label_name,
                     values=pie_val_col,
-                    hole=0.42,
+                    hole=0.45,
                     title=chart_title,
-                    template="plotly_white"
+                    template="plotly_white",
+                    color_discrete_sequence=pie_palette
                 )
-                if is_val_pct:
-                    fig.update_traces(
-                        textposition='inside',
-                        textinfo='percent+label',
-                        hovertemplate="<b>%{label}</b><br>" + f"{format_col_title(pie_val_col)}: " + "%{value:,.2f}%<extra></extra>"
-                    )
-                else:
-                    fig.update_traces(
-                        textposition='inside',
-                        textinfo='percent+label',
-                        hovertemplate="<b>%{label}</b><br>" + f"{format_col_title(pie_val_col)}: " + "%{value:,.0f} (%{percent})<extra></extra>"
-                    )
+                
+                # Cấu hình đường viền trắng phân cách rõ nét giữa các lát cắt và tự động đặt text
+                fig.update_traces(
+                    textposition='auto',
+                    textinfo='percent+label',
+                    insidetextorientation='horizontal',
+                    marker=dict(line=dict(color='#FFFFFF', width=2)),
+                    hovertemplate="<b>%{label}</b><br>" + f"{clean_pie_val}: " + ("%{value:,.2f}%" if is_val_pct else ("$%{value:,.2f} (%{percent})" if is_curr_pie else "%{value:,.0f} (%{percent})")) + "<extra></extra>"
+                )
                 fig.update_layout(
                     margin=dict(l=20, r=20, t=50, b=50),
+                    uniformtext_minsize=8,
+                    uniformtext_mode='hide',
                     legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
                 )
             elif len(df) == 1:
