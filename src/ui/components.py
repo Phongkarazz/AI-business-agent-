@@ -3539,12 +3539,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()
         if not valid_vals.empty:
             avg_val = valid_vals.mean()
-            if is_top_query and total_rows <= 30 and df.index[0] in valid_vals.index and df.index[-1] in valid_vals.index:
-                max_idx = df.index[0]
-                min_idx = df.index[-1]
-            else:
-                max_idx = valid_vals.idxmax()
-                min_idx = valid_vals.idxmin()
+            max_idx = valid_vals.idxmax()
+            min_idx = valid_vals.idxmin()
             peak_val = df.loc[max_idx, m_col]
             min_val = df.loc[min_idx, m_col]
 
@@ -3739,8 +3735,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     st.metric(
                         "📅 " + ("Giai đoạn theo dõi" if not is_en else "Tracking Period"),
                         f"{period_display}",
-                        delta=f"({range_str})" if range_str else None,
-                        delta_color="off"
+                        help=f"Khung thời gian ghi nhận: {range_str}" if range_str else None
                     )
                 with col2:
                     st.metric("📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg, help=_fmt_kpi_val_full(avg_val))
@@ -3780,12 +3775,10 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
 
                 with col3:
                     full_p = _fmt_kpi_val_full(peak_val) + _year_unit
-                    delta_p = full_p if fmt_peak != full_p else None
-                    st.metric(f"🏆 " + (f"Đỉnh cao nhất ({p_disp})" if not is_en else f"Peak ({p_disp})"), fmt_peak, delta=delta_p)
+                    st.metric(f"🏆 " + (f"Đỉnh cao nhất ({p_disp})" if not is_en else f"Peak ({p_disp})"), fmt_peak, help=full_p if fmt_peak != full_p else None)
                 with col4:
                     full_m = _fmt_kpi_val_full(min_val) + _year_unit
-                    delta_m = full_m if fmt_min != full_m else None
-                    st.metric(f"📉 " + (f"Thấp nhất ({m_disp})" if not is_en else f"Lowest ({m_disp})"), fmt_min, delta=delta_m)
+                    st.metric(f"📉 " + (f"Thấp nhất ({m_disp})" if not is_en else f"Lowest ({m_disp})"), fmt_min, help=full_m if fmt_min != full_m else None)
 
                 # Kiểm tra năm 2002 có bị sụt giảm tự nhiên do dữ liệu ghi nhận 8 tháng không
                 if any(str(v) == "2002" for v in dim_vals):

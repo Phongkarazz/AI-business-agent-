@@ -758,13 +758,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 if len(measure_cols) == 1:
                     clean_m = format_col_title(measure_cols[0])
                     chart_title = f"Xu hướng {clean_m} qua từng {clean_time}{time_range_str}"
+                    labels_map = {time_col: clean_time, measure_cols[0]: clean_m}
                     fig = px.line(
                         sorted_df,
                         x=time_col,
                         y=measure_cols[0],
                         markers=True,
                         title=chart_title,
-                        template="plotly_white"
+                        template="plotly_white",
+                        labels=labels_map
                     )
                     trace_kwargs = dict(
                         line=dict(width=3, color="#0068FF"),
@@ -896,8 +898,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 xaxis=dict(
                     type="category" if n_time_points <= 36 else None,
                     tickangle=tick_angle,
-                    automargin=True
+                    automargin=True,
+                    title=clean_time
                 ),
+                yaxis=dict(
+                    title=clean_m if len(measure_cols) == 1 else None,
+                    tickprefix="$" if (len(measure_cols) == 1 and any(k in str(measure_cols[0]).lower() for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])) else "",
+                    automargin=True
+                ) if len(measure_cols) == 1 else dict(automargin=True),
                 height=520,
                 margin=dict(l=30, r=30, t=50, b=60)
             )
