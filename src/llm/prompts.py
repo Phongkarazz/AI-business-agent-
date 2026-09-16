@@ -321,7 +321,7 @@ def get_db_specific_rules(schema_context: str) -> str:
             CONCAT(e.first_name, ' ', e.last_name) AS FullName,
             d.dept_name AS Department,
             e.hire_date AS HireDate,
-            ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+            ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 2) AS YearsOfService
         FROM employees e
         JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
         JOIN departments d ON de.dept_no = d.dept_no
@@ -443,7 +443,7 @@ def get_db_specific_rules(schema_context: str) -> str:
             CONCAT(e.first_name, ' ', e.last_name) AS FullName,
             d.dept_name AS Department,
             e.hire_date AS HireDate,
-            ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+            ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 2) AS YearsOfService
         FROM employees e
         JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
         JOIN departments d ON de.dept_no = d.dept_no
@@ -3622,7 +3622,7 @@ SELECT
     CONCAT(e.first_name, ' ', e.last_name) AS FullName,
     d.dept_name AS Department,
     e.hire_date AS HireDate,
-    ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+    ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 2) AS YearsOfService
 FROM employees e
 JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
 JOIN departments d ON de.dept_no = d.dept_no

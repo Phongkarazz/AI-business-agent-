@@ -4364,11 +4364,19 @@ def render_result(result: dict, turn_id: str):
                 col_label = format_col_title(col) if not is_en else col
                 is_num = pd.api.types.is_numeric_dtype(display_df[col])
 
-                is_year_or_id = (is_id_like(col) or (
-                    (any(k in c_low for k in ["year", "năm", "hireyear", "tháng", "month"]) or c_low in ["nam", "năm"])
+                is_tenure = any(k in c_low for k in ["thâm niên", "tham_nien", "tenure", "service", "cống hiến", "kinh nghiệm", "yearsofservice", "years_of_service", "avgyears", "avgyearsofservice"])
+                is_calendar_year_or_id = (is_id_like(col) or (
+                    (any(k in c_low for k in ["hireyear", "tháng", "month"]) or c_low in ["nam", "năm", "year", "hire_year", "hiredate_year"])
+                    and not is_tenure
                     and not any(k in c_low for k in ["salary", "lương", "cost", "revenue", "amount", "profit", "budget", "tiền"])
                 )) and not any(k in c_low for k in ["name", "tên", "department", "phòng", "title", "chức"])
-                if is_year_or_id:
+
+                if is_tenure:
+                    if is_num:
+                        column_config[col] = st.column_config.NumberColumn(col_label, format="%.2f")
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
+                elif is_calendar_year_or_id:
                     if is_num:
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%d")
                     else:

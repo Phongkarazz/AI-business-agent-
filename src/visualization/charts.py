@@ -2634,11 +2634,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         sal_cands = [c for c in alt_cands if any(k in c.lower() for k in ["salary", "lương", "thu nhập", "amount", "revenue"])]
                         measure_cols = [sal_cands[0] if sal_cands else alt_cands[0]]
 
+                # Giữ nguyên thứ tự xếp hạng từ Bảng dữ liệu (đối tượng #1 ở dòng đầu tiên)
                 if len(plot_df) > 30:
                     plot_df = plot_df.head(30)
-
-                # Sắp xếp tăng dần để khi vẽ từ dưới lên thì người cao nhất nằm trên cùng
-                plot_df = plot_df.sort_values(measure_cols[0], ascending=True)
 
                 m_lower = str(measure_cols[0]).lower()
                 is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
@@ -2661,6 +2659,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     y=label_name,
                     orientation='h',
                     title=f"Xếp hạng {clean_m} theo {clean_lbl}",
+                    category_orders={label_name: plot_df[label_name].tolist()},
                     template="plotly_white"
                 )
                 target_entity = None
@@ -2674,16 +2673,16 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                 if target_entity:
                     h_colors = ['#F59E0B' if str(v).strip().lower() == (target_entity or "").lower() else '#0068FF' for v in plot_df[label_name]]
-                elif any(k in (user_query or "").lower() for k in ["top", "cao nhất", "nhất", "xếp hạng", "leading"]):
-                    # Highlight #1 entity (last row in ascending sorted plot_df) in Gold #F59E0B, others in blue #0068FF
+                elif any(k in (user_query or "").lower() for k in ["top", "cao nhất", "nhất", "xếp hạng", "leading", "lâu nhất", "dẫn đầu", "nhiều nhất"]):
+                    # Highlight đối tượng #1 (dòng đầu tiên trên bảng & đỉnh trên cùng của biểu đồ) màu Vàng Gold #F59E0B, các đối tượng khác màu Blue #0068FF
                     h_colors = ['#0068FF'] * len(plot_df)
                     if len(h_colors) > 0:
-                        h_colors[-1] = '#F59E0B'
+                        h_colors[0] = '#F59E0B'
                 else:
                     h_colors = '#0068FF'
 
                 if is_years:
-                    h_ttemplate = "%{x:.1f} năm" if not is_en else "%{x:.1f} yrs"
+                    h_ttemplate = "%{x:.2f} năm" if not is_en else "%{x:.2f} yrs"
                 elif is_raises:
                     u_raise = " lần" if not is_en else " times"
                     h_ttemplate = f"%{{x:,.0f}}{u_raise}"
@@ -2734,7 +2733,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     xaxis_title_str = clean_m
 
                 fig.update_layout(
-                    yaxis=dict(type="category", automargin=True),
+                    yaxis=dict(type="category", autorange="reversed", automargin=True),
                     xaxis_title=xaxis_title_str,
                     yaxis_title="",
                     height=chart_height,

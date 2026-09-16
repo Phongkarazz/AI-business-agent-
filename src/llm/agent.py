@@ -159,7 +159,7 @@ def clean_sql_query(sql: str) -> str:
     if re.search(r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)\s*-\s*YEAR\s*\(", s, re.IGNORECASE):
         s = re.sub(
             r"YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?to_date\s*\)\s*-\s*YEAR\s*\(\s*(?:[a-zA-Z0-9_]+\.)?hire_date\s*\)\s*(?:AS\s+[a-zA-Z0-9_]+)?",
-            "ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService",
+            "ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 2) AS YearsOfService",
             s,
             flags=re.IGNORECASE
         )
@@ -787,7 +787,7 @@ def auto_fix_top_tenured_employees_query(sql: str, user_query: str, dialect: str
     e.first_name || ' ' || e.last_name AS FullName,
     d.dept_name AS Department,
     e.hire_date AS HireDate,
-    ROUND((julianday(CASE WHEN de.to_date = '9999-01-01' THEN '2002-08-01' ELSE de.to_date END) - julianday(e.hire_date)) / 365.25, 1) AS YearsOfService
+    ROUND((julianday(CASE WHEN de.to_date = '9999-01-01' THEN '2002-08-01' ELSE de.to_date END) - julianday(e.hire_date)) / 365.25, 2) AS YearsOfService
 FROM employees e
 JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
 JOIN departments d ON de.dept_no = d.dept_no
@@ -799,7 +799,7 @@ LIMIT {top_n}"""
     CONCAT(e.first_name, ' ', e.last_name) AS FullName,
     d.dept_name AS Department,
     e.hire_date AS HireDate,
-    ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 1) AS YearsOfService
+    ROUND(DATEDIFF(IF(de.to_date = '9999-01-01', '2002-08-01', de.to_date), e.hire_date) / 365.25, 2) AS YearsOfService
 FROM employees e
 JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
 JOIN departments d ON de.dept_no = d.dept_no
