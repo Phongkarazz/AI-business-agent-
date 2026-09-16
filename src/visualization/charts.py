@@ -78,6 +78,18 @@ VI_COLUMN_MAP = {
     "product": "Sản Phẩm",
     "percentage": "Tỷ Trọng (%)",
     "percent": "Tỷ Trọng (%)",
+    "contributionpercentage": "Tỷ Lệ Đóng Góp (%)",
+    "contribution_percentage": "Tỷ Lệ Đóng Góp (%)",
+    "contributionpct": "Tỷ Lệ Đóng Góp (%)",
+    "contribution_pct": "Tỷ Lệ Đóng Góp (%)",
+    "revenuecontribution": "Tỷ Lệ Đóng Góp Doanh Thu (%)",
+    "revenue_contribution": "Tỷ Lệ Đóng Góp Doanh Thu (%)",
+    "revenue_contribution_percentage": "Tỷ Lệ Đóng Góp Doanh Thu (%)",
+    "revenue_contribution_pct": "Tỷ Lệ Đóng Góp Doanh Thu (%)",
+    "percentagerevenue": "Tỷ Trọng Doanh Thu (%)",
+    "percentage_revenue": "Tỷ Trọng Doanh Thu (%)",
+    "revenuepercentage": "Tỷ Trọng Doanh Thu (%)",
+    "revenue_percentage": "Tỷ Trọng Doanh Thu (%)",
     "cumulativepercent": "Tích Lũy Doanh Số (%)",
     "cumulative_percent": "Tích Lũy Doanh Số (%)",
     "cumulativepercentage": "Tích Lũy Doanh Số (%)",
@@ -569,22 +581,25 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
             # Kiểm tra xem cột phần trăm có tổng xấp xỉ 100% (cơ cấu thành phần khép kín)
             pct_sum_approx_100 = False
-            if has_single_pct_col and 2 <= len(df) <= 10:
+            if has_single_pct_col and 2 <= len(df) <= 12:
                 try:
                     s_val = float(pd.to_numeric(df[pct_cols[0]], errors="coerce").sum())
-                    if abs(s_val - 100.0) <= 2.5:
+                    if abs(s_val - 100.0) <= 3.0:
                         pct_sum_approx_100 = True
                 except Exception:
                     pass
+
+            time_is_composition = (user_asked_pct or pct_sum_approx_100) and (2 <= len(df) <= 12)
 
             is_distribution_breakdown = (
                 (
                     (len(measure_cols) == 1 and (user_asked_pct or (has_single_pct_col and not non_pct_cols)))
                     or (pct_sum_approx_100 and (user_asked_pct or has_single_pct_col))
+                    or (user_asked_pct and has_single_pct_col and len(df) <= 12)
                 )
-                and (2 <= len(df) <= 10)
+                and (2 <= len(df) <= 12)
                 and (len(pct_cols) <= 1)
-                and (not time_col or n_time <= 1)
+                and (not time_col or n_time <= 1 or time_is_composition)
                 and not is_individual_entity
                 and not is_top_ranking
                 and not (len(measure_cols) == 1 and any(k in str(measure_cols[0]).lower() for k in ["rate", "thăng chức", "promotion"]))
@@ -863,7 +878,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 ticksuffix="%" if is_pct2 else "",
                                 showgrid=False
                             ),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                            legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="right", x=1),
+                            margin=dict(l=30, r=30, t=75, b=60)
                         )
                     else:
                         chart_title = f"Xu hướng qua từng {clean_time}{time_range_str}"
@@ -2638,8 +2654,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 return None
 
         elif chosen in ("Pie", "Biểu đồ tròn (Pie)", "Pie (Tròn)") and measure_cols:
-            if label_cols:
-                label_name, label_series, consumed_cols = pick_label_column(df, label_cols)
+            effective_label_cols = label_cols if label_cols else ([time_col] if time_col else [])
+            if effective_label_cols:
+                label_name, label_series, consumed_cols = pick_label_column(df, effective_label_cols)
                 if label_name is None:
                     st.info("Không tìm thấy cột phù hợp để phân loại lát cắt biểu đồ tròn.")
                     return None
