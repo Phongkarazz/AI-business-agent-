@@ -430,6 +430,34 @@ def format_col_title(col_name: str) -> str:
     return clean
 
 
+def clean_chart_title(title: str) -> str:
+    """Loại bỏ các từ lặp lại hoặc thừa thãi trong tiêu đề biểu đồ (e.g. 'Tỷ trọng Tỷ Lệ', 'Tỷ trọng Tỷ Trọng')."""
+    if not title:
+        return ""
+    res = title
+    patterns = [
+        (r"(?i)\btỷ\s*trọng\s+tỷ\s*trọng\b", "Tỷ Trọng"),
+        (r"(?i)\btỷ\s*trọng\s+tỷ\s*lệ\b", "Tỷ Lệ"),
+        (r"(?i)\btỷ\s*trọng\s+tỉ\s*trọng\b", "Tỷ Trọng"),
+        (r"(?i)\btỷ\s*trọng\s+tỉ\s*lệ\b", "Tỷ Lệ"),
+        (r"(?i)\btỷ\s*lệ\s+tỷ\s*lệ\b", "Tỷ Lệ"),
+        (r"(?i)\btỷ\s*lệ\s+tỷ\s*trọng\b", "Tỷ Trọng"),
+        (r"(?i)\btỉ\s*trọng\s+tỉ\s*trọng\b", "Tỉ Trọng"),
+        (r"(?i)\btỉ\s*trọng\s+tỷ\s*trọng\b", "Tỷ Trọng"),
+        (r"(?i)\btỉ\s*lệ\s+tỉ\s*lệ\b", "Tỉ Lệ"),
+        (r"(?i)\bcơ\s*cấu\s+tỷ\s*lệ\s+phần\s*trăm\b", "Cơ Cấu Tỷ Lệ"),
+        (r"(?i)\bcơ\s*cấu\s+tỷ\s*trọng\b", "Cơ Cấu"),
+        (r"(?i)\bcơ\s*cấu\s+tỉ\s*trọng\b", "Cơ Cấu"),
+        (r"(?i)\bcơ\s*cấu\s+cơ\s*cấu\b", "Cơ Cấu"),
+        (r"(?i)\bso\s*sánh\s+so\s*sánh\b", "So Sánh"),
+        (r"(?i)\bquy\s*mô\s+quy\s*mô\b", "Quy Mô"),
+        (r"(?i)\bsố\s*lượng\s+số\s*lượng\b", "Số Lượng"),
+    ]
+    for pat, repl in patterns:
+        res = re.sub(pat, repl, res)
+    return res.strip()
+
+
 def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user_query: str = ""):
     """Tự động phân loại cột và render biểu đồ phù hợp nhất:
     - Line/Area: Nếu có cột thời gian -> biểu đồ xu hướng theo thời gian, hiển thị đầy đủ 100% các tháng với số nằm ngang thẳng.
@@ -1454,22 +1482,26 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             chart_title = f"{format_col_title(chosen_sal)} theo {format_col_title(label_name)}"
                     elif pct_cols and (user_asked_pct or not non_pct_cols):
                         active_measures = pct_cols
-                        chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
+                        pct_labels = [format_col_title(c) for c in pct_cols]
+                        chart_title = clean_chart_title(f"Tỷ Lệ ({', '.join(pct_labels)}) theo {format_col_title(label_name)}")
                     elif non_pct_cols:
                         # Ưu tiên các cột giá trị thực tế (lương thực, quy mô...) thay vì phần trăm ảo
                         clean_non_pct = [c for c in non_pct_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])] or non_pct_cols
+                        clean_labels = [format_col_title(c) for c in clean_non_pct]
                         if len(clean_non_pct) >= 2:
                             active_measures = clean_non_pct
-                            chart_title = f"So sánh ({', '.join(clean_non_pct)}) theo {label_name}"
+                            chart_title = clean_chart_title(f"So Sánh ({', '.join(clean_labels)}) theo {format_col_title(label_name)}")
                         else:
                             active_measures = clean_non_pct
-                            chart_title = f"{clean_non_pct[0]} theo {label_name}"
+                            chart_title = clean_chart_title(f"{clean_labels[0]} theo {format_col_title(label_name)}")
                     elif pct_cols:
                         active_measures = pct_cols
-                        chart_title = f"Tỷ lệ phần trăm ({', '.join(pct_cols)}) theo {label_name}"
+                        pct_labels = [format_col_title(c) for c in pct_cols]
+                        chart_title = clean_chart_title(f"Tỷ Lệ ({', '.join(pct_labels)}) theo {format_col_title(label_name)}")
                     else:
                         active_measures = measure_cols
-                        chart_title = f"So sánh các chỉ số ({', '.join(measure_cols)}) theo {label_name}"
+                        meas_labels = [format_col_title(c) for c in measure_cols]
+                        chart_title = clean_chart_title(f"So Sánh Các Chỉ Số ({', '.join(meas_labels)}) theo {format_col_title(label_name)}")
 
                     # Kiểm tra độ tương thích về thang đo (tránh vẽ lương 150,000 chung trục với số lần 18)
                     if len(active_measures) >= 2:
@@ -1648,7 +1680,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     barmode_val = "stack" if is_composition_100 else ("group" if is_compare_query else ("stack" if is_headcount_stack else "group"))
                     if is_composition_100:
                         meas_labels = [format_col_title(c) for c in active_measures]
-                        chart_title = f"Cơ cấu Tỷ lệ Phần trăm ({', '.join(meas_labels)}) theo {format_col_title(label_name)} (100% Stacked Bar)"
+                        chart_title = f"Cơ Cấu Tỷ Lệ ({', '.join(meas_labels)}) theo {format_col_title(label_name)} (100% Stacked Bar)"
                     elif is_headcount_stack:
                         chart_type = "Grouped Bar" if barmode_val == "group" else "Stacked Bar"
                         chart_title = f"So Sánh Số Lượng Nam vs Nữ theo {format_col_title(label_name)} ({chart_type})" if is_compare_query else f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
@@ -1670,6 +1702,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         chart_title = f"So Sánh Quy Mô Nhân Sự & Mức Lương Trung Bình theo {format_col_title(label_name)} (Grouped Bar)"
                     elif any(any(k in c.lower() for k in ["indiasales", "india_sales"]) for c in active_measures) and any(any(k in c.lower() for k in ["usasales", "usa_sales"]) for c in active_measures):
                         chart_title = f"So Sánh Doanh Số Thị Trường Ấn Độ vs Mỹ theo {format_col_title(label_name)} (Grouped Bar)"
+
+                    chart_title = clean_chart_title(chart_title)
 
                     # Tự động tính góc nghiêng nhãn trục X nếu nhãn dài để không bao giờ bị cắt chữ
                     max_lbl_len = max([len(str(x)) for x in plot_df[label_name]] or [0])
@@ -2397,11 +2431,18 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 if is_pct and isinstance(val_num, (int, float)) and 0.0 <= float(val_num) <= 100.0:
                     pct_val = float(val_num)
                     rem_val = max(0.0, 100.0 - pct_val)
+                    clean_m = format_col_title(m_name)
+                    donut_title = (
+                        f"Cơ Cấu {clean_m} ({pct_val:,.2f}%)"
+                        if any(k in clean_m.lower() for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "cơ cấu"])
+                        else f"Tỷ Trọng {clean_m} ({pct_val:,.2f}%)"
+                    )
+                    donut_title = clean_chart_title(donut_title)
                     fig = px.pie(
-                        names=[f"{m_name} ({pct_val:,.2f}%)", f"Còn lại ({rem_val:,.2f}%)"],
+                        names=[f"{clean_m} ({pct_val:,.2f}%)", f"Còn lại ({rem_val:,.2f}%)"],
                         values=[pct_val, rem_val],
                         hole=0.55,
-                        title=f"Biểu đồ Tỷ trọng (Donut): {m_name} ({pct_val:,.2f}%)",
+                        title=donut_title,
                         template="plotly_white",
                         color_discrete_sequence=["#0068FF", "#E2E8F0"]
                     )
@@ -2474,11 +2515,17 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     plot_df = pd.concat([top_df, other_row], ignore_index=True)
 
                 is_val_pct = any(k in str(pie_val_col).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "%"])
-                chart_title = (
-                    f"Cơ Cấu Chi Phí Lương Theo {format_col_title(label_name)}"
-                    if (is_val_pct and any(k in (user_query or "").lower() for k in ["lương", "salary", "chi phí"]))
-                    else f"Tỷ trọng {format_col_title(pie_val_col)} theo {format_col_title(label_name)}"
-                )
+                clean_pie_val = format_col_title(pie_val_col)
+                clean_label = format_col_title(label_name)
+
+                if is_val_pct and any(k in (user_query or "").lower() for k in ["lương", "salary", "chi phí"]):
+                    chart_title = f"Cơ Cấu Chi Phí Lương theo {clean_label}"
+                elif any(k in clean_pie_val.lower() for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "cơ cấu"]):
+                    chart_title = f"{clean_pie_val} theo {clean_label}"
+                else:
+                    chart_title = f"Cơ Cấu {clean_pie_val} theo {clean_label}"
+
+                chart_title = clean_chart_title(chart_title)
                 fig = px.pie(
                     plot_df,
                     names=label_name,
@@ -2513,11 +2560,18 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     pct_val = 0.0
 
                 rem_val = max(0.0, 100.0 - pct_val) if (0.0 <= pct_val <= 100.0) else 0.0
+                clean_m = format_col_title(m_name)
+                donut_title = (
+                    f"Cơ Cấu {clean_m} ({pct_val:,.2f}%)"
+                    if any(k in clean_m.lower() for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "cơ cấu"])
+                    else f"Tỷ Trọng {clean_m} ({pct_val:,.2f}%)"
+                )
+                donut_title = clean_chart_title(donut_title)
                 fig = px.pie(
-                    names=[f"{m_name} ({pct_val:,.2f}%)", f"Còn lại ({rem_val:,.2f}%)"],
+                    names=[f"{clean_m} ({pct_val:,.2f}%)", f"Còn lại ({rem_val:,.2f}%)"],
                     values=[pct_val, rem_val],
                     hole=0.55,
-                    title=f"Biểu đồ Tỷ trọng (Donut): {m_name} ({pct_val:,.2f}%)",
+                    title=donut_title,
                     template="plotly_white",
                     color_discrete_sequence=["#0068FF", "#E2E8F0"]
                 )
