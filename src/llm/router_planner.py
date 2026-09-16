@@ -1472,13 +1472,16 @@ def route_and_plan(
         metrics.append("Số lần tăng lương (RaiseCount)")
 
     # 4. Xác định mốc thời gian
+    s_low = (schema_context or "").lower()
+    is_employees_ctx = ("dept_emp" in s_low or "dept_manager" in s_low or "salaries" in s_low or "titles" in s_low) and not any(k in s_low for k in ["film_id", "rental_id", "payment_id", "geoid", "spid", "boxes"])
+
     m_yr_th = re.search(r"\b(19\d\d|20\d\d)\b", q_low)
     m_yr_op = re.search(r"(\d+)\s*năm đầu", q_low)
     if m_yr_op or any(k in q_low for k in ["năm đầu hoạt động", "giai đoạn đầu", "thời kỳ đầu", "mới thành lập", "khởi đầu"]):
         n_yr = int(m_yr_op.group(1)) if m_yr_op else 3
         time_horizon = f"{n_yr} năm đầu hoạt động công ty (1985 - {1985 + n_yr - 1})" if not is_en else f"First {n_yr} years of operations (1985 - {1985 + n_yr - 1})"
-    elif any(k in q_low for k in ["hiện tại", "hiện nay", "đương nhiệm", "current"]) or (any(k in q_low for k in ["đang"]) and not any(k in q_low for k in ["năm đầu", "trước đây", "lịch sử"])):
-        time_horizon = "Thời điểm hiện tại (to_date = '9999-01-01')" if not is_en else "Current active state (to_date = '9999-01-01')"
+    elif any(k in q_low for k in ["hiện tại", "hiện nay", "đương nhiệm", "current"]) or (any(k in q_low for k in ["đang làm", "đang công tác", "đang giữ", "đang hưởng"]) and not any(k in q_low for k in ["năm đầu", "trước đây", "lịch sử"])):
+        time_horizon = ("Thời điểm hiện tại (to_date = '9999-01-01')" if is_employees_ctx else "Thời điểm hiện tại") if not is_en else ("Current active state (to_date = '9999-01-01')" if is_employees_ctx else "Current active state")
     elif m_yr_th and not any(k in q_low for k in ["5 năm", "gần nhất"]):
         time_horizon = f"Năm {m_yr_th.group(1)}" if not is_en else f"Year {m_yr_th.group(1)}"
     elif any(k in q_low for k in ["5 năm gần nhất", "5 năm gần đây", "gần nhất"]):

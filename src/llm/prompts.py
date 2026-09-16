@@ -955,8 +955,49 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     )
 
     if is_sakila_db:
+        # Tỷ lệ phần trăm đóng góp của từng tháng vào tổng doanh thu (Monthly revenue percentage contribution)
+        if (any(k in q_low for k in ["tỷ lệ", "phần trăm", "đóng góp", "percentage", "contribution", "tỷ trọng", "tỉ trọng", "tỉ lệ", "cơ cấu"])
+            and any(k in q_low for k in ["tháng", "month"])
+            and any(k in q_low for k in ["doanh thu", "revenue", "sales", "tiền", "amount", "total revenue"])):
+            if is_sqlite:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHẦN TRĂM ĐÓNG GÓP DOANH THU THEO THÁNG TRONG CSDL SAKILA):
+WITH MonthlyRevenue AS (
+    SELECT 
+        strftime('%Y-%m', p.payment_date) AS Month,
+        SUM(p.amount) AS TotalRevenue
+    FROM payment p
+    GROUP BY strftime('%Y-%m', p.payment_date)
+)
+SELECT 
+    Month,
+    TotalRevenue,
+    ROUND(TotalRevenue * 100.0 / (SELECT SUM(TotalRevenue) FROM MonthlyRevenue), 2) AS ContributionPercentage
+FROM MonthlyRevenue
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: Bảng thanh toán doanh thu là `payment` (cột `amount`, `payment_date`), TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`, KHÔNG DÙNG BẢNG `sales`!)
+"""
+            else:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHẦN TRĂM ĐÓNG GÓP DOANH THU THEO THÁNG TRONG CSDL SAKILA):
+WITH MonthlyRevenue AS (
+    SELECT 
+        DATE_FORMAT(p.payment_date, '%Y-%m') AS Month,
+        SUM(p.amount) AS TotalRevenue
+    FROM payment p
+    GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m')
+)
+SELECT 
+    Month,
+    TotalRevenue,
+    ROUND(TotalRevenue * 100.0 / (SELECT SUM(TotalRevenue) FROM MonthlyRevenue), 2) AS ContributionPercentage
+FROM MonthlyRevenue
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC: Bảng thanh toán doanh thu là `payment` (cột `amount`, `payment_date`), TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`, KHÔNG DÙNG BẢNG `sales`!)
+"""
+
         # Biến động doanh thu theo tháng / số lượt thuê
-        if any(k in q_low for k in ["theo tháng", "từng tháng", "hàng tháng", "qua các tháng", "biến động", "xu hướng"]) and any(k in q_low for k in ["doanh thu", "doanh số", "thuê", "rentals", "payment", "tiền"]):
+        if any(k in q_low for k in ["theo tháng", "từng tháng", "hàng tháng", "qua các tháng", "biến động", "xu hướng", "monthly"]) and any(k in q_low for k in ["doanh thu", "doanh số", "thuê", "rentals", "payment", "tiền", "revenue"]):
             if is_sqlite:
                 return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU & SỐ LƯỢT THUÊ THEO THÁNG TRONG CSDL SAKILA):

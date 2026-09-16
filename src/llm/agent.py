@@ -5993,6 +5993,82 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
     return combined[:3] if combined else grounded_questions[:3]
 
 
+def auto_fix_sakila_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa và bảo vệ các truy vấn trên CSDL Sakila (DVD Rental Store):
+    - Loại bỏ các điều kiện hallucinated như `WHERE to_date = '9999-01-01'` hay `s.to_date`
+    - Chuẩn hóa truy vấn tỷ lệ đóng góp doanh thu theo tháng / theo thể loại
+    - Chuẩn hóa truy vấn biến động doanh thu theo tháng
+    """
+    if not sql or not user_query:
+        return sql
+
+    q_low = user_query.lower()
+    sql_low = sql.lower()
+
+    # 1. Loại bỏ các mệnh đề to_date ảo giác trên Sakila
+    if "to_date" in sql_low:
+        cleaned_sql = re.sub(r"(?i)\s*(?:where|and)\s+to_date\s*=\s*'9999-01-01'", "", sql)
+        cleaned_sql = re.sub(r"(?i)\s*(?:where|and)\s+[a-z0-9_]+\.to_date\s*=\s*'9999-01-01'", "", cleaned_sql)
+        cleaned_sql = re.sub(r"(?i)where\s+group\s+by", "GROUP BY", cleaned_sql)
+        sql = cleaned_sql.strip()
+        sql_low = sql.lower()
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+    date_expr = "strftime('%Y-%m', p.payment_date)" if is_sqlite else "DATE_FORMAT(p.payment_date, '%Y-%m')"
+
+    # 2. Tỷ lệ phần trăm đóng góp doanh thu theo từng tháng (Monthly revenue percentage contribution)
+    is_contrib_pct = (
+        any(k in q_low for k in ["tỷ lệ", "phần trăm", "đóng góp", "tỷ trọng", "percentage", "contribution", "tỉ trọng", "tỉ lệ", "cơ cấu"])
+        and any(k in q_low for k in ["tháng", "month"])
+        and any(k in q_low for k in ["doanh thu", "revenue", "sales", "tiền", "amount"])
+    )
+    if is_contrib_pct:
+        has_bad_syntax = (
+            "to_date" in sql_low
+            or "sales" in sql_low
+            or ("contributionpercentage" not in sql_low and "percentage" not in sql_low and "tỷ lệ" not in sql_low)
+            or "payment" not in sql_low
+        )
+        if has_bad_syntax:
+            return f"""WITH MonthlyRevenue AS (
+    SELECT 
+        {date_expr} AS Month,
+        SUM(p.amount) AS TotalRevenue
+    FROM payment p
+    GROUP BY {date_expr}
+)
+SELECT 
+    Month,
+    TotalRevenue,
+    ROUND(TotalRevenue * 100.0 / (SELECT SUM(TotalRevenue) FROM MonthlyRevenue), 2) AS ContributionPercentage
+FROM MonthlyRevenue
+ORDER BY Month ASC;"""
+
+    # 3. Biến động doanh thu theo tháng (kèm lượt thuê)
+    is_monthly_trend = (
+        any(k in q_low for k in ["biến động", "theo tháng", "từng tháng", "hàng tháng", "qua các tháng", "xu hướng", "monthly"])
+        and any(k in q_low for k in ["doanh thu", "revenue", "thuê", "rental", "sales"])
+        and not is_contrib_pct
+    )
+    if is_monthly_trend:
+        has_bad_syntax = (
+            "to_date" in sql_low
+            or "sales" in sql_low
+            or "saledate" in sql_low
+            or "payment" not in sql_low
+        )
+        if has_bad_syntax:
+            return f"""SELECT 
+    {date_expr} AS Month,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(p.rental_id) AS TotalRentals
+FROM payment p
+GROUP BY {date_expr}
+ORDER BY Month ASC;"""
+
+    return sql
+
+
 def run_agent(
     user_query: str,
     client,
@@ -6163,6 +6239,7 @@ def run_agent(
             sql_cur = auto_fix_chocolates_top_rankings_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         elif is_sakila_db:
+            sql_cur = auto_fix_sakila_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         return sql_cur
@@ -6506,7 +6583,7 @@ def run_agent(
 
             # Bắt lỗi 1054 / Unknown column để tự động sửa cột ảo giác (như d.to_date)
             if "1054" in lowered_err or "unknown column" in lowered_err or "no such column" in lowered_err:
-                if "d.to_date" in lowered_err or "departments.to_date" in lowered_err or "to_date" in lowered_err:
+                if is_employees_db and ("d.to_date" in lowered_err or "departments.to_date" in lowered_err or "to_date" in lowered_err):
                     augmented_error += (
                         "\n\nLỖI CỘT 1054 (Unknown column 'd.to_date'):\n"
                         "Bảng 'departments' CHỈ CÓ 2 CỘT: `dept_no` và `dept_name`! TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`!\n"
@@ -6522,28 +6599,36 @@ def run_agent(
                         if lang != "en" else
                         "\n\nERROR 1054: Table 'departments' ONLY has `dept_no` and `dept_name`! It does NOT have `to_date`! Do NOT join departments when querying titles!"
                     )
-                elif "de." in lowered_err or "dept_emp" in lowered_err:
+                elif is_employees_db and ("de." in lowered_err or "dept_emp" in lowered_err):
                     augmented_error += (
                         "\n\nLỖI CỘT 1054: Bảng 'dept_emp' (bí danh de) không tồn tại trong mệnh đề FROM (hoặc bạn đang nhầm giữa de và dm)!\n"
                         "- Khi truy vấn ban quản lý, dùng bảng `dept_manager dm` và dùng `COUNT(*)` để đếm tổng số!\n"
                         "  SELECT d.dept_name AS Department, SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers, SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers, COUNT(*) AS TotalManagers, ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct, ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct FROM dept_manager dm JOIN employees e ON dm.emp_no = e.emp_no JOIN departments d ON dm.dept_no = d.dept_no GROUP BY d.dept_name ORDER BY d.dept_name;"
                     )
+                elif is_sakila_db:
+                    augmented_error += (
+                        "\n\nLƯU Ý CSDL SAKILA: CSDL này không có cột `to_date`, không có bảng `sales`, `geo`, `products` hay `employees`!\n"
+                        "Bảng thanh toán doanh thu là `payment` (cột `amount`, `payment_date`, `rental_id`, `customer_id`, `staff_id`).\n"
+                        "Bảng thuê phim là `rental` (cột `rental_id`, `rental_date`, `inventory_id`, `customer_id`).\n"
+                        "Hãy chỉ dùng các bảng tồn tại trong Sakila: payment, rental, film, inventory, category, film_category, actor, film_actor, customer, store, staff!"
+                    )
 
             # Bắt lỗi 1066 / Not unique table/alias để tự động hướng dẫn đổi bí danh
             if "1066" in lowered_err or "not unique table/alias" in lowered_err:
-                augmented_error += (
-                    f"\n\nLỖI TRÙNG BÍ DANH (1066 Not unique table/alias):\n"
-                    f"Bạn đang gán trùng bí danh (ví dụ cùng dùng 'p' cho cả bảng 'people' và 'products')!\n"
-                    f"BẮT BUỘC ĐỔI BÍ DANH:\n"
-                    f"- Bảng 'people': dùng bí danh 'pe' (pe.Salesperson, pe.SPID, pe.Team)\n"
-                    f"- Bảng 'products': dùng bí danh 'pr' (pr.Product, pr.PID, pr.Category)\n"
-                    f"- Bảng 'sales': dùng bí danh 's' (s.Amount, s.SaleDate)\n"
-                    f"- Bảng 'geo': dùng bí danh 'g' (g.Geo, g.GeoID)\n"
-                    f"Hãy sửa lại câu SQL bằng các bí danh phân biệt rõ ràng này!"
-                    if lang != "en" else
-                    f"\n\nALIAS COLLISION ERROR (1066 Not unique table/alias):\n"
-                    f"You used the same alias 'p' for multiple tables! Please use 'pe' for people, 'pr' for products, 's' for sales, 'g' for geo!"
-                )
+                if is_chocolates_db:
+                    augmented_error += (
+                        f"\n\nLỖI TRÙNG BÍ DANH (1066 Not unique table/alias):\n"
+                        f"Bạn đang gán trùng bí danh (ví dụ cùng dùng 'p' cho cả bảng 'people' và 'products')!\n"
+                        f"BẮT BUỘC ĐỔI BÍ DANH:\n"
+                        f"- Bảng 'people': dùng bí danh 'pe' (pe.Salesperson, pe.SPID, pe.Team)\n"
+                        f"- Bảng 'products': dùng bí danh 'pr' (pr.Product, pr.PID, pr.Category)\n"
+                        f"- Bảng 'sales': dùng bí danh 's' (s.Amount, s.SaleDate)\n"
+                        f"- Bảng 'geo': dùng bí danh 'g' (g.Geo, g.GeoID)\n"
+                        f"Hãy sửa lại câu SQL bằng các bí danh phân biệt rõ ràng này!"
+                        if lang != "en" else
+                        f"\n\nALIAS COLLISION ERROR (1066 Not unique table/alias):\n"
+                        f"Duplicate alias in query. Use distinct aliases: 'pe' for people, 'pr' for products, 's' for sales, 'g' for geo."
+                    )
 
             # Bắt lỗi 1111 / Invalid use of group function
             if "1111" in lowered_err or "invalid use of group function" in lowered_err:

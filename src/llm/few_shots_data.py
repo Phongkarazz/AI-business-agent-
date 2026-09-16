@@ -1313,6 +1313,44 @@ ORDER BY Month ASC;"""
     # NHÓM 3: CSDL SAKILA (DVD RENTAL STORE)
     # =========================================================================
     {
+        "id": "sakila_monthly_revenue_contribution_percentage",
+        "domain": "sakila",
+        "category": "contribution_percentage",
+        "tags": [
+            "tỷ lệ", "phần trăm", "đóng góp", "tỷ trọng", "tỉ lệ", "tỉ trọng", "percentage", "contribution",
+            "từng tháng", "theo tháng", "month", "doanh thu", "total revenue", "revenue", "payment", "sakila"
+        ],
+        "question": "Tỷ lệ phần trăm đóng góp của từng Month vào tổng Total Revenue",
+        "question_en": "Percentage contribution of each month to total revenue",
+        "intent_explanation": "Dùng CTE tính TotalRevenue = SUM(p.amount) theo DATE_FORMAT(p.payment_date, '%Y-%m') từ bảng payment p, sau đó tính ContributionPercentage = ROUND(TotalRevenue * 100.0 / (SELECT SUM(TotalRevenue) FROM MonthlyRevenue), 2).",
+        "sql_mysql": """WITH MonthlyRevenue AS (
+    SELECT 
+        DATE_FORMAT(p.payment_date, '%Y-%m') AS Month,
+        SUM(p.amount) AS TotalRevenue
+    FROM payment p
+    GROUP BY DATE_FORMAT(p.payment_date, '%Y-%m')
+)
+SELECT 
+    Month,
+    TotalRevenue,
+    ROUND(TotalRevenue * 100.0 / (SELECT SUM(TotalRevenue) FROM MonthlyRevenue), 2) AS ContributionPercentage
+FROM MonthlyRevenue
+ORDER BY Month ASC;""",
+        "sql_sqlite": """WITH MonthlyRevenue AS (
+    SELECT 
+        strftime('%Y-%m', p.payment_date) AS Month,
+        SUM(p.amount) AS TotalRevenue
+    FROM payment p
+    GROUP BY strftime('%Y-%m', p.payment_date)
+)
+SELECT 
+    Month,
+    TotalRevenue,
+    ROUND(TotalRevenue * 100.0 / (SELECT SUM(TotalRevenue) FROM MonthlyRevenue), 2) AS ContributionPercentage
+FROM MonthlyRevenue
+ORDER BY Month ASC;"""
+    },
+    {
         "id": "sakila_monthly_revenue_and_rentals",
         "domain": "sakila",
         "category": "monthly_trend",
