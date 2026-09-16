@@ -5163,7 +5163,12 @@ STRICT BUSINESS ANALYTICS DISCIPLINE & GUIDELINES:
        - Plan and build inventory ahead of peak holiday seasons (October - December).
        - Clear inventory and launch promotional combos during off-peak summer months (July - September).
        - Dynamically adapt factory production capacity and logistics shipping schedules across quarters.
-     * STRICT PROHIBITION: NEVER use generic, robotic clichés like 'hold dialogue with relevant units to manage operational disruption risk' or 'transition to AI predictive demand planning'.
+5. PARETO 80/20 & CUMULATIVE PERCENTAGE DISCIPLINE:
+   - When analyzing Pareto Analysis / Cumulative Percentage data (e.g. Products contributing to 80% of sales with columns Product, TotalSales, Percentage, CumulativePercent):
+     * STRICT METRIC DISTINCTION:
+       - `Percentage` (%): Represents each individual product's distinct share/contribution (e.g. 4.86%). The first product in the list is the #1 TOP-SELLING leader!
+       - `CumulativePercent` (%): Represents the RUNNING ACCUMULATED TOTAL of the entire group up to that row (e.g. reaching 82.79% across all 18 products). NEVER misread CumulativePercent as the revenue share of a single individual SKU!
+       - When proposing bundles (Combos), pair the #1 top-selling leader (e.g. Almond Choco with 4.86% individual share) with a slower-selling SKU or non-Pareto product. NEVER confuse the last row's cumulative percentage (82.79%) as its individual share.
 
 REQUIREMENTS:
 Generate an Executive Business Insight Report in English with exact Markdown format:
@@ -5237,6 +5242,11 @@ KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & THƯƠNG MẠI (BẮT BUỘC TUÂN THỦ):
        - Giải phóng hàng tồn và tung combo kích cầu vào các tháng thấp điểm mùa hè (Tháng 7 - Tháng 9).
        - Điều chỉnh công suất nhà máy và điều phối vận chuyển linh hoạt theo quý.
      * TUYỆT ĐỐI CẤM các câu văn sáo rỗng vô thưởng vô phạt như 'tổ chức đối thoại với các đơn vị liên quan để kiểm soát rủi ro gián đoạn vận hành' hay 'hoạch định dự báo nhu cầu bằng AI; xây dựng chuỗi cung ứng bền vững'.
+5. QUY TẮC PHÂN BIỆT PARETO 80/20 & TỶ LỆ TÍCH LŨY DỒN:
+   - Khi dữ liệu chứa bảng phân tích Pareto (các sản phẩm tạo 80% doanh thu) với các cột như Product, TotalSales, Percentage, CumulativePercent:
+     * `Percentage` (%): Là tỷ trọng đóng góp cá nhân của từng sản phẩm đơn lẻ (ví dụ: Almond Choco chiếm 4.86%, là sản phẩm BÁN CHẠY NHẤT).
+     * `CumulativePercent` (%): Là mốc tích lũy dồn của toàn bộ nhóm Pareto tính đến dòng đó (ví dụ: Peanut Butter Cubes ở dòng cuối đạt mốc 82.79% tích lũy của cả 18 sản phẩm). TUYỆT ĐỐI CẤM đọc nhầm mốc tích lũy 82.79% thành doanh số của một SKU đơn lẻ!
+     * Khi đề xuất Combo: Phải ghép sản phẩm bán chạy nhất đầu bảng (ví dụ: Almond Choco 4.86%) với sản phẩm bán chậm hơn ngoài nhóm Pareto.
 
 YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
 

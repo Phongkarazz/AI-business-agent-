@@ -529,6 +529,74 @@ def get_best_name_column(df: pd.DataFrame, exclude_cols: list = None):
     return None
 
 
+def select_primary_insight_columns(df: pd.DataFrame, user_query: str = "") -> tuple:
+    """Chọn cột giá trị đo lường chính (val_col) và cột tên/nhãn (name_col) chính xác nhất cho bài toán phân tích insight,
+    đặc biệt loại trừ các cột tích lũy dồn (CumulativePercent, RunningTotal) khỏi việc làm val_col."""
+    if df is None or df.empty:
+        return None, None
+    cols = df.columns.tolist()
+    measure_cols, cat_cols, time_col = get_axis_columns(df)
+
+    # Loại bỏ các cột cộng dồn / tích lũy Pareto khỏi danh sách cột số đo lường chính
+    non_cum_measures = [
+        c for c in measure_cols
+        if not any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy", "runningtotal", "running_total", "cumpct"])
+    ]
+
+    q_low = (user_query or "").lower()
+
+    # 1. Tìm val_col phù hợp
+    val_col = None
+    if non_cum_measures:
+        # Nếu người dùng hỏi tiền tệ / sản lượng / quy mô cụ thể:
+        if any(k in q_low for k in ["doanh số", "doanh thu", "sales", "revenue", "tiền"]):
+            sales_c = [c for c in non_cum_measures if any(k in str(c).lower() for k in ["sales", "revenue", "amount", "doanh thu", "doanh so"])]
+            if sales_c:
+                val_col = sales_c[0]
+        elif any(k in q_low for k in ["hộp", "thùng", "boxes", "sản lượng"]):
+            box_c = [c for c in non_cum_measures if any(k in str(c).lower() for k in ["boxes", "hộp", "thùng", "sản lượng"])]
+            if box_c:
+                val_col = box_c[0]
+        elif any(k in q_low for k in ["lương", "salary", "thu nhập"]):
+            sal_c = [c for c in non_cum_measures if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"])]
+            if sal_c:
+                val_col = sal_c[0]
+        elif any(k in q_low for k in ["tỷ suất", "tỉ suất", "margin"]):
+            margin_c = [c for c in non_cum_measures if any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất"])]
+            if margin_c:
+                val_col = margin_c[0]
+
+        if not val_col:
+            spread_candidate = next((c for c in non_cum_measures if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
+            if spread_candidate:
+                val_col = spread_candidate
+            else:
+                # Ưu tiên cột tiền tệ / số lượng trước cột phần trăm
+                money_or_vol = [
+                    c for c in non_cum_measures
+                    if any(k in str(c).lower() for k in ["sales", "revenue", "amount", "boxes", "salary", "lương", "cost", "profit", "headcount", "nhân viên", "nhân sự", "count"])
+                    and not any(k in str(c).lower() for k in ["pct", "percent", "%", "margin", "rate", "tỷ lệ", "tỉ lệ"])
+                ]
+                if money_or_vol:
+                    val_col = money_or_vol[0]
+                else:
+                    val_col = non_cum_measures[0]
+    elif measure_cols:
+        val_col = measure_cols[0]
+    else:
+        num_cols = df.select_dtypes(include="number").columns.tolist()
+        num_non_cum = [c for c in num_cols if not any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy", "runningtotal", "running_total"])]
+        val_col = num_non_cum[0] if num_non_cum else (num_cols[0] if num_cols else None)
+
+    # 2. Tìm name_col
+    name_candidates = [c for c in cat_cols if c != val_col]
+    if not name_candidates:
+        name_candidates = [c for c in cols if c != val_col and not is_id_like(c)]
+    name_col = name_candidates[0] if name_candidates else (cols[0] if cols else None)
+
+    return val_col, name_col
+
+
 def pick_label_column(df: pd.DataFrame, label_cols: list) -> tuple:
     """Chọn cột nhãn tốt nhất cho trục X:
     - Nếu có cả first_name và last_name, ưu tiên ghép lại làm nhãn 'Họ và Tên'.
@@ -1470,18 +1538,7 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             "• **Tuân thủ Mục tiêu & Kế hoạch Phân bổ**: Các chỉ số kinh doanh hiện tại bám sát kế hoạch điều hành và chưa ghi nhận áp lực đột biến từ ngoại cảnh."
         )
 
-    cols = df.columns.tolist()
-    measure_cols, cat_cols, time_col = get_axis_columns(df)
-    val_col = measure_cols[0] if measure_cols else None
-
-    if not val_col:
-        num_cols = df.select_dtypes(include="number").columns.tolist()
-        if num_cols:
-            val_col = num_cols[-1]
-
-    spread_candidate = next((c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
-    if spread_candidate:
-        val_col = spread_candidate
+    val_col, name_col = select_primary_insight_columns(df, user_query=user_query)
 
     if not val_col:
         if is_en:
@@ -1495,6 +1552,8 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
         )
 
     q_low = (user_query or "").lower()
+    cols = df.columns.tolist()
+    measure_cols, cat_cols, time_col = get_axis_columns(df)
     cols_str = " ".join(str(c).lower() for c in cols)
 
     # 1. NHẬN DIỆN CHUỖI THỜI GIAN (Time Series / Yearly Trend / Trend by Year / Monthly)
@@ -1602,10 +1661,9 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             pass
 
     # 3. SO SÁNH PHÒNG BAN, CHỨC DANH, GIỚI TÍNH, SẢN PHẨM HOẶC XẾP HẠNG
-    name_candidates = [c for c in cat_cols if c != val_col]
-    if not name_candidates:
-        name_candidates = [c for c in cols if c != val_col]
-    name_col = name_candidates[0] if name_candidates else None
+    if not name_col:
+        name_candidates = [c for c in cat_cols if c != val_col] or [c for c in cols if c != val_col]
+        name_col = name_candidates[0] if name_candidates else None
 
     if name_col and val_col:
         try:
@@ -1680,7 +1738,33 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                     h2 = f"• **Cân đối Định biên & Chuẩn hóa Phân bổ Nhóm**: Khoảng cách so với nhóm **{bot_name}** ({format_metric_value(bot_v, val_col)} nhân sự) phản ánh sự phân bố theo quy mô thị trường mục tiêu, đồng thời mở ra cơ hội rà soát và phân nhóm rõ ràng cho các nhân viên chưa được xếp đội để tối ưu hóa năng suất bán hàng."
                 return f"{h1}\n\n{h2}"
 
-            # 3D. Tỷ lệ đóng góp / Cơ cấu tỷ trọng (Contribution / Ratio / Share)
+            # 3D1. Phân tích Pareto 80/20 & Tích lũy dồn (Pareto 80/20 Analysis)
+            is_pareto = (
+                any(k in q_low for k in ["pareto", "80/20", "80-20", "tích lũy", "tích luỹ", "cumulative"])
+                or any(k in cols_str for k in ["cumulative", "tích lũy", "runningtotal", "cumulativepercent", "cumpct"])
+            )
+            if is_pareto:
+                cum_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["cumulative", "tích lũy", "running"])), None)
+                pct_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["percentage", "percent", "pct", "tỷ lệ", "tỉ lệ", "share"]) and not any(k in str(c).lower() for k in ["cumulative", "tích lũy", "running"])), None)
+                sales_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["totalsales", "total_sales", "sales", "revenue", "amount", "boxes", "doanh thu", "doanh so"])), None) or val_col
+
+                top_pct_val = f"{float(top_r[pct_col]):.2f}%" if (pct_col and pct_col in top_r and pd.notna(top_r[pct_col])) else ""
+                bot_pct_val = f"{float(bot_r[pct_col]):.2f}%" if (pct_col and pct_col in bot_r and pd.notna(bot_r[pct_col])) else ""
+                cum_total_val = f"{float(bot_r[cum_col]):.2f}%" if (cum_col and cum_col in bot_r and pd.notna(bot_r[cum_col])) else "80%"
+                n_items = len(df)
+
+                top_sales_str = format_metric_value(top_v, sales_col)
+                bot_sales_str = format_metric_value(bot_v, sales_col)
+
+                if is_en:
+                    h1 = f"• **Core Revenue Anchor & Category Demand**: **{top_name}** commands the #1 contribution ({top_sales_str}{f', {top_pct_val}' if top_pct_val else ''}), driven by widespread consumer taste adoption and consistent retail shelf placement."
+                    h2 = f"• **Portfolio Spread & Risk Diversification (Pareto 80/20)**: Top {n_items} key products collectively generate {cum_total_val} of total company sales; the balanced individual share from **{top_name}** ({top_pct_val}) to **{bot_name}** ({bot_pct_val}) demonstrates a resilient, well-distributed revenue foundation across core SKUs."
+                else:
+                    h1 = f"• **Trọng tâm Đóng góp Doanh số & Sức hút Thị trường**: Sản phẩm **{top_name}** ({top_sales_str}{f', {top_pct_val}' if top_pct_val else ''}) dẫn đầu doanh thu nhờ thị hiếu người tiêu dùng ưa chuộng và độ phủ kênh bán lẻ vượt trội."
+                    h2 = f"• **Cơ cấu Doanh thu Nhóm Trụ cột & Phân tán Rủi ro (Pareto 80/20)**: Danh mục {n_items} sản phẩm trọng điểm đóng góp {cum_total_val} tổng doanh số toàn công ty; khoảng cách tỷ trọng cá nhân từ **{top_name}** ({top_pct_val}) đến **{bot_name}** ({bot_pct_val}) cho thấy cơ cấu doanh thu khá đồng đều, giảm thiểu rủi ro phụ thuộc vào một SKU đơn lẻ."
+                return f"{h1}\n\n{h2}"
+
+            # 3D2. Tỷ lệ đóng góp / Cơ cấu tỷ trọng (Contribution / Ratio / Share)
             is_contribution = any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "cơ cấu", "đóng góp", "share", "ratio"])
             if is_contribution:
                 if is_en:
@@ -1692,7 +1776,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                 return f"{h1}\n\n{h2}"
 
             # 3E1. Tỷ suất Lợi nhuận / Biên lợi nhuận (Profit Margin / Margin % - Focus on COGS & Pricing Strategy)
-            is_margin = any(k in str(val_col).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"]) or any(k in q_low for k in ["tỷ suất", "tỉ suất", "margin", "%"])
+            is_margin = (
+                any(k in str(val_col).lower() for k in ["margin", "tỷ suất", "tỉ suất", "profit_margin", "profitmargin", "gross_margin", "grossmargin"])
+                or (
+                    any(k in q_low for k in ["tỷ suất lợi nhuận", "tỉ suất lợi nhuận", "biên lợi nhuận", "profit margin", "gross margin"])
+                    and not any(k in q_low for k in ["doanh thu", "doanh số", "sales", "revenue", "hộp", "boxes", "nhân viên", "nhân sự", "lương"])
+                    and not is_pareto
+                )
+            )
             if is_margin:
                 cash_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["profitperbox", "profit_per_box", "profit", "lợi nhuận", "lãi"]) 
                                  and not any(k in str(c).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"]) 
@@ -1818,12 +1909,13 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
             "• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn."
         )
 
-    cols = df.columns.tolist()
-    num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
-    cat_cols = [c for c in cols if c not in num_cols]
-
-    val_col = num_cols[-1] if num_cols else None
-    name_col = cat_cols[0] if cat_cols else (num_cols[0] if len(num_cols) > 1 else None)
+    val_col, name_col = select_primary_insight_columns(df, user_query=user_query)
+    if not val_col or not name_col:
+        cols = df.columns.tolist()
+        num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+        cat_cols = [c for c in cols if c not in num_cols]
+        val_col = val_col or (num_cols[0] if num_cols else None)
+        name_col = name_col or (cat_cols[0] if cat_cols else (num_cols[1] if len(num_cols) > 1 else None))
 
     if not val_col or not name_col:
         return (
@@ -1846,11 +1938,15 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
     gap_vs_top = (diff / top_val * 100) if top_val != 0 else 0
     lead_vs_bot = (diff / bot_val * 100) if bot_val != 0 else 0
 
+    cols = df.columns.tolist()
     cols_str = " ".join(str(c).lower() for c in cols)
     q_low = (user_query or "").lower()
     is_time_series = any(k in cols_str for k in ["year", "month", "date", "năm", "tháng", "ngày", "hire", "hiredate", "hireyear"])
     is_salary = any(k in cols_str for k in ["salary", "lương", "wage", "pay", "thu_nhập", "raisecount", "raise"])
     is_headcount = any(k in cols_str for k in ["headcount", "nhân viên", "nhân sự", "slngnhnvin", "totalemployees"]) and not is_salary
+    is_pareto = any(k in str(c).lower() for c in cols for k in ["cumulative", "tích lũy", "tich_luy", "runningtotal"]) or any(k in q_low for k in ["pareto", "80/20", "80%", "80-20", "tích lũy", "cumulative"])
+    cum_col = next((c for c in cols if any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy"])), None)
+    cum_val_str = f" ({format_metric_value(df[cum_col].iloc[-1], cum_col)})" if (cum_col and not df.empty) else ""
 
     entity_type = detect_analysis_entity_type(df, user_query=user_query, name_col=name_col)
 
@@ -1897,9 +1993,14 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions and employer branding."
         elif entity_type == "product":
             # SẢN PHẨM / HÀNG HÓA: Combo, Định giá, Tồn kho/Xả hàng, Bao bì
-            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Deploy promotional bundling campaigns (Combos) pairing top-performing SKU **{top_name}** ({format_metric_value(top_val, val_col)}) with slower-moving **{bot_name}** ({format_metric_value(bot_val, val_col)}); perform an immediate warehouse inventory audit on **{bot_name}** to expedite stock clearance and liberate working capital."
-            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Scale dynamic pricing adjustments and cross-selling initiatives across primary distribution channels; re-align replenishment schedules and demand forecasting around the baseline average of {format_metric_value(mean_val, val_col)} to boost inventory turnover."
-            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Re-engineer product packaging and portfolio tiering (SKU/Packaging); establish an agile, demand-driven supply chain to continuously protect category margin resilience."
+            if is_pareto:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Prioritize supply chain security and safety stock for top-selling SKU **{top_name}** ({format_metric_value(top_val, val_col)}); design promotional bundling combos pairing **{top_name}** with slower-moving products outside the 80/20 Pareto core to stimulate demand and liberate working capital."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Expand prime shelf placement and cross-selling for the top {len(df)} core SKUs (contributing ~80% of total revenue{cum_val_str}); rebalance replenishment orders around the category average of {format_metric_value(mean_val, val_col)}."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Optimize packaging tiering (SKU/Packaging) and develop derivative product lines based on market leader **{top_name}**; establish an agile demand-driven supply chain to continuously protect category margin resilience."
+            else:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Deploy promotional bundling campaigns (Combos) pairing top-performing SKU **{top_name}** ({format_metric_value(top_val, val_col)}) with slower-moving **{bot_name}** ({format_metric_value(bot_val, val_col)}); perform an immediate warehouse inventory audit on **{bot_name}** to expedite stock clearance and liberate working capital."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Scale dynamic pricing adjustments and cross-selling initiatives across primary distribution channels; re-align replenishment schedules and demand forecasting around the baseline average of {format_metric_value(mean_val, val_col)} to boost inventory turnover."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Re-engineer product packaging and portfolio tiering (SKU/Packaging); establish an agile, demand-driven supply chain to continuously protect category margin resilience."
         else:
             urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Concentrate strategic resources to scale market leader {top_name} ({format_metric_value(top_val, val_col)}), while addressing operational bottlenecks in {bot_name} ({format_metric_value(bot_val, val_col)})."
             medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Realign resource allocation frameworks around the benchmark average of {format_metric_value(mean_val, val_col)}; standardize cross-unit operating protocols."
@@ -1949,9 +2050,14 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
         elif entity_type == "product":
             # SẢN PHẨM / HÀNG HÓA: Combo, Định giá, Tồn kho/Xả hàng, Bao bì
-            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Thiết lập gói sản phẩm ưu đãi kết hợp (Combo) giữa mặt hàng bán chạy/margin cao **{top_name}** ({format_metric_value(top_val, val_col)}) với sản phẩm bán chậm hơn **{bot_name}** ({format_metric_value(bot_val, val_col)}); đồng thời kiểm kê hạn sử dụng và đánh giá tồn kho kho vận của **{bot_name}** để kịp thời xả hàng, giải phóng vốn lưu động."
-            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chương trình định giá linh hoạt và bán chéo (Cross-selling) tại các kênh phân phối; tái cân đối kế hoạch mua hàng quanh mức trung bình {format_metric_value(mean_val, val_col)} để tối ưu hóa vòng quay hàng tồn kho (Inventory Turnover)."
-            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Cải tiến bao bì đóng gói (Packaging/SKU), đa dạng hóa phân khúc giá và cơ cấu danh mục sản phẩm; xây dựng chuỗi cung ứng phản ứng nhanh bám sát sự thay đổi trong thị hiếu tiêu dùng để bảo vệ biên lợi nhuận danh mục."
+            if is_pareto:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Ưu tiên bảo đảm nguồn cung ứng và tồn kho an toàn cho mặt hàng bán chạy nhất **{top_name}** ({format_metric_value(top_val, val_col)}); thiết lập gói sản phẩm ưu đãi kết hợp (Combo) giữa **{top_name}** với các sản phẩm bán chậm hơn ngoài nhóm Pareto để kích cầu và giải phóng vốn lưu động."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chương trình trưng bày ưu tiên và bán chéo (Cross-selling) cho top {len(df)} sản phẩm chủ lực (đóng góp ~80% tổng doanh số{cum_val_str}); tái cân đối kế hoạch mua hàng quanh mức trung bình {format_metric_value(mean_val, val_col)}."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Cải tiến bao bì đóng gói (Packaging/SKU) và nghiên cứu mở rộng dòng sản phẩm phái sinh từ mặt hàng dẫn đầu **{top_name}**; xây dựng chuỗi cung ứng phản ứng nhanh bám sát nhu cầu để bảo vệ biên lợi nhuận danh mục."
+            else:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Thiết lập gói sản phẩm ưu đãi kết hợp (Combo) giữa mặt hàng bán chạy **{top_name}** ({format_metric_value(top_val, val_col)}) với sản phẩm bán chậm hơn **{bot_name}** ({format_metric_value(bot_val, val_col)}); đồng thời kiểm kê hạn sử dụng và đánh giá tồn kho kho vận của **{bot_name}** để kịp thời giải phóng vốn lưu động."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chương trình định giá linh hoạt và bán chéo (Cross-selling) tại các kênh phân phối; tái cân đối kế hoạch mua hàng quanh mức trung bình {format_metric_value(mean_val, val_col)} để tối ưu hóa vòng quay hàng tồn kho (Inventory Turnover)."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Cải tiến bao bì đóng gói (Packaging/SKU), đa dạng hóa phân khúc giá và cơ cấu danh mục sản phẩm; xây dựng chuỗi cung ứng phản ứng nhanh bám sát sự thay đổi trong thị hiếu tiêu dùng để bảo vệ biên lợi nhuận danh mục."
         else:
             urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tập trung nguồn lực bảo vệ và phát huy thế mạnh của {top_name} ({format_metric_value(top_val, val_col)}), đồng thời rà soát và khắc phục các điểm nghẽn hiệu quả tại nhóm {bot_name} ({format_metric_value(bot_val, val_col)})."
             medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tái cơ cấu quy trình phân bổ nguồn lực dựa trên mức trung bình {format_metric_value(mean_val, val_col)}; thiết lập các chuẩn mực vận hành đồng bộ giữa các đơn vị."
@@ -1969,11 +2075,13 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
         part_22 = ""
         if df is not None and not df.empty:
             measure_cols, cat_cols, time_col = get_axis_columns(df)
-            val_col = measure_cols[0] if measure_cols else None
+            val_col, name_col = select_primary_insight_columns(df, user_query=user_query)
+            if not val_col:
+                val_col = measure_cols[0] if measure_cols else None
             if not val_col:
                 num_cols = df.select_dtypes(include="number").columns.tolist()
                 if num_cols:
-                    val_col = num_cols[-1]
+                    val_col = num_cols[0]
 
             spread_candidate = next((c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
             if spread_candidate:
@@ -2017,8 +2125,9 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                 except Exception:
                     pass
             elif val_col:
-                name_candidates = [c for c in cat_cols if c != val_col] or [c for c in df.columns if c != val_col]
-                name_col = name_candidates[0] if name_candidates else None
+                if not name_col:
+                    name_candidates = [c for c in cat_cols if c != val_col] or [c for c in df.columns if c != val_col]
+                    name_col = name_candidates[0] if name_candidates else None
                 if name_col:
                     try:
                         df_eval = df.copy()
@@ -2036,6 +2145,11 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                         median_val = float(df_eval[val_col].median())
                         is_salary = any(k in str(val_col).lower() for k in ["salary", "lương", "wage", "pay", "thu_nhập"])
                         med_label = "Thu nhập trung vị" if is_salary else "Quy mô trung vị"
+
+                        is_pareto = any(k in str(c).lower() for c in df.columns for k in ["cumulative", "tích lũy", "tich_luy", "runningtotal"]) or any(k in q_low for k in ["pareto", "80/20", "80%", "80-20", "tích lũy", "cumulative"])
+                        pct_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["percentage", "tỷ trọng", "tỉ trọng", "pct", "percent"]) and not any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy"])), None)
+                        cum_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy"])), None)
+
                         if len(df) == 1:
                             has_max_min = any("max" in str(c).lower() for c in df.columns) and any("min" in str(c).lower() for c in df.columns)
                             if has_max_min:
@@ -2050,7 +2164,8 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                                         f"• **Internal Compensation Range**: Peak compensation reaches **{max_v_fmt}**, against a base floor of **{min_v_fmt}**.\n\n"
                                         f"• **Structural Evaluation**: This wide variance highlights significant pay progression between entry levels and senior specialists."
                                     )
-                                else:
+                                Adversary_action = None
+                                if not is_en:
                                     part_21 = (
                                         f"• **Đơn vị Dẫn đầu**: Phòng ban **{top_name}** ghi nhận mức chênh lệch lương nội bộ lớn nhất toàn tổ chức với **{val_fmt}**.\n\n"
                                         f"• **Biên độ Thu nhập Nội bộ**: Mức lương cao nhất tại phòng đạt **{max_v_fmt}**, trong khi mức lương sàn là **{min_v_fmt}**.\n\n"
@@ -2062,8 +2177,23 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                                     part_21 = f"• **Target Entity**: **{top_name}** recorded at **{val_fmt}**, representing the primary metric extracted from the inquiry."
                                 else:
                                     part_21 = f"• **Thực thể Trọng tâm**: **{top_name}** đạt mức **{val_fmt}**, là chỉ số trọng tâm theo yêu cầu của câu hỏi điều hành."
+                        elif is_pareto:
+                            top_pct_str = f" ({format_metric_value(top_row[pct_col], pct_col)} tổng doanh số)" if (pct_col and pct_col in top_row) else ""
+                            cum_val = df[cum_col].iloc[-1] if cum_col else None
+                            cum_str = format_metric_value(cum_val, cum_col) if cum_val is not None else "xấp xỉ 80%"
+                            n_items = len(df)
+                            if is_en:
+                                b1 = f"• **Pareto Revenue Leader**: Product **{top_name}** commands the #1 position ({format_metric_value(top_val, val_col)}{top_pct_str}), acting as the primary revenue locomotive."
+                                b2 = f"• **Cumulative Contribution (Pareto 80/20)**: Top {n_items} products account for a cumulative **{cum_str}** of total sales, demonstrating high revenue concentration in core SKUs."
+                                b3 = f"• **Benchmark Median**: Core group median scale stands at {format_metric_value(median_val, val_col)}, establishing a baseline for inventory planning."
+                                part_21 = f"{b1}\n\n{b2}\n\n{b3}"
+                            else:
+                                b1 = f"• **Dẫn đầu Doanh số Nhóm Pareto**: Sản phẩm **{top_name}** chiếm vị trí quán quân ({format_metric_value(top_val, val_col)}{top_pct_str}), giữ vai trò đầu tàu dẫn dắt doanh thu danh mục."
+                                b2 = f"• **Tỷ lệ Đóng góp Tích lũy (Pareto 80/20)**: Top {n_items} sản phẩm trong nhóm đóng góp tích lũy **{cum_str}** tổng doanh số, khẳng định mức độ tập trung doanh thu cốt lõi vào nhóm sản phẩm chủ lực."
+                                b3 = f"• **Mặt bằng Chuẩn Toàn Danh mục (Benchmark Median)**: Quy mô trung vị của nhóm chủ lực là {format_metric_value(median_val, val_col)}, thiết lập đường cơ sở chuẩn cho kế hoạch cung ứng và tồn kho."
+                                part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                         else:
-                            is_margin = any(k in str(val_col).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"]) or any(k in q_low for k in ["tỷ suất", "tỉ suất", "margin", "%"])
+                            is_margin = (any(k in str(val_col).lower() for k in ["margin", "tỷ suất", "tỉ suất", "gross_margin", "profit_margin"]) or any(k in q_low for k in ["tỷ suất", "tỉ suất lợi nhuận", "gross margin", "profit margin"]))
                             tradeoff_line = detect_tradeoff_insight(df, name_col, val_col, is_en=is_en)
                             if is_margin:
                                 if is_en:
@@ -2217,12 +2347,15 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
 
     # Nếu part_21 rỗng hoặc bị lọc hết rác -> tự động tính toán số liệu thực tế từ DataFrame
     if (not part_21 or len([l for l in part_21.split("\n") if l.strip()]) < 2) and df is not None and not df.empty:
-        cols = df.columns.tolist()
-        num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
-        cat_cols = [c for c in cols if c not in num_cols]
-        if num_cols and cat_cols:
-            val_col = num_cols[0]
-            name_col = cat_cols[0]
+        val_col, name_col = select_primary_insight_columns(df, user_query=user_query)
+        if not val_col or not name_col:
+            cols = df.columns.tolist()
+            num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+            cat_cols = [c for c in cols if c not in num_cols]
+            val_col = val_col or (num_cols[0] if num_cols else None)
+            name_col = name_col or (cat_cols[0] if cat_cols else (num_cols[1] if len(num_cols) > 1 else None))
+
+        if val_col and name_col:
             sorted_df = df.sort_values(by=val_col, ascending=False)
             top_row = sorted_df.iloc[0]
             bot_row = sorted_df.iloc[-1]
@@ -2235,49 +2368,69 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
             is_salary = any(k in str(val_col).lower() for k in ["salary", "lương", "wage", "pay", "thu_nhập"])
             med_label = "Thu nhập trung vị" if is_salary else "Quy mô trung vị"
 
-            is_margin = any(k in str(val_col).lower() for k in ["margin", "tỷ suất", "tỉ suất", "%"]) or any(k in q_low for k in ["tỷ suất", "tỉ suất", "margin", "%"])
-            tradeoff_line = detect_tradeoff_insight(df, name_col, val_col, is_en=is_en)
-            if is_margin:
+            is_pareto = any(k in str(c).lower() for c in df.columns for k in ["cumulative", "tích lũy", "tich_luy", "runningtotal"]) or any(k in q_low for k in ["pareto", "80/20", "80%", "80-20", "tích lũy", "cumulative"])
+            pct_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["percentage", "tỷ trọng", "tỉ trọng", "pct", "percent"]) and not any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy"])), None)
+            cum_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy"])), None)
+
+            if is_pareto:
+                top_pct_str = f" ({format_metric_value(top_row[pct_col], pct_col)} tổng doanh số)" if (pct_col and pct_col in top_row) else ""
+                cum_val = df[cum_col].iloc[-1] if cum_col else None
+                cum_str = format_metric_value(cum_val, cum_col) if cum_val is not None else "xấp xỉ 80%"
+                n_items = len(df)
                 if is_en:
-                    b1 = f"• **Gross Margin Leader**: Group **{top_name}** commands the highest margin ({format_metric_value(top_val, val_col)}), indicating an optimized COGS cost structure per unit."
-                    b2 = tradeoff_line if tradeoff_line else f"• **Margin Spread**: Standing {gap_vs_top:.1f}% above {bot_name} ({format_metric_value(bot_val, val_col)}), demonstrating strong pricing resilience across top tiers."
-                    b3 = f"• **Benchmark Median**: Portfolio median margin stands at {format_metric_value(median_val, val_col)}, establishing a solid profitability baseline."
+                    b1 = f"• **Pareto Revenue Leader**: Product **{top_name}** commands the #1 position ({format_metric_value(top_val, val_col)}{top_pct_str}), acting as the primary revenue locomotive."
+                    b2 = f"• **Cumulative Contribution (Pareto 80/20)**: Top {n_items} products account for a cumulative **{cum_str}** of total sales, demonstrating high revenue concentration in core SKUs."
+                    b3 = f"• **Benchmark Median**: Core group median scale stands at {format_metric_value(median_val, val_col)}, establishing a baseline for inventory planning."
                     part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                 else:
-                    b1 = f"• **Dẫn đầu Biên Lợi nhuận (Gross Margin Leader)**: Nhóm **{top_name}** đạt tỷ suất cao nhất ({format_metric_value(top_val, val_col)}), khẳng định lợi thế tối ưu hóa chi phí giá vốn (COGS) trên từng đơn vị sản phẩm."
-                    b2 = tradeoff_line if tradeoff_line else f"• **Biên độ Phân hóa**: Duy trì khoảng cách {gap_vs_top:.1f}% so với nhóm thấp nhất ({bot_name}: {format_metric_value(bot_val, val_col)}), cho thấy toàn bộ danh mục duy trì kỷ luật định giá cao."
-                    b3 = f"• **Mặt bằng Chuẩn Toàn Danh mục (Benchmark Median)**: Tỷ suất lợi nhuận trung vị toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh biên an toàn tài chính vững chắc."
+                    b1 = f"• **Dẫn đầu Doanh số Nhóm Pareto**: Sản phẩm **{top_name}** chiếm vị trí quán quân ({format_metric_value(top_val, val_col)}{top_pct_str}), giữ vai trò đầu tàu dẫn dắt doanh thu danh mục."
+                    b2 = f"• **Tỷ lệ Đóng góp Tích lũy (Pareto 80/20)**: Top {n_items} sản phẩm trong nhóm đóng góp tích lũy **{cum_str}** tổng doanh số, khẳng định mức độ tập trung doanh thu cốt lõi vào nhóm sản phẩm chủ lực."
+                    b3 = f"• **Mặt bằng Chuẩn Toàn Danh mục (Benchmark Median)**: Quy mô trung vị của nhóm chủ lực là {format_metric_value(median_val, val_col)}, thiết lập đường cơ sở chuẩn cho kế hoạch cung ứng và tồn kho."
                     part_21 = f"{b1}\n\n{b2}\n\n{b3}"
             else:
-                detected_ent = detect_analysis_entity_type(df, user_query=user_query, name_col=name_col)
-                if detected_ent == "geo":
-                    ent_pfx_vi = "Thị trường"
-                    ent_pfx_en = "Market"
-                elif detected_ent == "team":
-                    ent_pfx_vi = "Đội ngũ"
-                    ent_pfx_en = "Team"
-                elif detected_ent == "product":
-                    ent_pfx_vi = "Sản phẩm"
-                    ent_pfx_en = "Product"
-                elif detected_ent == "employee":
-                    ent_pfx_vi = "Nhân sự"
-                    ent_pfx_en = "Personnel"
+                is_margin = (any(k in str(val_col).lower() for k in ["margin", "tỷ suất", "tỉ suất", "gross_margin", "profit_margin"]) or any(k in q_low for k in ["tỷ suất", "tỉ suất lợi nhuận", "gross margin", "profit margin"]))
+                tradeoff_line = detect_tradeoff_insight(df, name_col, val_col, is_en=is_en)
+                if is_margin:
+                    if is_en:
+                        b1 = f"• **Gross Margin Leader**: Group **{top_name}** commands the highest margin ({format_metric_value(top_val, val_col)}), indicating an optimized COGS cost structure per unit."
+                        b2 = tradeoff_line if tradeoff_line else f"• **Margin Spread**: Standing {gap_vs_top:.1f}% above {bot_name} ({format_metric_value(bot_val, val_col)}), demonstrating strong pricing resilience across top tiers."
+                        b3 = f"• **Benchmark Median**: Portfolio median margin stands at {format_metric_value(median_val, val_col)}, establishing a solid profitability baseline."
+                        part_21 = f"{b1}\n\n{b2}\n\n{b3}"
+                    else:
+                        b1 = f"• **Dẫn đầu Biên Lợi nhuận (Gross Margin Leader)**: Nhóm **{top_name}** đạt tỷ suất cao nhất ({format_metric_value(top_val, val_col)}), khẳng định lợi thế tối ưu hóa chi phí giá vốn (COGS) trên từng đơn vị sản phẩm."
+                        b2 = tradeoff_line if tradeoff_line else f"• **Biên độ Phân hóa**: Duy trì khoảng cách {gap_vs_top:.1f}% so với nhóm thấp nhất ({bot_name}: {format_metric_value(bot_val, val_col)}), cho thấy toàn bộ danh mục duy trì kỷ luật định giá cao."
+                        b3 = f"• **Mặt bằng Chuẩn Toàn Danh mục (Benchmark Median)**: Tỷ suất lợi nhuận trung vị toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh biên an toàn tài chính vững chắc."
+                        part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                 else:
-                    ent_pfx_vi = "Nhóm"
-                    ent_pfx_en = "Group"
+                    detected_ent = detect_analysis_entity_type(df, user_query=user_query, name_col=name_col)
+                    if detected_ent == "geo":
+                        ent_pfx_vi = "Thị trường"
+                        ent_pfx_en = "Market"
+                    elif detected_ent == "team":
+                        ent_pfx_vi = "Đội ngũ"
+                        ent_pfx_en = "Team"
+                    elif detected_ent == "product":
+                        ent_pfx_vi = "Sản phẩm"
+                        ent_pfx_en = "Product"
+                    elif detected_ent == "employee":
+                        ent_pfx_vi = "Nhân sự"
+                        ent_pfx_en = "Personnel"
+                    else:
+                        ent_pfx_vi = "Nhóm"
+                        ent_pfx_en = "Group"
 
-                if is_en:
-                    part_21 = (
-                        f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
-                        f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
-                        f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
-                    )
-                else:
-                    part_21 = (
-                        f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
-                        f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
-                        f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
-                    )
+                    if is_en:
+                        part_21 = (
+                            f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
+                            f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
+                            f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
+                        )
+                    else:
+                        part_21 = (
+                            f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
+                            f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                            f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
+                        )
 
     # 2. Làm sạch mục Giả thuyết & Nguyên nhân (part_22)
     if part_22:
