@@ -145,9 +145,9 @@ def clean_sql_query(sql: str) -> str:
     # 6.3 Sửa lỗi tên bảng thiếu s: FROM/JOIN department -> FROM/JOIN departments
     s = re.sub(r"\b(FROM|JOIN)\s+department\b(?!\s+(?:AS\s+)?departments\b)", r"\1 departments", s, flags=re.IGNORECASE)
 
-    # 6.4 Khi đếm số lần tăng lương lịch sử hoặc nhóm theo năm/thời gian (GROUP BY YEAR/from_date):
+    # 6.4 Khi đếm số lần tăng lương lịch sử hoặc nhóm theo năm/thời gian (GROUP BY / PARTITION BY YEAR/from_date):
     # Tự động gỡ bỏ triệt để to_date = '9999-01-01' để lấy đủ toàn bộ lịch sử (tránh lỗi chỉ ra 2 năm 2001-2002)
-    if re.search(r"GROUP\s+BY\s+.*(?:YEAR|from_date|hire_date|hireyear)", s, re.IGNORECASE) or re.search(r"COUNT\s*\(\s*s\.salary\s*\)|raisecount", s, re.IGNORECASE):
+    if re.search(r"(?:GROUP\s+BY|PARTITION\s+BY)\s+.*(?:YEAR|from_date|saledate|hire_date|hireyear|strftime)", s, re.IGNORECASE) or re.search(r"COUNT\s*\(\s*s\.salary\s*\)|raisecount", s, re.IGNORECASE):
         s = re.sub(r"\s*AND\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
         s = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]\s*AND", " WHERE", s, flags=re.IGNORECASE)
         s = re.sub(r"\s*WHERE\s+[a-zA-Z0-9_.]*to_date\s*=\s*['\"]9999-01-01['\"]", "", s, flags=re.IGNORECASE)
@@ -272,16 +272,21 @@ def auto_fix_top_employee_per_year_query(sql: str, user_query: str, schema_conte
     q_low = user_query.lower()
     schema_low = (schema_context or "").lower()
 
-    is_per_year = any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó", "per year", "each year", "by year"])
+    is_per_year = (
+        any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó", "tất cả các năm", "các năm", "per year", "each year", "by year", "all years"])
+        or ("1985" in q_low and any(yr in q_low for yr in ["2001", "2002", "đến"]))
+        or ("năm từ" in q_low)
+        or ("tất cả các năm" in q_low)
+    )
     if not is_per_year:
         return sql
 
     is_top_person = (
-        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "salesperson", "sales person", "rep", "danh sách"])
+        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "salesperson", "sales person", "rep", "danh sách", "tất cả", "năm từ", "2 năm"])
         and any(k in q_low for k in [
             "lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "thu nhập lớn nhất",
             "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất",
-            "cao nhất", "lớn nhất", "nhiều nhất", "khủng nhất", "highest", "top 1", "dẫn đầu"
+            "cao nhất", "lớn nhất", "nhiều nhất", "khủng nhất", "highest", "top 1", "dẫn đầu", "1985", "tất cả các năm"
         ])
         and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng"])
     )

@@ -3687,9 +3687,12 @@ LIMIT {req_limit};
 
     # 2.4 Danh sách nhân viên đạt mức lương / tổng doanh thu lớn nhất qua từng năm
     elif (
-        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "danh sách"])
-        and any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất", "lớn nhất", "cao nhất", "nhiều nhất", "khủng nhất"])
-        and any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó"])
+        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "danh sách", "tất cả", "năm từ", "2 năm"])
+        and any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất", "lớn nhất", "cao nhất", "nhiều nhất", "khủng nhất", "1985", "tất cả các năm"])
+        and (
+            any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó", "tất cả các năm", "các năm"])
+            or ("1985" in q_low and any(yr in q_low for yr in ["2001", "2002", "đến"]))
+        )
         and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng"])
     ):
         if is_sqlite:
@@ -3716,7 +3719,8 @@ ORDER BY Year ASC;
 (CẢNH BÁO BẮT BUỘC:
 1. Trả về đúng 4 cột: emp_no (Mã NV), FullName (Tên Nhân viên), Year (Năm), MaxSalary (Lương cao nhất từng năm).
 2. Dùng CTE và ROW_NUMBER() OVER (PARTITION BY strftime('%Y', s.from_date) ORDER BY s.salary DESC) để lấy chính xác người có mức lương cao nhất trong từng năm.
-3. Lọc WHERE rn = 1 và ORDER BY Year ASC để liệt kê đầy đủ từng năm từ trước đến nay! TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10 đơn thuần!)
+3. TUYỆT ĐỐI KHÔNG LỌC to_date = '9999-01-01' để lấy đủ toàn bộ các năm lịch sử từ 1985 đến 2002!
+4. Lọc WHERE rn = 1 và ORDER BY Year ASC để liệt kê đầy đủ từng năm từ trước đến nay! TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10 đơn thuần!)
 """
         else:
             return """
@@ -3742,7 +3746,8 @@ ORDER BY Year ASC;
 (CẢNH BÁO BẮT BUỘC:
 1. Trả về đúng 4 cột: emp_no (Mã NV), FullName (Tên Nhân viên), Year (Năm), MaxSalary (Lương cao nhất từng năm).
 2. Dùng CTE và ROW_NUMBER() OVER (PARTITION BY YEAR(s.from_date) ORDER BY s.salary DESC) để lấy chính xác người có mức lương cao nhất trong từng năm.
-3. Lọc WHERE rn = 1 và ORDER BY Year ASC để liệt kê đầy đủ từng năm từ trước đến nay! TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10 đơn thuần!)
+3. TUYỆT ĐỐI KHÔNG LỌC to_date = '9999-01-01' để lấy đủ toàn bộ các năm lịch sử từ 1985 đến 2002!
+4. Lọc WHERE rn = 1 và ORDER BY Year ASC để liệt kê đầy đủ từng năm từ trước đến nay! TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10 đơn thuần!)
 """
 
     # 2.5 Xu hướng mức lương trung bình của toàn công ty qua các năm
