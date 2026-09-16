@@ -1280,6 +1280,34 @@ FROM sales s
 WHERE strftime('%Y', s.SaleDate) = '2021'
 GROUP BY Month
 ORDER BY Month ASC;"""
+    },
+    {
+        "id": "choco_team_monthly_revenue_trend_2021",
+        "domain": "awesome_chocolates",
+        "category": "monthly_trend",
+        "tags": [
+            "team yummies", "yummies", "delish", "jucies", "doanh thu", "qua các tháng", "năm 2021",
+            "thay đổi như thế nào", "xu hướng", "tháng", "đội ngũ", "team"
+        ],
+        "question": "Doanh thu của Team Yummies thay đổi như thế nào qua các tháng năm 2021?",
+        "question_en": "How did revenue for Team Yummies change across months in 2021?",
+        "intent_explanation": "Tính xu hướng doanh thu theo từng tháng trong năm 2021 của riêng Team Yummies. Liên kết sales s với people pe ON s.SPID = pe.SPID, lọc pe.Team = 'Yummies' VÀ YEAR(s.SaleDate) = 2021, nhóm theo Month và sắp xếp theo Month tăng dần.",
+        "sql_mysql": """SELECT 
+    DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team = 'Yummies' AND YEAR(s.SaleDate) = 2021
+GROUP BY Month
+ORDER BY Month ASC;""",
+        "sql_sqlite": """SELECT 
+    strftime('%Y-%m', s.SaleDate) AS Month,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team = 'Yummies' AND strftime('%Y', s.SaleDate) = '2021'
+GROUP BY Month
+ORDER BY Month ASC;"""
     }
 ]
 

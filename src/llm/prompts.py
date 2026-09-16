@@ -2157,6 +2157,15 @@ ORDER BY Month ASC, TotalSales DESC;
                 yr_val = yr_match.group(1)
                 yr_filter = f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}"
 
+            has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"])
+            has_sales = any(k in q_low for k in ["doanh thu", "doanh số", "sales", "tiền", "amount"])
+            if has_sales and has_boxes:
+                metric_col = "SUM(s.Amount) AS TotalRevenue,\n    SUM(s.Boxes) AS TotalBoxesSold"
+            elif has_boxes:
+                metric_col = "SUM(s.Boxes) AS TotalBoxesSold"
+            else:
+                metric_col = "SUM(s.Amount) AS TotalSales"
+
             if specific_team:
                 conds = [f"pe.Team = '{specific_team}'"]
                 if yr_filter:
@@ -2166,13 +2175,13 @@ ORDER BY Month ASC, TotalSales DESC;
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU CỦA TEAM {specific_team.upper()} QUA CÁC THÁNG):
 SELECT 
     {date_expr} AS Month,
-    SUM(s.Amount) AS TotalSales
+    {metric_col}
 FROM sales s
 JOIN people pe ON s.SPID = pe.SPID
 {where_clause}
 GROUP BY Month
 ORDER BY Month ASC;
-(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Lọc đội ngũ bằng pe.Team = '{specific_team}'! BẮT BUỘC ORDER BY Month ASC để vẽ biểu đồ đường 12 tháng!)
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và people pe ON s.SPID = pe.SPID! Lọc đội ngũ bằng pe.Team = '{specific_team}'! BẮT BUỘC CHỈ GROUP BY Month, TUYỆT ĐỐI KHÔNG GROUP BY Team hoặc xuất cột Team! ORDER BY Month ASC để vẽ biểu đồ đường 12 tháng của riêng team {specific_team}!)
 """
             else:
                 where_clause = f"WHERE pe.Team != '' AND {yr_filter}" if yr_filter else "WHERE pe.Team != ''"

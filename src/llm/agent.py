@@ -3197,19 +3197,7 @@ def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: 
             metric_expr = "SUM(s.Boxes) AS TotalBoxesSold"
         else:
             metric_expr = "SUM(s.Amount) AS TotalSales"
-        needs_fix = (
-            "with " in sql_low
-            or "products" in sql_low
-            or "pr." in sql_low
-            or "pe.spid" not in sql_low
-            or f"'{specific_team.lower()}'" not in sql_low
-            or ("date_format" not in sql_low and not is_sqlite)
-            or ("strftime" not in sql_low and is_sqlite)
-            or "group by month" not in sql_low
-            or (has_both and ("boxes" not in sql_low or ("amount" not in sql_low and "totalsales" not in sql_low and "totalrevenue" not in sql_low)))
-        )
-        if needs_fix:
-            return f"""SELECT 
+        return f"""SELECT 
     {date_expr} AS Month,
     {metric_expr}
 FROM sales s
@@ -3353,9 +3341,9 @@ JOIN people pe ON s.SPID = pe.SPID
 GROUP BY Month
 ORDER BY Month ASC"""
 
-    # 0.2 Doanh thu theo từng Team qua các tháng
+    # 0.2 Doanh thu theo từng Team qua các tháng (tất cả các team)
     is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng"]) or "team" in sql_low
-    if is_team and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country", "nhân viên", "salesperson"]):
+    if is_team and not specific_team and not any(k in q_low for k in ["yummies", "delish", "jucies", "sản phẩm", "product", "quốc gia", "country", "nhân viên", "salesperson"]):
         conds = ["pe.Team != ''"]
         if year_cond:
             conds.append(year_cond)
