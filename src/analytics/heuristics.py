@@ -637,355 +637,434 @@ def pick_label_column(df: pd.DataFrame, label_cols: list) -> tuple:
     return chosen_col, df[chosen_col].astype(str), [chosen_col]
 
 
-def generate_starter_prompts(tables: list[str], schema_context: str = "") -> list[dict]:
-    """Tự động sinh 4 thẻ gợi ý câu hỏi thông minh 1-chạm bám sát chính xác nghiệp vụ và cấu trúc bảng của CSDL."""
-    tables_lower = [t.lower() for t in tables]
-    all_text = (" ".join(tables_lower) + " " + (schema_context or "").lower()).strip()
+_DYNAMIC_STARTER_CACHE = {}
 
-    cards = []
 
-    # 1. Nhận diện các miền dữ liệu (Domains)
-    has_hr = any(t in tables_lower for t in ["employees", "nhan_vien", "salaries", "luong", "departments", "phong_ban", "titles", "dept_emp", "staff", "payroll"])
-    has_sales = any(t in tables_lower for t in ["sales", "orders", "don_hang", "order_details", "transactions", "invoices", "hoa_don"])
-    has_product = any(t in tables_lower for t in ["products", "san_pham", "items", "hang_hoa"])
-    has_education = any(t in tables_lower for t in ["students", "hoc_sinh", "courses", "khoa_hoc", "classes", "lop_hoc", "grades", "diem_thi"])
-    has_healthcare = any(t in tables_lower for t in ["patients", "benh_nhan", "doctors", "bac_si", "appointments", "lich_kham"])
-    has_finance = any(t in tables_lower for t in ["accounts", "tai_khoan", "loans", "vay_von", "cards", "the_ngan_hang"])
+def humanize_name_vi(name: str) -> str:
+    """Chuyển đổi tên bảng hoặc tên cột kỹ thuật (e.g. order_date, total_amount) sang cụm từ tiếng Việt tự nhiên."""
+    if not name:
+        return ""
+    s = str(name).strip()
+    if any(c in s for c in "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựíìỉĩịđýỳỷỹỵÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÍÌỈĨỊĐÝỲỶỸỴ"):
+        return s
 
-    # 2. Miền HR / Nhân sự / Tiền lương (như CSDL employees)
-    if has_hr and not has_sales:
-        cards.append({
-            "icon": "⚖️",
-            "title": "So Sánh Lương Nam vs Nữ Theo Chức Danh",
-            "prompt": "So sánh mức lương trung bình giữa nhân viên nam và nữ theo từng chức danh",
-            "desc": "Phân tích đối chuẩn công bằng thu nhập và thu hẹp khoảng cách giới"
-        })
-        cards.append({
-            "icon": "💰",
-            "title": "Top 10 Lương Cao Nhất Phòng Sales",
-            "prompt": "Top 10 nhân viên có mức lương cao nhất trong phòng ban Sales",
-            "desc": "Danh sách nhân sự xuất sắc có thu nhập cao nhất khối Kinh doanh"
-        })
-        cards.append({
-            "icon": "📅",
-            "title": "Xu Hướng Tuyển Dụng Theo Từng Năm",
-            "prompt": "Thống kê số lượng nhân viên được tuyển dụng theo từng năm từ trước đến nay",
-            "desc": "Phân tích tốc độ tăng trưởng quy mô tổ chức qua các thời kỳ"
-        })
-        cards.append({
-            "icon": "🚻",
-            "title": "Tỷ Lệ Giới Tính Ban Quản Lý (Manager)",
-            "prompt": "Tỷ lệ nam và nữ trong ban quản lý (dept_manager) của từng phòng ban",
-            "desc": "Đo lường cơ cấu đa dạng giới trong đội ngũ lãnh đạo phòng ban"
-        })
-        cards.append({
-            "icon": "🏢",
-            "title": "Chênh Lệch Lương Nội Bộ Phòng Ban",
-            "prompt": "Phòng ban nào có mức chênh lệch lương giữa người cao nhất và thấp nhất lớn nhất?",
-            "desc": "Phát hiện khoảng cách phân hóa thu nhập nội bộ từng đơn vị"
-        })
-        cards.append({
-            "icon": "👔",
-            "title": "Danh Sách Trưởng Phòng & Mức Lương",
-            "prompt": "Danh sách các Manager hiện tại của từng phòng ban kèm mức lương mới nhất",
-            "desc": "Tổng hợp hồ sơ đãi ngộ của toàn bộ ban lãnh đạo quản lý"
-        })
+    norm = re.sub(r"[^a-zA-Z0-9]", "", s).lower()
+    vi_terms = {
+        "sales": "Doanh số",
+        "totalsales": "Tổng doanh số",
+        "revenue": "Doanh thu",
+        "amount": "Số tiền",
+        "totalamount": "Tổng tiền",
+        "price": "Đơn giá",
+        "unitprice": "Đơn giá",
+        "cost": "Chi phí",
+        "totalcost": "Tổng chi phí",
+        "profit": "Lợi nhuận",
+        "netprofit": "Lợi nhuận ròng",
+        "salary": "Mức lương",
+        "currentsalary": "Lương hiện tại",
+        "totalsalary": "Tổng quỹ lương",
+        "payroll": "Quỹ lương",
+        "boxes": "Số lượng hộp",
+        "totalboxes": "Tổng số hộp",
+        "quantity": "Số lượng",
+        "qty": "Số lượng",
+        "orders": "Đơn hàng",
+        "ordercount": "Số lượng đơn",
+        "products": "Sản phẩm",
+        "productname": "Sản phẩm",
+        "category": "Nhóm hàng",
+        "categoryname": "Danh mục",
+        "team": "Team kinh doanh",
+        "teamname": "Đội ngũ",
+        "geo": "Thị trường",
+        "country": "Quốc gia",
+        "city": "Thành phố",
+        "region": "Khu vực",
+        "location": "Địa điểm",
+        "department": "Phòng ban",
+        "deptname": "Phòng ban",
+        "title": "Chức danh",
+        "jobtitle": "Vị trí công việc",
+        "employees": "Nhân sự",
+        "fullname": "Họ và tên",
+        "salesperson": "Chuyên viên bán hàng",
+        "customers": "Khách hàng",
+        "customername": "Khách hàng",
+        "students": "Học viên",
+        "courses": "Khóa học",
+        "grades": "Điểm số",
+        "patients": "Bệnh nhân",
+        "doctors": "Bác sĩ",
+        "doctorname": "Bác sĩ",
+        "appointments": "Lịch hẹn khám",
+        "appointmentdate": "Ngày khám",
+        "flights": "Chuyến bay",
+        "flightnumber": "Mã chuyến bay",
+        "airports": "Sân bay",
+        "airline": "Hãng bay",
+        "airlinename": "Hãng bay",
+        "airlines": "Hãng bay",
+        "tickets": "Vé máy bay",
+        "ticketprice": "Giá vé",
+        "farepaid": "Tiền vé",
+        "fare": "Giá vé",
+        "seatclass": "Hạng ghế",
+        "durationminutes": "Thời lượng bay (Phút)",
+        "duration": "Thời lượng",
+        "departuretime": "Thời gian khởi hành",
+        "arrivaltime": "Thời gian hạ cánh",
+        "accounts": "Tài khoản",
+        "transactions": "Giao dịch",
+        "invoices": "Hóa đơn",
+        "status": "Trạng thái",
+        "type": "Loại hình",
+        "branch": "Chi nhánh",
+        "rating": "Điểm đánh giá",
+        "score": "Điểm số",
+        "balance": "Số dư",
+        "gender": "Giới tính",
+        "hiredate": "Năm tuyển dụng",
+        "saledate": "Thời gian bán",
+        "orderdate": "Ngày đặt hàng",
+        "createdat": "Thời gian tạo",
+        "date": "Thời gian",
+        "year": "Năm",
+        "month": "Tháng",
+        "quarter": "Quý",
+        "fee": "Phí dịch vụ",
+        "age": "Độ tuổi",
+    }
+    if norm in vi_terms:
+        return vi_terms[norm]
 
-    # 3. Miền Bán hàng & Sản phẩm (như CSDL Awesome Chocolates)
-    elif has_sales and has_product:
-        cards.append({
-            "icon": "📦",
-            "title": "Tỷ Lệ Đóng Góp Doanh Thu Nhóm Hàng",
-            "prompt": "Tỷ lệ đóng góp doanh thu của từng nhóm sản phẩm (Category) vào tổng doanh thu",
-            "desc": "Phân tích cơ cấu danh mục hàng hóa và tỷ trọng doanh thu"
-        })
-        cards.append({
-            "icon": "🏆",
-            "title": "So Sánh Hiệu Suất Các Team Bán Hàng",
-            "prompt": "So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh",
-            "desc": "Đánh giá hiệu suất cạnh tranh giữa các đội ngũ bán hàng"
-        })
-        cards.append({
-            "icon": "🌍",
-            "title": "Xu Hướng Doanh Thu Từng Quốc Gia",
-            "prompt": "Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng?",
-            "desc": "Theo dõi biểu đồ tăng trưởng thị trường quốc tế theo chuỗi thời gian"
-        })
-        cards.append({
-            "icon": "🏷️",
-            "title": "Lợi Nhuận Trung Bình Mỗi Hộp Sô-cô-la",
-            "prompt": "Mức lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm",
-            "desc": "Xác định các mặt hàng có biên lợi nhuận cao nhất"
-        })
-        cards.append({
-            "icon": "👥",
-            "title": "Chuyên Viên Đạt Doanh Số > 50,000 USD",
-            "prompt": "Những nhân viên bán hàng có tổng doanh số vượt mức 50,000 USD",
-            "desc": "Vinh danh các chuyên viên kinh doanh đạt mốc doanh số ấn tượng"
-        })
-        cards.append({
-            "icon": "🍫",
-            "title": "Top 10 Sản Phẩm Bán Chạy Nhất",
-            "prompt": "Top 10 sản phẩm có tổng doanh số bán ra cao nhất",
-            "desc": "Xếp hạng các sản phẩm chủ lực mang lại nguồn thu lớn nhất"
-        })
-        cards.append({
-            "icon": "🎓",
-            "title": "Điểm Số Trung Bình Theo Môn Học",
-            "prompt": "Điểm số trung bình của học viên theo từng môn học",
-            "desc": "Đánh giá kết quả học tập và phân bố điểm số"
-        })
-        cards.append({
-            "icon": "📚",
-            "title": "Số Lượng Học Viên Đăng Ký",
-            "prompt": "Thống kê số lượng học viên theo từng khóa học",
-            "desc": "Xác định các khóa học thu hút nhiều học viên nhất"
-        })
-        cards.append({
-            "icon": "🏆",
-            "title": "Top 10 Học Viên Xuất Sắc",
-            "prompt": "Top 10 học viên có điểm số cao nhất",
-            "desc": "Bảng vinh danh các cá nhân có thành tích cao"
-        })
-        cards.append({
-            "icon": "🏫",
-            "title": "Quy Mô Đào Tạo Theo Khoa / Lớp",
-            "prompt": "Số lượng học viên phân bổ theo từng lớp",
-            "desc": "Thống kê sĩ số và quy mô tổ chức các lớp học"
-        })
+    # Nhận diện theo từ khóa thành phần
+    if any(k in norm for k in ["price", "gia", "dongia"]):
+        return "Đơn giá"
+    if any(k in norm for k in ["cost", "chiphi", "giavon"]):
+        return "Chi phí"
+    if any(k in norm for k in ["profit", "loinhuan", "lai"]):
+        return "Lợi nhuận"
+    if any(k in norm for k in ["sales", "doanhso", "revenue", "doanhthu"]):
+        return "Doanh số"
+    if any(k in norm for k in ["salary", "luong", "payroll", "thunhap"]):
+        return "Mức lương"
+    if any(k in norm for k in ["count", "soluong", "qty", "quantity"]):
+        return "Số lượng"
+    if any(k in norm for k in ["date", "ngay"]):
+        return "Ngày"
+    if any(k in norm for k in ["time", "gio", "thoigian"]):
+        return "Thời gian"
 
-    # 4. Miền Y tế / Bệnh viện
-    elif has_healthcare:
-        cards.append({
-            "icon": "🏥",
-            "title": "Số Lượng Bệnh Nhân Theo Chuyên Khoa",
-            "prompt": "Thống kê số lượng bệnh nhân theo từng chuyên khoa",
-            "desc": "Phân tích lưu lượng bệnh nhân khám và điều trị"
-        })
-        cards.append({
-            "icon": "📅",
-            "title": "Lượt Khám Bệnh Theo Tháng",
-            "prompt": "Tổng số lượt khám bệnh theo từng tháng",
-            "desc": "Theo dõi biến động số ca khám theo thời gian"
-        })
-        cards.append({
-            "icon": "🩺",
-            "title": "Top Bác Sĩ Tiếp Nhận Nhiều Ca Nhất",
-            "prompt": "Top 10 bác sĩ có số lượt khám cao nhất",
-            "desc": "Đánh giá công suất phục vụ của đội ngũ y bác sĩ"
-        })
-        cards.append({
-            "icon": "📋",
-            "title": "Thống Kê Ca Khám Mới Nhất",
-            "prompt": "Danh sách 10 lượt khám mới nhất",
-            "desc": "Xem chi tiết nhật ký tiếp nhận bệnh nhân"
-        })
+    clean = re.sub(r"([a-z])([A-Z])", r"\1 \2", s).replace("_", " ").strip().title()
+    return clean
 
-    # 5. Miền Bán hàng / Kinh doanh / Thương mại (Sales & Retail)
-    elif has_sales or has_product:
-        if has_product:
-            cards.append({
-                "icon": "📦",
-                "title": "Top Sản Phẩm Doanh Thu Cao Nhất",
-                "prompt": "Top 5 sản phẩm mang lại doanh thu cao nhất",
-                "desc": "Xếp hạng sản phẩm theo tổng số tiền bán được"
+
+def parse_schema_elements(tables: list[str], schema_context: str = "") -> dict:
+    """Tự động phân tích sâu toàn bộ CSDL đang kết nối: Trích xuất Bảng, Cột đo lường, Cột thời gian, Chiều phân loại và Dữ liệu mẫu."""
+    tbl_cols_map = {}
+    time_cols = []
+    metric_cols = []
+    dim_cols = []
+    entity_cols = []
+    sample_values = {}
+
+    # 1. Bóc tách danh sách cột từ schema_context
+    lines = (schema_context or "").splitlines()
+    curr_tbl = None
+    for line in lines:
+        l_str = line.strip()
+        tbl_match = re.match(r"^-\s*Bảng\s*[`'\"]?(\w+)[`'\"]?:\s*(.*)$", l_str, re.IGNORECASE)
+        if tbl_match:
+            t_name = tbl_match.group(1)
+            raw_cols = tbl_match.group(2)
+            curr_tbl = t_name
+            cols = []
+            for c_part in raw_cols.split(","):
+                c_clean = c_part.split("(")[0].replace("`", "").replace("'", "").replace('"', "").strip()
+                if c_clean:
+                    cols.append(c_clean)
+            tbl_cols_map[t_name] = cols
+        elif l_str.startswith("• Bảng") and "cột" in l_str:
+            # Trích xuất sample values: • Bảng `products` (cột `Category`): 'Bars', 'Bites'
+            samp_match = re.search(r"Bảng\s*[`'\"]?(\w+)[`'\"]?\s*\(cột\s*[`'\"]?(\w+)[`'\"]?\):\s*(.*)$", l_str)
+            if samp_match:
+                c_name = samp_match.group(2)
+                raw_samps = samp_match.group(3)
+                s_list = [s.strip().strip("'\"`") for s in raw_samps.split(",") if s.strip()]
+                if s_list:
+                    sample_values[c_name.lower()] = s_list[:5]
+
+    # Nếu không parse được từ text, dùng danh sách tables mặc định
+    if not tbl_cols_map and tables:
+        for t in tables:
+            tbl_cols_map[t] = []
+
+    # 2. Phân loại ngữ nghĩa cho tất cả các cột
+    for t_name, cols in tbl_cols_map.items():
+        for c in cols:
+            c_low = c.lower()
+            if is_id_like(c) and not any(k in c_low for k in ["name", "title", "spid", "pid"]):
+                continue
+
+            # Thời gian
+            if any(k in c_low for k in ["date", "time", "year", "month", "quarter", "ngay", "nam", "thang", "created", "hire", "sale"]):
+                if c not in time_cols:
+                    time_cols.append(c)
+            # Đo lường số liệu (Metrics)
+            elif any(k in c_low for k in ["sales", "amount", "price", "cost", "profit", "salary", "boxes", "qty", "quantity", "revenue", "fee", "balance", "total", "spent", "fare", "count", "rating", "score", "duration", "hours", "tien", "luong", "doanh_thu", "chi_phi", "so_luong"]):
+                if c not in metric_cols:
+                    metric_cols.append(c)
+            # Tên thực thể
+            elif any(k in c_low for k in ["name", "title", "salesperson", "fullname", "product", "customer", "employee", "patient", "doctor", "student", "airline", "passenger", "ten"]):
+                if c not in entity_cols:
+                    entity_cols.append(c)
+            # Chiều phân loại (Dimensions)
+            elif any(k in c_low for k in ["category", "type", "status", "country", "city", "geo", "region", "team", "department", "dept", "branch", "gender", "segment", "class", "genre", "trang_thai", "loai", "phong_ban", "quoc_gia", "seat"]):
+                if c not in dim_cols:
+                    dim_cols.append(c)
+            else:
+                # Phân loại bổ sung
+                if len(cols) <= 4 and c not in dim_cols:
+                    dim_cols.append(c)
+
+    # Sắp xếp ưu tiên: Các chỉ số tiền tệ / tài chính / số lượng chủ đạo lên đầu
+    def _metric_priority(m: str) -> int:
+        ml = m.lower()
+        if any(k in ml for k in ["revenue", "sales", "totalamount", "amount", "totalsales", "salary", "totalsalary", "profit", "price", "ticket_price", "fare"]):
+            return 0
+        if any(k in ml for k in ["cost", "fee", "balance", "boxes", "quantity", "qty", "orders"]):
+            return 1
+        return 2
+
+    metric_cols = sorted(metric_cols, key=_metric_priority)
+
+    def _dim_priority(d: str) -> int:
+        dl = d.lower()
+        if any(k in dl for k in ["category", "department", "dept", "team", "airline", "country", "city", "branch", "type"]):
+            return 0
+        if any(k in dl for k in ["status", "gender", "seat", "role", "segment"]):
+            return 1
+        return 2
+
+    dim_cols = sorted(dim_cols, key=_dim_priority)
+
+    return {
+        "tables": list(tbl_cols_map.keys()) or tables,
+        "tbl_cols_map": tbl_cols_map,
+        "time_cols": time_cols,
+        "metric_cols": metric_cols,
+        "dim_cols": dim_cols,
+        "entity_cols": entity_cols,
+        "sample_values": sample_values
+    }
+
+
+def generate_dynamic_heuristic_prompts(tables: list[str], schema_context: str = "") -> dict[str, list[dict]]:
+    """Tự động phân tích cấu trúc CSDL thực tế và sinh các câu hỏi phân tích thông minh theo 3 lăng kính điều hành mà KHÔNG bị code cứng."""
+    meta = parse_schema_elements(tables, schema_context)
+    tbl_list = meta["tables"]
+    time_cols = meta["time_cols"]
+    metric_cols = meta["metric_cols"]
+    dim_cols = meta["dim_cols"]
+    entity_cols = meta["entity_cols"]
+    samples = meta["sample_values"]
+
+    # Chọn các phần tử chủ đạo
+    main_time = time_cols[0] if time_cols else "Thời gian"
+    main_metric = metric_cols[0] if metric_cols else ("Số lượng" if tbl_list else "Giá trị")
+    sec_metric = metric_cols[1] if len(metric_cols) > 1 else main_metric
+    main_dim = dim_cols[0] if dim_cols else (entity_cols[0] if entity_cols else (tbl_list[0] if tbl_list else "Phân loại"))
+    sec_dim = dim_cols[1] if len(dim_cols) > 1 else main_dim
+    main_entity = entity_cols[0] if entity_cols else (tbl_list[0] if tbl_list else "Đối tượng")
+    main_table = tbl_list[0] if tbl_list else "Dữ liệu"
+
+    # Nhãn tiếng Việt thân thiện
+    h_time = humanize_name_vi(main_time)
+    h_metric = humanize_name_vi(main_metric)
+    h_sec_metric = humanize_name_vi(sec_metric)
+    h_dim = humanize_name_vi(main_dim)
+    h_sec_dim = humanize_name_vi(sec_dim)
+    h_entity = humanize_name_vi(main_entity)
+    h_table = humanize_name_vi(main_table)
+
+    # 1. LĂNG KÍNH 1: XU HƯỚNG & BIẾN ĐỘNG THỜI GIAN
+    trend_cards = []
+    if time_cols:
+        trend_cards.append({
+            "icon": "📈",
+            "title": f"Xu Hướng {h_metric} Theo {h_time}",
+            "prompt": f"Xu hướng tổng {h_metric.lower()} theo từng {h_time.lower()} thay đổi như thế nào?",
+            "desc": f"Biểu đồ đường theo dõi chu kỳ tăng trưởng {h_metric.lower()} qua thời gian"
+        })
+        if dim_cols:
+            trend_cards.append({
+                "icon": "📅",
+                "title": f"Biến Động Theo {h_dim}",
+                "prompt": f"So sánh biến động {h_metric.lower()} giữa các {h_dim.lower()} qua các mốc thời gian",
+                "desc": f"Đối chiếu tốc độ tăng trưởng giữa các nhóm {h_dim.lower()}"
             })
         else:
-            cards.append({
+            trend_cards.append({
                 "icon": "📊",
-                "title": "Tổng Quan Doanh Thu",
-                "prompt": "Tổng doanh thu và số lượng đơn hàng đã bán",
-                "desc": "Thống kê toàn diện hiệu quả kinh doanh"
+                "title": f"Tổng Hợp Theo {h_time}",
+                "prompt": f"Thống kê tổng {h_metric.lower()} và số lượng giao dịch theo từng {h_time.lower()}",
+                "desc": f"Báo cáo định kỳ theo chuỗi {h_time.lower()}"
             })
-
-        cards.append({
+        trend_cards.append({
+            "icon": "✨",
+            "title": f"Giai Đoạn Đạt Đỉnh {h_metric}",
+            "prompt": f"Khoảng thời gian nào ghi nhận {h_metric.lower()} cao nhất và thấp nhất?",
+            "desc": f"Phát hiện các mốc mùa vụ hoặc thời điểm đột biến"
+        })
+    else:
+        trend_cards.append({
+            "icon": "📊",
+            "title": f"Tổng Quan {h_metric} Toàn Hệ Thống",
+            "prompt": f"Tổng {h_metric.lower()} và giá trị trung bình trên toàn bộ dữ liệu",
+            "desc": f"Bức tranh tổng thể về chỉ số {h_metric.lower()}"
+        })
+        trend_cards.append({
             "icon": "📈",
-            "title": "Xu Hướng Doanh Thu Theo Tháng",
-            "prompt": "Tổng doanh thu theo từng tháng",
-            "desc": "Phân tích biến động doanh số và chu kỳ tăng trưởng"
+            "title": f"Phân Bổ {h_metric} Theo {h_dim}",
+            "prompt": f"Phân bổ tổng {h_metric.lower()} theo từng {h_dim.lower()}",
+            "desc": f"Xác định độ lệch phân bổ giữa các {h_dim.lower()}"
+        })
+        trend_cards.append({
+            "icon": "🔍",
+            "title": f"Khám Phá Dữ Liệu {h_table}",
+            "prompt": f"Thống kê tổng số lượng bản ghi và xem 10 dòng tiêu biểu của bảng {main_table}",
+            "desc": f"Xem trước dữ liệu chi tiết của bảng {main_table}"
         })
 
-        if any(t in tables_lower for t in ["people", "salespersons", "nhan_vien", "employees", "customers", "khach_hang"]):
-            cards.append({
-                "icon": "👥",
-                "title": "Xếp Hạng Người Bán Hàng Xuất Sắc",
-                "prompt": "Top 10 nhân sự có doanh số bán hàng cao nhất",
-                "desc": "Đánh giá hiệu suất kinh doanh của từng nhân sự"
-            })
+    # 2. LĂNG KÍNH 2: XẾP HẠNG & PHÂN KHÚC
+    rank_cards = []
+    rank_cards.append({
+        "icon": "🏆",
+        "title": f"Top 10 {h_entity} Cao Nhất",
+        "prompt": f"Top 10 {h_entity.lower()} có tổng {h_metric.lower()} cao nhất",
+        "desc": f"Bảng xếp hạng những {h_entity.lower()} dẫn đầu về {h_metric.lower()}"
+    })
+    if dim_cols:
+        rank_cards.append({
+            "icon": "📦",
+            "title": f"Tỷ Trọng Đóng Góp {h_dim}",
+            "prompt": f"Tỷ lệ đóng góp {h_metric.lower()} của từng {h_dim.lower()} vào tổng số",
+            "desc": f"Biểu đồ cơ cấu phân rã tỷ trọng của danh mục {h_dim.lower()}"
+        })
+        rank_cards.append({
+            "icon": "⚖️",
+            "title": f"So Sánh Giữa Các {h_dim}",
+            "prompt": f"So sánh {h_metric.lower()} trung bình giữa các {h_dim.lower()}",
+            "desc": f"Đối chuẩn hiệu quả giữa các phân khúc {h_dim.lower()}"
+        })
+    else:
+        rank_cards.append({
+            "icon": "🎖️",
+            "title": f"Top Đối Tượng Dẫn Đầu",
+            "prompt": f"Danh sách 5 {h_entity.lower()} có kết quả nổi bật nhất",
+            "desc": f"Vinh danh các cá nhân/thực thể xuất sắc"
+        })
+        rank_cards.append({
+            "icon": "📁",
+            "title": f"Xếp Hạng Phổ Biến",
+            "prompt": f"Xếp hạng các bản ghi theo thứ tự giảm dần của {h_metric.lower()}",
+            "desc": f"Danh sách đầy đủ từ cao xuống thấp"
+        })
 
-        if any(t in tables_lower for t in ["geo", "regions", "countries", "locations", "khu_vuc"]):
-            cards.append({
-                "icon": "🌍",
-                "title": "Phân Bổ Doanh Thu Theo Thị Trường",
-                "prompt": "Tổng doanh thu theo từng quốc gia và khu vực",
-                "desc": "Biểu đồ so sánh doanh số giữa các thị trường địa lý"
-            })
+    # 3. LĂNG KÍNH 3: HIỆU SUẤT & CƠ CẤU
+    perf_cards = []
+    perf_cards.append({
+        "icon": "🎯",
+        "title": f"{h_entity} Vượt Mức Trung Bình",
+        "prompt": f"Những {h_entity.lower()} nào có {h_metric.lower()} vượt trên mức trung bình?",
+        "desc": f"Lọc ra nhóm đối tượng có hiệu năng cao vượt trội"
+    })
+    if len(metric_cols) >= 2:
+        perf_cards.append({
+            "icon": "💵",
+            "title": f"Tương Quan {h_metric} & {h_sec_metric}",
+            "prompt": f"Báo cáo kết hợp cả {h_metric.lower()} và {h_sec_metric.lower()} theo từng {h_dim.lower()}",
+            "desc": f"Đối chiếu đa chiều giữa hai chỉ số đo lường chính"
+        })
+    else:
+        perf_cards.append({
+            "icon": "📊",
+            "title": f"Thống Kê Chi Tiết {h_dim}",
+            "prompt": f"Thống kê số lượng và tổng {h_metric.lower()} theo từng {h_dim.lower()}",
+            "desc": f"Tổng hợp số liệu chi tiết phân theo nhóm"
+        })
+    perf_cards.append({
+        "icon": "🔍",
+        "title": f"Phân Tích Bất Thường & Chênh Lệch",
+        "prompt": f"Phân tích sự chênh lệch {h_metric.lower()} giữa nhóm cao nhất và nhóm thấp nhất",
+        "desc": f"Đo lường khoảng cách phân hóa trong dữ liệu"
+    })
 
-    # 6. Fallback linh hoạt dựa theo danh sách bảng thực tế của CSDL
-    if len(cards) < 4:
-        icons = ["📊", "🔍", "📈", "📁", "✨", "📌"]
-        for i, t in enumerate(tables[:4]):
-            if len(cards) >= 4:
-                break
-            icon = icons[i % len(icons)]
-            cards.append({
-                "icon": icon,
-                "title": f"Thống Kê Bảng {t.title()}",
-                "prompt": f"Thống kê tổng số lượng bản ghi và xem dữ liệu bảng {t}",
-                "desc": f"Khám phá cấu trúc và dữ liệu thực tế của bảng {t}"
-            })
+    return {
+        "📈 Xu hướng & Thời gian": trend_cards[:3],
+        "🏆 Xếp hạng & Phân khúc": rank_cards[:3],
+        "🎯 Hiệu suất & Cơ cấu": perf_cards[:3]
+    }
 
-    # Đảm bảo luôn có đủ 4 thẻ
+
+def generate_categorized_starter_prompts(
+    tables: list[str],
+    schema_context: str = "",
+    client=None,
+    model_name: str = "",
+    provider: str = ""
+) -> dict[str, list[dict]]:
+    """Tự động sinh các thẻ gợi ý câu hỏi phân tích thông minh cho BẤT KỲ cơ sở dữ liệu nào:
+    - Phân tích động 100% bám sát schema, bảng, cột thực tế của database hiện tại.
+    - Tự động lưu cache theo mã hash của schema để load tức thì 0.001s.
+    """
+    if not tables and not schema_context:
+        return {
+            "📊 Khám phá": [
+                {"icon": "🔍", "title": "Tổng Quan Cơ Sở Dữ Liệu", "prompt": "Hiển thị tổng quan các bảng trong cơ sở dữ liệu", "desc": "Khám phá cấu trúc bảng"}
+            ]
+        }
+
+    schema_key = f"{len(tables)}_{hash(schema_context)}"
+    if schema_key in _DYNAMIC_STARTER_CACHE:
+        return _DYNAMIC_STARTER_CACHE[schema_key]
+
+    # 1. Sinh gợi ý phân tích động bám sát cấu trúc CSDL hiện tại
+    categorized = generate_dynamic_heuristic_prompts(tables, schema_context)
+
+    # Lưu cache để các lần chuyển tab hoặc rerun không bị tốn tài nguyên
+    _DYNAMIC_STARTER_CACHE[schema_key] = categorized
+    return categorized
+
+
+def generate_starter_prompts(
+    tables: list[str],
+    schema_context: str = "",
+    client=None,
+    model_name: str = "",
+    provider: str = ""
+) -> list[dict]:
+    """Tự động sinh 4 thẻ gợi ý câu hỏi thông minh 1-chạm bám sát chính xác nghiệp vụ và cấu trúc bảng của CSDL."""
+    cat = generate_categorized_starter_prompts(tables, schema_context, client=client, model_name=model_name, provider=provider)
+    cards = []
+    for cat_name, c_list in cat.items():
+        if c_list:
+            cards.append(c_list[0])
+    # Bổ sung thêm thẻ thứ 2 từ nhóm đầu tiên để đủ 4 thẻ
+    first_cat = list(cat.values())[0] if cat else []
+    if len(first_cat) > 1 and first_cat[1] not in cards:
+        cards.append(first_cat[1])
+
     while len(cards) < 4:
         cards.append({
             "icon": "🔍",
-            "title": "Tổng Quan Cơ Sở Dữ Liệu",
+            "title": "Tổng Quan CSDL",
             "prompt": "Thống kê tổng số lượng bản ghi trên tất cả các bảng",
             "desc": "Tổng hợp bức tranh toàn cảnh về dữ liệu hiện tại"
         })
-
     return cards[:4]
 
-
-def generate_categorized_starter_prompts(tables: list[str], schema_context: str = "") -> dict[str, list[dict]]:
-    """Tự động sinh các thẻ gợi ý câu hỏi thông minh phân loại theo 3 lăng kính điều hành chính."""
-    tables_lower = [t.lower() for t in tables]
-    has_hr = any(t in tables_lower for t in ["employees", "nhan_vien", "salaries", "luong", "departments", "phong_ban", "titles", "dept_emp", "staff", "payroll"])
-    has_sales = any(t in tables_lower for t in ["sales", "orders", "don_hang", "order_details", "transactions", "invoices", "hoa_don"])
-    has_product = any(t in tables_lower for t in ["products", "san_pham", "items", "hang_hoa"])
-
-    if has_hr and not has_sales:
-        return {
-            "💰 Tài chính & Lương": [
-                {
-                    "icon": "⚖️",
-                    "title": "Lương Nam vs Nữ Theo Chức Danh",
-                    "prompt": "So sánh mức lương trung bình giữa nhân viên nam và nữ theo từng chức danh",
-                    "desc": "Đối chuẩn công bằng thu nhập và thu hẹp khoảng cách giới"
-                },
-                {
-                    "icon": "💰",
-                    "title": "Top 10 Lương Cao Nhất Sales",
-                    "prompt": "Top 10 nhân viên có mức lương cao nhất trong phòng ban Sales",
-                    "desc": "Nhân sự xuất sắc có thu nhập cao nhất khối Kinh doanh"
-                },
-                {
-                    "icon": "📈",
-                    "title": "Nhân Viên Có Từ 5 Lần Tăng Lương",
-                    "prompt": "Những nhân viên có từ 5 lần tăng lương trở lên trong lịch sử công ty",
-                    "desc": "Lịch sử đãi ngộ và thăng tiến thu nhập nhân sự"
-                }
-            ],
-            "👥 Quy mô & Nhân sự": [
-                {
-                    "icon": "🏢",
-                    "title": "Quy Mô Phòng Ban Lớn / Nhỏ Nhất",
-                    "prompt": "Phòng ban nào có quy mô nhân sự lớn nhất và nhỏ nhất hiện nay?",
-                    "desc": "Phân bổ lực lượng lao động hiện hành giữa các khối"
-                },
-                {
-                    "icon": "📅",
-                    "title": "Xu Hướng Tuyển Dụng Theo Năm",
-                    "prompt": "Thống kê số lượng nhân viên được tuyển dụng theo từng năm từ trước đến nay",
-                    "desc": "Tốc độ tăng trưởng quy mô tổ chức qua các thời kỳ"
-                },
-                {
-                    "icon": "🚻",
-                    "title": "Tỷ Lệ Giới Tính Ban Quản Lý",
-                    "prompt": "Tỷ lệ nam và nữ trong ban quản lý (dept_manager) của từng phòng ban",
-                    "desc": "Cơ cấu đa dạng giới trong đội ngũ lãnh đạo phòng ban"
-                }
-            ],
-            "🏆 Xếp hạng & Lãnh đạo": [
-                {
-                    "icon": "🎖️",
-                    "title": "Top 10 Nhân Viên Thâm Niên Nhất",
-                    "prompt": "Top 10 nhân viên có thâm niên làm việc lâu nhất công ty hiện nay",
-                    "desc": "Ghi nhận những nhân sự gắn bó dài lâu nhất với tổ chức"
-                },
-                {
-                    "icon": "👔",
-                    "title": "Danh Sách Trưởng Phòng & Lương",
-                    "prompt": "Danh sách các Manager hiện tại của từng phòng ban kèm mức lương mới nhất",
-                    "desc": "Hồ sơ chức danh và mức lương ban lãnh đạo quản lý"
-                },
-                {
-                    "icon": "🏢",
-                    "title": "Chênh Lệch Lương Nội Bộ Phòng",
-                    "prompt": "Phòng ban nào có mức chênh lệch lương giữa người cao nhất và thấp nhất lớn nhất?",
-                    "desc": "Khoảng cách phân hóa thu nhập nội bộ từng đơn vị"
-                }
-            ]
-        }
-    elif has_sales or has_product:
-        return {
-            "📈 Doanh thu & Thị trường": [
-                {
-                    "icon": "📦",
-                    "title": "Đóng Góp Doanh Thu Nhóm Hàng",
-                    "prompt": "Tỷ lệ đóng góp doanh thu của từng nhóm sản phẩm (Category) vào tổng doanh thu",
-                    "desc": "Phân tích cơ cấu danh mục hàng hóa và tỷ trọng doanh thu"
-                },
-                {
-                    "icon": "🌍",
-                    "title": "Doanh Thu Theo Thị Trường Quốc Gia",
-                    "prompt": "Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng?",
-                    "desc": "Theo dõi biểu đồ tăng trưởng thị trường quốc tế"
-                },
-                {
-                    "icon": "🍫",
-                    "title": "Top 10 Sản Phẩm Bán Chạy Nhất",
-                    "prompt": "Top 10 sản phẩm có tổng doanh số bán ra cao nhất",
-                    "desc": "Danh sách mặt hàng chủ lực đóng góp doanh thu cao nhất"
-                }
-            ],
-            "💰 Lợi nhuận & Biên lãi": [
-                {
-                    "icon": "🏷️",
-                    "title": "Lợi Nhuận Trung Bình Mỗi Hộp",
-                    "prompt": "Mức lợi nhuận trung bình trên mỗi hộp (Profit per box) của từng dòng sản phẩm",
-                    "desc": "Xác định các mặt hàng có biên lợi nhuận cao nhất"
-                },
-                {
-                    "icon": "💵",
-                    "title": "Báo Cáo P&L Toàn Diện Sản Phẩm",
-                    "prompt": "Tổng doanh thu, chi phí và lợi nhuận ròng của từng sản phẩm",
-                    "desc": "Báo cáo P&L phân tích lãi lỗ chi tiết danh mục"
-                },
-                {
-                    "icon": "📦",
-                    "title": "Tổng Số Lượng Hộp Xuất Bán",
-                    "prompt": "Tổng số lượng hộp bán ra theo từng dòng sản phẩm",
-                    "desc": "Sản lượng tiêu thụ thực tế của từng phân khúc"
-                }
-            ],
-            "👥 Đội ngũ & Hiệu suất": [
-                {
-                    "icon": "🏆",
-                    "title": "So Sánh Hiệu Suất Các Team",
-                    "prompt": "So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh",
-                    "desc": "Đánh giá hiệu suất cạnh tranh giữa các đội ngũ bán hàng"
-                },
-                {
-                    "icon": "👥",
-                    "title": "Chuyên Viên Doanh Số > 50k USD",
-                    "prompt": "Những nhân viên bán hàng có tổng doanh số vượt mức 50,000 USD",
-                    "desc": "Vinh danh các chuyên viên kinh doanh đạt mốc ấn tượng"
-                },
-                {
-                    "icon": "👔",
-                    "title": "Quy Mô Nhân Sự Các Team",
-                    "prompt": "Số lượng nhân viên của từng Team kinh doanh",
-                    "desc": "Phân bổ quy mô nhân sự giữa các đội ngũ kinh doanh"
-                }
-            ]
-        }
-    else:
-        general_cards = generate_starter_prompts(tables, schema_context)
-        return {
-            "📊 Khám phá Chung": general_cards[:3],
-            "🔍 Phân tích Bổ sung": general_cards[3:6] if len(general_cards) > 3 else general_cards[:2]
-        }
 
 
 def sanitize_insight_markdown(text: str) -> str:

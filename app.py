@@ -832,7 +832,13 @@ else:
         """).strip(), unsafe_allow_html=True)
 
         # Khám phá câu hỏi theo 3 lăng kính điều hành (Categorized Smart Prompts Tabs)
-        categorized = generate_categorized_starter_prompts(tables, schema_context)
+        categorized = generate_categorized_starter_prompts(
+            tables,
+            schema_context,
+            client=st.session_state.get("client"),
+            model_name=model_disp,
+            provider=provider_name
+        )
         cat_keys = list(categorized.keys())
 
         st.markdown("""

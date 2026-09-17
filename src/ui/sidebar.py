@@ -42,7 +42,7 @@ def perform_connection(
             )
 
         client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
-        extracted_schema = auto_extract_schema(engine)
+        extracted_schema = auto_extract_schema(engine, force_refresh=True)
         custom_notes = (schema_context_input or "").strip()
         if custom_notes and not custom_notes.startswith("Cơ sở dữ liệu bao gồm") and custom_notes != extracted_schema:
             final_schema = f"{extracted_schema}\n\n=== GHI CHÚ NGHIỆP VỤ BỔ SUNG ===\n{custom_notes}"
