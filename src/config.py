@@ -112,4 +112,4 @@ MAX_TABLES_SCHEMA = 50
 MAX_HISTORY_TURNS = 20
 MAX_BAR_CATEGORIES = 100
 
-FORECAST_METHOD_NAME = "Hồi quy tuyến tính (Linear Regression)"
+FORECAST_METHOD_NAME = "Holt-Winters & ETS (Adaptive Exponential Smoothing with 95% Confidence Ribbon)"
