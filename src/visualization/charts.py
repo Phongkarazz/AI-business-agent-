@@ -1592,6 +1592,90 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             active_measures = [has_non_pct_eff[0]]
                             chart_title = f"{format_col_title(has_non_pct_eff[0])} theo {format_col_title(label_name)}"
 
+                    # Ưu tiên vẽ 2 biểu đồ (Subplots) khi người dùng hỏi/dữ liệu có cả Quy mô Nhân sự (Số lượng) VÀ Mức lương / Doanh thu
+                    hc_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["headcount", "employeecount", "employee_count", "totalemployees", "total_employees", "số lượng nhân sự", "số nhân sự", "quy mô", "total_emp", "số lượng nhân viên", "số nhân viên", "slngnhnvin", "soluong", "số lượng", "count", "nhân sự", "nhân viên"]) and not any(k in c.lower() for k in ["male", "female", "nam", "nữ", "salary", "lương", "thu nhập"])]
+                    sal_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["salary", "lương", "thu nhập", "payroll", "quỹ", "quỹ lương", "sales", "doanh số", "amount", "revenue", "doanh thu"]) and not any(k in c.lower() for k in ["diff", "chênh lệch", "gap", "spread"]) and c not in hc_cands]
+
+                    if hc_cands and sal_cands:
+                        hc_col = hc_cands[0]
+                        sal_col = sal_cands[0]
+
+                        if total_rows > 30:
+                            max_display = st.slider(
+                                f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng: {total_rows:,})",
+                                min_value=min(10, total_rows),
+                                max_value=total_rows,
+                                value=min(total_rows, MAX_BAR_CATEGORIES),
+                                step=5 if total_rows <= 100 else 10,
+                                key=f"bar_limit_{turn_id}"
+                            )
+                            plot_df = plot_df.head(max_display)
+
+                        max_label_len = max((len(str(v)) for v in plot_df[label_name]), default=0)
+                        tick_angle = -35 if (max_label_len > 7 or len(plot_df) > 6) else 0
+
+                        fig = make_subplots(
+                            rows=1, cols=2,
+                            subplot_titles=(
+                                f"👥 1. Quy mô Nhân sự ({format_col_title(hc_col)})",
+                                f"💰 2. Mức Lương Trung Bình ({format_col_title(sal_col)})"
+                            ),
+                            horizontal_spacing=0.10
+                        )
+
+                        # 1. Subplot 1: Quy mô nhân sự (Bar chart)
+                        fig.add_trace(
+                            go.Bar(
+                                x=plot_df[label_name],
+                                y=plot_df[hc_col],
+                                name=format_col_title(hc_col),
+                                marker_color="#0068FF",
+                                text=plot_df[hc_col],
+                                texttemplate="%{text:,.0f}",
+                                textposition="outside",
+                                hovertemplate=f"<b>%{{x}}</b><br>{format_col_title(hc_col)}: <b>%{{y:,.0f}}</b> người<extra></extra>"
+                            ),
+                            row=1, col=1
+                        )
+
+                        # 2. Subplot 2: Lương trung bình (Bar chart)
+                        is_curr_sal = any(k in sal_col.lower() for k in ["salary", "lương", "thu nhập", "payroll", "quỹ", "sales", "doanh", "amount", "revenue", "$"])
+                        fig.add_trace(
+                            go.Bar(
+                                x=plot_df[label_name],
+                                y=plot_df[sal_col],
+                                name=format_col_title(sal_col),
+                                marker_color="#FF7A00" if is_curr_sal else "#10B981",
+                                text=plot_df[sal_col],
+                                texttemplate="$%{text:,.0f}" if is_curr_sal else "%{text:,.0f}",
+                                textposition="outside",
+                                hovertemplate=f"<b>%{{x}}</b><br>{format_col_title(sal_col)}: <b>" + ("$%{y:,.2f}" if is_curr_sal else "%{y:,.0f}") + "</b><extra></extra>"
+                            ),
+                            row=1, col=2
+                        )
+
+                        try:
+                            max_hc = float(pd.to_numeric(plot_df[hc_col], errors="coerce").max() or 100)
+                        except Exception:
+                            max_hc = 100.0
+                        try:
+                            max_sal = float(pd.to_numeric(plot_df[sal_col], errors="coerce").max() or 1000)
+                        except Exception:
+                            max_sal = 1000.0
+
+                        fig.update_layout(
+                            title=f"📊 So Sánh Đa Chiều: {format_col_title(hc_col)} & {format_col_title(sal_col)} theo {format_col_title(label_name)}",
+                            template="plotly_white",
+                            height=530,
+                            showlegend=False,
+                            margin=dict(l=30, r=30, t=75, b=95 if tick_angle != 0 else 55)
+                        )
+                        fig.update_xaxes(type="category", tickangle=tick_angle, automargin=True)
+                        fig.update_yaxes(title="Số lượng (Người)", range=[0, max_hc * 1.22], row=1, col=1)
+                        fig.update_yaxes(title="Mức lương ($)" if is_curr_sal else format_col_title(sal_col), tickprefix="$" if is_curr_sal else "", range=[0, max_sal * 1.22], row=1, col=2)
+
+                        st.plotly_chart(fig, use_container_width=True)
+                        return fig
 
                     # Ưu tiên vẽ Chênh lệch lương khi người dùng hỏi về khoảng cách / chênh lệch lương
                     user_asked_spread = any(k in uq_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa"]) and not any(k in uq_low for k in ["chuẩn", "stddev", "standard deviation", "phân tán"])
