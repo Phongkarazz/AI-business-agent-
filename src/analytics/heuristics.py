@@ -1536,11 +1536,40 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
     # 1. Nhận diện Time Series
     is_time_col = any(k in ncol_low for k in ["year", "month", "date", "năm", "tháng", "quý", "quarter", "kỳ"])
     is_time_query = any(k in q_low for k in ["qua các năm", "theo năm", "từng năm", "over time", "per year", "yearly", "xu hướng", "trend", "qua các tháng", "từng tháng", "theo quý", "qua các quý"])
-    if is_time_col or (is_time_query and not any(k in cols_str for k in ["team", "đội ngũ", "product", "sản phẩm", "employee", "nhân viên", "salesperson", "geo", "country", "quốc gia", "thị trường"])):
+    if is_time_col or (is_time_query and not any(k in cols_str for k in ["team", "đội ngũ", "product", "sản phẩm", "employee", "nhân viên", "salesperson", "geo", "country", "quốc gia", "thị trường", "dept", "phòng"])):
         return "time_series"
 
-    # 2. Nhận diện Nhân sự / Nhân viên bán hàng cá nhân (pe.Salesperson / Employees)
-    is_emp_col = any(k in ncol_low for k in ["salesperson", "sales_person", "sales person", "nhân viên", "nhân sự", "người bán", "emp_no", "first_name", "last_name", "title", "chức danh", "department", "dept_name", "phòng ban", "bộ phận", "chức vụ", "vị trí", "rep", "spid"])
+    # 2. Nhận diện Phòng ban (Department)
+    is_dept_col = any(k in ncol_low for k in ["department", "dept_name", "dept_no", "dept", "phòng ban", "phòng", "bộ phận"])
+    known_depts = ["customer service", "development", "finance", "human resources", "marketing", "production", "quality management", "research", "sales", "tiếp thị", "nhân sự", "kỹ thuật", "tài chính", "sản xuất", "kinh doanh", "cskh"]
+    is_dept_values = False
+    if df is not None and not df.empty and name_col and name_col in df.columns:
+        sample_vals = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
+        if any(v in known_depts for v in sample_vals):
+            is_dept_values = True
+    if is_dept_col or is_dept_values:
+        return "department"
+
+    # 3. Nhận diện Chức danh (Job Title)
+    is_title_col = any(k in ncol_low for k in ["title", "chức danh", "vị trí", "chức vụ", "job"])
+    known_titles = ["senior engineer", "staff engineer", "engineer", "assistant engineer", "senior staff", "technique leader", "manager", "chuyên viên", "kỹ sư"]
+    is_title_values = False
+    if df is not None and not df.empty and name_col and name_col in df.columns:
+        sample_vals = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
+        if any(v in known_titles for v in sample_vals):
+            is_title_values = True
+    if is_title_col or is_title_values:
+        return "title"
+
+    # 4. Nhận diện Giới tính (Gender)
+    is_gen_col = any(k in ncol_low for k in ["gender", "giới tính", "gioi_tinh", "sex"])
+    if df is not None and not df.empty and name_col and name_col in df.columns:
+        raw_vals_upper = {str(v).strip().upper() for v in df[name_col].dropna()}
+        if is_gen_col or raw_vals_upper.issubset({"M", "F", "MALE", "FEMALE", "NAM", "NỮ", "NU"}):
+            return "gender"
+
+    # 5. Nhận diện Nhân sự / Nhân viên bán hàng cá nhân (pe.Salesperson / Individual Employees)
+    is_emp_col = any(k in ncol_low for k in ["salesperson", "sales_person", "sales person", "nhân viên", "nhân sự", "người bán", "emp_no", "first_name", "last_name", "rep", "spid"])
     
     known_salespeople = [
         "andria kimpton", "barr faughny", "benny karolovsky", "beverie moffet", "brien boise",
@@ -1557,13 +1586,12 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
         if any(v in known_salespeople for v in sample_vals):
             is_emp_values = True
 
-    is_hr_metric = any(k in cols_str for k in ["salary", "lương", "wage", "hire", "headcount", "raisecount", "slngnhnvin", "totalemployees"])
-    is_emp_query = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "phòng ban", "chức danh", "lương", "salary", "tuyển dụng", "bổ nhiệm", "thăng chức", "tăng lương", "thâm niên", "headcount", "ai là", "top 5 nhân sự", "top nhân sự", "top nhân viên"])
+    is_emp_query = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai là", "top 5 nhân sự", "top nhân sự", "top nhân viên"])
 
-    if is_emp_col or is_emp_values or (is_emp_query and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "team", "đội ngũ"])):
+    if is_emp_col or is_emp_values or (is_emp_query and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "team", "đội ngũ", "dept", "department", "phòng"])):
         return "employee"
 
-    # 3. Nhận diện Thị trường / Quốc gia (Geo / Country / Market) - TUYỆT ĐỐI KHÔNG gộp với Team
+    # 6. Nhận diện Thị trường / Quốc gia (Geo / Country / Market) - TUYỆT ĐỐI KHÔNG gộp với Team
     is_geo_col = any(k in ncol_low for k in ["geo", "country", "quốc gia", "thị trường", "market", "nation"])
     is_geo_query = any(k in q_low for k in ["thị trường", "quốc gia", "các nước", "từng nước", "country", "market", "geo"])
     
@@ -1577,7 +1605,7 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
     if is_geo_col or is_geo_values or (is_geo_query and not any(k in ncol_low for k in ["team", "đội ngũ", "product", "sản phẩm", "sku", "salesperson", "nhân viên"])):
         return "geo"
 
-    # 4. Nhận diện Đội ngũ / Chi nhánh / Team kinh doanh (pe.Team)
+    # 7. Nhận diện Đội ngũ / Chi nhánh / Team kinh doanh (pe.Team)
     is_team_col = any(k in ncol_low for k in ["team", "đội ngũ", "đội", "chinhanh", "chi nhánh", "branch"])
     is_team_query = any(k in q_low for k in ["team", "đội ngũ", "các đội", "từng đội", "chi nhánh", "branch", "giữa các team", "từng team", "các team"])
 
@@ -1590,7 +1618,7 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
     if is_team_col or is_team_values or (is_team_query and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "salesperson", "nhân viên", "nhân sự"])):
         return "team"
 
-    # 5. Nhận diện Sản phẩm / Hàng hóa
+    # 8. Nhận diện Sản phẩm / Hàng hóa
     is_prod_col = any(k in ncol_low for k in ["product", "sản phẩm", "category", "danh mục", "sku", "item", "hàng hóa", "pid", "mặt hàng"])
     is_prod_query = any(k in q_low for k in ["sản phẩm", "mặt hàng", "hàng hóa", "chocolate", "kẹo", "sku", "hộp", "thùng", "combo", "bao bì", "sản phẩm bán chạy"])
     is_prod_metric = any(k in cols_str for k in ["cost_per_box", "profit_per_box", "profitperbox"])
@@ -1760,6 +1788,23 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             lead_vs_bot = (spread_diff / bot_v * 100) if bot_v > 0 else 0
             is_single_or_tied = (len(df) == 1 or top_name == bot_name or spread_diff <= 0 or gap_vs_top < 0.01)
 
+            # 3A1. Quản lý & Bình đẳng Giới trong Ban Quản lý / Trưởng phòng (Leadership Diversity & ESG Parity)
+            is_mgr_diversity = (
+                any(k in q_low for k in ["dept_manager", "manager", "quản lý", "trưởng phòng", "ban quản lý", "lãnh đạo"])
+                or any("manager" in str(c).lower() for c in df.columns)
+            ) and (
+                any(k in cols_str for k in ["gender", "giới tính", "sex", "male", "female", "nam", "nữ"])
+                or any(k in q_low for k in ["giới tính", "nam", "nữ", "gender", "male", "female"])
+            )
+            if is_mgr_diversity:
+                if is_en:
+                    h1 = f"• **Leadership Diversity & ESG Governance Parity**: Gender representation across departmental management cohorts ({top_name}: {format_metric_value(top_v, val_col)}) underscores enterprise governance alignment with modern ESG diversity benchmarks and meritocratic promotion pathways."
+                    h2 = f"• **Historical Appointment Cycles & Succession Pipeline**: Differences across units reflect historical rotational appointment cycles and small managerial cohort sample sizes rather than systemic disparity, emphasizing the strategic value of a balanced leadership succession pipeline."
+                else:
+                    h1 = f"• **Cân bằng Bình đẳng Giới & Chuẩn mực Quản trị ESG (Leadership Diversity)**: Cơ cấu giới tính trong ban quản lý các phòng ban ({top_name}: {format_metric_value(top_v, val_col)}) phản ánh cam kết nhất quán của doanh nghiệp về bình đẳng cơ hội thăng tiến và phát triển nhân tài lãnh đạo dựa trên năng lực (Meritocracy)."
+                    h2 = f"• **Đặc thù Quy mô Bổ nhiệm Lịch sử & Quy hoạch Kế thừa**: Sự phân bổ tại từng phòng ban bắt nguồn từ số lượng vị trí trưởng phòng hữu hạn qua các nhiệm kỳ lịch sử, khẳng định tầm quan trọng của việc xây dựng quy hoạch cán bộ nguồn (Succession Planning) bền vững."
+                return f"{h1}\n\n{h2}"
+
             # 3A. Giới tính (Gender)
             is_gender = any(k in cols_str for k in ["gender", "giới tính", "sex"]) or any(k in q_low for k in ["giới tính", "nam", "nữ", "gender", "male", "female"])
             if is_gender:
@@ -1771,11 +1816,15 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                         h1 = f"• **Cơ cấu Phân bổ Chức danh & Thâm niên Quản lý**: Nhóm **{top_name}** ghi nhận mức {format_metric_value(top_v, val_col)}, phản ánh tỷ lệ phân bổ các cấp bậc chuyên môn và số năm thâm niên tích lũy tại tổ chức."
                         h2 = f"• **Đặc thù Nguồn cung Ứng viên & Chính sách Bình đẳng**: Phản ánh cam kết của doanh nghiệp trong việc thúc đẩy công bằng cơ hội phát triển nghề nghiệp và đãi ngộ theo năng lực."
                     return f"{h1}\n\n{h2}"
+                
+                is_small_sample = (top_v <= 5 and float(top_v).is_integer()) or bot_v == 0
                 if is_en:
-                    h1 = f"• **Job Family & Seniority Distribution**: The variance between **{top_name}** ({format_metric_value(top_v, val_col)}) and **{bot_name}** ({format_metric_value(bot_v, val_col)}, {gap_vs_top:.1f}% lower than leader) often stems from historical tenure accumulation and the distribution of senior managerial posts."
+                    gap_str = f"{format_metric_value(bot_v, val_col)} vs {format_metric_value(top_v, val_col)}" if is_small_sample else f"{format_metric_value(bot_v, val_col)}, {gap_vs_top:.1f}% lower than leader"
+                    h1 = f"• **Job Family & Seniority Distribution**: The variance between **{top_name}** ({format_metric_value(top_v, val_col)}) and **{bot_name}** ({gap_str}) stems from historical tenure accumulation and specialist grade distribution."
                     h2 = f"• **Candidate Pipeline & Pay Equity Governance**: This distribution reflects external industry talent pools across specialized divisions and active enterprise governance around compensation parity."
                 else:
-                    h1 = f"• **Cơ cấu Phân bổ Chức danh & Thâm niên Quản lý**: Chênh lệch giữa nhóm **{top_name}** ({format_metric_value(top_v, val_col)}) và nhóm **{bot_name}** ({format_metric_value(bot_v, val_col)}, thấp hơn {gap_vs_top:.1f}% so với nhóm dẫn đầu) thường bắt nguồn từ tỷ lệ nắm giữ các vị trí lãnh đạo cấp cao hoặc số năm thâm niên tích lũy tại tổ chức."
+                    gap_str = f"ở mức {format_metric_value(bot_v, val_col)} so với nhóm dẫn đầu {format_metric_value(top_v, val_col)}" if is_small_sample else f"thấp hơn {gap_vs_top:.1f}% so với nhóm dẫn đầu"
+                    h1 = f"• **Cơ cấu Phân bổ Chức danh & Thâm niên Quản lý**: Chênh lệch giữa nhóm **{top_name}** ({format_metric_value(top_v, val_col)}) và nhóm **{bot_name}** ({format_metric_value(bot_v, val_col)}, {gap_str}) thường bắt nguồn từ tỷ lệ phân bổ các vị trí chuyên môn cao hoặc số năm thâm niên tích lũy tại tổ chức."
                     h2 = f"• **Đặc thù Nguồn cung Ứng viên & Chính sách Bình đẳng**: Tỷ lệ cơ cấu phản ánh nguồn cung ứng viên lịch sử trong từng chuyên ngành và cam kết của doanh nghiệp trong việc thúc đẩy công bằng cơ hội phát triển nghề nghiệp."
                 return f"{h1}\n\n{h2}"
 
@@ -2198,9 +2247,20 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Deploy immediate incentive bonuses and sales contests for squad **{bot_name}** ({format_metric_value(bot_val, val_col)}); organize a peer-led best-practice transfer workshop with market leader **{top_name}** ({format_metric_value(top_val, val_col)}) to replicate top-performing sales pitches across underperforming reps."
                 medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Re-evaluate and rebalance territory planning and sales quota allocations based on local market potential; launch targeted sales enablement programs on deal closing and objection handling to lift team averages toward {format_metric_value(mean_val, val_col)}."
                 longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize a standardized sales competency framework, implement dynamic performance-tiered compensation plans, and deploy AI-assisted sales coaching tools to maximize long-term quota attainment per representative."
-        elif entity_type == "employee" or is_salary or is_headcount:
+        elif entity_type == "employee" or entity_type == "department" or entity_type == "title" or entity_type == "gender" or is_salary or is_headcount:
             is_salesperson_perf = any(k in cols_str for k in ["sales", "amount", "boxes", "doanh số", "doanh thu", "hộp"]) or any(k in q_low for k in ["doanh số", "doanh thu", "bán hàng", "sales", "hộp"])
-            if is_headcount:
+            is_mgr_diversity = (
+                any(k in q_low for k in ["dept_manager", "manager", "quản lý", "trưởng phòng", "ban quản lý", "lãnh đạo"])
+                or any("manager" in str(c).lower() for c in df.columns)
+            ) and (
+                any(k in cols_str for k in ["gender", "giới tính", "sex", "male", "female", "nam", "nữ"])
+                or any(k in q_low for k in ["giới tính", "nam", "nữ", "gender", "male", "female"])
+            )
+            if is_mgr_diversity:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit managerial appointment criteria and review succession planning pipelines across all departments (spearheaded by {top_name}: {format_metric_value(top_val, val_col)})."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Establish targeted Leadership Development Programs to sustain leadership gender balance and support meritocratic progression."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize an ESG Diversity & Inclusion Governance Framework and transparent executive promotion pathways."
+            elif is_headcount:
                 if is_single_or_tied:
                     urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Review workforce staffing capacity for {top_name} ({format_metric_value(top_val, val_col)} personnel); balance workload distribution across current team members."
                     medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize headcount planning around operational targets for {top_name}."
@@ -2227,7 +2287,9 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                     medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands and salary budget frameworks for unit **{top_name}** to ensure internal equity."
                     longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions."
                 else:
-                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({top_name}: {format_metric_value(top_val, val_col)} vs {bot_name}: {format_metric_value(bot_val, val_col)}, {gap_vs_top:.1f}% lower than leader); conduct proactive stay-interviews to curb flight risk among key talent."
+                    is_small_discrete = (top_val <= 5 and float(top_val).is_integer()) or bot_val == 0
+                    comp_gap_str = f"{top_name}: {format_metric_value(top_val, val_col)} vs {bot_name}: {format_metric_value(bot_val, val_col)}" if is_small_discrete else f"{top_name}: {format_metric_value(top_val, val_col)} vs {bot_name}: {format_metric_value(bot_val, val_col)}, {gap_vs_top:.1f}% lower than leader"
+                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({comp_gap_str}); conduct proactive stay-interviews to curb flight risk among key talent."
                     medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands against the median baseline of {format_metric_value(median_val, val_col)}; rebalance departmental salary budget pools and structured hiring plans for internal equity."
                     longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions and employer branding."
         elif entity_type == "product":
@@ -2298,9 +2360,20 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Thiết lập cơ chế thi đua và hoa hồng thưởng nóng (Incentive) cho đội ngũ **{bot_name}** ({format_metric_value(bot_val, val_col)}); tổ chức ngay buổi chuyển giao kinh nghiệm thực chiến (Best-Practice Sharing) từ team dẫn đầu **{top_name}** ({format_metric_value(top_val, val_col)}) sang các thành viên có hiệu suất thấp nhất để kích hoạt năng suất bán hàng ngay trong tháng."
                 medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đánh giá và phân chia lại địa bàn kinh doanh (Territory Planning) cùng hạn ngạch doanh số (Quota Allocation) dựa trên tiềm năng thị trường; triển khai chương trình đào tạo kỹ năng bán hàng và xử lý từ chối chuyên sâu cho các đội ngũ bám sát mức chuẩn {format_metric_value(mean_val, val_col)}."
                 longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Chuẩn hóa khung năng lực bán hàng (Sales Competency Framework), xây dựng chính sách đãi ngộ linh hoạt theo hiệu quả kinh doanh và ứng dụng công cụ hỗ trợ bán hàng (Sales Enablement) bằng AI để nâng cao năng suất doanh thu bền vững trên từng đại diện thương mại."
-        elif entity_type == "employee" or is_salary or is_headcount:
+        elif entity_type == "employee" or entity_type == "department" or entity_type == "title" or entity_type == "gender" or is_salary or is_headcount:
             is_salesperson_perf = any(k in cols_str for k in ["sales", "amount", "boxes", "doanh số", "doanh thu", "hộp"]) or any(k in q_low for k in ["doanh số", "doanh thu", "bán hàng", "sales", "hộp"])
-            if is_headcount:
+            is_mgr_diversity = (
+                any(k in q_low for k in ["dept_manager", "manager", "quản lý", "trưởng phòng", "ban quản lý", "lãnh đạo"])
+                or any("manager" in str(c).lower() for c in df.columns)
+            ) and (
+                any(k in cols_str for k in ["gender", "giới tính", "sex", "male", "female", "nam", "nữ"])
+                or any(k in q_low for k in ["giới tính", "nam", "nữ", "gender", "male", "female"])
+            )
+            if is_mgr_diversity:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát quy hoạch cán bộ kế thừa (Succession Planning) và chuẩn hóa tiêu chuẩn đánh giá bổ nhiệm cấp quản lý tại các phòng ban (dẫn dắt bởi {top_name}: {format_metric_value(top_val, val_col)})."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Triển khai chương trình phát triển năng lực lãnh đạo (Leadership Development Program) và duy trì chỉ số cân bằng giới trong quy hoạch nguồn cán bộ."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện khung quản trị nhân sự ESG (ESG Governance Framework) và chính sách đề bạt minh bạch nhằm xây dựng đội ngũ lãnh đạo bền vững."
+            elif is_headcount:
                 if is_single_or_tied:
                     urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát mức độ đáp ứng khối lượng công việc của đội ngũ **{top_name}** ({format_metric_value(top_val, val_col)} nhân sự); cân đối giao chỉ tiêu phù hợp với quy mô lực lượng thực tế."
                     medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa định biên nhân sự theo nhu cầu vận hành thực tế của **{top_name}**; triển khai đào tạo nâng cao kỹ năng nhằm gia tăng năng suất lao động bình quân."
@@ -2327,7 +2400,9 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                     medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa khung bậc lương (Salary Bands) và lộ trình thăng tiến nghề nghiệp (Career Progression) theo năng lực cho đơn vị **{top_name}**; cân đối lại quỹ lương nội bộ nhằm đảm bảo tính công bằng và cạnh tranh."
                     longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
                 else:
-                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách lương thưởng và đãi ngộ tại đơn vị/vị trí **{bot_name}** ({format_metric_value(bot_val, val_col)} so với **{top_name}**: {format_metric_value(top_val, val_col)}, thấp hơn {gap_vs_top:.1f}% so với vị trí dẫn đầu); chủ động đối thoại và lắng nghe nguyện vọng nhân sự để ngăn ngừa rủi ro biến động nhân tài chủ chốt."
+                    is_small_discrete = (top_val <= 5 and float(top_val).is_integer()) or bot_val == 0
+                    comp_gap_str = f"{bot_name}: {format_metric_value(bot_val, val_col)} so với {top_name}: {format_metric_value(top_val, val_col)}" if is_small_discrete else f"{bot_name}: {format_metric_value(bot_val, val_col)} so với {top_name}: {format_metric_value(top_val, val_col)}, thấp hơn {gap_vs_top:.1f}% so với vị trí dẫn đầu"
+                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách lương thưởng và đãi ngộ tại đơn vị/vị trí ({comp_gap_str}); chủ động đối thoại và lắng nghe nguyện vọng nhân sự để ngăn ngừa rủi ro biến động nhân tài chủ chốt."
                     medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa lộ trình thăng tiến nghề nghiệp (Career Progression) và định biên tuyển dụng theo nhu cầu thực tế của từng đơn vị quanh mức trung vị {format_metric_value(median_val, val_col)}; tái cân bằng quỹ lương để đảm bảo tính công bằng nội bộ."
                     longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
         elif entity_type == "product":
@@ -2506,7 +2581,16 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                                     part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                             else:
                                 detected_ent = detect_analysis_entity_type(df, user_query=user_query, name_col=name_col)
-                                if detected_ent == "geo":
+                                if detected_ent == "department":
+                                    ent_pfx_vi = "Phòng ban"
+                                    ent_pfx_en = "Department"
+                                elif detected_ent == "title":
+                                    ent_pfx_vi = "Chức danh"
+                                    ent_pfx_en = "Job Title"
+                                elif detected_ent == "gender":
+                                    ent_pfx_vi = "Giới tính"
+                                    ent_pfx_en = "Gender"
+                                elif detected_ent == "geo":
                                     ent_pfx_vi = "Thị trường"
                                     ent_pfx_en = "Market"
                                 elif detected_ent == "team":
@@ -2522,11 +2606,19 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                                     ent_pfx_vi = "Nhóm"
                                     ent_pfx_en = "Group"
 
+                                is_discrete_count = (top_val <= 5 and float(top_val).is_integer()) or bot_val == 0 or any(k in str(val_col).lower() for k in ["count", "số lượng", "headcount", "manager", "total", "lượt"])
+
                                 if is_en:
-                                    if bot_name != top_name and gap_vs_top >= 0.01:
+                                    if bot_name != top_name:
+                                        if bot_val == 0 or is_discrete_count:
+                                            spread_line = f"• **Distribution by Unit**: {ent_pfx_en} **{bot_name}** records {format_metric_value(bot_val, val_col)} (compared to {format_metric_value(top_val, val_col)} in leader **{top_name}**).\n\n"
+                                        elif gap_vs_top >= 0.01:
+                                            spread_line = f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
+                                        else:
+                                            spread_line = f"• **Metric Parity**: {ent_pfx_en}s maintain consistent and balanced levels across operations.\n\n"
                                         part_21 = (
                                             f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
-                                            f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
+                                            f"{spread_line}"
                                             f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
                                         )
                                     else:
@@ -2536,10 +2628,16 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                                             f"• **Operational Evaluation**: Performance reflects focused resource execution within {ent_pfx_en.lower()} **{top_name}**."
                                         )
                                 else:
-                                    if bot_name != top_name and gap_vs_top >= 0.01:
+                                    if bot_name != top_name:
+                                        if bot_val == 0 or is_discrete_count:
+                                            spread_line = f"• **Phân bổ Theo Đơn vị**: {ent_pfx_vi} **{bot_name}** ghi nhận mức {format_metric_value(bot_val, val_col)} (so với {format_metric_value(top_val, val_col)} tại {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                                        elif gap_vs_top >= 0.01:
+                                            spread_line = f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                                        else:
+                                            spread_line = f"• **Độ Đồng đều Chỉ số**: Các {ent_pfx_vi.lower()} duy trì mức độ cân bằng và tương đương chuẩn toàn bảng.\n\n"
                                         part_21 = (
                                             f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
-                                            f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                                            f"{spread_line}"
                                             f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
                                         )
                                     else:
@@ -2729,6 +2827,15 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                     elif detected_ent == "team":
                         ent_pfx_vi = "Đội ngũ"
                         ent_pfx_en = "Team"
+                    elif detected_ent == "department":
+                        ent_pfx_vi = "Phòng ban"
+                        ent_pfx_en = "Department"
+                    elif detected_ent == "title":
+                        ent_pfx_vi = "Chức danh"
+                        ent_pfx_en = "Title"
+                    elif detected_ent == "gender":
+                        ent_pfx_vi = "Giới tính"
+                        ent_pfx_en = "Gender"
                     elif detected_ent == "product":
                         ent_pfx_vi = "Sản phẩm"
                         ent_pfx_en = "Product"
@@ -2739,13 +2846,28 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                         ent_pfx_vi = "Nhóm"
                         ent_pfx_en = "Group"
 
+                    is_discrete_count = (top_val <= 5 and float(top_val).is_integer()) or (bot_val == 0 and top_val <= 10)
+
                     if is_en:
-                        if bot_name != top_name and gap_vs_top >= 0.01:
-                            part_21 = (
-                                f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
-                                f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
-                                f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
-                            )
+                        if bot_name != top_name:
+                            if is_discrete_count:
+                                part_21 = (
+                                    f"• **Cohort Distribution**: {ent_pfx_en} **{top_name}** recorded {format_metric_value(top_val, val_col)}, representing the maximum count in this discrete group.\n\n"
+                                    f"• **Sample Balance**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} (a discrete variance of {top_val - bot_val:.0f} vs leader **{top_name}**).\n\n"
+                                    f"• **Governance Perspective**: Median baseline is {format_metric_value(median_val, val_col)}, reflecting healthy rotational cohorts across units."
+                                )
+                            elif gap_vs_top >= 0.01:
+                                part_21 = (
+                                    f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
+                                    f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
+                                    f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
+                                )
+                            else:
+                                part_21 = (
+                                    f"• **Target Metric**: {ent_pfx_en} **{top_name}** recorded at {format_metric_value(top_val, val_col)}, maintaining parity across units.\n\n"
+                                    f"• **Baseline Reference**: Benchmark baseline is {format_metric_value(median_val, val_col)}.\n\n"
+                                    f"• **Operational Evaluation**: Performance reflects consistent operational scale across recorded entities."
+                                )
                         else:
                             part_21 = (
                                 f"• **Target Metric**: {ent_pfx_en} **{top_name}** recorded at {format_metric_value(top_val, val_col)}, representing the primary operational scale.\n\n"
@@ -2753,12 +2875,25 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                                 f"• **Operational Evaluation**: Performance reflects focused resource execution within {ent_pfx_en.lower()} **{top_name}**."
                             )
                     else:
-                        if bot_name != top_name and gap_vs_top >= 0.01:
-                            part_21 = (
-                                f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
-                                f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
-                                f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
-                            )
+                        if bot_name != top_name:
+                            if is_discrete_count:
+                                part_21 = (
+                                    f"• **Phân bổ Quy mô Cốt lõi**: {ent_pfx_vi} **{top_name}** ghi nhận mức cao nhất ({format_metric_value(top_val, val_col)}), thể hiện số lượng đại diện trong mẫu phân tích.\n\n"
+                                    f"• **Cân bằng Danh mục**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (chênh lệch {top_val - bot_val:.0f} lượt so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}** ({format_metric_value(top_val, val_col)})).\n\n"
+                                    f"• **Góc nhìn Quản trị Giám đốc CFO**: Quy mô mẫu mang tính chất số nguyên rời rạc đặc thù theo chu kỳ luân chuyển và cơ cấu tổ chức, không phản ánh rủi ro suy giảm."
+                                )
+                            elif gap_vs_top >= 0.01:
+                                part_21 = (
+                                    f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
+                                    f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                                    f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
+                                )
+                            else:
+                                part_21 = (
+                                    f"• **Dẫn đầu Cân bằng**: {ent_pfx_vi} **{top_name}** đạt mức {format_metric_value(top_val, val_col)}, duy trì mặt bằng đồng đều với các đơn vị khác.\n\n"
+                                    f"• **Mặt bằng Ổn định**: Toàn bộ danh mục ghi nhận kết quả tương đương ở mức {format_metric_value(median_val, val_col)}.\n\n"
+                                    f"• **Đánh giá Quản trị**: Hiệu suất duy trì sự ổn định, không có sự phân hóa cực đoan."
+                                )
                         else:
                             part_21 = (
                                 f"• **Thực thể Trọng tâm**: {ent_pfx_vi} **{top_name}** đạt mức {format_metric_value(top_val, val_col)}, giữ vai trò trọng tâm trong phân tích.\n\n"
@@ -2921,8 +3056,38 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
             "coordinate with operations to mitigate delivery bottlenecks",
             "transition from reactive adjustments to ai-driven predictive demand planning"
         ]
-        if any(cliche in part_23.lower() for cliche in time_cliches):
+    # 4. Hậu xử lý chuẩn hóa CFO, loại bỏ hoàn toàn các so sánh phần trăm ngô nghê và sửa lỗi danh xưng
+    dept_names = ["Sales", "Marketing", "Human Resources", "Production", "Development", "Quality Management", "Research", "Finance", "Customer Service"]
+    dept_pattern = r"(?i)\bnhân sự\s+(" + "|".join(dept_names) + r")\b"
+
+    def clean_cfo_artifacts(text: str) -> str:
+        if not text:
+            return text
+        # Sửa "Nhân sự Sales" -> "Phòng ban Sales"
+        text = re.sub(dept_pattern, r"Phòng ban \1", text)
+        # Loại bỏ các so sánh ngô nghê "thấp hơn 100.0%" hoặc "thấp hơn 0.0%"
+        text = re.sub(r"\s*\((?:thấp|kém|nhỏ|ít) hơn 100(?:\.0)?% so với [^\)]+\)", "", text)
+        text = re.sub(r"\s*(?:thấp|kém|nhỏ|ít) hơn 100(?:\.0)?% so với [^\,\.\n\)]+", "", text)
+        text = re.sub(r"(?:thấp|kém|nhỏ|ít) hơn 0(?:\.0)?% so với [^\,\.\n\)]+", "ở mức tương đương so với chuẩn dẫn đầu", text)
+        # Sửa "thấp hơn 0.0%" độc lập
+        text = re.sub(r"thấp hơn 0(?:\.0)?%", "ở mức tương đương", text)
+        # Sửa khoảng trắng thừa hoặc ngoặc rỗng do regex tạo ra
+        text = re.sub(r"\(\s*\)", "", text)
+        text = re.sub(r"\s{2,}", " ", text)
+        return text
+
+    part_21 = clean_cfo_artifacts(part_21)
+    part_22 = clean_cfo_artifacts(part_22)
+    part_23 = clean_cfo_artifacts(part_23)
+
+    # Nếu truy vấn về lãnh đạo/giới tính quản lý nhưng action plan bị nhiễm từ khóa khủng hoảng nhân sự ngô nghê -> ép dùng bộ tạo chuẩn CFO
+    is_mgr_query = any(k in q_low for k in ["dept_manager", "quản lý", "trưởng phòng", "manager", "lãnh đạo", "giám đốc", "giới tính", "gender"])
+    if is_mgr_query:
+        hr_panic_terms = ["đãi ngộ", "stay-interview", "exit interview", "phỏng vấn thôi việc", "nguy cơ thôi việc", "chảy máu chất xám", "bù đắp thâm hụt"]
+        if any(term in part_23.lower() for term in hr_panic_terms):
             part_23 = generate_data_grounded_action_plan(df, is_en=is_en, user_query=user_query)
+        if any(term in part_22.lower() for term in ["chảy máu chất xám", "nguy cơ thôi việc"]):
+            part_22 = generate_data_grounded_hypotheses(df, user_query=user_query, is_en=is_en)
 
     if not part_21 and not part_22 and not part_23:
         lines_fallback = [re.sub(r"^#+\s*", "", l).strip() for l in cleaned.split("\n") if l.strip() and not l.strip().startswith("#")]

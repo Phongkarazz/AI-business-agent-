@@ -5625,27 +5625,39 @@ Dữ liệu kết quả truy vấn thực tế:
 {ratio_note}
 {sparsity_note_vi}
 
-KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & THƯƠNG MẠI (BẮT BUỘC TUÂN THỦ):
-1. PHÂN ĐỊNH RÕ BẢN CHẤT CHỈ SỐ:
+KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & QUẢN TRỊ CFO (BẮT BUỘC TUÂN THỦ):
+1. TƯ DUY QUẢN TRỊ CHIẾN LƯỢC CỦA GIÁM ĐỐC CFO (CFO STRATEGIC GOVERNANCE):
+   - Khi phân tích các tập dữ liệu số đếm rời rạc quy mô nhỏ (Discrete Counts N <= 5 hoặc có giá trị 0, ví dụ: Số lượng Trưởng phòng/Quản lý theo giới tính hoặc phòng ban):
+     * TUYỆT ĐỐI CẤM tính toán phần trăm ngô nghê như "thấp hơn 100.0% so với nhóm dẫn đầu" hay "thấp hơn 0.0%". Đây là lỗi toán học ấu trĩ không có ý nghĩa quản trị!
+     * Hãy nhìn nhận dưới lăng kính Quản trị Nhân tài Cấp cao & Quản trị Đa dạng Giới (Leadership Diversity / ESG Governance):
+       - Đánh giá mức độ cân bằng giới tính lãnh đạo (Parity Ratio), ví dụ: Tỷ lệ 54% Nữ - 46% Nam phản ánh cơ cấu bổ nhiệm năng lực bình đẳng và lành mạnh.
+       - Ghi nhận đặc thù cơ cấu tổ chức theo chu kỳ luân chuyển và quy mô phòng ban thay vì coi số 0 là "suy giảm/khủng hoảng".
+       - TUYỆT ĐỐI CẤM đề xuất hoảng loạn vận hành như "phỏng vấn thôi việc (stay-interview)", "tăng lương giữ chân khẩn cấp" khi chỉ chênh lệch 0 vs 2 quản lý lịch sử.
+       - Kế hoạch hành động phải tập trung vào: Quy hoạch cán bộ nguồn (Succession Planning), Phát triển Năng lực Lãnh đạo (Leadership Development Program), và Khung đánh giá bổ nhiệm minh bạch (Merit-based Promotion).
+2. QUY TẮC DANH XƯNG THỰC THỂ CHUẨN XÁC:
+   - Phòng ban (Sales, Marketing, Human Resources, Production, Development, Finance...): BẮT BUỘC dùng danh xưng "Phòng ban [Tên]" (Ví dụ: "Phòng ban Human Resources", "Phòng ban Marketing"). TUYỆT ĐỐI CẤM gọi là "Nhân sự Human Resources" hay "Nhân sự Sales"!
+   - Chức danh (Engineer, Staff, Manager...): Dùng danh xưng "Chức danh [Tên]".
+   - Giới tính (F/M, Nữ/Nam): Dùng danh xưng "Giới tính Nữ", "Giới tính Nam".
+3. PHÂN ĐỊNH RÕ BẢN CHẤT CHỈ SỐ TÀI CHÍNH:
    - Khi câu hỏi/dữ liệu phân tích Tỷ suất Lợi nhuận / Biên lợi nhuận (Margin / Profit %):
      * BẮT BUỘC tập trung vào Cấu trúc Chi phí Giá vốn (COGS), Định giá (Pricing Strategy) và Khả năng giữ biên an toàn.
      * TUYỆT ĐỐI CẤM suy diễn biên lợi nhuận cao là do "thị hiếu người dùng", "sức hút thương hiệu" hay "chương trình xúc tiến bán hàng". Biên lợi nhuận cao đơn thuần là do giá vốn COGS trên mỗi hộp rất thấp so với đơn giá bán! TUYỆT ĐỐI KHÔNG "bốc thuốc" cảm tính sai lệch bản chất tài chính.
    - Khi câu hỏi/dữ liệu phân tích Doanh số (Sales/Revenue) hoặc Sản lượng (Boxes):
      * Lúc này MỚI được phân tích về độ phủ thị trường, sức mua và thị hiếu tiêu dùng.
-2. BẮT BUỘC PHÁT HIỆN "NGHỊCH LÝ ĐÁNH ĐỔI" (TRADE-OFF MATRIX):
+4. BẮT BUỘC PHÁT HIỆN "NGHỊCH LÝ ĐÁNH ĐỔI" (TRADE-OFF MATRIX):
    - Khi bảng dữ liệu có cả cột tỷ lệ phần trăm (`%` Margin) và cột số tiền tuyệt đối (`$` Profit per box, Sales):
      * BẮT BUỘC đối chiếu ở ngay Mục 2.1: Đối chiếu giữa sản phẩm có % margin cao nhất (nhưng tiền lời tuyệt đối mỗi hộp thấp) với sản phẩm có margin % thấp hơn nhưng lại mang về số tiền mặt ròng trên mỗi hộp cao nhất (ví dụ: White Choc margin 98.44% nhưng lãi $10.08/hộp vs Drinking Coco margin 91.68% nhưng lời tới $17.85/hộp).
-3. LOẠI BỎ CON SỐ TOÁN HỌC VỤN VẶT (DATA NOISE):
-   - TUYỆT ĐỐI CẤM viết các chuỗi tính toán trừ/chia % rườm rà (kiểu: "thấp hơn 7.8%... khoảng cách chênh lệch 7.67%; nhóm dẫn đầu vượt +8.4%...").
+5. LOẠI BỎ CON SỐ TOÁN HỌC VỤN VẶT & PHẦN TRĂM THỪA THÃI (DATA NOISE):
+   - TUYỆT ĐỐI CẤM viết các chuỗi tính toán trừ/chia % rườm rà (kiểu: "thấp hơn 100.0%", "thấp hơn 0.0%", "khoảng cách chênh lệch 7.67%...").
    - Nêu thẳng nhận định điều hành sắc gọn: Thực thể dẫn đầu biên độ, Nghịch lý đánh đổi (Trade-off Matrix) và Mặt bằng chung chuẩn toàn bảng.
-4. QUY TẮC PHÂN TÍCH CHUỖI THỜI GIAN (TIME-SERIES & TEMPORAL RULE):
+6. QUY TẮC PHÂN TÍCH CHUỖI THỜI GIAN (TIME-SERIES & TEMPORAL RULE):
    - Khi phân tích biến động theo THÁNG / NĂM / QUÝ (Dữ liệu chuỗi thời gian):
      * TUYỆT ĐỐI KHÔNG xuất số thực trơ trọi hay nhãn thô như 'Điểm 3.0', 'Giai đoạn 3', '(8)', '(9)'. BẮT BUỘC dùng danh xưng tự nhiên như 'Tháng 3', 'Tháng 8', 'Tháng 9', 'Quý 1', 'Năm 2022'.
      * Gắn liền với bản chất thực tế của lĩnh vực đang phân tích (Cho thuê phim/DVD, Nhân sự/lương, Bán hàng B2B...):
        - Nếu chuỗi thời gian liên tục: Phân tích tính chu kỳ và cao điểm dựa trên các mốc thời gian thực tế có trong bảng.
        - Nếu chuỗi thời gian đứt quãng (sparse): Chỉ ra các khoảng gián đoạn, tránh suy đoán chủ quan về các tháng bị khuyết thiếu.
      * TUYỆT ĐỐI CẤM các câu văn sáo rỗng vô thưởng vô phạt hoặc áp đặt lý thuyết mùa vụ không có căn cứ số liệu thực tế.
-5. QUY TẮC PHÂN BIỆT PARETO 80/20 & TỶ LỆ TÍCH LŨY DỒN:
+7. QUY TẮC PHÂN BIỆT PARETO 80/20 & TỶ LỆ TÍCH LŨY DỒN:
    - Khi dữ liệu chứa bảng phân tích Pareto (các sản phẩm tạo 80% doanh thu) với các cột như Product, TotalSales, Percentage, CumulativePercent:
      * `Percentage` (%): Là tỷ trọng đóng góp cá nhân của từng sản phẩm đơn lẻ (ví dụ: Almond Choco chiếm 4.86%, là sản phẩm BÁN CHẠY NHẤT).
      * `CumulativePercent` (%): Là mốc tích lũy dồn của toàn bộ nhóm Pareto tính đến dòng đó (ví dụ: Peanut Butter Cubes ở dòng cuối đạt mốc 82.79% tích lũy của cả 18 sản phẩm). TUYỆT ĐỐI CẤM đọc nhầm mốc tích lũy 82.79% thành doanh số của một SKU đơn lẻ!
@@ -5659,24 +5671,28 @@ YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
 ### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
 (BẮT BUỘC SUY LUẬN LOGIC BÁM SÁT ĐÚNG BẢN CHẤT CHỈ SỐ VÀ DẪN CHỨNG SỐ LIỆU THỰC TẾ:
 - Đưa ra đúng 2 giả thuyết kinh doanh giải thích TẠI SAO:
+  * Nếu là Quản trị Cấp cao / Lãnh đạo / Giới tính (Leadership & Diversity): Giả thuyết về Cân bằng Giới tính & Quản trị ESG (Gender Parity & ESG Governance) và Giả thuyết về Chu kỳ Bổ nhiệm & Quy hoạch Cán bộ nguồn (Succession Lifecycle).
   * Nếu là Margin %: Giả thuyết 1 về Cấu trúc Chi phí Vốn (COGS) & Lợi thế giá vốn sản xuất; Giả thuyết 2 về Định vị giá trị & Năng lực sinh dòng tiền mặt ròng (Premium Value Capture).
   * Nếu là Volume / Doanh số:
     - Nếu đối tượng là Sản phẩm: Giả thuyết về Kênh phân phối và Thị hiếu khách hàng.
     - Nếu đối tượng là Nhân sự cá nhân (pe.Salesperson): Dùng danh xưng "Nhân sự [Tên]" hoặc "Nhân viên [Tên]". TUYỆT ĐỐI KHÔNG gọi tên nhân viên cá nhân là "nhóm [Tên]" (Ví dụ: "Nhân sự Gunar Cockshoot", TUYỆT ĐỐI CẤM gọi là "nhóm Gunar Cockshoot")!
     - Nếu đối tượng là Đội ngũ (pe.Team): Dùng danh xưng "Đội ngũ [Tên Team]" hoặc "Team [Tên Team]". Giả thuyết về Kỷ luật bán hàng và Khai thác địa bàn.
+    - Nếu đối tượng là Phòng ban (department): Dùng danh xưng "Phòng ban [Tên Phòng]". Giả thuyết về Định biên nhân sự và Phân bổ nguồn lực chức năng.
     - Nếu đối tượng là Thị trường / Quốc gia: Giả thuyết về Quy mô thị trường & Sức mua địa phương; Giả thuyết về Mạng lưới phân phối và Thích ứng thị hiếu người tiêu dùng bản địa. TUYỆT ĐỐI KHÔNG gán "kỹ năng chốt hợp đồng" hay "kỷ luật của đội ngũ" cho một quốc gia/thị trường.
 - MỖI GIẢ THUYẾT BẮT BUỘC TRÍCH DẪN TÊN THỰC THỂ VÀ SỐ LIỆU CỤ THỂ TỪ KẾT QUẢ.
 - TUYỆT ĐỐI CẤM câu văn mẫu sáo rỗng, TUYỆT ĐỐI KHÔNG chèn nhãn [Ưu tiên Cao] vào mục này).
 
 ### 2.3. 🎯 Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)
 (Quy tắc phân loại ngữ cảnh thực thể (Entity Context Rule):
-1. Nếu đối tượng là SẢN PHẨM / SKU / CATEGORY:
+1. Nếu đối tượng là LÃNH ĐẠO / QUẢN LÝ / GIỚI TÍNH (Leadership & Diversity):
+   - Chiến lược: Quy hoạch cán bộ nguồn (Succession Planning), Chương trình nâng cao năng lực lãnh đạo (Leadership Development), Chuẩn hóa tiêu chí bổ nhiệm dựa trên hiệu suất (Meritocracy & ESG Governance). TUYỆT ĐỐI KHÔNG hoảng loạn dùng từ "khủng hoảng nhân sự", "phỏng vấn thôi việc (stay-interview)" hay "tăng lương giữ chân" cho các chênh lệch số nguyên nhỏ rời rạc!
+2. Nếu đối tượng là SẢN PHẨM / SKU / CATEGORY:
    - Chiến lược: Tối ưu danh mục, đóng gói combo, chính sách giá, quản trị hàng tồn kho.
-2. Nếu đối tượng là NHÂN SỰ CÁ NHÂN (pe.Salesperson):
+3. Nếu đối tượng là NHÂN SỰ CÁ NHÂN (pe.Salesperson):
    - Chiến lược: Incentive thưởng nóng, đào tạo kỹ năng chốt deal (coaching), kèm cặp nội bộ (peer coaching), chuyển giao kinh nghiệm từ Best Performer sang nhân sự khác. TUYỆT ĐỐI KHÔNG dùng từ "xả hàng", "hết hạn sử dụng", "combo" và TUYỆT ĐỐI KHÔNG gọi tên nhân viên là "nhóm [Tên]"!
-3. Nếu đối tượng là ĐỘI NGŨ (pe.Team):
+4. Nếu đối tượng là ĐỘI NGŨ (pe.Team):
    - Chiến lược: Incentive thưởng nóng, đào tạo kỹ năng, chia sẻ best-practice, Territory Planning.
-4. Nếu đối tượng là THỊ TRƯỜNG / QUỐC GIA (g.Geo / Country):
+5. Nếu đối tượng là THỊ TRƯỜNG / QUỐC GIA (g.Geo / Country):
    - Chiến lược: Mở rộng kênh phân phối địa phương, thâm nhập thị trường, thích ứng văn hóa tiêu dùng (Localization), tối ưu chuỗi cung ứng/logistics xuất nhập khẩu. TUYỆT ĐỐI KHÔNG dùng từ 'team New Zealand', 'hoa hồng thưởng nóng cho USA'.
 
 Quy tắc trình bày đề xuất:
@@ -5690,7 +5706,7 @@ QUY TẮC ĐỊNH DẠNG & NGÔN NGỮ (BẮT BUỘC):
 - 100% TIẾNG VIỆT KINH DOANH CHUẨN MỰC, TỰ NHIÊN (CẤM từ ngữ dịch máy ngô nghê, CẤM pha trộn câu tiếng Anh).
 - MỖI Ý PHÂN TÍCH BẮT BUỘC NẰM TRÊN MỘT DÒNG RIÊNG BIỆT (bắt đầu bằng gạch đầu dòng `• `).
 - CHỈ IN ĐẬM DUY NHẤT TIÊU ĐỀ Ở ĐẦU GẠCH ĐẦU DÒNG TRƯỚC DẤU HAI CHẤM.
-- Phong cách trình bày: Sắc bén, súc tích, chuẩn ngôn ngữ Strategic Memo trình Ban Giám đốc."""
+- Phong cách trình bày: Sắc bén, súc tích, chuẩn ngôn ngữ Strategic Memo trình Ban Giám đốc và CFO."""
 
 
 def build_followup_prompt(user_query: str, schema_context: str, df_sample_str: str, lang: str = "vi") -> str:
