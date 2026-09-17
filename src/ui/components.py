@@ -4178,16 +4178,18 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         if not text:
             return ""
         text = str(text).strip()
-        # Đảm bảo mỗi một ý có dấu chấm / gạch đầu dòng (•) hoặc icon (🔴, 🟡, 🟢) phải xuống dòng cách đoạn (\n\n) rõ ràng, không viết liền
-        text = re.sub(r"(?<=[^\n])\s*[•\-\*]\s*", "\n\n• ", text)
-        text = re.sub(r"(?<=[^\n])\s*(•\s*[🔴🟡🟢])", r"\n\n\1", text)
+        # Tách dòng rõ ràng giữa các ý: chỉ tách khi gặp ký tự • hoặc icon 🔴🟡🟢 ở giữa chuỗi
+        text = re.sub(r"(?<=[^\n])\s*•\s*", "\n\n• ", text)
+        text = re.sub(r"(?<=[^\n])\s*(?=[🔴🟡🟢])", "\n\n• ", text)
         raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
-        formatted = []
+        formatted_lines = []
         for l in raw_lines:
-            if not l.startswith("•") and not any(l.startswith(icon) for icon in ["🔴", "🟡", "🟢"]):
-                l = "• " + l
-            formatted.append(l)
-        return escape_markdown_currency_symbols("\n\n".join(formatted))
+            l = re.sub(r"^[•\s]+", "", l).strip()
+            if not l:
+                continue
+            l = f"• {l}"
+            formatted_lines.append(l)
+        return escape_markdown_currency_symbols("\n\n".join(formatted_lines))
 
     st.markdown("---")
     st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
