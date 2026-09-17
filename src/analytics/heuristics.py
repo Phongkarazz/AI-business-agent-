@@ -3073,7 +3073,18 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
         text = re.sub(r"thấp hơn 0(?:\.0)?%", "ở mức tương đương", text)
         # Sửa khoảng trắng thừa hoặc ngoặc rỗng do regex tạo ra
         text = re.sub(r"\(\s*\)", "", text)
-        text = re.sub(r"\s{2,}", " ", text)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        # BẮT BUỘC: Mỗi một ý có dấu chấm / gạch đầu dòng (•) phải xuống dòng cách đoạn (\n\n) rõ ràng, không viết liền
+        text = re.sub(r"(?<=[^\n])\s*[•\-\*]\s*", "\n\n• ", text)
+        text = re.sub(r"(?<=[^\n])\s*(•\s*[🔴🟡🟢])", r"\n\n\1", text)
+        # Chuẩn hóa các dòng
+        raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
+        formatted_lines = []
+        for l in raw_lines:
+            if not l.startswith("•") and not any(l.startswith(icon) for icon in ["🔴", "🟡", "🟢"]):
+                l = "• " + l
+            formatted_lines.append(l)
+        text = "\n\n".join(formatted_lines)
         return text
 
     part_21 = clean_cfo_artifacts(part_21)

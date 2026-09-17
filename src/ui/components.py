@@ -4174,6 +4174,21 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
     p22 = sections.get("hypothesis", "").strip()
     p23 = sections.get("action_plan", "").strip()
 
+    def format_card_markdown(text: str) -> str:
+        if not text:
+            return ""
+        text = str(text).strip()
+        # Đảm bảo mỗi một ý có dấu chấm / gạch đầu dòng (•) hoặc icon (🔴, 🟡, 🟢) phải xuống dòng cách đoạn (\n\n) rõ ràng, không viết liền
+        text = re.sub(r"(?<=[^\n])\s*[•\-\*]\s*", "\n\n• ", text)
+        text = re.sub(r"(?<=[^\n])\s*(•\s*[🔴🟡🟢])", r"\n\n\1", text)
+        raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
+        formatted = []
+        for l in raw_lines:
+            if not l.startswith("•") and not any(l.startswith(icon) for icon in ["🔴", "🟡", "🟢"]):
+                l = "• " + l
+            formatted.append(l)
+        return escape_markdown_currency_symbols("\n\n".join(formatted))
+
     st.markdown("---")
     st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
 
@@ -4182,14 +4197,14 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         with st.container(border=True):
             title_21 = "🚨 1. Key Discoveries & Trend Anomalies" if is_en else "🚨 1. Phát hiện Bất thường & Xu hướng Chính"
             st.markdown(f"<h4 style='color: #B23C00; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_21}</h4>", unsafe_allow_html=True)
-            st.markdown(escape_markdown_currency_symbols(p21))
+            st.markdown(format_card_markdown(p21))
 
     # Card 2: Giả thuyết & Nguyên nhân
     if p22:
         with st.container(border=True):
             title_22 = "🔍 2. Potential Root Causes & Hypotheses" if is_en else "🔍 2. Giả thuyết & Nguyên nhân Tiềm năng"
             st.markdown(f"<h4 style='color: #01579B; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
-            st.markdown(escape_markdown_currency_symbols(p22))
+            st.markdown(format_card_markdown(p22))
 
     # Card 3: Đề xuất chiến lược phân cấp (Cấp bách | Trung hạn | Dài hạn)
     if not p23 and df is not None and not df.empty:
@@ -4200,7 +4215,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         with st.container(border=True):
             title_23 = "🎯 3. Executive Strategic Recommendations (Urgent | Medium | Long-term)" if is_en else "🎯 3. Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)"
             st.markdown(f"<h4 style='color: #1B5E20; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
-            st.markdown(escape_markdown_currency_symbols(p23))
+            st.markdown(format_card_markdown(p23))
 
 
 def render_agent_workflow_badges(result: dict, turn_id: str):
