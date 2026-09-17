@@ -1274,6 +1274,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         male_emp_cols = ["MaleEmployees"]
                         female_emp_cols = ["FemaleEmployees"]
 
+                    # Đảm bảo chart_title luôn có giá trị mặc định tránh UnboundLocalError
+                    chart_title = f"{format_col_title(measure_cols[0])} theo {format_col_title(label_name)}" if (measure_cols and label_name) else "Biểu đồ Cột"
+
                     # Nếu có cặp số lượng Nam/Nữ thực tế (hoặc vừa được tính từ Tổng * %):
                     is_pure_pct_only = any(k in uq_low for k in ["chỉ xem tỷ lệ", "chỉ xem phần trăm", "chỉ tỷ lệ"])
                     if male_emp_cols and female_emp_cols and not is_pure_pct_only:
@@ -2685,8 +2688,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 clean_pie_val = format_col_title(pie_val_col)
                 clean_label = format_col_title(label_name)
 
+                # Khởi tạo tiêu đề mặc định an toàn cho mọi nhánh Pie chart
                 if is_val_pct and any(k in (user_query or "").lower() for k in ["lương", "salary", "chi phí"]):
                     chart_title = f"Cơ Cấu Chi Phí Lương theo {clean_label}"
+                elif is_val_pct or any(k in (user_query or "").lower() for k in ["tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "cơ cấu", "đóng góp", "share", "phần trăm"]):
+                    chart_title = f"Tỷ Trọng {clean_pie_val} theo {clean_label}"
+                else:
+                    chart_title = f"Cơ Cấu {clean_pie_val} theo {clean_label}"
                 # Bảng màu tương phản cao chuyên dụng cho Donut/Pie chart (Distinct Color Palette)
                 # Ngăn chặn hoàn toàn hiện tượng 2 màu tương đồng (như cam - đỏ cam) nằm kề nhau
                 pie_palette = [
