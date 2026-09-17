@@ -5239,6 +5239,22 @@ ORDER BY EmployeeCount DESC;
 (BẮT BUỘC tính cột Percentage bằng ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage!)
 """
 
+    # 8.2 Thống kê số lượng và tổng mức lương theo từng giới tính
+    elif any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "từng giới tính", "theo giới tính"]) and any(k in q_low for k in ["tổng mức lương", "tổng quỹ lương", "tổng lương", "quỹ lương", "chi phí lương"]) and any(k in q_low for k in ["số lượng", "quy mô", "nhân sự", "nhân viên", "headcount", "đếm"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (THỐNG KÊ SỐ LƯỢNG VÀ TỔNG MỨC LƯƠNG THEO TỪNG GIỚI TÍNH):
+SELECT 
+    e.gender AS Gender,
+    COUNT(DISTINCT e.emp_no) AS Headcount,
+    SUM(s.salary) AS TotalSalary,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM employees e
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY e.gender
+ORDER BY Gender ASC;
+(CẢNH BÁO ĐẶC BIỆT: BẮT BUỘC alias cột phân loại là Gender AS Gender, TUYỆT ĐỐI KHÔNG đặt tên Department hay Dept! Xuất đầy đủ Headcount, TotalSalary và AvgSalary!)
+"""
+
     # 9. So sánh quy mô nhân sự và mức lương trung bình phòng ban
     elif any(k in q_low for k in ["quy mô", "số lượng nhân sự", "số nhân sự", "số nhân viên"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập"]) and any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng"]):
         return """

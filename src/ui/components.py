@@ -2292,10 +2292,10 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         st.write("")
         return
 
-    # KIỂM TRA BÀI TOÁN SO SÁNH TRỰC TIẾP 2 PHÒNG BAN (TWO SPECIFIC DEPARTMENTS COMPARISON)
+    # KIỂM TRA BÀI TOÁN SO SÁNH TRỰC TIẾP 2 ĐỐI TƯỢNG (VD: 2 PHÒNG BAN, 2 GIỚI TÍNH, 2 THỊ TRƯỜNG, 2 TEAM...)
     dept_label_cands = [c for c in label_cols if any(k in str(c).lower() for k in ["dept", "phòng", "department"])]
     dept_col = dept_label_cands[0] if dept_label_cands else (label_cols[0] if label_cols else None)
-    sal_meas_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"])]
+    sal_meas_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập", "payroll", "sales", "doanh số", "amount", "budget"])]
     sal_col = sal_meas_cands[0] if sal_meas_cands else None
 
     uq_low_comp = (user_query or "").lower()
@@ -2307,7 +2307,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         and (
             any(k in uq_low_comp for k in ["so sánh", "đối chiếu", "chênh lệch", "vs", "compare", "giữa"])
             or any(any(k in str(c).lower() for k in ["diff", "difference", "chênh lệch"]) for c in df.columns)
-            or any(k in str(dept_col).lower() for k in ["dept", "phòng", "department"])
+            or any(k in str(dept_col).lower() for k in ["dept", "phòng", "department", "gender", "giới tính", "team", "country", "market", "category"])
+            or set(df[dept_col].dropna().astype(str).str.strip().str.upper()).issubset({"M", "F", "MALE", "FEMALE", "NAM", "NỮ", "NU"})
         )
     )
 
@@ -2319,7 +2320,53 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         sal0 = float(pd.to_numeric(row0[sal_col], errors="coerce") or 0.0)
         sal1 = float(pd.to_numeric(row1[sal_col], errors="coerce") or 0.0)
 
-        hc_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["headcount", "nhân sự", "nhân viên", "emp", "quy mô"])]
+        # Nhận diện loại phân loại đối tượng (Gender, Market, Team, Category, Department, etc.)
+        dim_name_low = str(dept_col).lower()
+        raw_vals_upper = {str(v).strip().upper() for v in df[dept_col].dropna()}
+        is_gender = (
+            any(k in dim_name_low for k in ["gender", "giới tính", "gioi_tinh", "sex"])
+            or raw_vals_upper.issubset({"M", "F"})
+            or raw_vals_upper.issubset({"MALE", "FEMALE"})
+            or raw_vals_upper.issubset({"NAM", "NỮ", "NU"})
+            or any(k in uq_low_comp for k in ["giới tính", "gender", "nam", "nữ", "male", "female"])
+        )
+
+        if is_gender:
+            dim_type = "Giới tính" if not is_en else "Gender"
+            dim_icon = "🚻"
+        elif any(k in dim_name_low for k in ["country", "geo", "quốc gia", "thị trường", "market"]):
+            dim_type = "Thị trường" if not is_en else "Market"
+            dim_icon = "🌍"
+        elif any(k in dim_name_low for k in ["team", "đội"]):
+            dim_type = "Đội ngũ" if not is_en else "Team"
+            dim_icon = "👥"
+        elif any(k in dim_name_low for k in ["product", "sản phẩm", "category", "nhóm hàng"]):
+            dim_type = "Nhóm hàng" if not is_en else "Category"
+            dim_icon = "📦"
+        elif any(k in dim_name_low for k in ["title", "chức danh", "job"]):
+            dim_type = "Chức danh" if not is_en else "Job Title"
+            dim_icon = "🎖️"
+        elif any(k in dim_name_low for k in ["dept", "phòng", "department"]):
+            dim_type = "Phòng ban" if not is_en else "Department"
+            dim_icon = "🏢"
+        else:
+            dim_type = "Đối tượng" if not is_en else "Entity"
+            dim_icon = "📊"
+
+        def _format_entity_label(val: str, is_gen: bool) -> str:
+            v = str(val).strip()
+            if is_gen:
+                if v.upper() == "M":
+                    return "Nam (M)"
+                if v.upper() == "F":
+                    return "Nữ (F)"
+                if v.lower() == "male":
+                    return "Nam (Male)"
+                if v.lower() == "female":
+                    return "Nữ (Female)"
+            return v
+
+        hc_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["headcount", "nhân sự", "nhân viên", "emp", "quy mô", "count", "số lượng"]) and c != sal_col]
         hc_col = hc_cands[0] if hc_cands else None
         hc0 = int(pd.to_numeric(row0[hc_col], errors="coerce") or 0) if hc_col else None
         hc1 = int(pd.to_numeric(row1[hc_col], errors="coerce") or 0) if hc_col else None
@@ -2340,7 +2387,14 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         else:
             diff_pct = (diff_val / low_sal * 100.0) if low_sal > 0 else 0.0
 
-        def _get_dept_icon(d_name: str) -> str:
+        def _get_entity_icon(d_name: str, is_gen: bool) -> str:
+            if is_gen:
+                dl = str(d_name).lower()
+                if "nam" in dl or d_name.upper() == "M" or "male" in dl:
+                    return "👨"
+                if "nữ" in dl or "nu" in dl or d_name.upper() == "F" or "female" in dl:
+                    return "👩"
+                return "🚻"
             dl = (d_name or "").lower()
             if any(k in dl for k in ["marketing", "tiếp thị"]):
                 return "📢"
@@ -2360,10 +2414,22 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 return "🛡️"
             if any(k in dl for k in ["human", "nhân sự", "hr"]):
                 return "👥"
-            return "🏢"
+            return dim_icon
 
-        icon_high = _get_dept_icon(high_dept)
-        icon_low = _get_dept_icon(low_dept)
+        high_name = _format_entity_label(high_dept, is_gender)
+        low_name = _format_entity_label(low_dept, is_gender)
+        icon_high = _get_entity_icon(high_dept, is_gender)
+        icon_low = _get_entity_icon(low_dept, is_gender)
+
+        is_tot_sal = any(k in str(sal_col).lower() for k in ["totalsalary", "total_salary", "totalpayroll", "total_payroll", "quỹ", "quỹ lương", "tổng"])
+        is_sales = any(k in str(sal_col).lower() for k in ["sales", "revenue", "doanh số", "doanh thu"])
+        
+        if is_tot_sal:
+            metric_prefix = "Tổng Quỹ Lương" if not is_en else "Total Payroll"
+        elif is_sales:
+            metric_prefix = "Tổng Doanh Thu" if not is_en else "Total Revenue"
+        else:
+            metric_prefix = "Lương TB" if not is_en else "Avg Salary"
 
         delta_high = f"{high_hc:,} nhân sự" if high_hc else ("Mức cao hơn" if not is_en else "Higher")
         delta_low = f"{low_hc:,} nhân sự" if low_hc else ("Mức thấp hơn" if not is_en else "Lower")
@@ -2371,36 +2437,36 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.metric(
-                f"{icon_high} " + (f"Lương TB {high_dept}" if not is_en else f"Avg Salary {high_dept}"),
+                f"{icon_high} {metric_prefix} {high_name}",
                 f"${high_sal:,.0f}",
                 delta=delta_high
             )
         with c2:
             st.metric(
-                f"{icon_low} " + (f"Lương TB {low_dept}" if not is_en else f"Avg Salary {low_dept}"),
+                f"{icon_low} {metric_prefix} {low_name}",
                 f"${low_sal:,.0f}",
                 delta=delta_low
             )
         with c3:
             st.metric(
-                "⚖️ " + ("Chênh lệch Thu nhập" if not is_en else "Salary Difference"),
+                "⚖️ " + (f"Chênh lệch {metric_prefix}" if not is_en else "Difference"),
                 f"+${diff_val:,.0f}",
-                delta=f"{high_dept} cao hơn" if not is_en else f"Higher in {high_dept}"
+                delta=f"{high_name} cao hơn" if not is_en else f"Higher in {high_name}"
             )
         with c4:
             st.metric(
                 "📊 " + ("Tỷ lệ Chênh lệch" if not is_en else "Difference Percentage"),
                 f"+{diff_pct:.2f}%",
-                delta=f"Nghiêng về {high_dept}" if not is_en else f"Favors {high_dept}"
+                delta=f"Nghiêng về {high_name}" if not is_en else f"Favors {high_name}"
             )
 
         st.caption(
-            f"ℹ️ **Đối chiếu Thu nhập Phòng ban {high_dept} vs {low_dept}**: "
-            f"Nhân sự phòng ban **{high_dept}** có mức lương trung bình hiện tại (${high_sal:,.0f}) "
-            f"cao hơn phòng ban **{low_dept}** (${low_sal:,.0f}) là **+${diff_val:,.0f} (+{diff_pct:.2f}%)**."
+            f"ℹ️ **Đối chiếu {metric_prefix} {dim_type} {high_name} vs {low_name}**: "
+            f"Nhóm {dim_type.lower()} **{high_name}** có {metric_prefix.lower()} (${high_sal:,.0f}) "
+            f"cao hơn nhóm {dim_type.lower()} **{low_name}** (${low_sal:,.0f}) là **+${diff_val:,.0f} (+{diff_pct:.2f}%)**."
             if not is_en else
-            f"ℹ️ **Compensation Comparison: {high_dept} vs {low_dept}**: "
-            f"Department **{high_dept}** average salary (${high_sal:,.0f}) is higher than **{low_dept}** (${low_sal:,.0f}) "
+            f"ℹ️ **{metric_prefix} Comparison: {high_name} vs {low_name}**: "
+            f"{dim_type} **{high_name}** {metric_prefix.lower()} (${high_sal:,.0f}) is higher than **{low_name}** (${low_sal:,.0f}) "
             f"by **+${diff_val:,.0f} (+{diff_pct:.2f}%)**."
         )
         st.write("")
