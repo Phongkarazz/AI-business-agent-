@@ -690,6 +690,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             sorted_df = df.sort_values([time_color_col, time_col]) if time_color_col else df.sort_values(time_col)
             n_time_points = sorted_df[time_col].nunique(dropna=True)
             tick_angle = 0 if n_time_points <= 20 else -45
+            y_range = None
+            diff_unit_or_scale = False
 
             if time_color_col:
                 # Nếu có nhiều chỉ số (như P&L gồm Doanh Thu, Chi Phí, Lợi Nhuận, Tỷ Suất LN):
@@ -737,6 +739,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 clean_m = format_col_title(active_measure)
                 clean_time = format_col_title(time_col)
                 clean_group = format_col_title(time_color_col)
+                palette = ["#0068FF", "#DC2626", "#10B981", "#D97706", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316"]
                 fig = px.line(
                     sorted_df,
                     x=time_col,
@@ -744,26 +747,45 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     color=time_color_col,
                     markers=True,
                     title=f"Xu hướng {clean_m} theo {clean_time} (Phân loại theo {clean_group})",
-                    template="plotly_white"
+                    template="plotly_white",
+                    color_discrete_sequence=palette
                 )
                 m_low = str(active_measure).lower()
                 is_pct = any(k in m_low for k in ["margin", "tỷ suất", "tỉ suất", "%", "pct", "percent"])
                 is_curr = (not is_pct) and any(k in m_low for k in ["sales", "amount", "salary", "budget", "revenue", "lương", "doanh", "lợi nhuận", "profit", "chi phí", "cost", "$"])
-                if is_pct:
-                    fig.update_traces(
-                        line=dict(width=2.5),
-                        marker=dict(size=7),
-                        connectgaps=True,
-                        hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: %{{y:,.2f}}%<extra></extra>"
-                    )
-                else:
-                    curr_sym = "$" if is_curr else ""
-                    fig.update_traces(
-                        line=dict(width=2.5),
-                        marker=dict(size=7),
-                        connectgaps=True,
-                        hovertemplate=f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: {curr_sym}%{{y:,.0f}}<extra></extra>"
-                    )
+
+                DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
+                MARKER_SYMBOLS = ["circle", "diamond", "square", "triangle-up", "star", "cross", "hexagon"]
+
+                for idx, trace in enumerate(fig.data):
+                    c = palette[idx % len(palette)]
+                    d = DASH_STYLES[idx % len(DASH_STYLES)]
+                    s = MARKER_SYMBOLS[idx % len(MARKER_SYMBOLS)]
+                    trace.line.color = c
+                    trace.line.width = 3
+                    trace.line.dash = d
+                    trace.marker.color = c
+                    trace.marker.symbol = s
+                    trace.marker.size = 8
+                    trace.marker.line = dict(width=1.5, color="#ffffff")
+                    trace.connectgaps = True
+                    if is_pct:
+                        trace.hovertemplate = f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: %{{y:,.2f}}%<extra></extra>"
+                    else:
+                        curr_sym = "$" if is_curr else ""
+                        trace.hovertemplate = f"<b>%{{fullData.name}}</b><br>{clean_time}: %{{x}}<br>{clean_m}: {curr_sym}%{{y:,.2f}}<extra></extra>"
+
+                # Dynamic Y-axis auto-zoom: nếu min > 0 và span nhỏ so với max (ví dụ lương 50k-70k, chênh lệch M/F chỉ vài chục $), tự động zoom trục Y để thấy rõ độ tách biệt
+                y_clean = pd.to_numeric(sorted_df[active_measure], errors='coerce').dropna()
+                if not y_clean.empty:
+                    y_min = float(y_clean.min())
+                    y_max = float(y_clean.max())
+                    y_span = y_max - y_min
+                    if y_min > 0 and (y_span / max(y_max, 1e-6) < 0.7 or y_min >= 1000):
+                        pad = max(y_span * 0.15, (y_max - y_min) * 0.08, y_max * 0.03)
+                        y_lower = max(0.0, y_min - pad)
+                        y_upper = y_max + pad
+                        y_range = [y_lower, y_upper]
             else:
                 clean_time = format_col_title(time_col)
                 min_t = str(sorted_df[time_col].min())
@@ -910,21 +932,33 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         labels=labels_map
                     )
                     fig.update_traces(line=dict(width=3), marker=dict(size=8))
-            fig.update_layout(
-                xaxis=dict(
-                    type="category" if n_time_points <= 36 else None,
-                    tickangle=tick_angle,
-                    automargin=True,
-                    title=clean_time
-                ),
-                yaxis=dict(
-                    title=clean_m if len(measure_cols) == 1 else None,
-                    tickprefix="$" if (len(measure_cols) == 1 and any(k in str(measure_cols[0]).lower() for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])) else "",
+
+            if not (len(measure_cols) == 2 and not time_color_col and diff_unit_or_scale):
+                curr_metric_name = measure_cols[0] if (not time_color_col and len(measure_cols) == 1) else (active_measure if time_color_col else "")
+                m_title = clean_m if (len(measure_cols) == 1 or time_color_col) else None
+                is_curr_m = any(k in str(curr_metric_name).lower() for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                yaxis_cfg = dict(
+                    title=m_title,
+                    tickprefix="$" if ((len(measure_cols) == 1 or time_color_col) and is_curr_m) else "",
                     automargin=True
-                ) if len(measure_cols) == 1 else dict(automargin=True),
-                height=520,
-                margin=dict(l=30, r=30, t=50, b=60)
-            )
+                )
+                if y_range is not None:
+                    yaxis_cfg["range"] = y_range
+                    yaxis_cfg["autorange"] = False
+
+                fig.update_layout(
+                    xaxis=dict(
+                        type="category" if n_time_points <= 36 else None,
+                        tickangle=tick_angle,
+                        automargin=True,
+                        title=clean_time
+                    ),
+                    yaxis=yaxis_cfg,
+                    hovermode="x unified" if (time_color_col or len(measure_cols) > 1) else None,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="right", x=1) if (time_color_col or len(measure_cols) > 1) else None,
+                    height=520,
+                    margin=dict(l=30, r=30, t=50, b=60)
+                )
 
         elif chosen == "Area" and time_col and measure_cols:
             sorted_df = df.sort_values([time_color_col, time_col]) if time_color_col else df.sort_values(time_col)
