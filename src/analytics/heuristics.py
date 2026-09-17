@@ -1679,10 +1679,19 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             spread_diff = top_v - bot_v
             gap_vs_top = (spread_diff / top_v * 100) if top_v > 0 else 0
             lead_vs_bot = (spread_diff / bot_v * 100) if bot_v > 0 else 0
+            is_single_or_tied = (len(df) == 1 or top_name == bot_name or spread_diff <= 0 or gap_vs_top < 0.01)
 
             # 3A. Giới tính (Gender)
             is_gender = any(k in cols_str for k in ["gender", "giới tính", "sex"]) or any(k in q_low for k in ["giới tính", "nam", "nữ", "gender", "male", "female"])
             if is_gender:
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Job Family & Seniority Distribution**: The **{top_name}** group recorded at {format_metric_value(top_v, val_col)}, reflecting managerial tenure accumulation and specialist grade distribution."
+                        h2 = f"• **Candidate Pipeline & Pay Equity Governance**: Reflects enterprise commitment to pay parity and career advancement governance."
+                    else:
+                        h1 = f"• **Cơ cấu Phân bổ Chức danh & Thâm niên Quản lý**: Nhóm **{top_name}** ghi nhận mức {format_metric_value(top_v, val_col)}, phản ánh tỷ lệ phân bổ các cấp bậc chuyên môn và số năm thâm niên tích lũy tại tổ chức."
+                        h2 = f"• **Đặc thù Nguồn cung Ứng viên & Chính sách Bình đẳng**: Phản ánh cam kết của doanh nghiệp trong việc thúc đẩy công bằng cơ hội phát triển nghề nghiệp và đãi ngộ theo năng lực."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Job Family & Seniority Distribution**: The variance between **{top_name}** ({format_metric_value(top_v, val_col)}) and **{bot_name}** ({format_metric_value(bot_v, val_col)}, {gap_vs_top:.1f}% lower than leader) often stems from historical tenure accumulation and the distribution of senior managerial posts."
                     h2 = f"• **Candidate Pipeline & Pay Equity Governance**: This distribution reflects external industry talent pools across specialized divisions and active enterprise governance around compensation parity."
@@ -1694,6 +1703,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             # 3B. Chức danh (Titles / Roles)
             is_title = any(k in cols_str for k in ["title", "chức danh", "position"]) or any(k in q_low for k in ["chức danh", "vị trí", "title"])
             if is_title:
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Accountability Scope & Decision-Making Complexity**: Position **{top_name}** recorded at {format_metric_value(top_v, val_col)}, corresponding to specialized execution scope and decision-making complexity."
+                        h2 = f"• **Merit Progression & Key Talent Retention**: Compensation benchmarks provide key financial incentives for career ladders and leadership retention."
+                    else:
+                        h1 = f"• **Phân cấp Trách nhiệm & Biên độ Quyết định Quản lý**: Vị trí **{top_name}** ghi nhận mức {format_metric_value(top_v, val_col)}, thể hiện mức độ rủi ro trách nhiệm cao và yêu cầu kinh nghiệm điều hành chuyên sâu."
+                        h2 = f"• **Đòn bẩy Tài chính & Giữ chân Nhân sự Cốt lõi**: Mức thu nhập đóng vai trò đòn bẩy tài chính quan trọng để tạo động lực thăng tiến nội bộ và giữ chân nhân tài đầu ngành."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Accountability Scope & Decision-Making Complexity**: **{top_name}** ranks highest ({format_metric_value(top_v, val_col)}), corresponding to strategic decision risk and specialized leadership execution."
                     h2 = f"• **Merit Progression & Key Talent Retention**: The gap of {format_metric_value(spread_diff, val_col)} ({gap_vs_top:.1f}% lower than leader) against **{bot_name}** ({format_metric_value(bot_v, val_col)}) serves as a key financial incentive for career ladders and leadership retention."
@@ -1730,6 +1747,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                 and any(k in q_low for k in ["team", "đội ngũ", "phân bổ", "đội"])
             )
             if is_team_headcount:
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Salesforce Distribution & Team Scale**: **{top_name}** maintains {format_metric_value(top_v, val_col)} personnel, establishing dedicated operational capacity."
+                        h2 = f"• **Workforce Allocation**: Staffing levels are aligned with current territorial account workload and operational targets."
+                    else:
+                        h1 = f"• **Quy mô Lực lượng & Năng lực Bao phủ**: Đội ngũ **{top_name}** sở hữu quy mô {format_metric_value(top_v, val_col)} nhân sự, bảo đảm năng lực vận hành và bao phủ mạng lưới khách hàng trọng yếu."
+                        h2 = f"• **Định biên Vận hành & Phân bổ Mục tiêu**: Quy mô nhân lực phù hợp với kế hoạch phân bổ hạn ngạch doanh số và dung lượng thị trường mục tiêu."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Salesforce Distribution & Team Scale**: **{top_name}** maintains the largest headcount with {format_metric_value(top_v, val_col)} sales professionals, positioning it as the primary frontline team driving account coverage."
                     h2 = f"• **Workforce Allocation & Onboarding Gap**: The spread against **{bot_name}** ({format_metric_value(bot_v, val_col)} reps) outlines differing regional workload demands and highlights an opportunity to reassign unallocated personnel to high-growth squads."
@@ -1756,6 +1781,15 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                 top_sales_str = format_metric_value(top_v, sales_col)
                 bot_sales_str = format_metric_value(bot_v, sales_col)
 
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Core Revenue Anchor & Category Demand**: **{top_name}** commands the primary contribution ({top_sales_str}{f', {top_pct_val}' if top_pct_val else ''}), driven by strong consumer adoption."
+                        h2 = f"• **Portfolio Focus**: Demonstrates strong performance concentration in key strategic SKUs."
+                    else:
+                        h1 = f"• **Trọng tâm Đóng góp Doanh số & Sức hút Thị trường**: Sản phẩm **{top_name}** ({top_sales_str}{f', {top_pct_val}' if top_pct_val else ''}) giữ vai trò chủ lực nhờ thị hiếu người tiêu dùng ưa chuộng."
+                        h2 = f"• **Cơ cấu Doanh thu Trụ cột**: Khẳng định vai trò dẫn dắt doanh thu danh mục và sức hút thương hiệu bền vững."
+                    return f"{h1}\n\n{h2}"
+
                 if is_en:
                     h1 = f"• **Core Revenue Anchor & Category Demand**: **{top_name}** commands the #1 contribution ({top_sales_str}{f', {top_pct_val}' if top_pct_val else ''}), driven by widespread consumer taste adoption and consistent retail shelf placement."
                     h2 = f"• **Portfolio Spread & Risk Diversification (Pareto 80/20)**: Top {n_items} key products collectively generate {cum_total_val} of total company sales; the balanced individual share from **{top_name}** ({top_pct_val}) to **{bot_name}** ({bot_pct_val}) demonstrates a resilient, well-distributed revenue foundation across core SKUs."
@@ -1767,6 +1801,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             # 3D2. Tỷ lệ đóng góp / Cơ cấu tỷ trọng (Contribution / Ratio / Share)
             is_contribution = any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "tỉ trọng", "tỷ trọng", "phần trăm", "cơ cấu", "đóng góp", "share", "ratio"])
             if is_contribution:
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Core Revenue Anchor & Contribution Share**: Group **{top_name}** accounts for the primary revenue stream, serving as the strategic growth pillar across business operations."
+                        h2 = f"• **Portfolio Focus**: Reflects consistent commercial execution and market focus."
+                    else:
+                        h1 = f"• **Trọng tâm Đóng góp Doanh thu & Vị thế Trụ cột**: Nhóm **{top_name}** nắm giữ tỷ trọng đóng góp chủ lực, đóng vai trò đầu tàu dẫn dắt dòng tiền toàn hệ thống."
+                        h2 = f"• **Tập trung Nguồn lực Chiến lược**: Phản ánh sự tập trung nguồn lực hiệu quả vào phân khúc kinh doanh cốt lõi."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Core Revenue Anchor & Portfolio Dominance**: **{top_name}** accounts for the primary revenue stream, serving as the strategic growth pillar across business operations."
                     h2 = f"• **Channel Diversification & Secondary Growth Levers**: The contribution variance highlights an opportunity to cross-sell and elevate **{bot_name}** to reduce single-segment dependency."
@@ -1802,6 +1844,15 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                     except Exception:
                         pass
 
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **COGS Structure & Cost Advantage**: The gross margin of **{top_name}** ({format_metric_value(top_v, val_col)}) reflects an optimized cost of goods sold (COGS) per unit relative to selling price."
+                        h2 = f"• **Pricing Discipline & Margin Protection**: Demonstrates robust pricing discipline and strong category margin resilience."
+                    else:
+                        h1 = f"• **Cấu trúc Chi phí Vốn (COGS) & Lợi thế Biên Lợi nhuận**: Tỷ suất lợi nhuận của **{top_name}** ({format_metric_value(top_v, val_col)}) bắt nguồn từ cấu trúc giá vốn hàng bán (COGS) được tối ưu hóa so với đơn giá niêm yết."
+                        h2 = f"• **Kỷ luật Định giá & Bảo vệ Biên An toàn**: Phản ánh kỷ luật định giá vững chắc và biên an toàn tài chính cao của danh mục sản phẩm."
+                    return f"{h1}\n\n{h2}"
+
                 if is_en:
                     h1 = f"• **COGS Structure & Cost Advantage**: The superior gross margin of **{top_name}** ({format_metric_value(top_v, val_col)}) reflects an exceptionally lean manufacturing cost of goods sold (COGS) per unit relative to selling price—representing a structural cost efficiency rather than consumer popularity or promotional pull."
                     if cash_top_name and cash_top_name != top_name:
@@ -1819,6 +1870,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             # 3E1.5. Thị trường / Quốc gia (Geo / Country / Market), Đội ngũ kinh doanh (Sales Teams), hoặc Nhân sự (Salesperson)
             detected_ent = detect_analysis_entity_type(df, user_query=user_query, name_col=name_col)
             if detected_ent == "geo":
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Market Scale & Local Purchasing Power**: Market **{top_name}** commands sales volume of {format_metric_value(top_v, val_col)}, driven by solid consumer demand and local purchasing power."
+                        h2 = f"• **Distribution Infrastructure**: Reflects active retail distribution partnerships and established regional logistics operations."
+                    else:
+                        h1 = f"• **Quy mô Thị trường & Sức mua Địa phương**: Thị trường **{top_name}** đạt quy mô doanh thu {format_metric_value(top_v, val_col)}, nhờ sức mua ổn định và sự đón nhận tích cực của người tiêu dùng bản địa."
+                        h2 = f"• **Độ Phủ Mạng lưới Phân phối & Hiệu quả Kênh**: Phản ánh năng lực khai thác của hệ thống phân phối và các chuỗi đối tác bán lẻ địa phương."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Market Scale & Local Purchasing Power**: Market **{top_name}** commands the leading sales output ({format_metric_value(top_v, val_col)}), driven by high per-capita purchasing power and strong consumer affinity for chocolate confectionery."
                     h2 = f"• **Distribution Network & Market Penetration**: The {gap_vs_top:.1f}% variance against **{bot_name}** ({format_metric_value(bot_v, val_col)}) stems from differences in local retail network maturity, import-export logistics lead times, and consumer taste preferences, highlighting significant market penetration headroom in **{bot_name}**."
@@ -1827,6 +1886,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                     h2 = f"• **Độ Phủ Mạng lưới Phân phối & Rào cản Thâm nhập**: Khoảng cách {gap_vs_top:.1f}% so với thị trường **{bot_name}** ({format_metric_value(bot_v, val_col)}) phản ánh sự phân hóa về độ bao phủ kênh bán lẻ hiện đại (Modern Trade), hạ tầng logistics chuỗi lạnh và khẩu vị tiêu dùng địa phương, mở ra dư địa mở rộng thị phần lớn tại **{bot_name}**."
                 return f"{h1}\n\n{h2}"
             elif detected_ent == "team":
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Sales Execution & Account Coverage**: Team **{top_name}** achieved {format_metric_value(top_v, val_col)}, driven by disciplined commercial execution and pipeline conversion."
+                        h2 = f"• **Territory Management**: Reflects focused account management and effective sales process discipline."
+                    else:
+                        h1 = f"• **Năng lực Bán hàng & Khai thác Địa bàn**: Đội ngũ **{top_name}** đạt doanh số {format_metric_value(top_v, val_col)}, khẳng định kỷ luật thực thi kinh doanh và khả năng bao phủ khách hàng hiệu quả."
+                        h2 = f"• **Quản trị Khách hàng & Kỷ luật Đội ngũ**: Phản ánh sự tập trung khai thác danh mục khách hàng trọng điểm và duy trì nhịp độ bán hàng ổn định."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Sales Execution & Account Coverage**: Team **{top_name}** commands the leading sales output ({format_metric_value(top_v, val_col)}), driven by high frontline conversion discipline and superior commercial execution."
                     h2 = f"• **Territory Potential & Capability Dispersion**: The {gap_vs_top:.1f}% variance against **{bot_name}** ({format_metric_value(bot_v, val_col)}) stems from uneven territory account density and tenure gaps, creating an immediate opportunity for best-practice replication."
@@ -1837,6 +1904,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             elif detected_ent == "employee":
                 is_salesperson_query = any(k in cols_str for k in ["sales", "amount", "boxes", "doanh số", "doanh thu", "hộp"]) or any(k in q_low for k in ["doanh số", "doanh thu", "bán hàng", "sales", "hộp"])
                 if is_salesperson_query:
+                    if is_single_or_tied:
+                        if is_en:
+                            h1 = f"• **Consultative Selling & Deal Conversion**: Sales representative **{top_name}** achieved {format_metric_value(top_v, val_col)}, reflecting consultative selling skills and disciplined deal closing."
+                            h2 = f"• **Role Impact & Client Relationship**: Reflects strong relationship management and high customer satisfaction."
+                        else:
+                            h1 = f"• **Kỹ năng Bán hàng & Khai thác Khách hàng Trọng điểm**: Nhân sự **{top_name}** đạt doanh số {format_metric_value(top_v, val_col)}, thể hiện kỹ năng tư vấn giải pháp sắc bén và kỷ luật chốt đơn hàng hiệu quả."
+                            h2 = f"• **Đóng góp Trọng yếu & Gắn kết Khách hàng**: Phản ánh sự tận tâm trong công tác chăm sóc đối tác và duy trì giá trị hợp đồng bền vững."
+                        return f"{h1}\n\n{h2}"
                     if is_en:
                         h1 = f"• **Consultative Selling & High-Value Account Conversion**: Sales representative **{top_name}** leads performance ({format_metric_value(top_v, val_col)}), reflecting exceptional key-account management, consultative selling skills, and disciplined deal closing."
                         h2 = f"• **Territory Density & Peer Coaching Opportunities**: The {gap_vs_top:.1f}% variance compared to sales representative **{bot_name}** ({format_metric_value(bot_v, val_col)}) highlights differences in account portfolio maturity and sales tenure, creating a high-impact opportunity for peer coaching and best-practice sharing across the sales team."
@@ -1844,6 +1919,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                         h1 = f"• **Kỹ năng Bán hàng & Khai thác Khách hàng Trọng điểm**: Nhân sự **{top_name}** đạt doanh số dẫn đầu ({format_metric_value(top_v, val_col)}), thể hiện kỹ năng tư vấn giải pháp sắc bén, khả năng duy trì quan hệ đối tác bền vững và kỷ luật chốt đơn hàng giá trị cao."
                         h2 = f"• **Độ Chín Danh mục Khách hàng & Dư địa Kèm cặp Nội bộ**: Khoảng cách {gap_vs_top:.1f}% so với nhân sự **{bot_name}** ({format_metric_value(bot_v, val_col)}) phản ánh sự phân hóa về độ bao phủ tệp khách hàng tiềm năng và kinh nghiệm thực chiến, mở ra cơ hội đẩy mạnh chuyển giao kỹ năng và kèm cặp nội bộ (peer coaching) để nâng cao đồng đều năng suất đội ngũ."
                 else:
+                    if is_single_or_tied:
+                        if is_en:
+                            h1 = f"• **Individual Performance & Role Value**: Personnel **{top_name}** recorded at {format_metric_value(top_v, val_col)}, reflecting specialized capabilities and strategic role impact."
+                            h2 = f"• **Progression Framework**: Compensation reflects experience maturity and established performance bands."
+                        else:
+                            h1 = f"• **Hiệu quả Cá nhân & Đóng góp Chuyên môn**: Nhân sự **{top_name}** đạt mức {format_metric_value(top_v, val_col)}, thể hiện năng lực chuyên môn và đóng góp trọng yếu vào mục tiêu tổ chức."
+                            h2 = f"• **Khung Lộ trình Đãi ngộ**: Mức thu nhập phản ánh sự phân tầng theo thâm niên và đóng vai trò đòn bẩy phát triển năng lực."
+                        return f"{h1}\n\n{h2}"
                     if is_en:
                         h1 = f"• **Individual Performance & Role Value**: Personnel **{top_name}** achieves the highest benchmark ({format_metric_value(top_v, val_col)}), reflecting specialized capabilities and strategic role impact."
                         h2 = f"• **Compensation Spread & Progression Incentive**: The variance compared to **{bot_name}** ({format_metric_value(bot_v, val_col)}, {gap_vs_top:.1f}% lower than leader) aligns with experience maturity and performance-driven progression bands."
@@ -1857,6 +1940,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             if is_sales:
                 ent_lbl_en = "Product" if detected_ent == "product" else ("Sales representative" if detected_ent == "employee" else ("Market" if detected_ent == "geo" else "Team"))
                 ent_lbl_vi = "Sản phẩm" if detected_ent == "product" else ("Nhân sự" if detected_ent == "employee" else ("Thị trường" if detected_ent == "geo" else "Đội ngũ"))
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Consumer Preference & Market Demand**: {ent_lbl_en} **{top_name}** generated {format_metric_value(top_v, val_col)}, proving healthy market demand and consumer adoption."
+                        h2 = f"• **Channel Execution**: Reflects solid shelf placement and consistent promotional execution across retail points."
+                    else:
+                        h1 = f"• **Thị hiếu Tiêu dùng & Sức Hút Thị trường**: {ent_lbl_vi} **{top_name}** đạt quy mô tiêu thụ {format_metric_value(top_v, val_col)}, chứng minh sự ưa chuộng và đón nhận tích cực từ thị trường."
+                        h2 = f"• **Độ Phủ Phân phối & Hiệu quả Kênh**: Phản ánh sự bao phủ tốt trên các điểm bán và chính sách thương mại hiệu quả."
+                    return f"{h1}\n\n{h2}"
                 if is_en:
                     h1 = f"• **Consumer Preference & Market Demand**: {ent_lbl_en} **{top_name}** commands the leading sales volume ({format_metric_value(top_v, val_col)}), proving superior consumer adoption and strong frontline retail pull."
                     h2 = f"• **Distribution Penetration & Channel Variance**: Standing {gap_vs_top:.1f}% lower than market leader reflects varying channel distribution intensity, highlighting an opportunity to expand into secondary retail touchpoints."
@@ -1868,6 +1959,14 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
             # 3F. General Ranking
             ent_pfx_en = "Sales representative" if detected_ent == "employee" else ("Product" if detected_ent == "product" else ("Market" if detected_ent == "geo" else ("Team" if detected_ent == "team" else "Unit")))
             ent_pfx_vi = "Nhân sự" if detected_ent == "employee" else ("Sản phẩm" if detected_ent == "product" else ("Thị trường" if detected_ent == "geo" else ("Đội ngũ" if detected_ent == "team" else "Đơn vị")))
+            if is_single_or_tied:
+                if is_en:
+                    h1 = f"• **Operational Focus & Capacity**: {ent_pfx_en} **{top_name}** recorded {format_metric_value(top_v, val_col)}, demonstrating dedicated execution capacity."
+                    h2 = f"• **Governance & Alignment**: Reflects aligned operating plans and consistent resource dedication."
+                else:
+                    h1 = f"• **Trọng tâm Vận hành & Năng lực Thực thi**: {ent_pfx_vi} **{top_name}** đạt mức {format_metric_value(top_v, val_col)}, phản ánh năng lực vận hành và sự tập trung nguồn lực hiệu quả."
+                    h2 = f"• **Kế hoạch Quản trị & Định hướng Vận hành**: Thể hiện sự nhất quán trong việc thực thi các mục tiêu đã đề ra theo kế hoạch."
+                return f"{h1}\n\n{h2}"
             if is_en:
                 h1 = f"• **Operational Leadership & Execution Focus**: {ent_pfx_en} **{top_name}** achieves the highest benchmark ({format_metric_value(top_v, val_col)}), demonstrating superior operational capacity and resource dedication."
                 h2 = f"• **Performance Variance & Optimization Window**: Standing {gap_vs_top:.1f}% lower than leader (variance of -{format_metric_value(spread_diff, val_col)}; leader exceeds {ent_pfx_en.lower()} **{bot_name}** at {format_metric_value(bot_v, val_col)} by +{lead_vs_bot:.1f}%) highlights an operational optimization window to narrow performance dispersion across units."
@@ -1937,6 +2036,13 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
     diff = top_val - bot_val
     gap_vs_top = (diff / top_val * 100) if top_val != 0 else 0
     lead_vs_bot = (diff / bot_val * 100) if bot_val != 0 else 0
+    is_single_or_tied = (len(df) == 1 or top_name == bot_name or abs(diff) < 1e-6 or gap_vs_top < 0.01)
+
+    has_max_min = any("max" in str(c).lower() for c in df.columns) and any("min" in str(c).lower() for c in df.columns)
+    max_c = next((c for c in df.columns if "max" in str(c).lower()), None)
+    min_c = next((c for c in df.columns if "min" in str(c).lower()), None)
+    max_val = float(df[max_c].iloc[0]) if (has_max_min and max_c in df) else None
+    min_val = float(df[min_c].iloc[0]) if (has_max_min and min_c in df) else None
 
     cols = df.columns.tolist()
     cols_str = " ".join(str(c).lower() for c in cols)
@@ -1996,35 +2102,61 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                     f"align operational batch schedules with channel purchasing cycles to sustainably mitigate cyclical disruptions."
                 )
         elif entity_type == "geo":
-            # MARKET / COUNTRY (g.Geo / Country):
-            # Strategy: Local distribution partner networks, cross-border shipping/logistics, consumer localization, regional hubs.
-            # STRICT PROHIBITION: NEVER use 'team New Zealand', 'incentive for USA', 'combo', 'stock clearance'.
-            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit local distribution partner networks and optimize cross-border shipping/logistics lead times in market **{bot_name}** ({format_metric_value(bot_val, val_col)}) to minimize inventory holding costs and shorten delivery cycles."
-            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Accelerate consumer localization strategies by tailoring packaging sizes and sweetness profiles to local cultural preferences; expand retail shelf coverage across leading supermarket chains in **{bot_name}** toward the benchmark average of {format_metric_value(mean_val, val_col)}."
-            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Establish strategic regional distribution hubs and long-term joint ventures with prominent international retail conglomerates to solidify premium chocolate brand positioning across key global markets (spearheaded by **{top_name}**: {format_metric_value(top_val, val_col)})."
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit local distribution partner networks and optimize shipping lead times in market **{top_name}** ({format_metric_value(top_val, val_col)}) to minimize inventory holding costs."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Accelerate consumer localization strategies in **{top_name}** and expand shelf coverage across leading retail chains."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Establish long-term strategic distribution partnerships and reinforce brand equity in **{top_name}**."
+            else:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit local distribution partner networks and optimize cross-border shipping/logistics lead times in market **{bot_name}** ({format_metric_value(bot_val, val_col)}) to minimize inventory holding costs and shorten delivery cycles."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Accelerate consumer localization strategies by tailoring packaging sizes and sweetness profiles to local cultural preferences; expand retail shelf coverage across leading supermarket chains in **{bot_name}** toward the benchmark average of {format_metric_value(mean_val, val_col)}."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Establish strategic regional distribution hubs and long-term joint ventures with prominent international retail conglomerates to solidify premium chocolate brand positioning across key global markets (spearheaded by **{top_name}**: {format_metric_value(top_val, val_col)})."
         elif entity_type == "team":
-            # ĐỘI NGŨ / CHI NHÁNH / TEAM: Hoa hồng (Incentive), Đào tạo, Chia địa bàn (Territory planning), Best-practice
-            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Deploy immediate incentive bonuses and sales contests for squad **{bot_name}** ({format_metric_value(bot_val, val_col)}); organize a peer-led best-practice transfer workshop with market leader **{top_name}** ({format_metric_value(top_val, val_col)}) to replicate top-performing sales pitches across underperforming reps."
-            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Re-evaluate and rebalance territory planning and sales quota allocations based on local market potential; launch targeted sales enablement programs on deal closing and objection handling to lift team averages toward {format_metric_value(mean_val, val_col)}."
-            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize a standardized sales competency framework, implement dynamic performance-tiered compensation plans, and deploy AI-assisted sales coaching tools to maximize long-term quota attainment per representative."
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Review quarterly quota pacing and sales incentives for squad **{top_name}** ({format_metric_value(top_val, val_col)}) to sustain frontline selling momentum."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Optimize territory planning and account allocation for **{top_name}**; deploy consultative selling coaching."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize sales competency frameworks and AI sales enablement tools for **{top_name}**."
+            else:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Deploy immediate incentive bonuses and sales contests for squad **{bot_name}** ({format_metric_value(bot_val, val_col)}); organize a peer-led best-practice transfer workshop with market leader **{top_name}** ({format_metric_value(top_val, val_col)}) to replicate top-performing sales pitches across underperforming reps."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Re-evaluate and rebalance territory planning and sales quota allocations based on local market potential; launch targeted sales enablement programs on deal closing and objection handling to lift team averages toward {format_metric_value(mean_val, val_col)}."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize a standardized sales competency framework, implement dynamic performance-tiered compensation plans, and deploy AI-assisted sales coaching tools to maximize long-term quota attainment per representative."
         elif entity_type == "employee" or is_salary or is_headcount:
-            # NHÂN SỰ / PHÒNG BAN: Chính sách lương, Lộ trình thăng tiến, Tuyển dụng, hoặc Kỹ năng bán hàng cá nhân
             is_salesperson_perf = any(k in cols_str for k in ["sales", "amount", "boxes", "doanh số", "doanh thu", "hộp"]) or any(k in q_low for k in ["doanh số", "doanh thu", "bán hàng", "sales", "hộp"])
             if is_headcount:
-                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Finalize team allocation for {bot_name} ({format_metric_value(bot_val, val_col)} reps); align quarterly sales quotas with squad capacity led by {top_name} ({format_metric_value(top_val, val_col)} reps)."
-                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize team sizes around {format_metric_value(mean_val, val_col)} reps per squad; conduct uniform enablement training to lift mid-tier rep productivity."
-                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Build dynamic territory rebalancing models and implement AI sales coaching tools to maximize sales output per representative."
+                if is_single_or_tied:
+                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Review workforce staffing capacity for {top_name} ({format_metric_value(top_val, val_col)} personnel); balance workload distribution across current team members."
+                    medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize headcount planning around operational targets for {top_name}."
+                    longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Build dynamic talent mobility models and succession planning for {top_name}."
+                else:
+                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Finalize team allocation for {bot_name} ({format_metric_value(bot_val, val_col)} reps); align quarterly sales quotas with squad capacity led by {top_name} ({format_metric_value(top_val, val_col)} reps)."
+                    medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize team sizes around {format_metric_value(mean_val, val_col)} reps per squad; conduct uniform enablement training to lift mid-tier rep productivity."
+                    longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Build dynamic territory rebalancing models and implement AI sales coaching tools to maximize sales output per representative."
             elif is_salesperson_perf and not is_salary:
-                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Organize a deal-closing best-practice transfer workshop from sales leader **{top_name}** ({format_metric_value(top_val, val_col)}) to sales representative **{bot_name}** ({format_metric_value(bot_val, val_col)}); audit and unblock pending deals across priority accounts."
-                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize sales quotas and rebalance account portfolios around the period average of {format_metric_value(mean_val, val_col)}; deploy consultative selling training to uplift underperforming reps."
-                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Deploy tiered commission plans tied to margin contribution and integrate AI sales enablement tools to maximize sales output per representative."
+                if is_single_or_tied:
+                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Review priority customer deal pipeline for sales representative **{top_name}** ({format_metric_value(top_val, val_col)}); unblock pending high-value accounts."
+                    medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Establish sales quotas and expand qualified prospect accounts for **{top_name}**."
+                    longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Deploy performance-tiered commission incentives and AI sales enablement tools."
+                else:
+                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Organize a deal-closing best-practice transfer workshop from sales leader **{top_name}** ({format_metric_value(top_val, val_col)}) to sales representative **{bot_name}** ({format_metric_value(bot_val, val_col)}); audit and unblock pending deals across priority accounts."
+                    medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Standardize sales quotas and rebalance account portfolios around the period average of {format_metric_value(mean_val, val_col)}; deploy consultative selling training to uplift underperforming reps."
+                    longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Deploy tiered commission plans tied to margin contribution and integrate AI sales enablement tools to maximize sales output per representative."
             else:
-                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({top_name}: {format_metric_value(top_val, val_col)} vs {bot_name}: {format_metric_value(bot_val, val_col)}, {gap_vs_top:.1f}% lower than leader); conduct proactive stay-interviews to curb flight risk among key talent."
-                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands against the median baseline of {format_metric_value(median_val, val_col)}; rebalance departmental salary budget pools and structured hiring plans for internal equity."
-                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions and employer branding."
+                if is_single_or_tied:
+                    if has_max_min and max_val is not None and min_val is not None:
+                        urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Review internal compensation structure across unit **{top_name}** (peak compensation {format_metric_value(max_val, max_c)} vs floor {format_metric_value(min_val, min_c)}, spread of {format_metric_value(top_val, val_col)}); conduct proactive stay-interviews with key senior specialists."
+                    else:
+                        urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Review compensation structure and retention packages at unit **{top_name}** ({format_metric_value(top_val, val_col)}); conduct proactive stay-interviews to protect key talent."
+                    medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands and salary budget frameworks for unit **{top_name}** to ensure internal equity."
+                    longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions."
+                else:
+                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({top_name}: {format_metric_value(top_val, val_col)} vs {bot_name}: {format_metric_value(bot_val, val_col)}, {gap_vs_top:.1f}% lower than leader); conduct proactive stay-interviews to curb flight risk among key talent."
+                    medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands against the median baseline of {format_metric_value(median_val, val_col)}; rebalance departmental salary budget pools and structured hiring plans for internal equity."
+                    longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions and employer branding."
         elif entity_type == "product":
-            # SẢN PHẨM / HÀNG HÓA: Combo, Định giá, Tồn kho/Xả hàng, Bao bì
-            if is_pareto:
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Prioritize supply chain security and safety stock for key product **{top_name}** ({format_metric_value(top_val, val_col)}); control inventory replenishment cycles to meet demand."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Expand prime shelf placement, dynamic pricing, and cross-selling for **{top_name}**; optimize inventory turnover."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Optimize packaging tiering (SKU/Packaging) and develop derivative product lines based on **{top_name}**."
+            elif is_pareto:
                 urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Prioritize supply chain security and safety stock for top-selling SKU **{top_name}** ({format_metric_value(top_val, val_col)}); design promotional bundling combos pairing **{top_name}** with slower-moving products outside the 80/20 Pareto core to stimulate demand and liberate working capital."
                 medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Expand prime shelf placement and cross-selling for the top {len(df)} core SKUs (contributing ~80% of total revenue{cum_val_str}); rebalance replenishment orders around the category average of {format_metric_value(mean_val, val_col)}."
                 longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Optimize packaging tiering (SKU/Packaging) and develop derivative product lines based on market leader **{top_name}**; establish an agile demand-driven supply chain to continuously protect category margin resilience."
@@ -2033,9 +2165,14 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Scale dynamic pricing adjustments and cross-selling initiatives across primary distribution channels; re-align replenishment schedules and demand forecasting around the baseline average of {format_metric_value(mean_val, val_col)} to boost inventory turnover."
                 longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Re-engineer product packaging and portfolio tiering (SKU/Packaging); establish an agile, demand-driven supply chain to continuously protect category margin resilience."
         else:
-            urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Concentrate strategic resources to scale market leader {top_name} ({format_metric_value(top_val, val_col)}), while addressing operational bottlenecks in {bot_name} ({format_metric_value(bot_val, val_col)})."
-            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Realign resource allocation frameworks around the benchmark average of {format_metric_value(mean_val, val_col)}; standardize cross-unit operating protocols."
-            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Expand strategic portfolio initiatives, institutionalize enterprise risk governance, and sustain market leadership."
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Concentrate strategic resources to optimize performance in **{top_name}** ({format_metric_value(top_val, val_col)})."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Realign resource allocation frameworks around operational requirements for **{top_name}**."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Expand strategic portfolio initiatives and institutionalize enterprise risk governance."
+            else:
+                urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Concentrate strategic resources to scale market leader {top_name} ({format_metric_value(top_val, val_col)}), while addressing operational bottlenecks in {bot_name} ({format_metric_value(bot_val, val_col)})."
+                medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Realign resource allocation frameworks around the benchmark average of {format_metric_value(mean_val, val_col)}; standardize cross-unit operating protocols."
+                longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Expand strategic portfolio initiatives, institutionalize enterprise risk governance, and sustain market leadership."
     else:
         if is_time_series or entity_type == "time_series":
             if is_sparse_ts:
@@ -2065,37 +2202,61 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                     f"đồng bộ quy trình từ khâu cung ứng đến các kênh phân phối để chủ động thích ứng với biến động thị trường."
                 )
         elif entity_type == "geo":
-            # THỊ TRƯỜNG / QUỐC GIA (g.Geo / Country):
-            # Chiến lược: Mở rộng kênh phân phối địa phương, thâm nhập thị trường, thích ứng văn hóa tiêu dùng (Localization), tối ưu chuỗi cung ứng/logistics xuất nhập khẩu.
-            # TUYỆT ĐỐI KHÔNG dùng từ 'team New Zealand', 'hoa hồng thưởng nóng cho USA', 'combo', 'xả hàng', 'đào tạo chốt sales'.
-            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát mạng lưới đối tác phân phối địa phương tại thị trường **{bot_name}** ({format_metric_value(bot_val, val_col)}); tối ưu hóa chuỗi cung ứng và logistics xuất nhập khẩu để giảm thiểu chi phí lưu kho và rút ngắn thời gian giao hàng."
-            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chiến lược bản địa hóa sản phẩm (Market Localization), điều chỉnh khẩu vị và quy cách đóng gói phù hợp với văn hóa tiêu dùng bản địa; mở rộng độ phủ vào các chuỗi siêu thị/bán lẻ trọng điểm tại **{bot_name}** hướng tới mức chuẩn {format_metric_value(mean_val, val_col)}."
-            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng quan hệ đối tác chiến lược dài hạn với các tập đoàn bán lẻ quốc tế lớn, thiết lập trung tâm điều phối kho vận khu vực (Regional Hub) và củng cố vị thế thương hiệu sô-cô-la cao cấp toàn cầu (dẫn dắt bởi **{top_name}**: {format_metric_value(top_val, val_col)})."
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát mạng lưới đối tác phân phối địa phương tại thị trường **{top_name}** ({format_metric_value(top_val, val_col)}); tối ưu hóa chuỗi cung ứng và logistics xuất nhập khẩu để giảm thiểu chi phí lưu kho và rút ngắn thời gian giao hàng."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chiến lược bản địa hóa sản phẩm (Market Localization), điều chỉnh khẩu vị và quy cách đóng gói phù hợp với văn hóa tiêu dùng bản địa tại **{top_name}**; mở rộng độ phủ vào các chuỗi siêu thị/bán lẻ trọng điểm."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng quan hệ đối tác chiến lược dài hạn với các tập đoàn bán lẻ quốc tế lớn, thiết lập trung tâm điều phối kho vận khu vực tại **{top_name}** và củng cố vị thế thương hiệu."
+            else:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát mạng lưới đối tác phân phối địa phương tại thị trường **{bot_name}** ({format_metric_value(bot_val, val_col)}); tối ưu hóa chuỗi cung ứng và logistics xuất nhập khẩu để giảm thiểu chi phí lưu kho và rút ngắn thời gian giao hàng."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chiến lược bản địa hóa sản phẩm (Market Localization), điều chỉnh khẩu vị và quy cách đóng gói phù hợp với văn hóa tiêu dùng bản địa; mở rộng độ phủ vào các chuỗi siêu thị/bán lẻ trọng điểm tại **{bot_name}** hướng tới mức chuẩn {format_metric_value(mean_val, val_col)}."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng quan hệ đối tác chiến lược dài hạn với các tập đoàn bán lẻ quốc tế lớn, thiết lập trung tâm điều phối kho vận khu vực (Regional Hub) và củng cố vị thế thương hiệu sô-cô-la cao cấp toàn cầu (dẫn dắt bởi **{top_name}**: {format_metric_value(top_val, val_col)})."
         elif entity_type == "team":
-            # ĐỘI NGŨ / CHI NHÁNH / TEAM: Hoa hồng (Incentive), Đào tạo, Chia địa bàn (Territory planning), Best-practice
-            # TUYỆT ĐỐI KHÔNG dùng từ xả hàng, hết hạn sử dụng, combo
-            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Thiết lập cơ chế thi đua và hoa hồng thưởng nóng (Incentive) cho đội ngũ **{bot_name}** ({format_metric_value(bot_val, val_col)}); tổ chức ngay buổi chuyển giao kinh nghiệm thực chiến (Best-Practice Sharing) từ team dẫn đầu **{top_name}** ({format_metric_value(top_val, val_col)}) sang các thành viên có hiệu suất thấp nhất để kích hoạt năng suất bán hàng ngay trong tháng."
-            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đánh giá và phân chia lại địa bàn kinh doanh (Territory Planning) cùng hạn ngạch doanh số (Quota Allocation) dựa trên tiềm năng thị trường; triển khai chương trình đào tạo kỹ năng bán hàng và xử lý từ chối chuyên sâu cho các đội ngũ bám sát mức chuẩn {format_metric_value(mean_val, val_col)}."
-            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Chuẩn hóa khung năng lực bán hàng (Sales Competency Framework), xây dựng chính sách đãi ngộ linh hoạt theo hiệu quả kinh doanh và ứng dụng công cụ hỗ trợ bán hàng (Sales Enablement) bằng AI để nâng cao năng suất doanh thu bền vững trên từng đại diện thương mại."
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát tiến độ hoàn thành hạn ngạch doanh số của đội ngũ **{top_name}** ({format_metric_value(top_val, val_col)}); thiết lập cơ chế thi đua và hoa hồng thưởng nóng để kích hoạt động lực bán hàng của từng đại diện thương mại."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đánh giá và tối ưu hóa địa bàn kinh doanh (Territory Planning) cùng danh mục khách hàng phụ trách của **{top_name}**; tổ chức đào tạo chuyên sâu về kỹ năng chốt hợp đồng và mở rộng tài khoản doanh nghiệp."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Chuẩn hóa khung năng lực bán hàng (Sales Competency Framework), xây dựng chính sách đãi ngộ linh hoạt theo hiệu quả kinh doanh và trang bị công cụ hỗ trợ bán hàng AI."
+            else:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Thiết lập cơ chế thi đua và hoa hồng thưởng nóng (Incentive) cho đội ngũ **{bot_name}** ({format_metric_value(bot_val, val_col)}); tổ chức ngay buổi chuyển giao kinh nghiệm thực chiến (Best-Practice Sharing) từ team dẫn đầu **{top_name}** ({format_metric_value(top_val, val_col)}) sang các thành viên có hiệu suất thấp nhất để kích hoạt năng suất bán hàng ngay trong tháng."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đánh giá và phân chia lại địa bàn kinh doanh (Territory Planning) cùng hạn ngạch doanh số (Quota Allocation) dựa trên tiềm năng thị trường; triển khai chương trình đào tạo kỹ năng bán hàng và xử lý từ chối chuyên sâu cho các đội ngũ bám sát mức chuẩn {format_metric_value(mean_val, val_col)}."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Chuẩn hóa khung năng lực bán hàng (Sales Competency Framework), xây dựng chính sách đãi ngộ linh hoạt theo hiệu quả kinh doanh và ứng dụng công cụ hỗ trợ bán hàng (Sales Enablement) bằng AI để nâng cao năng suất doanh thu bền vững trên từng đại diện thương mại."
         elif entity_type == "employee" or is_salary or is_headcount:
-            # NHÂN SỰ / PHÒNG BAN: Chính sách lương, Lộ trình thăng tiến, Tuyển dụng, hoặc Kỹ năng bán hàng cá nhân
-            # TUYỆT ĐỐI KHÔNG dùng từ xả hàng, hết hạn sử dụng, combo
             is_salesperson_perf = any(k in cols_str for k in ["sales", "amount", "boxes", "doanh số", "doanh thu", "hộp"]) or any(k in q_low for k in ["doanh số", "doanh thu", "bán hàng", "sales", "hộp"])
             if is_headcount:
-                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát danh sách {bot_name} ({format_metric_value(bot_val, val_col)} nhân sự) để hoàn tất việc phân bổ đội ngũ chính thức; cân đối chỉ tiêu doanh số phù hợp với quy mô lực lượng bán hàng của từng team (dẫn đầu là {top_name}: {format_metric_value(top_val, val_col)} nhân viên)."
-                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa định biên nhân sự quanh mức trung bình {format_metric_value(mean_val, val_col)} nhân viên/đội; triển khai chương trình đào tạo kỹ năng bán hàng đồng bộ nhằm thu hẹp khoảng cách năng suất."
-                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Thiết lập cơ chế luân chuyển nhân sự linh hoạt theo mùa vụ và tiềm năng thị trường; ứng dụng hệ thống CRM/AI phân tích hiệu suất cá nhân để tối đa hóa doanh thu trên mỗi đại diện kinh doanh."
+                if is_single_or_tied:
+                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát mức độ đáp ứng khối lượng công việc của đội ngũ **{top_name}** ({format_metric_value(top_val, val_col)} nhân sự); cân đối giao chỉ tiêu phù hợp với quy mô lực lượng thực tế."
+                    medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa định biên nhân sự theo nhu cầu vận hành thực tế của **{top_name}**; triển khai đào tạo nâng cao kỹ năng nhằm gia tăng năng suất lao động bình quân."
+                    longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng kế hoạch quy hoạch nhân sự dài hạn và cơ chế phát triển nhân tài kế thừa cho **{top_name}**."
+                else:
+                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát danh sách {bot_name} ({format_metric_value(bot_val, val_col)} nhân sự) để hoàn tất việc phân bổ đội ngũ chính thức; cân đối chỉ tiêu doanh số phù hợp với quy mô lực lượng bán hàng của từng team (dẫn đầu là {top_name}: {format_metric_value(top_val, val_col)} nhân viên)."
+                    medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa định biên nhân sự quanh mức trung bình {format_metric_value(mean_val, val_col)} nhân viên/đội; triển khai chương trình đào tạo kỹ năng bán hàng đồng bộ nhằm thu hẹp khoảng cách năng suất."
+                    longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Thiết lập cơ chế luân chuyển nhân sự linh hoạt theo mùa vụ và tiềm năng thị trường; ứng dụng hệ thống CRM/AI phân tích hiệu suất cá nhân để tối đa hóa doanh thu trên mỗi đại diện kinh doanh."
             elif is_salesperson_perf and not is_salary:
-                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tổ chức chương trình chuyển giao kinh nghiệm thực chiến từ nhân sự dẫn đầu **{top_name}** ({format_metric_value(top_val, val_col)}) cho nhân sự **{bot_name}** ({format_metric_value(bot_val, val_col)}); rà soát và tháo gỡ các vướng mắc tại các khách hàng trọng điểm để cải thiện tỷ lệ chốt deal ngay trong tháng."
-                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa hạn ngạch doanh số và cân đối lại danh mục khách hàng phụ trách quanh mức trung bình {format_metric_value(mean_val, val_col)}; triển khai đào tạo kỹ năng tư vấn chuyên sâu và xử lý từ chối cho các nhân sự chưa đạt chỉ tiêu."
-                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng chính sách thưởng hoa hồng lũy tiến gắn với hiệu quả kinh doanh cá nhân; ứng dụng trợ lý AI hỗ trợ bán hàng (Sales Enablement) để nâng cao năng suất doanh thu trên từng nhân sự."
+                if is_single_or_tied:
+                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chi tiết danh mục khách hàng và tiến độ xử lý cơ hội bán hàng của nhân sự **{top_name}** ({format_metric_value(top_val, val_col)}); tháo gỡ kịp thời các điểm nghẽn tại các khách hàng trọng điểm để đẩy nhanh tiến độ chốt deal."
+                    medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Thiết lập hạn ngạch doanh số mục tiêu và kế hoạch mở rộng tệp khách hàng tiềm năng cho **{top_name}**; tối ưu hóa quy trình tư vấn giải pháp và chăm sóc khách hàng sau bán."
+                    longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng chính sách hoa hồng lũy tiến gắn liền với hiệu quả kinh doanh và ứng dụng trợ lý AI hỗ trợ bán hàng để duy trì đà tăng trưởng doanh số cá nhân bền vững."
+                else:
+                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tổ chức chương trình chuyển giao kinh nghiệm thực chiến từ nhân sự dẫn đầu **{top_name}** ({format_metric_value(top_val, val_col)}) cho nhân sự **{bot_name}** ({format_metric_value(bot_val, val_col)}); rà soát và tháo gỡ các vướng mắc tại các khách hàng trọng điểm để cải thiện tỷ lệ chốt deal ngay trong tháng."
+                    medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa hạn ngạch doanh số và cân đối lại danh mục khách hàng phụ trách quanh mức trung bình {format_metric_value(mean_val, val_col)}; triển khai đào tạo kỹ năng tư vấn chuyên sâu và xử lý từ chối cho các nhân sự chưa đạt chỉ tiêu."
+                    longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng chính sách thưởng hoa hồng lũy tiến gắn với hiệu quả kinh doanh cá nhân; ứng dụng trợ lý AI hỗ trợ bán hàng (Sales Enablement) để nâng cao năng suất doanh thu trên từng nhân sự."
             else:
-                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách lương thưởng và đãi ngộ tại đơn vị/vị trí **{bot_name}** ({format_metric_value(bot_val, val_col)} so với **{top_name}**: {format_metric_value(top_val, val_col)}, thấp hơn {gap_vs_top:.1f}% so với vị trí dẫn đầu); chủ động đối thoại và lắng nghe nguyện vọng nhân sự để ngăn ngừa rủi ro biến động nhân tài chủ chốt."
-                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa lộ trình thăng tiến nghề nghiệp (Career Progression) và định biên tuyển dụng theo nhu cầu thực tế của từng đơn vị quanh mức trung vị {format_metric_value(median_val, val_col)}; tái cân bằng quỹ lương để đảm bảo tính công bằng nội bộ."
-                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
+                if is_single_or_tied:
+                    if has_max_min and max_val is not None and min_val is not None:
+                        urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát cơ cấu phân bổ thu nhập nội bộ tại đơn vị/vị trí **{top_name}** (mức lương cao nhất {format_metric_value(max_val, max_c)} so với mức lương sàn {format_metric_value(min_val, min_c)}, biên độ {format_metric_value(top_val, val_col)}); chủ động phỏng vấn gắn kết (stay-interview) và lắng nghe nguyện vọng nhân sự chủ chốt để phòng ngừa rủi ro biến động nhân tài."
+                    else:
+                        urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách lương thưởng và đãi ngộ tại đơn vị/vị trí **{top_name}** ({format_metric_value(top_val, val_col)}); chủ động đối thoại và lắng nghe nguyện vọng nhân sự để phòng ngừa rủi ro biến động nhân tài chủ chốt."
+                    medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa khung bậc lương (Salary Bands) và lộ trình thăng tiến nghề nghiệp (Career Progression) theo năng lực cho đơn vị **{top_name}**; cân đối lại quỹ lương nội bộ nhằm đảm bảo tính công bằng và cạnh tranh."
+                    longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
+                else:
+                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách lương thưởng và đãi ngộ tại đơn vị/vị trí **{bot_name}** ({format_metric_value(bot_val, val_col)} so với **{top_name}**: {format_metric_value(top_val, val_col)}, thấp hơn {gap_vs_top:.1f}% so với vị trí dẫn đầu); chủ động đối thoại và lắng nghe nguyện vọng nhân sự để ngăn ngừa rủi ro biến động nhân tài chủ chốt."
+                    medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa lộ trình thăng tiến nghề nghiệp (Career Progression) và định biên tuyển dụng theo nhu cầu thực tế của từng đơn vị quanh mức trung vị {format_metric_value(median_val, val_col)}; tái cân bằng quỹ lương để đảm bảo tính công bằng nội bộ."
+                    longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
         elif entity_type == "product":
-            # SẢN PHẨM / HÀNG HÓA: Combo, Định giá, Tồn kho/Xả hàng, Bao bì
-            if is_pareto:
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Ưu tiên bảo đảm nguồn cung ứng và duy trì mức tồn kho an toàn cho mặt hàng **{top_name}** ({format_metric_value(top_val, val_col)}); kiểm soát chặt chẽ kế hoạch luân chuyển hàng hóa để đáp ứng kịp thời nhu cầu thị trường."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh các chương trình trưng bày ưu tiên, định giá linh hoạt và bán kèm (Cross-selling) cho sản phẩm **{top_name}**; tối ưu hóa vòng quay hàng tồn kho (Inventory Turnover)."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Cải tiến bao bì đóng gói (Packaging/SKU) và nghiên cứu mở rộng dòng sản phẩm phái sinh từ **{top_name}**; xây dựng chuỗi cung ứng phản ứng nhanh để bảo vệ biên lợi nhuận danh mục."
+            elif is_pareto:
                 urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Ưu tiên bảo đảm nguồn cung ứng và tồn kho an toàn cho mặt hàng bán chạy nhất **{top_name}** ({format_metric_value(top_val, val_col)}); thiết lập gói sản phẩm ưu đãi kết hợp (Combo) giữa **{top_name}** với các sản phẩm bán chậm hơn ngoài nhóm Pareto để kích cầu và giải phóng vốn lưu động."
                 medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chương trình trưng bày ưu tiên và bán chéo (Cross-selling) cho top {len(df)} sản phẩm chủ lực (đóng góp ~80% tổng doanh số{cum_val_str}); tái cân đối kế hoạch mua hàng quanh mức trung bình {format_metric_value(mean_val, val_col)}."
                 longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Cải tiến bao bì đóng gói (Packaging/SKU) và nghiên cứu mở rộng dòng sản phẩm phái sinh từ mặt hàng dẫn đầu **{top_name}**; xây dựng chuỗi cung ứng phản ứng nhanh bám sát nhu cầu để bảo vệ biên lợi nhuận danh mục."
@@ -2104,9 +2265,14 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Đẩy mạnh chương trình định giá linh hoạt và bán chéo (Cross-selling) tại các kênh phân phối; tái cân đối kế hoạch mua hàng quanh mức trung bình {format_metric_value(mean_val, val_col)} để tối ưu hóa vòng quay hàng tồn kho (Inventory Turnover)."
                 longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Cải tiến bao bì đóng gói (Packaging/SKU), đa dạng hóa phân khúc giá và cơ cấu danh mục sản phẩm; xây dựng chuỗi cung ứng phản ứng nhanh bám sát sự thay đổi trong thị hiếu tiêu dùng để bảo vệ biên lợi nhuận danh mục."
         else:
-            urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tập trung nguồn lực bảo vệ và phát huy thế mạnh của {top_name} ({format_metric_value(top_val, val_col)}), đồng thời rà soát và khắc phục các điểm nghẽn hiệu quả tại nhóm {bot_name} ({format_metric_value(bot_val, val_col)})."
-            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tái cơ cấu quy trình phân bổ nguồn lực dựa trên mức trung bình {format_metric_value(mean_val, val_col)}; thiết lập các chuẩn mực vận hành đồng bộ giữa các đơn vị."
-            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng lộ trình phát triển danh mục dài hạn, hoàn thiện hệ thống quản trị rủi ro và củng cố vị thế dẫn dắt thị trường."
+            if is_single_or_tied:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tập trung nguồn lực bảo vệ và phát huy hiệu quả hoạt động tại **{top_name}** ({format_metric_value(top_val, val_col)}); rà soát kịp thời các yếu tố phát sinh ảnh hưởng đến hiệu suất vận hành."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa quy trình vận hành và tối ưu hóa phân bổ ngân sách tại **{top_name}** dựa trên nhu cầu thực tế."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng lộ trình phát triển danh mục dài hạn, hoàn thiện hệ thống quản trị rủi ro và củng cố vị thế dẫn dắt."
+            else:
+                urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Tập trung nguồn lực bảo vệ và phát huy thế mạnh của {top_name} ({format_metric_value(top_val, val_col)}), đồng thời rà soát và khắc phục các điểm nghẽn hiệu quả tại nhóm {bot_name} ({format_metric_value(bot_val, val_col)})."
+                medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tái cơ cấu quy trình phân bổ nguồn lực dựa trên mức trung bình {format_metric_value(mean_val, val_col)}; thiết lập các chuẩn mực vận hành đồng bộ giữa các đơn vị."
+                longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Xây dựng lộ trình phát triển danh mục dài hạn, hoàn thiện hệ thống quản trị rủi ro và củng cố vị thế dẫn dắt thị trường."
 
     return f"{urgent}\n\n{medium}\n\n{longterm}"
 
@@ -2243,12 +2409,20 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                             if is_margin:
                                 if is_en:
                                     b1 = f"• **Gross Margin Leader**: Group **{top_name}** commands the highest margin ({format_metric_value(top_val, val_col)}), indicating an optimized COGS cost structure per unit."
-                                    b2 = tradeoff_line if tradeoff_line else f"• **Margin Spread**: Standing {gap_vs_top:.1f}% above {bot_name} ({format_metric_value(bot_val, val_col)}), demonstrating strong pricing resilience across top tiers."
+                                    b2 = tradeoff_line if tradeoff_line else (
+                                        f"• **Margin Spread**: Standing {gap_vs_top:.1f}% above {bot_name} ({format_metric_value(bot_val, val_col)}), demonstrating strong pricing resilience across top tiers."
+                                        if (bot_name != top_name and gap_vs_top >= 0.01) else
+                                        f"• **Margin Stability**: Maintained consistent profitability benchmark across recorded operations."
+                                    )
                                     b3 = f"• **Benchmark Median**: Portfolio median margin stands at {format_metric_value(median_val, val_col)}, establishing a solid profitability baseline."
                                     part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                                 else:
                                     b1 = f"• **Dẫn đầu Biên Lợi nhuận (Gross Margin Leader)**: Nhóm **{top_name}** đạt tỷ suất cao nhất ({format_metric_value(top_val, val_col)}), khẳng định lợi thế tối ưu hóa chi phí giá vốn (COGS) trên từng đơn vị sản phẩm."
-                                    b2 = tradeoff_line if tradeoff_line else f"• **Biên độ Phân hóa**: Duy trì khoảng cách {gap_vs_top:.1f}% so với nhóm thấp nhất ({bot_name}: {format_metric_value(bot_val, val_col)}), cho thấy toàn bộ danh mục duy trì kỷ luật định giá cao."
+                                    b2 = tradeoff_line if tradeoff_line else (
+                                        f"• **Biên độ Phân hóa**: Duy trì khoảng cách {gap_vs_top:.1f}% so với nhóm thấp nhất ({bot_name}: {format_metric_value(bot_val, val_col)}), cho thấy toàn bộ danh mục duy trì kỷ luật định giá cao."
+                                        if (bot_name != top_name and gap_vs_top >= 0.01) else
+                                        f"• **Độ Ổn định Biên Lợi nhuận**: Duy trì tỷ suất lợi nhuận đồng đều và kỷ luật định giá cao."
+                                    )
                                     b3 = f"• **Mặt bằng Chuẩn Toàn Danh mục (Benchmark Median)**: Tỷ suất lợi nhuận trung vị toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh biên an toàn tài chính vững chắc."
                                     part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                             else:
@@ -2270,17 +2444,31 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                                     ent_pfx_en = "Group"
 
                                 if is_en:
-                                    part_21 = (
-                                        f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
-                                        f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
-                                        f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
-                                    )
+                                    if bot_name != top_name and gap_vs_top >= 0.01:
+                                        part_21 = (
+                                            f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
+                                            f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
+                                            f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
+                                        )
+                                    else:
+                                        part_21 = (
+                                            f"• **Target Metric**: {ent_pfx_en} **{top_name}** recorded at {format_metric_value(top_val, val_col)}, representing the primary operational scale.\n\n"
+                                            f"• **Baseline Reference**: Benchmark baseline is {format_metric_value(median_val, val_col)}.\n\n"
+                                            f"• **Operational Evaluation**: Performance reflects focused resource execution within {ent_pfx_en.lower()} **{top_name}**."
+                                        )
                                 else:
-                                    part_21 = (
-                                        f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
-                                        f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
-                                        f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
-                                    )
+                                    if bot_name != top_name and gap_vs_top >= 0.01:
+                                        part_21 = (
+                                            f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
+                                            f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                                            f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
+                                        )
+                                    else:
+                                        part_21 = (
+                                            f"• **Thực thể Trọng tâm**: {ent_pfx_vi} **{top_name}** đạt mức {format_metric_value(top_val, val_col)}, giữ vai trò trọng tâm trong phân tích.\n\n"
+                                            f"• **Mức tham chiếu Chuẩn**: Mức chuẩn ghi nhận là {format_metric_value(median_val, val_col)}.\n\n"
+                                            f"• **Đánh giá Vận hành**: Kết quả phản ánh sự tập trung nguồn lực và năng lực thực thi hiệu quả tại {ent_pfx_vi.lower()} **{top_name}**."
+                                        )
                     except Exception:
                         pass
             part_22 = generate_data_grounded_hypotheses(df, user_query=user_query, is_en=is_en)
@@ -2438,12 +2626,20 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                 if is_margin:
                     if is_en:
                         b1 = f"• **Gross Margin Leader**: Group **{top_name}** commands the highest margin ({format_metric_value(top_val, val_col)}), indicating an optimized COGS cost structure per unit."
-                        b2 = tradeoff_line if tradeoff_line else f"• **Margin Spread**: Standing {gap_vs_top:.1f}% above {bot_name} ({format_metric_value(bot_val, val_col)}), demonstrating strong pricing resilience across top tiers."
+                        b2 = tradeoff_line if tradeoff_line else (
+                            f"• **Margin Spread**: Standing {gap_vs_top:.1f}% above {bot_name} ({format_metric_value(bot_val, val_col)}), demonstrating strong pricing resilience across top tiers."
+                            if (bot_name != top_name and gap_vs_top >= 0.01) else
+                            f"• **Margin Stability**: Maintained consistent profitability benchmark across recorded operations."
+                        )
                         b3 = f"• **Benchmark Median**: Portfolio median margin stands at {format_metric_value(median_val, val_col)}, establishing a solid profitability baseline."
                         part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                     else:
                         b1 = f"• **Dẫn đầu Biên Lợi nhuận (Gross Margin Leader)**: Nhóm **{top_name}** đạt tỷ suất cao nhất ({format_metric_value(top_val, val_col)}), khẳng định lợi thế tối ưu hóa chi phí giá vốn (COGS) trên từng đơn vị sản phẩm."
-                        b2 = tradeoff_line if tradeoff_line else f"• **Biên độ Phân hóa**: Duy trì khoảng cách {gap_vs_top:.1f}% so với nhóm thấp nhất ({bot_name}: {format_metric_value(bot_val, val_col)}), cho thấy toàn bộ danh mục duy trì kỷ luật định giá cao."
+                        b2 = tradeoff_line if tradeoff_line else (
+                            f"• **Biên độ Phân hóa**: Duy trì khoảng cách {gap_vs_top:.1f}% so với nhóm thấp nhất ({bot_name}: {format_metric_value(bot_val, val_col)}), cho thấy toàn bộ danh mục duy trì kỷ luật định giá cao."
+                            if (bot_name != top_name and gap_vs_top >= 0.01) else
+                            f"• **Độ Ổn định Biên Lợi nhuận**: Duy trì tỷ suất lợi nhuận đồng đều và kỷ luật định giá cao."
+                        )
                         b3 = f"• **Mặt bằng Chuẩn Toàn Danh mục (Benchmark Median)**: Tỷ suất lợi nhuận trung vị toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh biên an toàn tài chính vững chắc."
                         part_21 = f"{b1}\n\n{b2}\n\n{b3}"
                 else:
@@ -2465,17 +2661,31 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                         ent_pfx_en = "Group"
 
                     if is_en:
-                        part_21 = (
-                            f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
-                            f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
-                            f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
-                        )
+                        if bot_name != top_name and gap_vs_top >= 0.01:
+                            part_21 = (
+                                f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
+                                f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
+                                f"• **Reference Median**: Overall median benchmark is {format_metric_value(median_val, val_col)}, representing organizational baseline."
+                            )
+                        else:
+                            part_21 = (
+                                f"• **Target Metric**: {ent_pfx_en} **{top_name}** recorded at {format_metric_value(top_val, val_col)}, representing the primary operational scale.\n\n"
+                                f"• **Baseline Reference**: Benchmark baseline is {format_metric_value(median_val, val_col)}.\n\n"
+                                f"• **Operational Evaluation**: Performance reflects focused resource execution within {ent_pfx_en.lower()} **{top_name}**."
+                            )
                     else:
-                        part_21 = (
-                            f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
-                            f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
-                            f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
-                        )
+                        if bot_name != top_name and gap_vs_top >= 0.01:
+                            part_21 = (
+                                f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
+                                f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                                f"• **Mức trung vị tham chiếu**: {med_label} toàn bảng là {format_metric_value(median_val, val_col)}, phản ánh mặt bằng chung ổn định."
+                            )
+                        else:
+                            part_21 = (
+                                f"• **Thực thể Trọng tâm**: {ent_pfx_vi} **{top_name}** đạt mức {format_metric_value(top_val, val_col)}, giữ vai trò trọng tâm trong phân tích.\n\n"
+                                f"• **Mức tham chiếu Chuẩn**: Mức chuẩn ghi nhận là {format_metric_value(median_val, val_col)}.\n\n"
+                                f"• **Đánh giá Vận hành**: Kết quả phản ánh sự tập trung nguồn lực và năng lực thực thi hiệu quả tại {ent_pfx_vi.lower()} **{top_name}**."
+                            )
 
     # 2. Làm sạch mục Giả thuyết & Nguyên nhân (part_22)
     if part_22:
