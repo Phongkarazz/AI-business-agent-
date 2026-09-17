@@ -41,8 +41,8 @@
    - Tự động phát hiện kiểu dữ liệu để chọn biểu đồ tối ưu (**Line**, **Bar**, **Area**, **Scatter**).
    - Thanh trượt điều chỉnh số lượng đối tượng hiển thị linh hoạt (hỗ trợ hiển thị đầy đủ 100+ đối tượng).
 
-8. **Dự báo Xác định (Deterministic Forecasting)**:
-   - Sử dụng thuật toán Hồi quy tuyến tính xác định (*Linear Regression*) với đường cầu nối thực tế và tương lai.
+8. **Dự báo Chuỗi Thời Gian Thích ứng (Adaptive Time-Series Forecasting)**:
+   - Sử dụng thuật toán Holt-Winters & San bằng số mũ (*Exponential Smoothing - ETS*) với Dải khoảng tin cậy 95% (Fan Chart / Risk Corridor) và đường cầu nối thực tế - tương lai chuẩn doanh nghiệp.
 
 9. **Tối ưu Quota & Trải nghiệm**:
    - Tích hợp sẵn cơ sở dữ liệu mẫu **SQLite Demo** (kinh doanh chocolate 2023) để trải nghiệm ngay.
@@ -81,7 +81,7 @@ AI-business-agent-/
     ├── analytics/                 # Thống kê & Phân tích
     │   ├── __init__.py
     │   ├── heuristics.py          # Phân loại cột thông minh (ID, Time, Measure)
-    │   ├── forecasting.py         # Dự báo hồi quy tuyến tính
+    │   ├── forecasting.py         # Dự báo chuỗi thời gian thích ứng (Holt-Winters / ETS)
     │   └── anomaly.py             # Phát hiện điểm bất thường đa chiều
     ├── visualization/             # Trực quan hóa
     │   ├── __init__.py

@@ -4733,9 +4733,9 @@ def render_result(result: dict, turn_id: str):
     # -----------------------------------------------------
     with tab_forecast:
         caption_forecast = (
-            "🧮 Forecast uses deterministic linear regression — mathematically verifiable. Available when dataset contains time and numerical measure columns."
+            "🔮 Adaptive time-series forecasting using Holt-Winters & Exponential Smoothing (ETS) with 95% Confidence Interval Ribbon — enterprise-grade statistical models."
             if is_en else
-            "🧮 Dự báo bằng mô hình hồi quy tuyến tính xác định (Deterministic Linear Regression) — có thể kiểm chứng toán học 100%. Áp dụng khi dữ liệu có cột thời gian và số đo."
+            "🔮 Dự báo bằng mô hình thích ứng chuỗi thời gian Holt-Winters & San bằng số mũ (ETS) kèm Dải khoảng tin cậy 95% (Risk Corridor) — chuẩn thống kê quản trị doanh nghiệp."
         )
         st.caption(caption_forecast)
 
