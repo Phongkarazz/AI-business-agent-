@@ -11,8 +11,9 @@ from sqlalchemy.pool import StaticPool
 
 @st.cache_resource(show_spinner=False)
 def build_demo_engine():
-    """Tạo 1 SQLite in-memory với dữ liệu mẫu kinh doanh chocolate 2023,
-    để bất kỳ ai cũng test được ngay mà không cần MySQL riêng."""
+    """Tạo 1 SQLite in-memory với dữ liệu mẫu kinh doanh chocolate 2021-2023 đầy đủ,
+    để bất kỳ ai cũng test được ngay các câu hỏi Top 10, phân tích theo thị trường (India, USA...),
+    team (Yummies, Delish, Jucies), dòng sản phẩm mà không cần MySQL riêng."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -21,40 +22,80 @@ def build_demo_engine():
     rng = np.random.default_rng(42)
 
     geo_df = pd.DataFrame({
-        "GeoID": ["G1", "G2", "G3"],
-        "Geo": ["Ha Noi", "Da Nang", "Ho Chi Minh"],
-        "Region": ["North", "Central", "South"],
+        "GeoID": ["G1", "G2", "G3", "G4", "G5", "G6"],
+        "Geo": ["India", "USA", "UK", "Canada", "Australia", "New Zealand"],
+        "Region": ["APAC", "Americas", "Europe", "Americas", "APAC", "APAC"],
     })
 
     people_df = pd.DataFrame({
-        "SPID": [f"P{i}" for i in range(1, 7)],
-        "Salesperson": ["An", "Binh", "Chi", "Dung", "Em", "Phong"],
-        "Team": ["Alpha", "Alpha", "Beta", "Beta", "Gamma", "Gamma"],
-        "Location": ["Ha Noi", "Ha Noi", "Da Nang", "Da Nang", "Ho Chi Minh", "Ho Chi Minh"],
+        "SPID": [f"SP{i:02d}" for i in range(1, 19)],
+        "Salesperson": [
+            "Brien Boise", "Husein Augar", "Ches Bonnell", "Ovis Cure", "Gigi Bohling",
+            "Gunar Cockshoot", "Kabeer Bould", "Barr Faughnan", "Mallorie Waber", "Karlen McCaffrey",
+            "Marques Humpage", "Van Tuxill", "Maddalena Tripe", "Chesley Baisden", "Beverie Muncaster",
+            "Rafaelita Blaksley", "Dotty Mascall", "Ermin Simmers"
+        ],
+        "Team": [
+            "Yummies", "Delish", "Jucies", "Yummies", "Delish",
+            "Jucies", "Yummies", "Delish", "Jucies", "Yummies",
+            "Delish", "Jucies", "Yummies", "Delish", "Jucies",
+            "Yummies", "Delish", "Jucies"
+        ],
+        "Location": [
+            "India", "USA", "UK", "Canada", "Australia",
+            "New Zealand", "India", "USA", "UK", "Canada",
+            "Australia", "New Zealand", "India", "USA", "UK",
+            "Canada", "Australia", "New Zealand"
+        ],
     })
 
     products_df = pd.DataFrame({
-        "PID": [f"PR{i}" for i in range(1, 7)],
-        "Product": ["Dark 70%", "Milk Classic", "White Choco", "Hazelnut", "Almond", "Orange Zest"],
-        "Category": ["Dark", "Milk", "White", "Milk", "Dark", "White"],
-        "Size": ["Small", "Medium", "Large", "Medium", "Small", "Medium"],
-        "Cost_per_box": [3.5, 2.8, 3.0, 3.2, 3.8, 3.1],
+        "PID": [f"P{i:02d}" for i in range(1, 23)],
+        "Product": [
+            "85% Dark Bars", "70% Dark Bites", "Milk Bars", "Mint Chip Choco", "White Choco",
+            "Hazelnut Bites", "Almond Choco", "Orange Zest", "Caramel Stuffed", "Organic Dark",
+            "Peanut Butter Bites", "Eclairs", "Fruit & Nut", "Spicy Dark", "Strawberry Bites",
+            "Coconut Crunch", "Raspberry Dark", "Sea Salt Caramel", "Toffee Crunch", "Choco Fudge",
+            "Dark Truffles", "Vanilla White"
+        ],
+        "Category": [
+            "Bars", "Bites", "Bars", "Other", "Other",
+            "Bites", "Other", "Other", "Bars", "Bars",
+            "Bites", "Other", "Bars", "Bars", "Bites",
+            "Bites", "Bars", "Other", "Bites", "Bars",
+            "Other", "Other"
+        ],
+        "Size": [
+            "Large", "Small", "Medium", "Small", "Large",
+            "Small", "Medium", "Medium", "Large", "Medium",
+            "Small", "Large", "Medium", "Small", "Small",
+            "Small", "Medium", "Medium", "Small", "Large",
+            "Small", "Medium"
+        ],
+        "Cost_per_box": [
+            3.5, 2.8, 3.0, 3.2, 3.8,
+            3.1, 4.0, 2.9, 3.6, 4.2,
+            2.5, 3.4, 3.7, 3.9, 2.7,
+            3.3, 4.1, 3.5, 2.6, 4.5,
+            5.0, 3.0
+        ],
     })
 
-    dates = pd.date_range("2023-01-01", "2023-12-31", freq="3D")
-    n = len(dates)
+    dates = pd.date_range("2021-01-01", "2023-12-31", freq="D")
+    n = len(dates) * 3  # ~3,285 transactions
     sales_df = pd.DataFrame({
         "SPID": rng.choice(people_df["SPID"], n),
         "GeoID": rng.choice(geo_df["GeoID"], n),
         "PID": rng.choice(products_df["PID"], n),
-        "SaleDate": dates,
-        "Amount": rng.integers(2000, 15000, n),
-        "Customers": rng.integers(5, 60, n),
-        "Boxes": rng.integers(10, 200, n),
-    })
+        "SaleDate": rng.choice(dates, n),
+        "Amount": rng.integers(1500, 18000, n),
+        "Customers": rng.integers(5, 75, n),
+        "Boxes": rng.integers(15, 350, n),
+    }).sort_values("SaleDate").reset_index(drop=True)
 
-    # Tạo 1 điểm bất thường có chủ đích (tháng 6) để test tính năng giải thích outlier
-    sales_df.loc[sales_df["SaleDate"].dt.month == 6, "Amount"] *= 3
+    # Điểm bất thường có chủ đích (tháng 6/2021 và tháng 11/2022) để test tính năng outlier / anomaly detection
+    sales_df.loc[(sales_df["SaleDate"].dt.year == 2021) & (sales_df["SaleDate"].dt.month == 6), "Amount"] *= 2
+    sales_df.loc[(sales_df["SaleDate"].dt.year == 2022) & (sales_df["SaleDate"].dt.month == 11), "Amount"] *= 2
 
     geo_df.to_sql("geo", engine, index=False, if_exists="replace")
     people_df.to_sql("people", engine, index=False, if_exists="replace")
