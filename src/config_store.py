@@ -52,10 +52,10 @@ def load_saved_config() -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Tự động nâng cấp model Gemini cũ/đã đóng về gemini-2.5-flash
+    # Tự động nâng cấp model Gemini cũ/đã đóng về gemini-3.7-flash
     m_name = (config.get("model_name") or "").lower()
-    if "gemini-2.0" in m_name or "gemini-3.7" in m_name or "gemini-3.1" in m_name:
-        config["model_name"] = "gemini-2.5-flash"
+    if any(old in m_name for old in ["gemini-1.5", "gemini-2.0", "gemini-2.5", "gemini-1.0"]):
+        config["model_name"] = "gemini-3.7-flash"
 
     # Tự động đọc cấu hình từ Streamlit Cloud Secrets nếu có
     try:

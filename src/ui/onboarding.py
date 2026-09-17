@@ -360,7 +360,7 @@ def render_onboarding():
         effective_provider = saved.get("provider", "Gemini (Google)" if saved.get("api_key_gemini") else ("OpenRouter" if saved.get("api_key_openrouter") else "Ollama (Local AI Offline)"))
         if effective_provider == "Gemini (Google)":
             clean_api_key = saved.get("api_key_gemini", "")
-            selected_model = saved.get("model_name", "gemini-2.5-flash")
+            selected_model = saved.get("model_name", "gemini-3.7-flash")
             custom_base_url = ""
         elif effective_provider == "OpenRouter":
             clean_api_key = saved.get("api_key_openrouter", "")

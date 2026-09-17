@@ -147,7 +147,7 @@ def render_main_sidebar():
         elif "deepseek" in model_name.lower():
             engine_badge = "DeepSeek V3"
         elif "gemini" in model_name.lower():
-            engine_badge = "Gemini 2.5"
+            engine_badge = "Gemini 3.7"
         elif "claude" in model_name.lower():
             engine_badge = "Claude 3.5"
         else:

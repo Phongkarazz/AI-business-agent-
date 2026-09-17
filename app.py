@@ -742,7 +742,7 @@ else:
         elif "qwen2.5-coder" in model_disp.lower():
             clean_model = "Qwen 2.5 Coder"
         elif "gemini" in model_disp.lower():
-            clean_model = "Gemini 2.5 Flash"
+            clean_model = "Gemini 3.7 Flash"
         elif "claude" in model_disp.lower():
             clean_model = "Claude 3.5 Sonnet"
 

@@ -157,41 +157,52 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
     if "/" in clean_model:
         clean_model = clean_model.split("/")[-1]
 
-    # Danh sách các model Gemini chính thức đang hoạt động trên Google AI Studio
+    # Danh sách các model Gemini 3.x chính thức đang hoạt động trên Google AI Studio
     ACTIVE_GEMINI_MODELS = (
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
         "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
         "gemini-3.8-flash",
-        "gemini-3.5-flash",
         "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite",
     )
 
-    # Chuyển các model cũ đã đóng (gemini-2.0-flash, gemini-1.5-flash, gemini-1.5-pro...) về gemini-2.5-flash
-    if clean_model in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro") or not clean_model:
-        clean_model = "gemini-2.5-flash"
-    elif clean_model not in ACTIVE_GEMINI_MODELS:
-        if not clean_model.startswith("gemini-"):
-            clean_model = "gemini-2.5-flash"
+    # Tự động chuyển toàn bộ các model cũ đã đóng (2.5, 2.0, 1.5...) về gemini-3.7-flash
+    if any(old in clean_model for old in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-1.0"]) or not clean_model:
+        clean_model = "gemini-3.7-flash"
+    elif clean_model not in ACTIVE_GEMINI_MODELS and not clean_model.startswith("gemini-3."):
+        clean_model = "gemini-3.7-flash"
 
-    # Danh sách model dự phòng tối ưu (TUYỆT ĐỐI không chứa model cũ 1.5 hay 2.0 đã đóng)
+    # Danh sách model dự phòng theo chuẩn Gemini 3.x
     target_models = [clean_model]
-    for fallback in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-pro"]:
+    for fallback in ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-pro-preview"]:
         if fallback not in target_models:
             target_models.append(fallback)
 
     last_exc = None
     for m in target_models:
         try:
-            response = client.models.generate_content(model=m, contents=prompt)
-            if response and response.text:
-                return response.text
+            # 1. Thử gọi qua Interactions API thế hệ mới (Khuyến nghị của Google cho Gemini 3.x)
+            if hasattr(client, "interactions") and hasattr(client.interactions, "create"):
+                try:
+                    interaction = client.interactions.create(model=m, input=prompt)
+                    out_text = getattr(interaction, "output_text", None) or (interaction.text if hasattr(interaction, "text") else None)
+                    if out_text:
+                        return out_text
+                except Exception as ex_interact:
+                    ex_str = str(ex_interact).lower()
+                    if not any(k in ex_str for k in ["404", "not_found", "is not found", "no longer available"]):
+                        raise ex_interact
+
+            # 2. Thử gọi qua models.generate_content
+            if hasattr(client, "models") and hasattr(client.models, "generate_content"):
+                response = client.models.generate_content(model=m, contents=prompt)
+                if response and hasattr(response, "text") and response.text:
+                    return response.text
         except Exception as e:
             last_exc = e
             err_str = str(e).lower()
             should_fallback = any(k in err_str for k in [
-                "404", "not_found", "no longer available", "not found",
+                "404", "not_found", "no longer available", "not found", "is not found",
                 "503", "unavailable", "high demand", "overloaded", "spikes in demand",
                 "429", "resource_exhausted", "quota", "rate_limit", "exhausted"
             ])
@@ -276,7 +287,7 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
                     wait_time = 2 * (attempt + 1)
                     time.sleep(wait_time)
                     continue
-                return None, f"Lỗi kết nối tới {provider} ({model_name}): {err}. Vui lòng thử lại hoặc chuyển sang model khác như google/gemini-2.0-flash-001 hoặc openai/gpt-4o-mini."
+                return None, f"Lỗi kết nối tới {provider} ({model_name}): {err}. Vui lòng thử lại hoặc chuyển sang model khác như gemini-3.7-flash hoặc deepseek/deepseek-chat."
 
             else:
                 return None, f"Lỗi {provider} ({model_name}): {err}"
