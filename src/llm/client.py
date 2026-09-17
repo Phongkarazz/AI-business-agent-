@@ -157,16 +157,27 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
     if "/" in clean_model:
         clean_model = clean_model.split("/")[-1]
 
-    # Danh sách các model Gemini chính thức đang hoạt động
-    VALID_GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-1.5-pro")
+    # Danh sách các model Gemini chính thức đang hoạt động trên Google AI Studio
+    ACTIVE_GEMINI_MODELS = (
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+    )
 
-    # Tự động định tuyến mọi tên model cũ / lạ / đã đóng (như gemini-2.0-flash, gemini-3.7-flash, gemini-3.1...) về gemini-2.5-flash
-    if not clean_model or clean_model not in VALID_GEMINI_MODELS:
+    # Chuyển các model cũ đã đóng (gemini-2.0-flash, gemini-1.5-flash, gemini-1.5-pro...) về gemini-2.5-flash
+    if clean_model in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro") or not clean_model:
         clean_model = "gemini-2.5-flash"
+    elif clean_model not in ACTIVE_GEMINI_MODELS:
+        if not clean_model.startswith("gemini-"):
+            clean_model = "gemini-2.5-flash"
 
-    # Danh sách model dự phòng theo thứ tự tối ưu
+    # Danh sách model dự phòng tối ưu (TUYỆT ĐỐI không chứa model cũ 1.5 hay 2.0 đã đóng)
     target_models = [clean_model]
-    for fallback in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-1.5-flash"]:
+    for fallback in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-pro"]:
         if fallback not in target_models:
             target_models.append(fallback)
 
