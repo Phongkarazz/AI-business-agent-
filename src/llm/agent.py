@@ -1513,12 +1513,13 @@ WHERE de.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY TotalEmployees DESC"""
 
-    is_company = any(k in q_low for k in ["công ty", "toàn công ty", "company", "toàn bộ"]) or "employees" in sql_low
-    if is_company or any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu"]):
+    is_company = any(k in q_low for k in ["công ty", "toàn công ty", "company", "toàn bộ", "từng giới tính", "theo giới tính", "tổng số", "tổng"]) or "employees" in sql_low
+    if is_company or any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu", "đóng góp"]):
+        has_first_name_leak = any(k in sql_low for k in ["first_name", "fullname", "last_name"])
         has_female = bool(re.search(r"\b(PercentageFemale|FemalePct|female)\b", sql, re.IGNORECASE))
         has_male = bool(re.search(r"\b(PercentageMale|MalePct|male)\b", sql, re.IGNORECASE))
         has_percentage = bool(re.search(r"\b(percentage|percent|pct|tỷ lệ|tỉ lệ)\b", sql, re.IGNORECASE))
-        if not (has_female and has_male) and not has_percentage:
+        if has_first_name_leak or (not (has_female and has_male) and not has_percentage):
             return """SELECT 
     gender AS Gender,
     COUNT(*) AS EmployeeCount,
@@ -1526,6 +1527,43 @@ ORDER BY TotalEmployees DESC"""
 FROM employees
 GROUP BY gender
 ORDER BY EmployeeCount DESC"""
+
+    return sql
+
+
+def auto_fix_gender_salary_contribution_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu truy vấn Tỷ lệ đóng góp mức lương / quỹ lương theo từng giới tính vào tổng số."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+    sql_low = (sql or "").lower()
+
+    # Nhận diện câu hỏi tỷ lệ đóng góp mức lương / quỹ lương theo giới tính
+    is_gender = any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "từng giới tính", "theo giới tính", "gender", "nam", "nữ"])
+    is_salary = any(k in q_low for k in ["lương", "mức lương", "salary", "quỹ lương", "thu nhập", "chi phí lương"])
+    is_contrib = any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp", "share", "ratio", "vào tổng", "trong tổng", "tổng số"])
+
+    if is_gender and is_salary and is_contrib:
+        # Nếu câu hỏi KHÔNG yêu cầu theo phòng ban hay chức danh cụ thể
+        is_by_dept = any(k in q_low for k in ["phòng ban", "từng phòng", "các phòng", "department"])
+        is_by_title = any(k in q_low for k in ["chức danh", "vị trí", "title", "job"])
+
+        if not is_by_dept and not is_by_title:
+            has_first_name_leak = any(k in sql_low for k in ["first_name", "fullname", "last_name"])
+            has_salary_pct = any(k in sql_low for k in ["percentage", "percent", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "pct", "share", "salaryshare"]) and ("*" in sql_low or "/" in sql_low)
+            missing_gender_group = "group by" not in sql_low or ("gender" not in sql_low and "e.gender" not in sql_low)
+
+            if has_first_name_leak or not has_salary_pct or missing_gender_group:
+                return """SELECT 
+    e.gender AS Gender,
+    COUNT(DISTINCT e.emp_no) AS Headcount,
+    SUM(s.salary) AS TotalSalary,
+    ROUND(SUM(s.salary) * 100.0 / (SELECT SUM(salary) FROM salaries WHERE to_date = '9999-01-01'), 2) AS Percentage,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM employees e
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY e.gender
+ORDER BY TotalSalary DESC"""
 
     return sql
 
@@ -6201,6 +6239,7 @@ def run_agent(
             sql_cur = auto_fix_gender_promotion_rate_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_gender_salary_gap_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_recent_manager_gender_promotion_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_gender_salary_contribution_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_gender_ratio_query(sql_cur, user_query)
             sql_cur = auto_fix_employee_salary_growth_rate_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_employee_salary_above_title_avg_query(sql_cur, user_query, dialect=dialect)

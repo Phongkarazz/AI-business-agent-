@@ -5225,8 +5225,30 @@ ORDER BY d.dept_name;
 (BẮT BUỘC XUẤT ĐẦY ĐỦ CẢ HAI CỘT TỶ LỆ: MalePct VÀ FemalePct! GROUP BY d.dept_name!)
 """
 
+    # 8.05 Tỷ lệ đóng góp mức lương / quỹ lương theo từng giới tính vào tổng số (Gender Salary Contribution Share)
+    elif any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "từng giới tính", "theo giới tính", "gender", "nam", "nữ"]) \
+         and any(k in q_low for k in ["lương", "mức lương", "salary", "quỹ lương", "thu nhập", "chi phí lương"]) \
+         and any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp", "share", "ratio", "vào tổng", "trong tổng", "tổng số"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ ĐÓNG GÓP MỨC LƯƠNG CỦA TỪNG GIỚI TÍNH VÀO TỔNG SỐ):
+SELECT 
+    e.gender AS Gender,
+    COUNT(DISTINCT e.emp_no) AS Headcount,
+    SUM(s.salary) AS TotalSalary,
+    ROUND(SUM(s.salary) * 100.0 / (SELECT SUM(salary) FROM salaries WHERE to_date = '9999-01-01'), 2) AS Percentage,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM employees e
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY e.gender
+ORDER BY TotalSalary DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. BẮT BUỘC GROUP BY e.gender (chỉ có đúng 2 dòng: 'M' và 'F')! TUYỆT ĐỐI CẤM GROUP BY first_name, last_name, dept_name hay emp_no!
+2. Cột tỷ lệ đóng góp quỹ lương Percentage = ROUND(SUM(s.salary) * 100.0 / (SELECT SUM(salary) FROM salaries WHERE to_date = '9999-01-01'), 2).
+3. Xuất đầy đủ các cột: Gender, Headcount, TotalSalary, Percentage, AvgSalary!)
+"""
+
     # 8.1 Tỷ lệ nam nữ toàn công ty (Company-wide gender ratio)
-    elif any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính"]) and any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu", "tỉ trọng", "tỷ trọng", "share", "ratio"]):
+    elif any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "từng giới tính", "theo giới tính"]) and any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "cơ cấu", "tỉ trọng", "tỷ trọng", "share", "ratio", "đóng góp"]):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ NAM NỮ TOÀN CÔNG TY):
 SELECT 
@@ -5236,7 +5258,7 @@ SELECT
 FROM employees
 GROUP BY gender
 ORDER BY EmployeeCount DESC;
-(BẮT BUỘC tính cột Percentage bằng ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage!)
+(BẮT BUỘC GROUP BY gender (chỉ có 2 dòng 'M' và 'F')! TUYỆT ĐỐI KHÔNG GROUP BY first_name! Tính cột Percentage bằng ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage!)
 """
 
     # 8.2 Thống kê số lượng và tổng mức lương theo từng giới tính
