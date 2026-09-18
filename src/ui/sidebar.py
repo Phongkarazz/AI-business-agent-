@@ -116,7 +116,11 @@ def show_table_preview_dialog(engine, tables: list[str], default_table: str = No
     sample_df = get_table_sample_df(engine, selected_t, limit=10)
     if not sample_df.empty:
         st.markdown(f"**👁️ 10 dòng dữ liệu mẫu bảng `{selected_t}`:**")
-        st.dataframe(sample_df, use_container_width=True)
+        display_sample_df = sample_df.copy()
+        for col in display_sample_df.columns:
+            if col.lower() == "team":
+                display_sample_df[col] = display_sample_df[col].fillna("(Chưa phân loại)").replace({"": "(Chưa phân loại)"})
+        st.dataframe(display_sample_df, use_container_width=True)
 
         c_dl, _ = st.columns([2, 3])
         with c_dl:

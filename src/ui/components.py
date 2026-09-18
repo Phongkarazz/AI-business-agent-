@@ -4440,6 +4440,10 @@ def render_result(result: dict, turn_id: str):
                 display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
                 display_df.index.name = "Xếp hạng" if not is_en else "Rank"
 
+            for col in display_df.columns:
+                if str(col).lower() in ["team", "đội ngũ", "đội"]:
+                    display_df[col] = display_df[col].fillna("Chưa phân loại").replace({"": "Chưa phân loại"})
+
             column_config = {}
             for col in display_df.columns:
                 c_low = str(col).lower()

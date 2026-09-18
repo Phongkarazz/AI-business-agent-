@@ -500,46 +500,67 @@ def get_db_specific_rules(schema_context: str) -> str:
         return """   - QUY TẮC CSDL AWESOME CHOCOLATES:
      + Bảng `products` (Bí danh bắt buộc: `pr`):
        * Cột: `PID` (Khóa chính), `Product` (Tên sản phẩm: 'Mint Chip Choco', 'Milk Bars'...), `Category`, `Size`, `Cost_per_box`.
-     + Bảng `people` (Bí danh bắt buộc: `pe`):
-       * Cột: `SPID` (Khóa chính), `Salesperson` (Tên nhân viên: 'Van Tuxwell'...), `Team` ('Yummies', 'Jucies', 'Delish'...), `Location`.
-     + Bảng `geo` (Bí danh bắt buộc: `g`):
-       * Cột: `GeoID` (Khóa chính), `Geo` (Tên quốc gia/thị trường: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand'), `Region` (Khu vực địa lý lớn: 'APAC', 'Americas').
-     + Bảng `sales` (Bí danh bắt buộc: `s`):
-       * Cột: `SPID` (liên kết pe.SPID), `PID` (liên kết pr.PID), `GeoID` (liên kết g.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
-     + QUY TẮC BÍ DANH (ALIAS) TUYỆT ĐỐI KHÔNG TRÙNG NHAU:
-       * Luôn dùng: `pe` cho people, `pr` cho products, `s` cho sales, `g` cho geo.
-      + MẪU CHUẨN SỐ LƯỢNG NHÂN VIÊN BÁN HÀNG / HEADCOUNT THEO TEAM HOẶC LOCATION:
-        * Khi hỏi 'Số lượng nhân viên bán hàng', 'nhân sự', 'headcount', 'quy mô nhân sự', 'đếm nhân viên' theo từng Đội ngũ (Team) hoặc Khu vực (Location):
-          TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) hay SUM(Amount)!
-          BẮT BUỘC TRUY VẤN TRỰC TIẾP TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID):
-          SELECT 
-              pe.Team AS `Đội Ngũ`,
-              COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`,
-              ROUND(COUNT(DISTINCT pe.SPID) * 100.0 / (SELECT COUNT(*) FROM people WHERE Team != '' AND Team IS NOT NULL), 2) AS `Tỷ Lệ (%)`
-          FROM people pe
-          WHERE pe.Team != '' AND pe.Team IS NOT NULL
-          GROUP BY pe.Team
-          ORDER BY `Số Lượng Nhân Viên` DESC;
-     + MẪU CHUẨN TOP NHÂN SỰ:
-       SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
-       FROM people pe
-       JOIN sales s ON pe.SPID = s.SPID
-       GROUP BY pe.Salesperson, pe.Team
-       ORDER BY TotalSales DESC
-       LIMIT 10;
-      + MẪU CHUẨN TOP NHÂN SỰ / NHÂN VIÊN TRONG MỘT NHÓM / ĐỘI NGŨ (TEAM YUMMIES, DELISH, JUCIES):
-        * Khi hỏi 'Top 5 nhân sự có doanh số cao nhất trong nhóm Yummies' hoặc 'Top nhân viên team Delish':
-          CÁC TỪ 'nhân sự', 'nhân viên', 'salesperson' VÀ CÁC NHÓM 'Yummies', 'Delish', 'Jucies' LÀ NÓI VỀ NHÂN SỰ (BẢNG people, CỘT pe.Team)!
-          TUYỆT ĐỐI CẤM TRUY VẤN SẢN PHẨM (BẢNG products) HAY NHẦM SANG BẢNG employees!
-          SELECT 
-              pe.Salesperson, 
-              SUM(s.Amount) AS TotalSales
-          FROM sales s
-          JOIN people pe ON s.SPID = pe.SPID
-          WHERE pe.Team = 'Yummies'
-          GROUP BY pe.Salesperson
-          ORDER BY TotalSales DESC
-          LIMIT 5;
+      + Bảng `people` (Bí danh bắt buộc: `pe`):
+        * Cột: `SPID` (Khóa chính), `Salesperson` (Tên nhân viên: 'Ches Bonnell', 'Van Tuxwell'...), `Team` ('Yummies', 'Jucies', 'Delish'..., riêng 'Ches Bonnell' có Team = '' tức Chưa phân loại / Chưa phân đội), `Location`.
+      + Bảng `geo` (Bí danh bắt buộc: `g`):
+        * Cột: `GeoID` (Khóa chính), `Geo` (Tên quốc gia/thị trường: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand'), `Region` (Khu vực địa lý lớn: 'APAC', 'Americas').
+      + Bảng `sales` (Bí danh bắt buộc: `s`):
+        * Cột: `SPID` (liên kết pe.SPID), `PID` (liên kết pr.PID), `GeoID` (liên kết g.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
+      + QUY TẮC BÍ DANH (ALIAS) TUYỆT ĐỐI KHÔNG TRÙNG NHAU:
+        * Luôn dùng: `pe` cho people, `pr` cho products, `s` cho sales, `g` cho geo.
+       + MẪU CHUẨN NHÂN VIÊN CHƯA ĐƯỢC PHÂN LOẠI / CHƯA PHÂN ĐỘI / KHÔNG THUỘC TEAM NÀO / CHES BONNELL:
+         * Khi hỏi 'nhân viên nào chưa được phân loại', 'nhân viên chưa phân đội', 'ai chưa có team', 'nhân sự không thuộc team nào', 'Ches Bonnell thuộc team nào':
+           SELECT 
+               pe.SPID,
+               pe.Salesperson,
+               COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS `Đội Ngũ`,
+               pe.Location AS `Khu Vực`
+           FROM people pe
+           WHERE pe.Team = '' OR pe.Team IS NULL;
+         * Nếu hỏi doanh số / số hộp của nhân viên chưa phân đội / chưa phân loại:
+           SELECT 
+               pe.Salesperson,
+               COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS `Đội Ngũ`,
+               pe.Location,
+               SUM(s.Amount) AS TotalSales,
+               SUM(s.Boxes) AS TotalBoxes
+           FROM people pe
+           JOIN sales s ON pe.SPID = s.SPID
+           WHERE pe.Team = '' OR pe.Team IS NULL
+           GROUP BY pe.SPID, pe.Salesperson, pe.Team, pe.Location
+           ORDER BY TotalSales DESC;
+       + MẪU CHUẨN SỐ LƯỢNG NHÂN VIÊN BÁN HÀNG / HEADCOUNT THEO TEAM HOẶC LOCATION:
+         * Khi hỏi 'Số lượng nhân viên bán hàng', 'nhân sự', 'headcount', 'quy mô nhân sự', 'đếm nhân viên' theo từng Đội ngũ (Team) hoặc Khu vực (Location):
+           TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) hay SUM(Amount)!
+           BẮT BUỘC TRUY VẤN TRỰC TIẾP TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID):
+           SELECT 
+               pe.Team AS `Đội Ngũ`,
+               COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`,
+               ROUND(COUNT(DISTINCT pe.SPID) * 100.0 / (SELECT COUNT(*) FROM people WHERE Team != '' AND Team IS NOT NULL), 2) AS `Tỷ Lệ (%)`
+           FROM people pe
+           WHERE pe.Team != '' AND pe.Team IS NOT NULL
+           GROUP BY pe.Team
+           ORDER BY `Số Lượng Nhân Viên` DESC;
+      + MẪU CHUẨN TOP NHÂN SỰ:
+        SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
+        FROM people pe
+        JOIN sales s ON pe.SPID = s.SPID
+        GROUP BY pe.Salesperson, pe.Team
+        ORDER BY TotalSales DESC
+        LIMIT 10;
+       + MẪU CHUẨN TOP NHÂN SỰ / NHÂN VIÊN TRONG MỘT NHÓM / ĐỘI NGŨ (TEAM YUMMIES, DELISH, JUCIES):
+         * Khi hỏi 'Top 5 nhân sự có doanh số cao nhất trong nhóm Yummies' hoặc 'Top nhân viên team Delish':
+           CÁC TỪ 'nhân sự', 'nhân viên', 'salesperson' VÀ CÁC NHÓM 'Yummies', 'Delish', 'Jucies' LÀ NÓI VỀ NHÂN SỰ (BẢNG people, CỘT pe.Team)!
+           TUYỆT ĐỐI CẤM TRUY VẤN SẢN PHẨM (BẢNG products) HAY NHẦM SANG BẢNG employees!
+           SELECT 
+               pe.Salesperson, 
+               SUM(s.Amount) AS TotalSales
+           FROM sales s
+           JOIN people pe ON s.SPID = pe.SPID
+           WHERE pe.Team = 'Yummies'
+           GROUP BY pe.Salesperson
+           ORDER BY TotalSales DESC
+           LIMIT 5;
      + MẪU CHUẨN TOP SẢN PHẨM:
        SELECT pr.Product, SUM(s.Amount) AS TotalSales
        FROM products pr
@@ -1511,6 +1532,47 @@ ORDER BY {m_col} DESC;
 2. BẮT BUỘC dùng HAVING {m_having}!
 3. BẮT BUỘC ORDER BY {m_col} DESC!
 4. TUYỆT ĐỐI KHÔNG DÙNG LIMIT NẾU NGƯỜI DÙNG KHÔNG YÊU CẦU TOP N!{orders_warn})
+"""
+
+        # 0.0001 Nhân viên chưa được phân loại / chưa phân đội / không thuộc team nào / Ches Bonnell
+        is_unassigned_salesperson_q = (
+            any(k in q_low for k in ["chưa phân loại", "chưa được phân loại", "chưa phân đội", "chưa có team", "chưa có đội", "không thuộc team", "không có team", "không thuộc đội", "không có đội", "chưa phân nhóm", "unassigned team", "no team", "unassigned"])
+            or ("ches bonnell" in q_low and any(k in q_low for k in ["team nào", "đội nào", "nhóm nào", "chưa phân", "phân loại", "thuộc team", "ở team", "thông tin"]))
+        )
+        if is_unassigned_salesperson_q:
+            has_sales = any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "bán được", "hộp", "boxes"])
+            if has_sales:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH SỐ / SỐ HỘP CỦA NHÂN VIÊN CHƯA ĐƯỢC PHÂN LOẠI / CHƯA PHÂN ĐỘI):
+SELECT 
+    pe.Salesperson AS Salesperson,
+    pe.Location AS `Khu Vực`,
+    COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS `Đội Ngũ`,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold
+FROM people pe
+JOIN sales s ON pe.SPID = s.SPID
+WHERE pe.Team = '' OR pe.Team IS NULL
+GROUP BY pe.SPID, pe.Salesperson, pe.Location, pe.Team
+ORDER BY TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. Nhân viên chưa được phân loại là những người có pe.Team = '' HOẶC pe.Team IS NULL (trong CSDL Chocolates là Ches Bonnell)!
+2. Dùng COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS `Đội Ngũ` để hiển thị rõ ràng!)
+"""
+            else:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DANH SÁCH NHÂN VIÊN CHƯA ĐƯỢC PHÂN LOẠI / CHƯA PHÂN ĐỘI / CHES BONNELL):
+SELECT 
+    pe.SPID,
+    pe.Salesperson,
+    COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS `Đội Ngũ`,
+    pe.Location AS `Khu Vực`
+FROM people pe
+WHERE pe.Team = '' OR pe.Team IS NULL;
+(CẢNH BÁO BẮT BUỘC:
+1. Trong CSDL Chocolates, nhân viên chưa được phân loại vào Team nào là Ches Bonnell (SP08, Location: Hyderabad, Team: '')!
+2. Lọc chính xác bằng: WHERE pe.Team = '' OR pe.Team IS NULL (hoặc tìm Ches Bonnell nếu hỏi đích danh)!
+3. Dùng COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS `Đội Ngũ`!)
 """
 
         # 0.00 Số lượng nhân viên bán hàng / Headcount theo từng Đội ngũ (Team) hoặc Khu vực (Location)
