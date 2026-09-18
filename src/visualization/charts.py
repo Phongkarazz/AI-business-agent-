@@ -567,21 +567,25 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
             # 2. Nếu có cột tỷ lệ/phần trăm/cơ cấu và số lượng danh mục từ 2 đến 10
             # CHÚ Ý: CHỈ chọn Pie khi có ĐÚNG 1 cột đo lường phân rã thành phần.
-            # Nếu có từ 2 cột tỷ lệ/số đo trở lên (ví dụ: MalePct & FemalePct, hoặc MaleManagers & FemaleManagers),
-            # BẮT BUỘC dùng Bar Chart (Grouped Bar Chart) để so sánh song song giữa các nhóm!
-            pct_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phan_tram", "share", "ratio", "rate"])]
+            # 2. Nếu có cột tỷ lệ/phần trăm/cơ cấu và số lượng danh mục từ 2 đến 10
+            # CHÚ Ý: CHỈ chọn Pie khi có ĐÚNG 1 cột đo lường phân rã thành phần và KHÔNG PHẢI là chuỗi thời gian (time series).
+            # Chuỗi thời gian (có time_col và n_time > 1) TUYỆT ĐỐI dùng Line hoặc Bar Chart!
+            pct_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phan_tram", "share", "ratio"])]
             has_single_pct_col = len(pct_cols) == 1
             uq_low = (user_query or "").lower()
+            
+            # Chỉ coi là user hỏi % khi có từ khóa rõ ràng, KHÔNG check bare "%" vì sẽ dính vào tên sản phẩm như "85% Dark Bars", "70% Dark Bites"
             user_asked_pct = any(k in uq_low for k in [
-                "tỷ lệ", "tỉ lệ", "phần trăm", "percent", "percentage", "pct", "%", 
-                "share", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp"
+                "tỷ lệ", "tỉ lệ", "phần trăm", "percent", "percentage", "cơ cấu", 
+                "tỉ trọng", "tỷ trọng", "đóng góp", "chiếm bao nhiêu", "tỷ phần", "tỉ phần"
             ])
             non_pct_cols = [c for c in measure_cols if c not in pct_cols]
             is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "danh sách", "liệt kê"])
+            user_asked_time_trend = any(k in uq_low for k in ["qua các", "qua từng", "theo tháng", "theo năm", "theo quý", "biến động", "xu hướng", "trend", "thay đổi"])
 
             # Kiểm tra xem cột phần trăm có tổng xấp xỉ 100% (cơ cấu thành phần khép kín)
             pct_sum_approx_100 = False
-            if has_single_pct_col and 2 <= len(df) <= 12:
+            if has_single_pct_col and 2 <= len(df) <= 10:
                 try:
                     s_val = float(pd.to_numeric(df[pct_cols[0]], errors="coerce").sum())
                     if abs(s_val - 100.0) <= 3.0:
@@ -589,21 +593,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 except Exception:
                     pass
 
-            time_is_composition = (user_asked_pct or pct_sum_approx_100) and (2 <= len(df) <= 12)
-
             is_distribution_breakdown = (
                 (
                     (len(measure_cols) == 1 and (user_asked_pct or (has_single_pct_col and not non_pct_cols)))
                     or (pct_sum_approx_100 and (user_asked_pct or has_single_pct_col))
-                    or (user_asked_pct and has_single_pct_col and len(df) <= 12)
+                    or (user_asked_pct and has_single_pct_col and len(df) <= 10)
                 )
-                and (2 <= len(df) <= 12)
+                and (2 <= len(df) <= 10)
                 and (len(pct_cols) <= 1)
-                and (not time_col or n_time <= 1 or time_is_composition)
+                and (not time_col or n_time <= 1)  # TUYỆT ĐỐI không dùng Pie cho chuỗi thời gian n_time > 1
+                and not user_asked_time_trend
                 and not is_individual_entity
                 and not is_top_ranking
                 and not (len(measure_cols) == 1 and any(k in str(measure_cols[0]).lower() for k in ["rate", "thăng chức", "promotion"]))
-                and not (len(measure_cols) == 1 and any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "thu nhập", "wage", "pay"]))
+                and not (len(measure_cols) == 1 and not user_asked_pct and any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "thu nhập", "wage", "pay", "sales", "doanh", "amount", "revenue"]))
             )
 
             is_gender_compare = (
@@ -628,7 +631,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 chosen = "Bar"
             elif time_col and measure_cols and n_time > 1:
                 chosen = "Line"
-            elif len(df) == 1 and measure_cols and any(k in str(measure_cols[0]).lower() for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram", "%"]):
+            elif len(df) == 1 and measure_cols and any(k in str(measure_cols[0]).lower() for k in ["percent", "ratio", "rate", "tỷ lệ", "phan_tram"]):
                 chosen = "Pie"
             elif measure_cols:
                 chosen = "Bar"
@@ -1267,7 +1270,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     # Kiểm tra xem người dùng có thực sự yêu cầu vẽ tỷ lệ/phần trăm, số lượng, hay hiệu quả kinh doanh không
                     uq_low = (user_query or "").lower()
-                    user_asked_pct = any(k in uq_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "percent", "pct", "%", "share", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp"])
+                    user_asked_pct = any(k in uq_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "percent", "percentage", "cơ cấu", "tỉ trọng", "tỷ trọng", "đóng góp", "chiếm bao nhiêu", "tỷ phần"])
                     user_asked_count = any(k in uq_low for k in ["số lượng", "quy mô", "bao nhiêu", "count", "headcount", "nhân viên"])
                     user_asked_pnl = any(k in uq_low for k in [
                         "lãi", "lỗ", "lãi, lỗ", "lãi lỗ", "chi phí", "cost", "giá vốn", "cogs", 
