@@ -210,11 +210,14 @@ def export_to_png(fig=None, df: pd.DataFrame = None, user_query: str = "") -> by
                     ax.set_title(f"{format_col_title(measure_cols[0])} theo {format_col_title(label_col)}", fontsize=11, fontweight="bold", pad=12, color="#0F2042")
                 else:
                     import numpy as np
-                    n_m = min(len(measure_cols), 3)
+                    pct_cols = [c for c in measure_cols if any(k in c.lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
+                    non_pct = [c for c in measure_cols if c not in pct_cols] or measure_cols
+                    use_m = non_pct[:3] if len(non_pct) >= 2 else measure_cols[:3]
+                    n_m = min(len(use_m), 3)
                     width = 0.8 / n_m
                     x_indices = np.arange(len(x_vals))
                     colors_list = ["#1E40AF", "#FF7A00", "#10B981"]
-                    for idx, m in enumerate(measure_cols[:n_m]):
+                    for idx, m in enumerate(use_m):
                         y_vals = pd.to_numeric(plot_df[m], errors="coerce").fillna(0)
                         offset = (idx - (n_m - 1) / 2) * width
                         ax.bar(x_indices + offset, y_vals, width=width, label=format_col_title(m), color=colors_list[idx % len(colors_list)])

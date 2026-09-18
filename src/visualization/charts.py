@@ -1314,16 +1314,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     # Đảm bảo chart_title luôn có giá trị mặc định tránh UnboundLocalError
                     chart_title = f"{format_col_title(measure_cols[0])} theo {format_col_title(label_name)}" if (measure_cols and label_name) else "Biểu đồ Cột"
 
-                    # Nếu có cặp số lượng Nam/Nữ thực tế (hoặc vừa được tính từ Tổng * %):
-                    is_pure_pct_only = any(k in uq_low for k in ["chỉ xem tỷ lệ", "chỉ xem phần trăm", "chỉ tỷ lệ"])
-                    if male_emp_cols and female_emp_cols and not is_pure_pct_only:
-                        active_measures = [male_emp_cols[0], female_emp_cols[0]]
-                        chart_title = f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
-                    elif user_asked_pnl and len(monetary_pnl_cols) >= 2:
-                        active_measures = monetary_pnl_cols
-                        chart_title = f"Báo cáo Doanh Thu - Chi Phí - Lợi Nhuận theo {format_col_title(label_name)} (Grouped Bar)"
-                    # Ưu tiên vẽ Dual Axis khi người dùng hỏi so sánh Doanh số ($) và Số lượng hộp bán ra giữa các Team / đối tượng kinh doanh
-                    elif any(k in uq_low for k in ["doanh số", "doanh thu", "sales", "tiền"]) and any(k in uq_low for k in ["hộp", "thùng", "boxes", "số lượng"]) and [c for c in non_pct_cols if any(k in c.lower() for k in ["totalsales", "sales", "amount", "revenue", "doanh thu", "doanh so"])] and [c for c in non_pct_cols if any(k in c.lower() for k in ["totalboxes", "boxes", "hộp", "thùng", "sản lượng"])]:
+                    # 1. Ưu tiên vẽ Dual Axis khi người dùng hỏi so sánh Doanh số ($) và Số lượng hộp bán ra giữa các Team / đối tượng kinh doanh
+                    if any(k in uq_low for k in ["doanh số", "doanh thu", "sales", "tiền"]) and any(k in uq_low for k in ["hộp", "thùng", "boxes", "số lượng"]) and [c for c in non_pct_cols if any(k in c.lower() for k in ["totalsales", "sales", "amount", "revenue", "doanh thu", "doanh so"])] and [c for c in non_pct_cols if any(k in c.lower() for k in ["totalboxes", "boxes", "hộp", "thùng", "sản lượng"])]:
                         sales_c = [c for c in non_pct_cols if any(k in c.lower() for k in ["totalsales", "sales", "amount", "revenue", "doanh thu", "doanh so"])][0]
                         boxes_c = [c for c in non_pct_cols if any(k in c.lower() for k in ["totalboxes", "boxes", "hộp", "thùng", "sản lượng"])][0]
 
@@ -1595,7 +1587,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             active_measures = [has_non_pct_eff[0]]
                             chart_title = f"{format_col_title(has_non_pct_eff[0])} theo {format_col_title(label_name)}"
 
-                    # Ưu tiên vẽ 2 biểu đồ (Subplots) khi người dùng hỏi/dữ liệu có cả Quy mô Nhân sự (Số lượng) VÀ Mức lương / Doanh thu
+                    # 4. Ưu tiên vẽ 2 biểu đồ (Subplots) khi người dùng hỏi/dữ liệu có cả Quy mô Nhân sự (Số lượng) VÀ Mức lương / Doanh thu
                     hc_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["headcount", "employeecount", "employee_count", "totalemployees", "total_employees", "số lượng nhân sự", "số nhân sự", "quy mô", "total_emp", "số lượng nhân viên", "số nhân viên", "slngnhnvin", "soluong", "số lượng", "count", "nhân sự", "nhân viên"]) and not any(k in c.lower() for k in ["male", "female", "nam", "nữ", "salary", "lương", "thu nhập"])]
                     sal_cands = [c for c in non_pct_cols if any(k in c.lower() for k in ["salary", "lương", "thu nhập", "payroll", "quỹ", "quỹ lương", "sales", "doanh số", "amount", "revenue", "doanh thu"]) and not any(k in c.lower() for k in ["diff", "chênh lệch", "gap", "spread"]) and c not in hc_cands]
 
@@ -1680,20 +1672,44 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         st.plotly_chart(fig, use_container_width=True)
                         return fig
 
-                    # Ưu tiên vẽ Chênh lệch lương khi người dùng hỏi về khoảng cách / chênh lệch lương
-                    user_asked_spread = any(k in uq_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa"]) and not any(k in uq_low for k in ["chuẩn", "stddev", "standard deviation", "phân tán"])
-                    spread_meas = [c for c in non_pct_cols if any(k in c.lower() for k in ["salaryspread", "salary_spread", "spread", "chênh lệch", "gap", "diff"])]
-                    sal_meas = [c for c in non_pct_cols if any(k in c.lower() for k in ["salary", "lương", "thu nhập", "payroll", "quỹ"]) and not any(k in c.lower() for k in ["diff", "chênh lệch", "gap", "spread"])]
-                    user_asked_salary = any(k in uq_low for k in ["lương", "salary", "thu nhập", "payroll", "quỹ lương"]) and not any(k in uq_low for k in ["tỷ lệ tăng", "tỉ lệ tăng", "số lần"])
-                    user_asked_payroll = any(k in uq_low for k in ["tổng quỹ lương", "quỹ lương", "tổng chi phí lương", "tổng lương", "payroll", "salary budget", "total salary", "ngân sách lương", "chi phí lương"])
-                    user_asked_avg_salary = any(k in uq_low for k in ["lương trung bình", "trung bình", "thu nhập bình quân", "average salary", "avg salary"])
-                    
-                    user_asked_stddev = any(k in uq_low for k in ["độ lệch chuẩn", "stddev", "phân tán", "độ phân tán", "standard deviation"])
-                    has_stddev_sal = [c for c in non_pct_cols if any(k in c.lower() for k in ["salarystddev", "salary_std_dev", "stddev", "độ lệch chuẩn"])]
-
-                    payroll_cands_meas = [c for c in sal_meas if any(k in c.lower() for k in ["totalpayroll", "total_payroll", "totalsalarybudget", "total_salary_budget", "totalsalary", "total_salary", "quỹ lương", "tổng quỹ lương", "salarybudget", "salary_budget", "deptsalary", "dept_salary", "tổng chi phí lương", "totalcompanysalary", "total_company_salary", "companytotalsalary", "tổng quỹ"]) and not any(k in c.lower() for k in ["avg", "trung bình", "median", "mean"])]
-
-                    if user_asked_stddev and has_stddev_sal:
+                    # 5. Xác định danh sách chỉ số đo lường (active_measures) và tiêu đề biểu đồ (Grouped / Stacked Bar)
+                    is_pure_pct_only = any(k in uq_low for k in ["chỉ xem tỷ lệ", "chỉ xem phần trăm", "chỉ tỷ lệ"])
+                    if male_emp_cols and female_emp_cols and not is_pure_pct_only:
+                        active_measures = [male_emp_cols[0], female_emp_cols[0]]
+                        chart_title = f"Quy mô & Cơ cấu Giới tính theo {format_col_title(label_name)} (Stacked Bar)"
+                    elif user_asked_pnl and len(monetary_pnl_cols) >= 2:
+                        is_rev_cost_focus = (
+                            any(k in uq_low for k in ["số tiền", "doanh thu", "doanh số", "sales", "revenue", "amount", "tiền"])
+                            and any(k in uq_low for k in ["chi phí", "cost", "giá vốn", "cogs"])
+                            and not any(k in uq_low for k in ["lợi nhuận", "lãi", "profit", "net profit", "ròng"])
+                        )
+                        rev_c = [c for c in monetary_pnl_cols if any(k in c.lower() for k in ["doanh thu", "sales", "revenue", "totalsales", "amount", "tiền"])]
+                        cost_c = [c for c in monetary_pnl_cols if any(k in c.lower() for k in ["chi phí", "cost", "giá vốn", "cogs", "totalcost"])]
+                        if is_rev_cost_focus and rev_c and cost_c:
+                            active_measures = [rev_c[0], cost_c[0]]
+                            chart_title = f"So Sánh Doanh Thu & Chi Phí theo {format_col_title(label_name)} (Grouped Bar)"
+                        else:
+                            active_measures = monetary_pnl_cols
+                            has_rev = any(any(k in c.lower() for k in ["doanh thu", "sales", "revenue", "totalsales", "amount", "tiền"]) for c in active_measures)
+                            has_cost = any(any(k in c.lower() for k in ["chi phí", "cost", "giá vốn", "cogs", "totalcost"]) for c in active_measures)
+                            has_prof = any(any(k in c.lower() for k in ["lợi nhuận", "profit", "lãi"]) for c in active_measures)
+                            if has_rev and has_cost and has_prof:
+                                chart_title = f"Báo Cáo Doanh Thu - Chi Phí - Lợi Nhuận theo {format_col_title(label_name)} (Grouped Bar)"
+                            elif has_rev and has_cost:
+                                chart_title = f"So Sánh Doanh Thu & Chi Phí theo {format_col_title(label_name)} (Grouped Bar)"
+                            else:
+                                chart_title = f"Báo Cáo Tài Chính P&L theo {format_col_title(label_name)} (Grouped Bar)"
+                    elif user_asked_efficiency and eff_cols:
+                        if is_margin_focus and has_pct_eff:
+                            active_measures = [has_pct_eff[0]]
+                            chart_title = f"{format_col_title(has_pct_eff[0])} theo {format_col_title(label_name)}"
+                        elif is_box_focus and has_non_pct_eff:
+                            active_measures = [has_non_pct_eff[0]]
+                            chart_title = f"{format_col_title(has_non_pct_eff[0])} theo {format_col_title(label_name)}"
+                        else:
+                            active_measures = [eff_cols[0]]
+                            chart_title = f"{format_col_title(eff_cols[0])} theo {format_col_title(label_name)}"
+                    elif user_asked_stddev and has_stddev_sal:
                         has_avg_sal = [c for c in sal_meas if any(k in c.lower() for k in ["avg", "trung bình"])]
                         if has_avg_sal:
                             active_measures = [has_avg_sal[0], has_stddev_sal[0]]
@@ -1704,7 +1720,6 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     elif user_asked_spread and spread_meas:
                         active_measures = [spread_meas[0]]
                         chart_title = f"Chênh Lệch Lương ($) theo {format_col_title(label_name)}"
-                    # Ưu tiên vẽ Lương (TotalPayroll / AvgSalary / Salary) khi người dùng hỏi so sánh Lương
                     elif user_asked_salary and sal_meas:
                         has_male_sal = [c for c in sal_meas if any(k in c.lower() for k in ["male", "nam"]) and not any(k in c.lower() for k in ["female", "nu", "nữ"])]
                         has_female_sal = [c for c in sal_meas if any(k in c.lower() for k in ["female", "nu", "nữ"])]
@@ -1756,15 +1771,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         pct_labels = [format_col_title(c) for c in pct_cols]
                         chart_title = clean_chart_title(f"Tỷ Lệ ({', '.join(pct_labels)}) theo {format_col_title(label_name)}")
                     elif non_pct_cols:
-                        # Ưu tiên các cột giá trị thực tế (lương thực, quy mô...) thay vì phần trăm ảo
-                        clean_non_pct = [c for c in non_pct_cols if not any(k in c.lower() for k in ["total", "tổng", "count_all", "all"])] or non_pct_cols
-                        clean_labels = [format_col_title(c) for c in clean_non_pct]
-                        if len(clean_non_pct) >= 2:
-                            active_measures = clean_non_pct
-                            chart_title = clean_chart_title(f"So Sánh ({', '.join(clean_labels)}) theo {format_col_title(label_name)}")
+                        if len(non_pct_cols) >= 2:
+                            active_measures = non_pct_cols
+                            meas_labels = [format_col_title(c) for c in non_pct_cols]
+                            chart_title = clean_chart_title(f"So Sánh ({', '.join(meas_labels)}) theo {format_col_title(label_name)} (Grouped Bar)")
                         else:
-                            active_measures = clean_non_pct
-                            chart_title = clean_chart_title(f"{clean_labels[0]} theo {format_col_title(label_name)}")
+                            active_measures = non_pct_cols
+                            chart_title = clean_chart_title(f"{format_col_title(non_pct_cols[0])} theo {format_col_title(label_name)}")
                     elif pct_cols:
                         active_measures = pct_cols
                         pct_labels = [format_col_title(c) for c in pct_cols]
@@ -1922,9 +1935,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     is_pnl_comp = (
                         len(active_measures) >= 2 and
-                        any(any(k in c.lower() for k in ["doanh thu", "sales", "revenue", "totalsales"]) for c in active_measures) and
-                        any(any(k in c.lower() for k in ["chi phí", "cost", "giá vốn", "cogs", "totalcost"]) for c in active_measures) and
-                        any(any(k in c.lower() for k in ["lợi nhuận", "profit", "lãi"]) for c in active_measures)
+                        any(any(k in c.lower() for k in ["doanh thu", "sales", "revenue", "totalsales", "amount", "tiền"]) for c in active_measures) and
+                        any(any(k in c.lower() for k in ["chi phí", "cost", "giá vốn", "cogs", "totalcost"]) for c in active_measures)
                     )
 
                     is_employee_title_salary_comp = (
@@ -2269,7 +2281,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     elif is_pnl_comp:
                         for tr in fig.data:
                             tr_l = str(tr.name).lower()
-                            if any(k in tr_l for k in ["doanh thu", "sales", "revenue", "totalsales"]):
+                            if any(k in tr_l for k in ["doanh thu", "sales", "revenue", "totalsales", "amount", "tiền"]):
                                 tr.name = "Doanh Thu ($)" if not is_en else "Revenue ($)"
                                 tr.marker.color = "#0068FF"
                             elif any(k in tr_l for k in ["chi phí", "cost", "giá vốn", "cogs", "totalcost"]):
