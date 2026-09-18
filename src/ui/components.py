@@ -4527,7 +4527,8 @@ def render_result(result: dict, turn_id: str):
             )
 
         with c_pdf:
-            pdf_bytes = export_to_pdf(result, df)
+            chart_bytes = export_to_png(chart_fig, df=df, user_query=result.get("query", ""))
+            pdf_bytes = export_to_pdf(result, df, chart_png_bytes=chart_bytes)
             st.download_button(
                 "📄 Xuất Báo cáo PDF" if not is_en else "📄 Export PDF Report",
                 pdf_bytes,

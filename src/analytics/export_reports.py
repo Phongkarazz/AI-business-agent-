@@ -139,12 +139,102 @@ def export_to_excel(df: pd.DataFrame, sheet_name: str = "Bao_Cao") -> bytes:
 
 
 # ---------------------------------------------------------
-# 2. Xuất Ảnh Biểu Đồ PNG Độ Nét Cao
+# 2. Xuất Ảnh Biểu Đồ PNG Độ Nét Cao & Nhúng Báo Cáo PDF
 # ---------------------------------------------------------
-def export_to_png(fig) -> bytes | None:
-    """Xuất biểu đồ Plotly sang ảnh PNG.
-    Đã tắt việc gọi Chrome headless ngầm để chống treo server (người dùng tải trực tiếp qua nút Camera 📷 trên biểu đồ).
+def export_to_png(fig=None, df: pd.DataFrame = None, user_query: str = "") -> bytes | None:
+    """Xuất biểu đồ sang ảnh PNG bytes độ nét cao để nhúng vào Báo cáo PDF.
+    - Ưu tiên 1: Dùng kaleido xuất trực tiếp từ Plotly Figure (`fig.to_image`).
+    - Ưu tiên 2: Tự động vẽ biểu đồ chuẩn McKinsey Executive (Bar/Line/Donut) bằng Matplotlib nếu kaleido không sẵn sàng.
     """
+    # 1. Thử dùng Plotly + Kaleido
+    if fig is not None:
+        try:
+            img_bytes = fig.to_image(format="png", width=1000, height=450, scale=2, engine="kaleido")
+            if img_bytes and len(img_bytes) > 500:
+                return img_bytes
+        except Exception:
+            pass
+
+    # 2. Fallback: Tự động vẽ biểu đồ bằng Matplotlib chuẩn Executive
+    if df is not None and not df.empty:
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            from src.analytics.heuristics import get_axis_columns, is_id_like, pick_label_column
+            from src.visualization.charts import format_col_title
+
+            measure_cols, label_cols, time_col = get_axis_columns(df)
+            if not measure_cols:
+                return None
+
+            plot_df = df.copy()
+            if len(plot_df) > 20:
+                plot_df = plot_df.head(20)
+
+            fig_mpl, ax = plt.subplots(figsize=(9, 4.2), dpi=150)
+            fig_mpl.patch.set_facecolor("#FFFFFF")
+            ax.set_facecolor("#FFFFFF")
+
+            # Cấu hình phong cách tối giản McKinsey
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["left"].set_color("#CBD5E1")
+            ax.spines["bottom"].set_color("#CBD5E1")
+            ax.grid(axis="y", linestyle="--", alpha=0.4, color="#E2E8F0")
+
+            if time_col and time_col in plot_df.columns:
+                # Line Chart xu hướng thời gian
+                x_vals = [str(v) for v in plot_df[time_col]]
+                colors_list = ["#0068FF", "#DC2626", "#10B981", "#D97706"]
+                for idx, m in enumerate(measure_cols[:3]):
+                    y_vals = pd.to_numeric(plot_df[m], errors="coerce").fillna(0)
+                    ax.plot(x_vals, y_vals, marker="o", linewidth=2.5, markersize=6, label=format_col_title(m), color=colors_list[idx % len(colors_list)])
+                if len(measure_cols) > 1:
+                    ax.legend(frameon=False, loc="upper right")
+                ax.set_title(f"Xu hướng {format_col_title(measure_cols[0])} theo {format_col_title(time_col)}", fontsize=11, fontweight="bold", pad=12, color="#0F2042")
+                plt.xticks(rotation=35 if len(x_vals) > 6 else 0, ha="right" if len(x_vals) > 6 else "center", fontsize=8.5)
+            elif label_cols:
+                label_col = label_cols[0]
+                x_vals = [str(v)[:18] for v in plot_df[label_col]]
+
+                if len(measure_cols) == 1:
+                    y_vals = pd.to_numeric(plot_df[measure_cols[0]], errors="coerce").fillna(0)
+                    bars = ax.bar(x_vals, y_vals, color="#1E40AF", width=0.55, edgecolor="none")
+                    is_curr = any(k in str(measure_cols[0]).lower() for k in ["salary", "sales", "revenue", "amount", "$", "tiền", "lương", "cost", "profit"])
+                    max_y = max(y_vals) if len(y_vals) > 0 and max(y_vals) > 0 else 1.0
+                    for bar in bars:
+                        yval = bar.get_height()
+                        txt = f"${yval:,.0f}" if is_curr else (f"{yval:,.0f}" if yval >= 10 else f"{yval:,.1f}")
+                        ax.text(bar.get_x() + bar.get_width() / 2.0, yval + max_y * 0.02, txt, ha="center", va="bottom", fontsize=7.5, color="#334155", fontweight="bold")
+                    ax.set_title(f"{format_col_title(measure_cols[0])} theo {format_col_title(label_col)}", fontsize=11, fontweight="bold", pad=12, color="#0F2042")
+                else:
+                    import numpy as np
+                    n_m = min(len(measure_cols), 3)
+                    width = 0.8 / n_m
+                    x_indices = np.arange(len(x_vals))
+                    colors_list = ["#1E40AF", "#FF7A00", "#10B981"]
+                    for idx, m in enumerate(measure_cols[:n_m]):
+                        y_vals = pd.to_numeric(plot_df[m], errors="coerce").fillna(0)
+                        offset = (idx - (n_m - 1) / 2) * width
+                        ax.bar(x_indices + offset, y_vals, width=width, label=format_col_title(m), color=colors_list[idx % len(colors_list)])
+                    ax.set_xticks(x_indices)
+                    ax.set_xticklabels(x_vals)
+                    ax.legend(frameon=False, loc="upper right")
+                    ax.set_title(f"So sánh các chỉ số theo {format_col_title(label_col)}", fontsize=11, fontweight="bold", pad=12, color="#0F2042")
+
+                plt.xticks(rotation=30 if len(x_vals) > 6 else 0, ha="right" if len(x_vals) > 6 else "center", fontsize=8.5)
+            else:
+                return None
+
+            plt.tight_layout()
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="#FFFFFF")
+            plt.close(fig_mpl)
+            return buf.getvalue()
+        except Exception:
+            return None
+
     return None
 
 
@@ -656,11 +746,14 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
                 ))
             story.append(Spacer(1, 10))
 
-        # 2. BIỂU ĐỒ TRỰC QUAN HÓA CHIẾN LƯỢC (nếu có ảnh chart)
+        # 2. BIỂU ĐỒ TRỰC QUAN HÓA CHIẾN LƯỢC (nếu có ảnh chart hoặc tự động vẽ)
+        if chart_png_bytes is None and df is not None and not df.empty:
+            chart_png_bytes = export_to_png(None, df=df, user_query=result.get("query", ""))
+
         if chart_png_bytes:
             try:
                 img_buffer = io.BytesIO(chart_png_bytes)
-                img_obj = Image(img_buffer, width=515, height=230)
+                img_obj = Image(img_buffer, width=515, height=215)
                 sec_counter += 1
                 story.append(Paragraph(f"{sec_counter}. BIỂU ĐỒ TRỰC QUAN HÓA CHIẾN LƯỢC (STRATEGIC VISUALIZATION)", section_style))
                 story.append(img_obj)
