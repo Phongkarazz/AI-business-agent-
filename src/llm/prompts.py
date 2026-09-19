@@ -320,6 +320,57 @@ def get_db_specific_rules(schema_context: str) -> str:
           2. BẮT BUỘC có điều kiện WHERE so sánh lương s_curr.salary < da.AvgSalary (hoặc > nếu hỏi cao hơn)! TUYỆT ĐỐI KHÔNG BỎ QUA ĐIỀU KIỆN SO SÁNH LƯƠNG!
           3. BẮT BUỘC có cột tính mức chênh lệch: ROUND(da.AvgSalary - s_curr.salary, 2) AS SalaryDeficit!
 
+      + MẪU CHUẨN PHÒNG BAN CÓ NHIỀU NHÂN VIÊN CHUYỂN ĐẾN NHẤT (HOẶC XẾP HẠNG PHÒNG BAN THEO SỐ LƯỢNG NHÂN VIÊN CHUYỂN ĐẾN):
+        WITH EmployeeDeptRank AS (
+            SELECT 
+                emp_no, 
+                dept_no, 
+                ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+            FROM dept_emp
+        )
+        SELECT 
+            d.dept_no,
+            d.dept_name AS Department,
+            COUNT(DISTINCT edr.emp_no) AS TransferredInCount
+        FROM EmployeeDeptRank edr
+        JOIN departments d ON edr.dept_no = d.dept_no
+        WHERE edr.rn > 1
+        GROUP BY d.dept_no, d.dept_name
+        ORDER BY TransferredInCount DESC
+        LIMIT 1; -- (hoặc LIMIT N theo yêu cầu)
+        * QUY TẮC BẮT BUỘC:
+          1. Nhân viên chuyển đến một phòng ban nghĩa là phòng ban đó không phải là phòng ban đầu tiên của họ (`rn > 1`).
+          2. Gom nhóm theo `d.dept_no, d.dept_name`, đếm `COUNT(DISTINCT edr.emp_no) AS TransferredInCount` và `ORDER BY TransferredInCount DESC`!
+
+      + MẪU CHUẨN PHÒNG BAN CÓ NHIỀU NHÂN VIÊN CHUYỂN ĐI NHẤT (HOẶC XẾP HẠNG PHÒNG BAN THEO SỐ LƯỢNG NHÂN VIÊN CHUYỂN ĐI):
+        WITH EmployeeDeptRank AS (
+            SELECT 
+                emp_no, 
+                dept_no, 
+                ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+            FROM dept_emp
+        ),
+        MultiDeptEmployees AS (
+            SELECT emp_no
+            FROM dept_emp
+            GROUP BY emp_no
+            HAVING COUNT(DISTINCT dept_no) > 1
+        )
+        SELECT 
+            d.dept_no,
+            d.dept_name AS Department,
+            COUNT(DISTINCT edr.emp_no) AS TransferredOutCount
+        FROM EmployeeDeptRank edr
+        JOIN MultiDeptEmployees mde ON edr.emp_no = mde.emp_no
+        JOIN departments d ON edr.dept_no = d.dept_no
+        WHERE edr.rn = 1
+        GROUP BY d.dept_no, d.dept_name
+        ORDER BY TransferredOutCount DESC
+        LIMIT 1; -- (hoặc LIMIT N theo yêu cầu)
+        * QUY TẮC BẮT BUỘC:
+          1. Nhân viên chuyển đi từ một phòng ban nghĩa là phòng ban khởi đầu của họ (`rn = 1`) và họ từng công tác ở từ 2 phòng ban trở lên (`MultiDeptEmployees`).
+          2. Gom nhóm theo `d.dept_no, d.dept_name`, đếm `COUNT(DISTINCT edr.emp_no) AS TransferredOutCount` và `ORDER BY TransferredOutCount DESC`!
+
       + MẪU CHUẨN TOP N NHÂN VIÊN CÓ TỐC ĐỘ TĂNG TRƯỞNG LƯƠNG TRUNG BÌNH MỖI NĂM CAO NHẤT (THEO PHÒNG BAN HOẶC TOÀN CÔNG TY):
         SELECT 
             e.emp_no,
@@ -3404,7 +3455,7 @@ ORDER BY TotalSales DESC;
             or (any(k in q_low for k in ["thay đổi", "đổi", "chuyển", "luân chuyển"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
         )
         and any(k in q_low for k in ["bao nhiêu", "số lượng", "tổng số", "tỷ lệ", "tỉ lệ", "đếm", "count", "how many", "mấy"])
-        and not any(k in q_low for k in ["danh sách", "liệt kê", "những ai", "top", "ai là"])
+        and not any(k in q_low for k in ["danh sách", "liệt kê", "những ai", "top", "ai là", "chuyển đến", "chuyển tới", "chuyển đi", "nào có"])
     )
     if is_count_dept_transfer_q:
         return """
@@ -3424,6 +3475,79 @@ FROM (
 2. BẮT BUỘC tính: EmployeesChangedDepartment (số người đổi phòng = 31,579), TotalEmployees (tổng nhân sự = 300,024), PercentageChangedDept (tỷ lệ % = 10.53%)!
 3. TUYỆT ĐỐI KHÔNG JOIN dept_manager, TUYỆT ĐỐI KHÔNG DÙNG bảng salaries!
 4. TUYỆT ĐỐI KHÔNG xuất danh sách cá nhân từng người, chỉ trả về 1 dòng kết quả tổng hợp!)
+"""
+
+    # 0.9815 Phòng ban có nhiều nhân viên chuyển đến nhất (hoặc xếp hạng theo số nhân viên chuyển đến)
+    is_dept_transfers_in_q = (
+        (any(k in q_low for k in ["chuyển đến", "chuyển tới", "chuyển sang", "chuyển vào", "tiếp nhận", "transferred in", "transfer in"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+        or (any(k in q_low for k in ["chuyển", "luân chuyển"]) and "đến" in q_low and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+        or (any(k in q_low for k in ["phòng ban nào", "phòng nào", "department"]) and any(k in q_low for k in ["chuyển đến", "chuyển tới"]))
+    )
+    if is_dept_transfers_in_q:
+        dept_transfer_limit = 1 if any(k in q_low for k in ["nhất", "nhiều nhất", "cao nhất", "phòng ban nào", "phòng nào"]) and not any(k in q_low for k in ["top", "danh sách", "các phòng", "tất cả"]) else (req_limit if req_limit != 10 else 10)
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN CÓ NHIỀU NHÂN VIÊN CHUYỂN ĐẾN NHẤT / THỐNG KÊ NHÂN VIÊN CHUYỂN ĐẾN THEO PHÒNG BAN):
+WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredInCount
+FROM EmployeeDeptRank edr
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn > 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredInCount DESC
+LIMIT {dept_transfer_limit};
+(CẢNH BÁO BẮT BUỘC:
+1. Dùng CTE `EmployeeDeptRank` với `ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn` trên bảng `dept_emp`.
+2. Nhân viên chuyển đến phòng ban là khi `rn > 1` (không phải phòng ban ban đầu của họ).
+3. JOIN `departments d ON edr.dept_no = d.dept_no`, GROUP BY `d.dept_no, d.dept_name`, ORDER BY `TransferredInCount DESC`!
+4. TUYỆT ĐỐI KHÔNG từ chối tạo SQL, KHÔNG giải thích dông dài!)
+"""
+
+    # 0.9816 Phòng ban có nhiều nhân viên chuyển đi nhất (hoặc xếp hạng theo số nhân viên chuyển đi)
+    is_dept_transfers_out_q = (
+        (any(k in q_low for k in ["chuyển đi", "rời khỏi", "chuyển khỏi", "transferred out", "transfer out"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+        or (any(k in q_low for k in ["chuyển", "luân chuyển"]) and "đi" in q_low and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+    )
+    if is_dept_transfers_out_q:
+        dept_transfer_out_limit = 1 if any(k in q_low for k in ["nhất", "nhiều nhất", "cao nhất", "phòng ban nào", "phòng nào"]) and not any(k in q_low for k in ["top", "danh sách", "các phòng", "tất cả"]) else (req_limit if req_limit != 10 else 10)
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÒNG BAN CÓ NHIỀU NHÂN VIÊN CHUYỂN ĐI NHẤT / THỐNG KÊ NHÂN VIÊN CHUYỂN ĐI THEO PHÒNG BAN):
+WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+),
+MultiDeptEmployees AS (
+    SELECT emp_no
+    FROM dept_emp
+    GROUP BY emp_no
+    HAVING COUNT(DISTINCT dept_no) > 1
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredOutCount
+FROM EmployeeDeptRank edr
+JOIN MultiDeptEmployees mde ON edr.emp_no = mde.emp_no
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn = 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredOutCount DESC
+LIMIT {dept_transfer_out_limit};
+(CẢNH BÁO BẮT BUỘC:
+1. Dùng CTE `EmployeeDeptRank` với `rn = 1` và CTE `MultiDeptEmployees` lọc nhân viên có `COUNT(DISTINCT dept_no) > 1`.
+2. JOIN `departments d ON edr.dept_no = d.dept_no`, GROUP BY `d.dept_no, d.dept_name`, ORDER BY `TransferredOutCount DESC`!
+3. TUYỆT ĐỐI KHÔNG từ chối tạo SQL, KHÔNG giải thích dông dài!)
 """
 
     # 0.982 Phân loại toàn bộ nhân sự hiện tại thành 3 nhóm lương (Thu nhập thấp, trung bình, cao)

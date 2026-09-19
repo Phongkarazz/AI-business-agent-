@@ -238,6 +238,106 @@ FROM employees
 GROUP BY strftime('%Y', hire_date)
 ORDER BY HireYear ASC;"""
     },
+    {
+        "id": "emp_dept_transfers_in_top",
+        "domain": "employees",
+        "category": "mobility",
+        "tags": ["chuyển đến", "chuyển tới", "luân chuyển đến", "phòng ban", "nhiều nhân viên chuyển đến nhất", "transfer in", "transferred in"],
+        "question": "Phòng ban nào có nhiều nhân viên chuyển đến nhất?",
+        "question_en": "Which department has received the most transferred employees?",
+        "intent_explanation": "Xác định các lượt chuyển phòng ban không phải là phòng ban đầu tiên (rn > 1) và gom nhóm theo phòng ban tiếp nhận.",
+        "sql_mysql": """WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredInCount
+FROM EmployeeDeptRank edr
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn > 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredInCount DESC
+LIMIT 1;""",
+        "sql_sqlite": """WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredInCount
+FROM EmployeeDeptRank edr
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn > 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredInCount DESC
+LIMIT 1;"""
+    },
+    {
+        "id": "emp_dept_transfers_out_top",
+        "domain": "employees",
+        "category": "mobility",
+        "tags": ["chuyển đi", "rời khỏi", "luân chuyển đi", "phòng ban", "nhiều nhân viên chuyển đi nhất", "transfer out", "transferred out"],
+        "question": "Phòng ban nào có nhiều nhân viên chuyển đi nhất?",
+        "question_en": "Which department had the most employees transfer out?",
+        "intent_explanation": "Xác định phòng ban khởi đầu (rn = 1) của các nhân viên từng làm việc ở >= 2 phòng ban.",
+        "sql_mysql": """WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+),
+MultiDeptEmployees AS (
+    SELECT emp_no
+    FROM dept_emp
+    GROUP BY emp_no
+    HAVING COUNT(DISTINCT dept_no) > 1
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredOutCount
+FROM EmployeeDeptRank edr
+JOIN MultiDeptEmployees mde ON edr.emp_no = mde.emp_no
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn = 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredOutCount DESC
+LIMIT 1;""",
+        "sql_sqlite": """WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+),
+MultiDeptEmployees AS (
+    SELECT emp_no
+    FROM dept_emp
+    GROUP BY emp_no
+    HAVING COUNT(DISTINCT dept_no) > 1
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredOutCount
+FROM EmployeeDeptRank edr
+JOIN MultiDeptEmployees mde ON edr.emp_no = mde.emp_no
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn = 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredOutCount DESC
+LIMIT 1;"""
+    },
 
     # =========================================================================
     # NHÓM 2: CSDL AWESOME CHOCOLATES (KINH DOANH, ĐỘI NGŨ & SẢN PHẨM)

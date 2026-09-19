@@ -492,7 +492,7 @@ def evaluate_execution(
                 or (any(k in q_low for k in ["thay đổi", "đổi", "chuyển", "luân chuyển"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
             )
             and any(k in q_low for k in ["bao nhiêu", "số lượng", "tổng số", "tỷ lệ", "tỉ lệ", "đếm", "count", "how many", "mấy"])
-            and not any(k in q_low for k in ["danh sách", "liệt kê", "những ai", "top", "ai là"])
+            and not any(k in q_low for k in ["danh sách", "liệt kê", "những ai", "top", "ai là", "chuyển đến", "chuyển tới", "chuyển đi", "nào có"])
         )
         if is_dept_transfer_count_eval:
             has_wrong_table = "dept_manager" in sql_low or "salaries" in sql_low
@@ -512,6 +512,31 @@ def evaluate_execution(
                     "BẮT BUỘC dùng cấu trúc: SELECT COUNT(*) AS EmployeesChangedDepartment, (SELECT COUNT(DISTINCT emp_no) FROM dept_emp) AS TotalEmployees, ROUND(COUNT(*) * 100.0 / (SELECT COUNT(DISTINCT emp_no) FROM dept_emp), 2) AS PercentageChangedDept FROM (SELECT emp_no FROM dept_emp GROUP BY emp_no HAVING COUNT(DISTINCT dept_no) > 1) t. TUYỆT ĐỐI KHÔNG JOIN dept_manager hay salaries!"
                     if not is_en else
                     "MUST use subquery with HAVING COUNT(DISTINCT dept_no) > 1 and COUNT(*) outer. Do NOT join dept_manager or salaries!"
+                )
+
+        # Kiểm tra 2.6.17b: Người dùng hỏi phòng ban có nhiều nhân viên chuyển đến / chuyển đi nhất
+        is_dept_transfer_breakdown_eval = (
+            any(k in q_low for k in ["chuyển đến", "chuyển tới", "chuyển sang", "chuyển đi", "rời khỏi", "luân chuyển đến", "luân chuyển đi"])
+            and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"])
+        )
+        if is_dept_transfer_breakdown_eval:
+            has_cte = "employeedeptrank" in sql_low or "rn > 1" in sql_low or "rn = 1" in sql_low or "row_number" in sql_low
+            has_dept_col = any(any(k in c for k in ["department", "dept_name", "dept_no"]) for c in cols_low)
+            has_count_col = any(any(k in c for k in ["transferredincount", "transferredoutcount", "transferredcount", "count"]) for c in cols_low)
+
+            if not has_cte or not has_dept_col or not has_count_col or df is None or df.empty:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Người dùng hỏi PHÒNG BAN CÓ NHIỀU NHÂN VIÊN CHUYỂN ĐẾN / CHUYỂN ĐI NHẤT, nhưng câu lệnh thiếu CTE xếp hạng lịch sử chuyển phòng (ROW_NUMBER) hoặc không trả về số lượng chuyển phòng theo phòng ban."
+                    if not is_en else
+                    "User asked for department with most transfers in/out, but query lacked CTE ROW_NUMBER() or failed to aggregate transfer count by department."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC dùng CTE EmployeeDeptRank với ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn trên dept_emp, JOIN departments d ON edr.dept_no = d.dept_no, lọc rn > 1 (chuyển đến) hoặc rn = 1 kèm MultiDept (chuyển đi), GROUP BY d.dept_no, d.dept_name, ORDER BY TransferredInCount/TransferredOutCount DESC!"
+                    if not is_en else
+                    "MUST use CTE with ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn on dept_emp, filter rn > 1 (transfers in) or rn = 1 with multi-dept (transfers out), and GROUP BY department!"
                 )
 
         # Kiểm tra 2.6.18: Người dùng hỏi tốc độ tăng trưởng quy mô nhân sự các phòng ban trong N năm đầu hoạt động

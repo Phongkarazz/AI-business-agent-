@@ -2581,6 +2581,96 @@ FROM (
 ) t"""
 
 
+def auto_fix_department_transfers_breakdown_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu truy vấn xếp hạng phòng ban theo số lượng nhân viên chuyển đến hoặc chuyển đi."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    # Guard: Không can thiệp nếu là bài toán đếm tổng số nhân viên đổi phòng toàn công ty (single aggregate row)
+    if (any(k in q_low for k in ["bao nhiêu", "tổng số", "tỷ lệ", "tỉ lệ", "đếm", "count", "how many"])
+        and not any(k in q_low for k in ["phòng ban nào", "phòng nào", "từng phòng", "mỗi phòng", "các phòng", "chuyển đến", "chuyển tới", "chuyển đi"])):
+        return sql
+
+    # Guard: Không can thiệp nếu là bài toán so sánh lương với phòng ban đầu tiên
+    if any(k in q_low for k in ["phòng ban đầu tiên", "phòng đầu tiên", "first department", "first dept"]) and any(k in q_low for k in ["lương", "salary", "thu nhập"]):
+        return sql
+
+    is_transfer_in = (
+        (any(k in q_low for k in ["chuyển đến", "chuyển tới", "chuyển sang", "chuyển vào", "tiếp nhận", "transferred in", "transfer in"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+        or (any(k in q_low for k in ["chuyển", "luân chuyển"]) and "đến" in q_low and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+        or (any(k in q_low for k in ["phòng ban nào", "phòng nào"]) and any(k in q_low for k in ["chuyển đến", "chuyển tới", "chuyển sang"]))
+    )
+
+    is_transfer_out = (
+        (any(k in q_low for k in ["chuyển đi", "rời khỏi", "chuyển khỏi", "transferred out", "transfer out"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+        or (any(k in q_low for k in ["chuyển", "luân chuyển"]) and "đi" in q_low and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
+    )
+
+    if not (is_transfer_in or is_transfer_out):
+        return sql
+
+    req_limit = extract_requested_limit(user_query)
+    if not req_limit:
+        if any(k in q_low for k in ["nhất", "nhiều nhất", "cao nhất", "phòng ban nào", "phòng nào"]) and not any(k in q_low for k in ["top", "danh sách", "các phòng", "tất cả", "xếp hạng"]):
+            req_limit = 1
+        else:
+            req_limit = 10
+
+    sql_low = (sql or "").lower()
+    has_cte = "employeedeptrank" in sql_low or "rn > 1" in sql_low or "row_number" in sql_low
+    has_dept_join = "departments" in sql_low and ("dept_no" in sql_low)
+    has_trans_count = any(k in sql_low for k in ["transferredincount", "transferredoutcount", "transferredcount", "transfer_count", "count("])
+
+    # Nếu SQL chưa chuẩn xác hoặc rỗng/từ chối, chuẩn hóa ngay về CTE chuẩn
+    if not has_cte or not has_dept_join or not has_trans_count or not sql or not is_safe_select(sql):
+        if is_transfer_in:
+            return f"""WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredInCount
+FROM EmployeeDeptRank edr
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn > 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredInCount DESC
+LIMIT {req_limit};""".strip()
+        else:
+            return f"""WITH EmployeeDeptRank AS (
+    SELECT 
+        emp_no, 
+        dept_no, 
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM dept_emp
+),
+MultiDeptEmployees AS (
+    SELECT emp_no
+    FROM dept_emp
+    GROUP BY emp_no
+    HAVING COUNT(DISTINCT dept_no) > 1
+)
+SELECT 
+    d.dept_no,
+    d.dept_name AS Department,
+    COUNT(DISTINCT edr.emp_no) AS TransferredOutCount
+FROM EmployeeDeptRank edr
+JOIN MultiDeptEmployees mde ON edr.emp_no = mde.emp_no
+JOIN departments d ON edr.dept_no = d.dept_no
+WHERE edr.rn = 1
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TransferredOutCount DESC
+LIMIT {req_limit};""".strip()
+
+    return sql
+
+
 def auto_fix_multi_dept_salary_vs_first_dept_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa câu truy vấn: Liệt kê nhân viên từng làm việc tại ít nhất 2 phòng ban khác nhau,
     nhưng mức lương hiện tại thấp hơn (hoặc cao hơn) lương trung bình của phòng ban đầu tiên họ từng gia nhập.
@@ -6216,6 +6306,7 @@ def run_agent(
         if is_employees_db:
             sql_cur = auto_fix_department_headcount_growth_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_count_dept_transfer_employees_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_department_transfers_breakdown_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_salary_bracket_distribution_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_salary_fluctuation_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_top_payroll_query(sql_cur, user_query, dialect=dialect)

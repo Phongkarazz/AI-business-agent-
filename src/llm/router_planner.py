@@ -861,7 +861,7 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
             or (any(k in q_low for k in ["thay đổi", "đổi", "chuyển", "luân chuyển"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
         )
         and any(k in q_low for k in ["bao nhiêu", "số lượng", "tổng số", "tỷ lệ", "tỉ lệ", "đếm", "count", "how many", "mấy"])
-        and not any(k in q_low for k in ["danh sách", "liệt kê", "những ai", "top", "ai là"])
+        and not any(k in q_low for k in ["danh sách", "liệt kê", "những ai", "top", "ai là", "chuyển đến", "chuyển tới", "chuyển đi", "nào có"])
     )
     if is_dept_transfer_count_plan:
         return [
@@ -887,6 +887,36 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
                 "step": 4,
                 "name": "Trình bày báo cáo tổng hợp và thẻ KPI tỷ lệ luân chuyển" if not is_en else "Present summary metrics and mobility KPI cards",
                 "desc": "Xuất 1 dòng số liệu tổng hợp kèm bộ 4 thẻ KPI đo lường tính linh hoạt nhân sự." if not is_en else "Output 1-row summary and 4 executive internal mobility KPI cards.",
+                "status": "done"
+            }
+        ]
+
+    # Mẫu 0.0995: Xếp hạng phòng ban có nhiều nhân viên chuyển đến / chuyển đi nhất
+    if any(k in q_low for k in ["chuyển đến", "chuyển tới", "chuyển sang", "chuyển đi", "rời khỏi", "luân chuyển đến", "luân chuyển đi"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]):
+        is_in = any(k in q_low for k in ["chuyển đến", "chuyển tới", "chuyển sang", "tiếp nhận", "luân chuyển đến"]) or "đến" in q_low
+        return [
+            {
+                "step": 1,
+                "name": "Xác định thứ tự phòng ban từng công tác (CTE EmployeeDeptRank)" if not is_en else "Rank historical department assignments (CTE EmployeeDeptRank)",
+                "desc": "Sử dụng ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn trên bảng dept_emp." if not is_en else "Use ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn on dept_emp table.",
+                "status": "done"
+            },
+            {
+                "step": 2,
+                "name": ("Lọc các lượt chuyển đến (rn > 1)" if is_in else "Lọc phòng ban xuất phát (rn = 1) của nhân viên đa phòng ban") if not is_en else ("Filter incoming transfers (rn > 1)" if is_in else "Filter originating department (rn = 1) for multi-dept staff"),
+                "desc": ("Lọc các bản ghi phân công sau phòng ban đầu tiên để xác định lượt tiếp nhận." if is_in else "Lọc phòng ban khởi đầu của nhân sự từng làm việc tại từ 2 phòng ban trở lên.") if not is_en else ("Filter assignments after initial dept." if is_in else "Filter initial dept of multi-dept employees."),
+                "status": "done"
+            },
+            {
+                "step": 3,
+                "name": "Gom nhóm theo phòng ban và đếm số lượng nhân sự" if not is_en else "Group by department and count transferred workforce",
+                "desc": "JOIN departments d ON edr.dept_no = d.dept_no, GROUP BY d.dept_no, d.dept_name, ORDER BY DESC." if not is_en else "JOIN departments d, GROUP BY department and ORDER BY count DESC.",
+                "status": "done"
+            },
+            {
+                "step": 4,
+                "name": "Trực quan hóa biểu đồ và tổng hợp thông số quản trị" if not is_en else "Visualize transfer breakdown and summarize executive metrics",
+                "desc": "Xuất bảng kết quả, biểu đồ cột so sánh và phân tích cơ cấu luân chuyển nhân sự." if not is_en else "Generate ranking table, bar chart comparison, and mobility insights.",
                 "status": "done"
             }
         ]
