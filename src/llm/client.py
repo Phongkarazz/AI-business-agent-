@@ -22,12 +22,25 @@ def extract_clean_content(raw: str) -> str:
     if not raw:
         return ""
 
+    # 0. Loại bỏ thẻ suy luận <think> ... </think> của các mô hình DeepSeek R1 / Qwen Reasoning
+    clean_raw = re.sub(r"<think>[\s\S]*?</think>", "", raw, flags=re.IGNORECASE).strip()
+    if not clean_raw and "<think>" in raw:
+        match_inside = re.search(r"```(?:sql|json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
+        if match_inside:
+            clean_raw = match_inside.group(1).strip()
+        else:
+            match_sel = re.search(r"\b(SELECT\s+[\s\S]+)", raw, re.IGNORECASE)
+            if match_sel:
+                clean_raw = match_sel.group(1).strip()
+            else:
+                clean_raw = raw
+
     # 1. Nếu có markdown code block ```sql ... ``` hoặc ```json ... ``` hoặc ``` ... ```
-    match = re.search(r"```(?:sql|json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
+    match = re.search(r"```(?:sql|json)?\s*([\s\S]*?)\s*```", clean_raw, re.IGNORECASE)
     if match:
         extracted = match.group(1).strip()
     else:
-        extracted = raw.strip()
+        extracted = clean_raw.strip()
 
     # 2. Bóc bỏ markdown backticks đơn/kép/ba bao quanh: `SELECT ...` hoặc ```sql SELECT ...
     extracted = re.sub(r"^```(?:sql|json)?\s*", "", extracted, flags=re.IGNORECASE)

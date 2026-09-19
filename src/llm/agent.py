@@ -6212,8 +6212,7 @@ def run_agent(
         return result
 
     def _apply_domain_auto_fixes(sql_cur: str) -> str:
-        if not sql_cur:
-            return sql_cur
+        sql_cur = sql_cur or ""
         if is_employees_db:
             sql_cur = auto_fix_department_headcount_growth_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_count_dept_transfer_employees_query(sql_cur, user_query, dialect=dialect)
@@ -6327,15 +6326,22 @@ def run_agent(
         ]
 
     initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
-    sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=800)
+    sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=2048)
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
         sql_query = _apply_domain_auto_fixes(sql_query)
+    else:
+        # Thử tổng hợp SQL trực tiếp qua các quy tắc nghiệp vụ domain auto-fixes
+        domain_fallback_sql = _apply_domain_auto_fixes("")
+        if domain_fallback_sql and is_safe_select(domain_fallback_sql):
+            sql_query = domain_fallback_sql
+            err = None
 
     if not sql_query:
         result["error"] = "Could not generate SQL from AI model." if lang == "en" else f"Không thể tạo SQL từ mô hình AI.{' Lý do: ' + err if err else ''}"
         return result
+
 
     # 2. Vòng lặp thực thi, kiểm định và tự sửa lỗi âm thầm (Silent Self-Healing)
     for attempt in range(1, 4):
