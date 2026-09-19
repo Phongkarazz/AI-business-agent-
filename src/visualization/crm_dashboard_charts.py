@@ -1,6 +1,6 @@
 """
-High-End Cyber/Neon CRM Dashboard Plotly Chart Builders.
-Styled to match the dark neon executive dashboard aesthetic with glowing gradients.
+High-End Cyber/Neon Multi-Layer Dashboard Plotly Chart Builders.
+Styled with glassmorphism aesthetics and glowing gradients.
 """
 
 import plotly.graph_objects as go
@@ -48,7 +48,6 @@ def build_latency_wave_chart(
     # Highlight Marker Peak
     if len(x_vals) >= 1:
         idx = len(x_vals) - 1 if len(x_vals) <= 4 else min(3, len(x_vals) - 1)
-        # Tìm điểm cao nhất thực tế
         if "ReplyHours" in df and len(df["ReplyHours"]) > 0:
             idx = int(df["ReplyHours"].tolist().index(max(df["ReplyHours"])))
         pk_x = x_vals[idx]
@@ -112,7 +111,7 @@ def build_created_vs_solved_chart(
     fig = go.Figure()
     x_vals = df["MonthName"].tolist() if "MonthName" in df else df.iloc[:, 0].tolist()
     
-    # 1. Solved / Primary Line (Solid Cyan Glow)
+    # 1. Primary Solid Cyan Line
     if "Tickets_Solved" in df:
         y_solved = df["Tickets_Solved"].tolist()
         fig.add_trace(go.Scatter(
@@ -127,7 +126,7 @@ def build_created_vs_solved_chart(
             hovertemplate=f"<b>%{{x}}</b><br>{name_solved}: <b>%{{y:,.0f}}</b><extra></extra>"
         ))
 
-    # 2. Created / Secondary Line (Dotted / Dashed Magenta/Purple Line)
+    # 2. Secondary Dashed Magenta Line
     if "Tickets_Created" in df:
         y_created = df["Tickets_Created"].tolist()
         fig.add_trace(go.Scatter(
@@ -205,24 +204,31 @@ def build_created_vs_solved_chart(
     return fig
 
 
-def build_tickets_by_type_donut(df: pd.DataFrame) -> go.Figure:
-    """Biểu đồ Donut phân loại theo danh mục (Type / Department)."""
-    labels = df["Type"].tolist()
-    values = df["Total"].tolist()
+def build_tickets_by_type_donut(df: pd.DataFrame, label_col: str = "Department", val_col: str = "Headcount") -> go.Figure:
+    """Biểu đồ Donut phân loại theo danh mục phòng ban hoặc type."""
+    lbl_c = label_col if label_col in df.columns else ("Type" if "Type" in df.columns else df.columns[0])
+    val_c = val_col if val_col in df.columns else ("Headcount" if "Headcount" in df.columns else ("Total" if "Total" in df.columns else df.columns[1]))
     
-    # Futuristic Neon Palette matching mockup
+    labels = df[lbl_c].tolist()
+    values = df[val_c].tolist()
+    
     colors_map = {
-        "Sales": "#0068FF",
-        "Features": "#00F0FF",
-        "Setup": "#38BDF8",
-        "Bug": "#818CF8",
         "Development": "#0068FF",
         "Production": "#00F0FF",
-        "Customer Service": "#38BDF8",
-        "Research": "#818CF8",
-        "Marketing": "#C084FC",
-        "Human Resources": "#F472B6",
-        "Finance": "#34D399"
+        "Sales": "#38BDF8",
+        "Customer Service": "#818CF8",
+        "Research": "#C084FC",
+        "Marketing": "#F472B6",
+        "Quality Management": "#34D399",
+        "Human Resources": "#FBBF24",
+        "Finance": "#FB7185",
+        "Senior Engineer": "#0068FF",
+        "Staff": "#00F0FF",
+        "Engineer": "#38BDF8",
+        "Senior Staff": "#818CF8",
+        "Technique Leader": "#C084FC",
+        "Assistant Engineer": "#F472B6",
+        "Manager": "#34D399"
     }
     custom_colors = [colors_map.get(lbl, "#00A3FF") for lbl in labels]
 
@@ -234,7 +240,7 @@ def build_tickets_by_type_donut(df: pd.DataFrame) -> go.Figure:
         marker=dict(colors=custom_colors, line=dict(color="#161B33", width=3)),
         textinfo="percent",
         textposition="inside",
-        textfont=dict(size=12, color="#FFFFFF", family="Inter", weight=700),
+        textfont=dict(size=11, color="#FFFFFF", family="Inter", weight=700),
         hovertemplate="<b>%{label}</b><br>Số lượng: %{value:,}<br>Tỷ lệ: %{percent}<extra></extra>"
     )])
 
@@ -242,7 +248,7 @@ def build_tickets_by_type_donut(df: pd.DataFrame) -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=10, r=10, t=10, b=10),
-        height=210,
+        height=220,
         showlegend=True,
         legend=dict(
             orientation="v",
@@ -263,16 +269,18 @@ def build_new_vs_returned_donut(
     center_label: str = "Returned Tickets",
     center_val_override: int = None
 ) -> go.Figure:
-    """Biểu đồ Concentric Donut: Khách hàng Mới vs Quay lại hoặc Cơ cấu Giới tính Nam/Nữ."""
-    labels = df["CustomerType"].tolist()
-    values = df["Total"].tolist()
+    """Biểu đồ Concentric Donut: Cơ cấu Giới tính hoặc Khách hàng Mới/Quay lại."""
+    lbl_col = "CustomerType" if "CustomerType" in df.columns else df.columns[0]
+    val_col = "Total" if "Total" in df.columns else df.columns[1]
 
-    # Magenta/Pink (#FF007A) for Secondary/Male, Dark Purple (#7C3AED) for Primary/Female
+    labels = df[lbl_col].tolist()
+    values = df[val_col].tolist()
+
     colors_map = {
-        "Returned": "#FF007A",
-        "New": "#7C3AED",
         "Nam (Male)": "#00F0FF",
-        "Nữ (Female)": "#FF007A"
+        "Nữ (Female)": "#FF007A",
+        "Returned": "#FF007A",
+        "New": "#7C3AED"
     }
     custom_colors = [colors_map.get(lbl, "#EC4899") for lbl in labels]
 
@@ -314,18 +322,17 @@ def build_new_vs_returned_donut(
 
 
 def build_weekday_bar_chart(df: pd.DataFrame) -> go.Figure:
-    """Biểu đồ Cột Gradient: Phân bổ số lượng Ticket theo Thứ trong tuần (Mon -> Sat)."""
-    days = df["WeekDay"].tolist()
-    totals = df["Total"].tolist()
+    """Biểu đồ Cột Gradient: Phân bổ số lượng theo danh mục/thứ."""
+    days = df["WeekDay"].tolist() if "WeekDay" in df.columns else df.iloc[:, 0].tolist()
+    totals = df["Total"].tolist() if "Total" in df.columns else df.iloc[:, 1].tolist()
 
-    # Gradient Cyan-to-Blue Bars
     bar_colors = [
-        "rgba(0, 240, 255, 0.75)",
-        "rgba(0, 240, 255, 0.45)",
+        "rgba(0, 240, 255, 0.95)",
         "rgba(0, 240, 255, 0.85)",
-        "rgba(0, 240, 255, 0.60)",
-        "rgba(0, 240, 255, 1.00)",  # Fri Peak
-        "rgba(0, 240, 255, 0.70)",
+        "rgba(0, 240, 255, 0.75)",
+        "rgba(0, 240, 255, 0.65)",
+        "rgba(0, 240, 255, 0.55)",
+        "rgba(0, 240, 255, 0.45)",
     ]
 
     fig = go.Figure(data=[go.Bar(
@@ -335,7 +342,7 @@ def build_weekday_bar_chart(df: pd.DataFrame) -> go.Figure:
             color=bar_colors[:len(days)],
             line=dict(color="#00F0FF", width=1)
         ),
-        hovertemplate="<b>Thứ: %{x}</b><br>Tickets: <b>%{y}</b><extra></extra>"
+        hovertemplate="<b>%{x}</b><br>Giá trị: <b>%{y:,.0f}</b><extra></extra>"
     )])
 
     fig.update_layout(
@@ -362,6 +369,50 @@ def build_weekday_bar_chart(df: pd.DataFrame) -> go.Figure:
             font_size=11,
             font_family="Inter",
             bordercolor="#00F0FF"
+        )
+    )
+    return fig
+
+
+def build_horizontal_bar_chart(df: pd.DataFrame, x_col: str, y_col: str, color_hex: str = "#00F0FF") -> go.Figure:
+    """Biểu đồ Thanh Ngang (Horizontal Bar Chart) tối ưu cho Top 5 phòng ban hoặc xếp hạng chức danh."""
+    # Sắp xếp để thanh lớn nhất nằm trên cùng
+    df_sorted = df.sort_values(x_col, ascending=True)
+    y_vals = df_sorted[y_col].tolist()
+    x_vals = df_sorted[x_col].tolist()
+
+    fig = go.Figure(data=[go.Bar(
+        x=x_vals,
+        y=y_vals,
+        orientation="h",
+        marker=dict(
+            color=color_hex,
+            line=dict(color="#FFFFFF", width=1)
+        ),
+        text=[f"{v:,}" for v in x_vals],
+        textposition="auto",
+        textfont=dict(color="#FFFFFF", size=10, family="Inter"),
+        hovertemplate=f"<b>%{{y}}</b><br>{x_col}: <b>%{{x:,.0f}}</b><extra></extra>"
+    )])
+
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=20, r=20, t=20, b=20),
+        height=220,
+        showlegend=False,
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.06)",
+            showline=False,
+            zeroline=False,
+            tickfont=dict(color="#94A3B8", size=9)
+        ),
+        yaxis=dict(
+            showgrid=False,
+            showline=False,
+            zeroline=False,
+            tickfont=dict(color="#CBD5E1", size=10)
         )
     )
     return fig

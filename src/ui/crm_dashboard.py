@@ -1,19 +1,25 @@
 """
-Dynamic Universal Executive Dashboard UI View.
-Automatically adapts to any database schema (HR / Employees & Payroll, Sales & Commerce, CRM & Support)
-powered by live SQL queries and deep-dive conversational AI agent integration.
+Multi-Layer Executive Intelligence Dashboard UI.
+Provides a comprehensive Overview Hub and 6 specialized detail layers for the employees database:
+1. Department Management
+2. Employee Directory
+3. Salary Analysis
+4. Organizational Structure
+5. Title & Positions
+6. Department Managers
 """
 
 import streamlit as st
 import pandas as pd
 from src.database.crm_queries import (
     detect_dashboard_domain,
-    fetch_hr_kpis,
-    fetch_hr_salary_evolution,
-    fetch_hr_hiring_trend,
-    fetch_hr_dept_headcount,
-    fetch_hr_gender_distribution,
-    fetch_hr_dept_salary_ranking,
+    fetch_hr_overview_data,
+    fetch_hr_dept_management_data,
+    fetch_hr_employee_directory,
+    fetch_hr_salary_analysis_data,
+    fetch_hr_org_structure_data,
+    fetch_hr_titles_data,
+    fetch_hr_managers_data,
     fetch_crm_kpis,
     fetch_tickets_created_vs_solved,
     fetch_tickets_by_type,
@@ -26,15 +32,16 @@ from src.visualization.crm_dashboard_charts import (
     build_created_vs_solved_chart,
     build_tickets_by_type_donut,
     build_new_vs_returned_donut,
-    build_weekday_bar_chart
+    build_weekday_bar_chart,
+    build_horizontal_bar_chart
 )
 
 
 def _render_sql_modal(title: str, sql: str, exec_time_ms: float, key: str):
-    """Hiển thị câu lệnh SQL đằng sau widget trong 1 expander nhỏ gọn, trực quan."""
+    """Hiển thị câu lệnh SQL đằng sau widget trong expander nhỏ gọn, chuẩn mực."""
     with st.expander(f"🔍 Xem câu lệnh SQL ({title}) • {exec_time_ms} ms", expanded=False):
         st.code(sql, language="sql")
-        st.caption(f"⚡ Thời gian thực thi CSDL: **{exec_time_ms} ms** • Động cơ: SQLAlchemy Live Engine")
+        st.caption(f"⚡ Thời gian thực thi: **{exec_time_ms} ms** • Engine: SQLAlchemy Live Engine")
 
 
 def _trigger_ai_deep_dive(prompt_text: str):
@@ -44,482 +51,659 @@ def _trigger_ai_deep_dive(prompt_text: str):
     st.rerun()
 
 
-def render_crm_dashboard():
-    """Hàm chính hiển thị Executive Dashboard tự động thích ứng với CSDL hiện tại."""
-    engine = st.session_state.get("engine")
+def _set_layer(layer_name: str):
+    """Chuyển đổi tầng/layer hiển thị trên Dashboard."""
+    st.session_state["hr_dashboard_layer"] = layer_name
+    st.rerun()
 
-    # 1. Tự động nhận diện nghiệp vụ CSDL
+
+# =========================================================================
+# MAIN DASHBOARD RENDERER & ROUTER
+# =========================================================================
+
+def render_crm_dashboard():
+    """Hàm chính hiển thị Dashboard đa tầng tự động thích ứng với CSDL hiện tại."""
+    engine = st.session_state.get("engine")
     auto_domain = detect_dashboard_domain(engine)
 
-    # 2. Inject CSS Giao diện Cyber Dark / Neon Glow cao cấp
+    # 1. Custom CSS Theme Cyber Dark / Glassmorphism
     st.markdown("""
     <style>
         .kpi-card-purple {
             background: linear-gradient(135deg, #D946EF 0%, #8B5CF6 100%);
-            border-radius: 18px;
-            padding: 18px 20px;
+            border-radius: 16px;
+            padding: 16px 18px;
             color: #FFFFFF;
             box-shadow: 0 8px 24px rgba(217, 70, 239, 0.28);
-            min-height: 125px;
+            min-height: 115px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
         }
         .kpi-card-cyan {
             background: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%);
-            border-radius: 18px;
-            padding: 18px 20px;
+            border-radius: 16px;
+            padding: 16px 18px;
             color: #FFFFFF;
             box-shadow: 0 8px 24px rgba(6, 182, 212, 0.28);
-            min-height: 125px;
+            min-height: 115px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
         }
-        .kpi-badge-card {
-            background: #161B33;
-            border-radius: 18px;
-            padding: 16px;
-            border: 1px solid #232A4D;
+        .kpi-card-emerald {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            border-radius: 16px;
+            padding: 16px 18px;
+            color: #FFFFFF;
+            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.28);
+            min-height: 115px;
             display: flex;
             flex-direction: column;
-            justify-content: space-around;
-            min-height: 125px;
-        }
-        .kpi-badge-row {
-            display: flex;
-            align-items: center;
             justify-content: space-between;
-            background: #111528;
-            padding: 8px 12px;
-            border-radius: 12px;
-            border: 1px solid #1E2442;
+        }
+        .kpi-card-amber {
+            background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+            border-radius: 16px;
+            padding: 16px 18px;
+            color: #FFFFFF;
+            box-shadow: 0 8px 24px rgba(245, 158, 11, 0.28);
+            min-height: 115px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
         }
         .crm-card {
             background: #161B33;
-            border-radius: 18px;
-            padding: 18px 20px;
+            border-radius: 16px;
+            padding: 16px 18px;
             border: 1px solid #232A4D;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
         .crm-card-title {
-            font-size: 0.95rem;
+            font-size: 0.92rem;
             font-weight: 700;
             color: #F8FAFC;
             letter-spacing: -0.01em;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
-        .crm-ai-insight-banner {
-            background: linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%);
-            border: 1.5px solid #6366F1;
-            border-radius: 18px;
-            padding: 20px 24px;
-            color: #E2E8F0;
-            box-shadow: 0 8px 30px rgba(99, 102, 241, 0.20);
-            margin-top: 20px;
+        .nav-hub-card {
+            background: linear-gradient(135deg, #1E2442 0%, #161B33 100%);
+            border: 1.5px solid #2D3766;
+            border-radius: 16px;
+            padding: 14px 16px;
+            transition: all 0.2s ease;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .nav-hub-card:hover {
+            border-color: #00F0FF;
+            box-shadow: 0 6px 20px rgba(0, 240, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        .layer-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.88rem;
+            color: #94A3B8;
+            margin-bottom: 12px;
         }
     </style>
     """, unsafe_allow_html=True)
 
-    # 3. Control Bar & Lựa chọn góc nhìn nghiệp vụ
-    c_hdr1, c_hdr2, c_hdr3 = st.columns([4, 2, 2])
-    with c_hdr1:
-        if auto_domain == "hr_employees":
-            dash_title = "👥 HR & Payroll Executive Dashboard"
-            dash_desc = "Bức tranh toàn cảnh quản trị nhân sự, tiền lương, cơ cấu phòng ban & tuyển dụng qua các thời kỳ"
-            badge_text = "CSDL Employees (Live SQL)"
-        elif auto_domain == "sales_commerce":
-            dash_title = "💰 Commercial & Sales Executive Dashboard"
-            dash_desc = "Bức tranh toàn cảnh doanh thu, sản phẩm bán chạy, thị trường và đội ngũ kinh doanh"
-            badge_text = "CSDL Sales (Live SQL)"
-        else:
-            dash_title = "📊 CRM Executive Dashboard"
-            dash_desc = "Bức tranh toàn cảnh điều hành dịch vụ khách hàng, tỷ lệ giải quyết SLA & phân tích chuyên sâu"
-            badge_text = "CSDL CRM (Live SQL)"
+    # Nếu đang ở CSDL CRM / Support, chuyển về view CRM
+    if auto_domain != "hr_employees":
+        _render_crm_legacy_view(engine)
+        return
 
-        st.markdown(f"""
+    # Khởi tạo state layer hiện tại (mặc định: 'overview')
+    current_layer = st.session_state.get("hr_dashboard_layer", "overview")
+
+    # 2. Điều hướng Header
+    c_hdr1, c_hdr2, c_hdr3 = st.columns([5, 2, 1.5])
+    with c_hdr1:
+        st.markdown("""
         <div style="display: flex; align-items: center; gap: 10px;">
-            <div style="font-size: 1.6rem; font-weight: 850; color: #0F172A;">{dash_title}</div>
-            <span style="background: #E0E7FF; color: #4338CA; padding: 3px 10px; border-radius: 20px; font-size: 0.76rem; font-weight: 700;">{badge_text}</span>
-        </div>
-        <div style="font-size: 0.88rem; color: #64748B; margin-top: 2px;">
-            {dash_desc}
+            <div style="font-size: 1.6rem; font-weight: 850; color: #0F172A;">👥 HR & Payroll Intelligence Dashboard</div>
+            <span style="background: #E0E7FF; color: #4338CA; padding: 3px 10px; border-radius: 20px; font-size: 0.76rem; font-weight: 700;">CSDL Employees (Live SQL)</span>
         </div>
         """, unsafe_allow_html=True)
 
     with c_hdr2:
-        # Lựa chọn lăng kính nghiệp vụ
-        domain_opts = {
-            "Tự động nhận diện": auto_domain,
-            "👥 Quản trị Nhân sự & Lương (HR)": "hr_employees",
-            "💬 Chăm sóc Khách hàng (CRM)": "crm_support",
+        layer_names = {
+            "overview": "🏠 Trang chủ Tổng quan (Overview)",
+            "dept_mgmt": "🏢 Quản lý Phòng ban (Departments)",
+            "employee_dir": "👥 Danh bạ Nhân viên (Directory)",
+            "salary_analysis": "💰 Phân tích Tiền lương (Salary)",
+            "org_structure": "🌳 Cơ cấu Tổ chức (Org Structure)",
+            "title_positions": "🎓 Chức danh & Vị trí (Titles)",
+            "dept_managers": "👔 Đội ngũ Quản lý (Managers)",
         }
-        selected_opt = st.selectbox(
-            "Lăng kính Dashboard",
-            list(domain_opts.keys()),
-            index=0,
-            key="dashboard_domain_selector",
+        selected_l = st.selectbox(
+            "Chọn tầng phân tích",
+            list(layer_names.keys()),
+            format_func=lambda x: layer_names[x],
+            index=list(layer_names.keys()).index(current_layer) if current_layer in layer_names else 0,
+            key="sb_select_hr_layer",
             label_visibility="collapsed"
         )
-        active_domain = domain_opts[selected_opt]
+        if selected_l != current_layer:
+            st.session_state["hr_dashboard_layer"] = selected_l
+            st.rerun()
 
     with c_hdr3:
-        if st.button("💬 Trò chuyện với AI", type="secondary", use_container_width=True, help="Quay lại giao diện trò chuyện & hỏi tự do với Tác tử AI"):
+        if st.button("💬 Chat với AI", type="secondary", use_container_width=True, help="Quay lại giao diện trò chuyện & hỏi tự do với Tác tử AI"):
             st.session_state["view_mode"] = "chat"
             st.rerun()
 
+    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
+    # 3. ROUTING TỚI CÁC LAYER CHUYÊN BIỆT
+    if current_layer == "overview":
+        _render_layer_overview(engine)
+    elif current_layer == "dept_mgmt":
+        _render_layer_department_management(engine)
+    elif current_layer == "employee_dir":
+        _render_layer_employee_directory(engine)
+    elif current_layer == "salary_analysis":
+        _render_layer_salary_analysis(engine)
+    elif current_layer == "org_structure":
+        _render_layer_org_structure(engine)
+    elif current_layer == "title_positions":
+        _render_layer_title_positions(engine)
+    elif current_layer == "dept_managers":
+        _render_layer_dept_managers(engine)
+
+
+# =========================================================================
+# LAYER 0: TRANG CHỦ OVERVIEW (HUB ĐIỀU HÀNH)
+# =========================================================================
+
+def _render_layer_overview(engine):
+    """Trang chủ Overview: Danh sách các thẻ chủ đề, 4 KPI tóm tắt, Biểu đồ phân bổ phòng ban & Top 5."""
+    data = fetch_hr_overview_data(engine)
+
+    # 1. KHỐI NÚT BẤM / CARDS CHUYỂN LAYER (6 CHỦ ĐỀ CHÍNH)
+    st.markdown("""
+    <div style="font-size: 0.95rem; font-weight: 700; color: #334155; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+        <span>🎯</span> <span><b>Chọn chủ đề phân tích chuyên sâu (Khám phá theo Layer):</b></span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    nav_cols1 = st.columns(3)
+    with nav_cols1[0]:
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-weight: 700; font-size: 0.95rem; color: #0F172A; margin-bottom: 2px;">🏢 Department Management</div>
+            <div style="font-size: 0.8rem; color: #64748B; min-height: 38px; line-height: 1.35;">Danh sách phòng ban, quản lý, quy mô nhân sự và tổng quỹ lương chi trả.</div>
+            """, unsafe_allow_html=True)
+            if st.button("Mở Phòng Ban ➔", key="btn_nav_dept", use_container_width=True, type="secondary"):
+                _set_layer("dept_mgmt")
+
+    with nav_cols1[1]:
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-weight: 700; font-size: 0.95rem; color: #0F172A; margin-bottom: 2px;">👥 Employee Directory</div>
+            <div style="font-size: 0.8rem; color: #64748B; min-height: 38px; line-height: 1.35;">Danh bạ toàn bộ nhân viên, tìm kiếm theo ID/Tên, lọc phòng ban & chức danh.</div>
+            """, unsafe_allow_html=True)
+            if st.button("Mở Danh Bạ ➔", key="btn_nav_emp", use_container_width=True, type="secondary"):
+                _set_layer("employee_dir")
+
+    with nav_cols1[2]:
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-weight: 700; font-size: 0.95rem; color: #0F172A; margin-bottom: 2px;">💰 Salary Analysis</div>
+            <div style="font-size: 0.8rem; color: #64748B; min-height: 38px; line-height: 1.35;">Phân bố mức lương theo phòng ban, theo chức danh và Top 10 thu nhập cao nhất.</div>
+            """, unsafe_allow_html=True)
+            if st.button("Mở Tiền Lương ➔", key="btn_nav_sal", use_container_width=True, type="secondary"):
+                _set_layer("salary_analysis")
+
+    nav_cols2 = st.columns(3)
+    with nav_cols2[0]:
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-weight: 700; font-size: 0.95rem; color: #0F172A; margin-bottom: 2px;">🌳 Organizational Structure</div>
+            <div style="font-size: 0.8rem; color: #64748B; min-height: 38px; line-height: 1.35;">Sơ đồ cơ cấu tổ chức, quy mô nhân sự trực tiếp dưới quyền của từng Manager.</div>
+            """, unsafe_allow_html=True)
+            if st.button("Mở Cơ Cấu ➔", key="btn_nav_org", use_container_width=True, type="secondary"):
+                _set_layer("org_structure")
+
+    with nav_cols2[1]:
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-weight: 700; font-size: 0.95rem; color: #0F172A; margin-bottom: 2px;">🎓 Title & Positions</div>
+            <div style="font-size: 0.8rem; color: #64748B; min-height: 38px; line-height: 1.35;">Danh mục chức danh công việc, phân bổ nhân sự và thu nhập bình quân từng vị trí.</div>
+            """, unsafe_allow_html=True)
+            if st.button("Mở Chức Danh ➔", key="btn_nav_title", use_container_width=True, type="secondary"):
+                _set_layer("title_positions")
+
+    with nav_cols2[2]:
+        with st.container(border=True):
+            st.markdown("""
+            <div style="font-weight: 700; font-size: 0.95rem; color: #0F172A; margin-bottom: 2px;">👔 Department Managers</div>
+            <div style="font-size: 0.8rem; color: #64748B; min-height: 38px; line-height: 1.35;">Hồ sơ chi tiết đội ngũ Manager, phòng ban quản lý, nhiệm kỳ và mức lương.</div>
+            """, unsafe_allow_html=True)
+            if st.button("Mở Managers ➔", key="btn_nav_mgr", use_container_width=True, type="secondary"):
+                _set_layer("dept_managers")
+
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+
+    # 2. 4 THẺ CHỈ SỐ KPI TÓM TẮT TOÀN BỘ CÔNG TY
+    st.markdown("""
+    <div style="font-size: 0.95rem; font-weight: 700; color: #334155; margin-bottom: 8px;">
+        📊 <b>Chỉ số Tổng hợp Doanh nghiệp (Company Overview KPIs):</b>
+    </div>
+    """, unsafe_allow_html=True)
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    with kpi1:
+        st.markdown(f"""
+        <div class="kpi-card-cyan">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; opacity: 0.9;">Tổng Số Nhân Viên</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">{data['total_employees']:,}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">👥 Quy mô toàn công ty</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with kpi2:
+        st.markdown(f"""
+        <div class="kpi-card-purple">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; opacity: 0.9;">Số Department</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">{data['total_departments']}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">🏢 Khối phòng ban nghiệp vụ</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with kpi3:
+        st.markdown(f"""
+        <div class="kpi-card-emerald">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; opacity: 0.9;">Mức Lương Bình Quân</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">${data['avg_salary']:,.0f}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">⚡ Quỹ lương hiện tại</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with kpi4:
+        st.markdown(f"""
+        <div class="kpi-card-amber">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; opacity: 0.9;">Số Vị Trí / Title</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">{data['distinct_titles']}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">🎓 Cấp bậc & chức danh</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    _render_sql_modal("Chỉ Số Tổng Hợp", data["sql"], data["exec_time_ms"], "overview_kpi_sql")
+
+    # 3. 2 BIỂU ĐỒ TRUNG TÂM: PHÂN BỔ PHÒNG BAN & TOP 5 PHÒNG BAN LỚN NHẤT
+    col_ch1, col_ch2 = st.columns([1.2, 1.0])
+    with col_ch1:
+        st.markdown("""
+        <div class="crm-card">
+            <div class="crm-card-title">
+                <span>🎯 Phân Bổ Nhân Viên Theo Department</span>
+                <span style="font-size: 0.75rem; color: #00F0FF; font-weight: 600;">9 Phòng ban</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        fig_donut = build_tickets_by_type_donut(data["dept_df"], label_col="Department", val_col="Headcount")
+        st.plotly_chart(fig_donut, use_container_width=True, config={"displayModeBar": False})
+
+    with col_ch2:
+        st.markdown("""
+        <div class="crm-card">
+            <div class="crm-card-title">
+                <span>🏆 Top 5 Department Quy Mô Lớn Nhất</span>
+                <span style="font-size: 0.75rem; color: #38BDF8; font-weight: 600;">Headcount</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        fig_top5 = build_horizontal_bar_chart(data["top5_dept_df"], x_col="Headcount", y_col="Department", color_hex="rgba(0, 240, 255, 0.85)")
+        st.plotly_chart(fig_top5, use_container_width=True, config={"displayModeBar": False})
+
+
+# =========================================================================
+# LAYER 1: DEPARTMENT MANAGEMENT (QUẢN LÝ PHÒNG BAN)
+# =========================================================================
+
+def _render_layer_department_management(engine):
+    """Layer 1: Danh sách phòng ban, Quản lý, Số lượng nhân viên, Tổng quỹ lương."""
+    data = fetch_hr_dept_management_data(engine)
+    df = data["df"]
+
+    # Breadcrumb
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        st.markdown("<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>Trang Chủ</a> ➔ <b>🏢 Department Management</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        if st.button("⬅️ Trang Chủ", key="btn_back_home_1", use_container_width=True):
+            _set_layer("overview")
+
+    # Bảng danh sách chi tiết
+    st.markdown("""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>📋 Danh Sách Tất Cả Phòng Ban & Cơ Cấu Điều Hành</span>
+            <span style="font-size: 0.78rem; color: #00F0FF; font-weight: 600;">9 Phòng ban</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    disp_df = df.copy()
+    if "TotalPayroll" in disp_df.columns:
+        disp_df["TotalPayroll ($)"] = disp_df["TotalPayroll"].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "$0")
+    if "AvgSalary" in disp_df.columns:
+        disp_df["AvgSalary ($)"] = disp_df["AvgSalary"].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "$0")
+    
+    show_cols = ["DeptID", "Department", "ActiveHeadcount", "CurrentManager", "TotalPayroll ($)", "AvgSalary ($)"]
+    st.dataframe(disp_df[[c for c in show_cols if c in disp_df.columns]], hide_index=True, use_container_width=True)
+
+    _render_sql_modal("Quản Lý Phòng Ban", data["sql"], data["exec_time_ms"], "dept_mgmt_sql")
+
+    # Biểu đồ so sánh
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        st.markdown("<div class='crm-card-title' style='color:#334155;'>📊 Quy Mô Nhân Sự Theo Phòng Ban</div>", unsafe_allow_html=True)
+        fig_bar = build_weekday_bar_chart(pd.DataFrame({"WeekDay": df["Department"], "Total": df["ActiveHeadcount"]}))
+        st.plotly_chart(fig_bar, use_container_width=True, config={"displayModeBar": False})
+    with col_c2:
+        st.markdown("<div class='crm-card-title' style='color:#334155;'>💰 Mức Lương Bình Quân Từng Phòng Ban ($)</div>", unsafe_allow_html=True)
+        fig_sal = build_weekday_bar_chart(pd.DataFrame({"WeekDay": df["Department"], "Total": df["AvgSalary"]}))
+        st.plotly_chart(fig_sal, use_container_width=True, config={"displayModeBar": False})
+
+    if st.button("💬 Phân tích Hiệu quả Phòng ban cùng AI", key="btn_ai_dept_layer", type="secondary"):
+        _trigger_ai_deep_dive("Phân tích cơ cấu quy mô nhân sự và tổng quỹ lương chi trả giữa 9 phòng ban trong công ty. Phòng ban nào có chi phí lương trên đầu người cao nhất?")
+
+
+# =========================================================================
+# LAYER 2: EMPLOYEE DIRECTORY (DANH BẠ NHÂN VIÊN)
+# =========================================================================
+
+def _render_layer_employee_directory(engine):
+    """Layer 2: Danh bạ nhân viên, Tìm kiếm & Lọc, Thống kê nhân viên mới nhất & lương cao nhất."""
+    # Breadcrumb
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        st.markdown("<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>Trang Chủ</a> ➔ <b>👥 Employee Directory</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        if st.button("⬅️ Trang Chủ", key="btn_back_home_2", use_container_width=True):
+            _set_layer("overview")
+
+    # Bộ lọc tìm kiếm
+    c_srch, c_f_dept, c_f_title = st.columns([3, 2, 2])
+    with c_srch:
+        search_q = st.text_input("🔍 Tìm kiếm", placeholder="Nhập tên hoặc mã ID nhân viên...", key="emp_dir_search_input")
+    with c_f_dept:
+        dept_opts = ["All", "Development", "Production", "Sales", "Customer Service", "Research", "Marketing", "Quality Management", "Human Resources", "Finance"]
+        sel_dept = st.selectbox("Lọc Phòng ban", dept_opts, key="emp_dir_dept_filter")
+    with c_f_title:
+        title_opts = ["All", "Senior Engineer", "Staff", "Engineer", "Senior Staff", "Technique Leader", "Assistant Engineer", "Manager"]
+        sel_title = st.selectbox("Lọc Chức danh", title_opts, key="emp_dir_title_filter")
+
+    data = fetch_hr_employee_directory(engine, search_term=search_q, dept_filter=sel_dept, title_filter=sel_title, limit=50)
+
+    # 3 Thẻ Thống Kê Nhanh
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        st.info(f"👥 **Kết quả hiển thị**: **{data['total_records']} nhân viên**")
+    with s2:
+        st.success(f"🌱 **Mới gia nhập**: **{data['newest_hire']}**")
+    with s3:
+        st.warning(f"💎 **Thu nhập cao nhất**: **{data['highest_earner']}**")
+
+    disp_df = data["df"].copy()
+    if "CurrentSalary" in disp_df.columns:
+        disp_df["CurrentSalary ($)"] = disp_df["CurrentSalary"].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "$0")
+        disp_df = disp_df.drop(columns=["CurrentSalary"])
+
+    st.dataframe(disp_df, hide_index=True, use_container_width=True)
+    _render_sql_modal("Danh Bạ Nhân Viên", data["sql"], data["exec_time_ms"], "emp_dir_sql")
+
+
+# =========================================================================
+# LAYER 3: SALARY ANALYSIS (PHÂN TÍCH TIỀN LƯƠNG)
+# =========================================================================
+
+def _render_layer_salary_analysis(engine):
+    """Layer 3: Phân tích lương theo phòng ban, theo chức danh, Top 10 nhân viên lương cao nhất."""
+    data = fetch_hr_salary_analysis_data(engine)
+
+    # Breadcrumb
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        st.markdown("<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>Trang Chủ</a> ➔ <b>💰 Salary Analysis</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        if st.button("⬅️ Trang Chủ", key="btn_back_home_3", use_container_width=True):
+            _set_layer("overview")
+
+    # 4 Thẻ Lương Toàn Diện
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.markdown(f"""
+        <div class="kpi-card-emerald">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase;">Lương Bình Quân</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">${data['avg_salary']:,.0f}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">⚡ Toàn doanh nghiệp</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with s2:
+        st.markdown(f"""
+        <div class="kpi-card-purple">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase;">Lương Cao Nhất</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">${data['max_salary']:,.0f}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">🏆 Đỉnh điểm thu nhập</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with s3:
+        st.markdown(f"""
+        <div class="kpi-card-cyan">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase;">Lương Thấp Nhất</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">${data['min_salary']:,.0f}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">📌 Mức lương sàn</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with s4:
+        st.markdown(f"""
+        <div class="kpi-card-amber">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase;">Tổng Quỹ Lương Hiện Tại</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">${data['total_payroll']/1e9:,.2f}B</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">💵 Ngân sách chi trả</div>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
-    # =========================================================================
-    # GIAO DIỆN CHẾ ĐỘ 1: HR & EMPLOYEES / PAYROLL DASHBOARD
-    # =========================================================================
-    if active_domain == "hr_employees":
-        hr_kpis = fetch_hr_kpis(engine)
-        hr_sal_wave = fetch_hr_salary_evolution(engine)
-        hr_hiring = fetch_hr_hiring_trend(engine)
-        hr_dept_hc = fetch_hr_dept_headcount(engine)
-        hr_gender = fetch_hr_gender_distribution(engine)
-        hr_dept_sal = fetch_hr_dept_salary_ranking(engine)
+    # 2 Bảng: Phân bố Lương theo Phòng Ban & Theo Title
+    col_d, col_t = st.columns(2)
+    with col_d:
+        st.markdown("<div class='crm-card-title' style='color:#334155;'>🏢 Phân Bố Lương Theo Phòng Ban</div>", unsafe_allow_html=True)
+        disp_dept = data["dept_sal_df"].copy()
+        disp_dept["Avg ($)"] = disp_dept["AvgSalary"].apply(lambda x: f"${x:,.0f}")
+        disp_dept["Max ($)"] = disp_dept["MaxSalary"].apply(lambda x: f"${x:,.0f}")
+        st.dataframe(disp_dept[["Department", "Headcount", "Avg ($)", "Max ($)"]], hide_index=True, use_container_width=True)
 
-        # HÀNG 1: TOP KPI CARDS & WAVE SALARY CHART
-        col_kpi1, col_kpi2, col_kpi3, col_wave = st.columns([1.3, 1.3, 1.4, 2.0])
+    with col_t:
+        st.markdown("<div class='crm-card-title' style='color:#334155;'>🎓 Phân Bố Lương Theo Chức Danh (Title)</div>", unsafe_allow_html=True)
+        disp_title = data["title_sal_df"].copy()
+        disp_title["Avg ($)"] = disp_title["AvgSalary"].apply(lambda x: f"${x:,.0f}")
+        disp_title["Max ($)"] = disp_title["MaxSalary"].apply(lambda x: f"${x:,.0f}")
+        st.dataframe(disp_title[["Title", "Headcount", "Avg ($)", "Max ($)"]], hide_index=True, use_container_width=True)
 
-        with col_kpi1:
-            st.markdown(f"""
-            <div class="kpi-card-purple">
-                <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.9; text-transform: uppercase;">Mức Lương Bình Quân</div>
-                <div style="font-size: 1.85rem; font-weight: 850; letter-spacing: -0.02em;">
-                    ${hr_kpis['avg_salary']:,.0f}
-                </div>
-                <div style="font-size: 0.75rem; opacity: 0.85;">⚡ Quỹ lương điều hành doanh nghiệp</div>
-            </div>
-            """, unsafe_allow_html=True)
-            _render_sql_modal("Lương TB", hr_kpis["sql"], hr_kpis["exec_time_ms"], "hr_kpi1")
+    # Bảng Top 10 nhân viên có lương cao nhất
+    st.markdown("<div class='crm-card-title' style='color:#334155; margin-top: 14px;'>🏆 Top 10 Nhân Viên Có Mức Lương Cao Nhất Toàn Công Ty</div>", unsafe_allow_html=True)
+    disp_top10 = data["top10_df"].copy()
+    disp_top10["CurrentSalary ($)"] = disp_top10["CurrentSalary"].apply(lambda x: f"${x:,.0f}")
+    st.dataframe(disp_top10[["ID", "FullName", "Department", "Title", "CurrentSalary ($)"]], hide_index=True, use_container_width=True)
 
-        with col_kpi2:
-            st.markdown(f"""
-            <div class="kpi-card-cyan">
-                <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.9; text-transform: uppercase;">Tổng Quy Mô Nhân Sự</div>
-                <div style="font-size: 1.85rem; font-weight: 850; letter-spacing: -0.02em;">
-                    {hr_kpis['total_headcount']:,} <span style="font-size: 1rem; font-weight: 500;">người</span>
-                </div>
-                <div style="font-size: 0.75rem; opacity: 0.85;">🎯 9 Khối Phòng Ban Trực Thuộc</div>
-            </div>
-            """, unsafe_allow_html=True)
-            _render_sql_modal("Tổng Nhân Sự", hr_kpis["sql"], hr_kpis["exec_time_ms"], "hr_kpi2")
+    _render_sql_modal("Phân Tích Tiền Lương", data["sql"], data["exec_time_ms"], "sal_analysis_sql")
 
-        with col_kpi3:
-            st.markdown(f"""
-            <div class="kpi-badge-card">
-                <div class="kpi-badge-row">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: rgba(56, 189, 248, 0.2); color: #38BDF8; padding: 4px 8px; border-radius: 8px; font-size: 0.78rem;">👨 Nam (Male)</span>
-                    </div>
-                    <span style="color: #38BDF8; font-weight: 700; font-size: 0.88rem;">{hr_kpis['male_pct']}%</span>
-                </div>
-                <div class="kpi-badge-row">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: rgba(236, 72, 153, 0.2); color: #F472B6; padding: 4px 8px; border-radius: 8px; font-size: 0.78rem;">👩 Nữ (Female)</span>
-                    </div>
-                    <span style="color: #F472B6; font-weight: 700; font-size: 0.88rem;">{hr_kpis['female_pct']}%</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            _render_sql_modal("Cơ Cấu Giới Tính", hr_kpis["sql"], hr_kpis["exec_time_ms"], "hr_kpi3")
 
-        with col_wave:
-            st.markdown(f"""
-            <div class="crm-card" style="padding-bottom: 8px;">
-                <div class="crm-card-title">
-                    <span>📈 Diễn Biến Lương TB Theo Năm ($k)</span>
-                    <span style="font-size: 0.75rem; color: #00F0FF; font-weight: 500;">{hr_sal_wave.get('peak_info', '2002 • $72.6k')}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_wave = build_latency_wave_chart(
-                hr_sal_wave["df"],
-                name_1="Lương TB ($k)",
-                name_2="Lương Max ($k)",
-                peak_text=hr_sal_wave.get("peak_info", "2002 • $72.6k")
-            )
-            st.plotly_chart(fig_wave, use_container_width=True, config={"displayModeBar": False})
-            _render_sql_modal("Xu Hướng Lương", hr_sal_wave["sql"], hr_sal_wave["exec_time_ms"], "hr_wave_sql")
+# =========================================================================
+# LAYER 4: ORGANIZATIONAL STRUCTURE (CƠ CẤU TỔ CHỨC)
+# =========================================================================
 
-        # HÀNG 2: BIẾN ĐỘNG TUYỂN DỤNG & NHÂN SỰ QUA CÁC NĂM (CENTER HERO WAVE CHART)
-        st.markdown("""
-        <div class="crm-card">
-            <div class="crm-card-title">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.05rem;">📊</span>
-                    <span>Biến Động Tuyển Dụng Mới & Quy Mô Nhân Sự Theo Năm (Hiring Trend)</span>
-                </div>
-                <span style="font-size: 0.78rem; background: rgba(0, 240, 255, 0.15); color: #00F0FF; padding: 3px 10px; border-radius: 12px; font-weight: 600;">
-                    Đỉnh Tuyển Dụng
-                </span>
-            </div>
+def _render_layer_org_structure(engine):
+    """Layer 4: Sơ đồ cơ cấu tổ chức & Span of Control của từng Manager."""
+    data = fetch_hr_org_structure_data(engine)
+    df = data["df"]
+
+    # Breadcrumb
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        st.markdown("<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>Trang Chủ</a> ➔ <b>🌳 Organizational Structure</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        if st.button("⬅️ Trang Chủ", key="btn_back_home_4", use_container_width=True):
+            _set_layer("overview")
+
+    st.markdown("""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>🌳 Cơ Cấu Lãnh Đạo & Quy Mô Quản Lý (Span of Control)</span>
+            <span style="font-size: 0.78rem; color: #00F0FF; font-weight: 600;">9 Khối phòng ban</span>
         </div>
-        """, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
-        fig_center = build_created_vs_solved_chart(
-            hr_hiring["df"],
-            hr_hiring.get("max_point"),
-            name_solved="Quy mô duy trì",
-            name_created="Tuyển dụng mới"
-        )
-        st.plotly_chart(fig_center, use_container_width=True, config={"displayModeBar": False})
+    disp_df = df.copy()
+    disp_df["ManagerSalary ($)"] = disp_df["ManagerSalary"].apply(lambda x: f"${x:,.0f}")
+    st.dataframe(disp_df[["ManagerID", "ManagerName", "Department", "Status", "CurrentDepartmentSize", "ManagerSalary ($)"]], hide_index=True, use_container_width=True)
 
-        c_btn1, c_btn2 = st.columns([3, 1])
-        with c_btn1:
-            _render_sql_modal("Tuyển Dụng Theo Năm", hr_hiring["sql"], hr_hiring["exec_time_ms"], "hr_hiring_sql")
-        with c_btn2:
-            if st.button("💬 Phân tích Tuyển dụng với AI", key="btn_ai_deep_hr_hiring", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("Phân tích xu hướng tuyển dụng nhân sự mới qua các năm trong database employees và chỉ ra các giai đoạn mở rộng quy mô lớn nhất.")
+    _render_sql_modal("Cơ Cấu Tổ Chức", data["sql"], data["exec_time_ms"], "org_struct_sql")
 
-        # HÀNG 3: 3 BIỂU ĐỒ PHÂN BỔ (CƠ CẤU PHÒNG BAN, GIỚI TÍNH, THU NHẬP BÌNH QUÂN)
-        col_b1, col_b2, col_b3 = st.columns(3)
+    # Biểu đồ so sánh số lượng nhân sự trực tiếp dưới quyền của Manager
+    st.markdown("<div class='crm-card-title' style='color:#334155; margin-top: 12px;'>📊 Quy Mô Nhân Sự Dưới Quyền Của Từng Manager</div>", unsafe_allow_html=True)
+    fig_span = build_weekday_bar_chart(pd.DataFrame({"WeekDay": df["ManagerName"], "Total": df["CurrentDepartmentSize"]}))
+    st.plotly_chart(fig_span, use_container_width=True, config={"displayModeBar": False})
 
-        with col_b1:
-            st.markdown("""
-            <div class="crm-card">
-                <div class="crm-card-title">
-                    <span>🏢 Cơ Cấu Theo Phòng Ban</span>
-                    <span style="font-size: 0.75rem; color: #94A3B8;">Headcount</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_type = build_tickets_by_type_donut(hr_dept_hc["df"])
-            st.plotly_chart(fig_type, use_container_width=True, config={"displayModeBar": False})
-            _render_sql_modal("Quy Mô Phòng Ban", hr_dept_hc["sql"], hr_dept_hc["exec_time_ms"], "hr_dept_sql")
-            if st.button("💬 Đánh giá Tỷ Trọng Dev/Prod", key="btn_ai_dept", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("Phân tích cơ cấu nhân sự giữa các phòng ban: Tại sao Development và Production chiếm hơn 54% tổng nhân sự toàn công ty?")
 
-        with col_b2:
-            st.markdown(f"""
-            <div class="crm-card">
-                <div class="crm-card-title">
-                    <span>🚻 Cơ Cấu Giới Tính Nhân Sự</span>
-                    <span style="font-size: 0.75rem; color: #FF007A; font-weight: 600;">{hr_kpis['male_pct']}% Nam / {hr_kpis['female_pct']}% Nữ</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_ret = build_new_vs_returned_donut(
-                hr_gender["df"],
-                hr_gender.get("total_all", 300024),
-                hr_gender.get("returned_count", 179973),
-                center_label="Tổng Nhân Sự",
-                center_val_override=hr_gender.get("total_all", 300024)
-            )
-            st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
+# =========================================================================
+# LAYER 5: TITLE & POSITIONS (CHỨC DANH & VỊ TRÍ)
+# =========================================================================
 
-            _render_sql_modal("Phân Bố Giới Tính", hr_gender["sql"], hr_gender["exec_time_ms"], "hr_gender_sql")
-            if st.button("💬 So sánh Lương Nam vs Nữ", key="btn_ai_gender", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("So sánh mức lương trung bình và cơ hội thăng chức giữa nhân viên Nam và Nữ trong toàn bộ công ty.")
+def _render_layer_title_positions(engine):
+    """Layer 5: Danh sách chức danh, số lượng nhân viên và mức lương bình quân."""
+    data = fetch_hr_titles_data(engine)
+    df = data["df"]
 
-        with col_b3:
-            st.markdown("""
-            <div class="crm-card">
-                <div class="crm-card-title">
-                    <span>🏆 Thu Nhập TB Theo Khối ($)</span>
-                    <span style="font-size: 0.75rem; color: #00F0FF; font-weight: 600;">Top: Sales & Mktg</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_wk = build_weekday_bar_chart(hr_dept_sal["df"])
-            st.plotly_chart(fig_wk, use_container_width=True, config={"displayModeBar": False})
-            _render_sql_modal("Xếp Hạng Thu Nhập", hr_dept_sal["sql"], hr_dept_sal["exec_time_ms"], "hr_sal_rank_sql")
-            if st.button("💬 Khuyến nghị Chế độ Đãi ngộ", key="btn_ai_comp", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("Phân tích bảng lương bình quân giữa các phòng ban và đề xuất chính sách đãi ngộ giữ chân nhân tài cho khối Kỹ thuật và R&D.")
+    # Breadcrumb
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        st.markdown("<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>Trang Chủ</a> ➔ <b>🎓 Title & Positions</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        if st.button("⬅️ Trang Chủ", key="btn_back_home_5", use_container_width=True):
+            _set_layer("overview")
 
-        # KHỐI TỔNG HỢP INSIGHT NHÂN SỰ TỰ ĐỘNG TỪ AI
+    st.markdown("""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>🎓 Danh Mục Vị Trí & Cơ Cấu Cấp Bậc (7 Titles)</span>
+            <span style="font-size: 0.78rem; color: #00F0FF; font-weight: 600;">Toàn công ty</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    disp_df = df.copy()
+    disp_df["AvgSalary ($)"] = disp_df["AvgSalary"].apply(lambda x: f"${x:,.0f}")
+    disp_df["MaxSalary ($)"] = disp_df["MaxSalary"].apply(lambda x: f"${x:,.0f}")
+    disp_df["MinSalary ($)"] = disp_df["MinSalary"].apply(lambda x: f"${x:,.0f}")
+    st.dataframe(disp_df[["Title", "Headcount", "Percentage", "AvgSalary ($)", "MaxSalary ($)", "MinSalary ($)"]], hide_index=True, use_container_width=True)
+
+    _render_sql_modal("Chức Danh & Vị Trí", data["sql"], data["exec_time_ms"], "titles_sql")
+
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        st.markdown("<div class='crm-card-title' style='color:#334155;'>📊 Phân Bổ Nhân Sự Theo Chức Danh</div>", unsafe_allow_html=True)
+        fig_donut = build_tickets_by_type_donut(df, label_col="Title", val_col="Headcount")
+        st.plotly_chart(fig_donut, use_container_width=True, config={"displayModeBar": False})
+    with col_t2:
+        st.markdown("<div class='crm-card-title' style='color:#334155;'>💰 Mức Lương Bình Quân Theo Chức Danh ($)</div>", unsafe_allow_html=True)
+        fig_sal = build_weekday_bar_chart(pd.DataFrame({"WeekDay": df["Title"], "Total": df["AvgSalary"]}))
+        st.plotly_chart(fig_sal, use_container_width=True, config={"displayModeBar": False})
+
+
+# =========================================================================
+# LAYER 6: DEPARTMENT MANAGERS (ĐỘI NGŨ QUẢN LÝ)
+# =========================================================================
+
+def _render_layer_dept_managers(engine):
+    """Layer 6: Hồ sơ chi tiết các Manager, nhiệm kỳ quản lý và mức lương."""
+    data = fetch_hr_managers_data(engine)
+    df = data["df"]
+
+    # Breadcrumb
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        st.markdown("<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>Trang Chủ</a> ➔ <b>👔 Department Managers</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        if st.button("⬅️ Trang Chủ", key="btn_back_home_6", use_container_width=True):
+            _set_layer("overview")
+
+    st.markdown("""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>👔 Danh Sách Đội Ngũ Trưởng Phòng (Managers) Qua Các Thời Kỳ</span>
+            <span style="font-size: 0.78rem; color: #00F0FF; font-weight: 600;">Lịch sử & Đương nhiệm</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    disp_df = df.copy()
+    disp_df["CurrentSalary ($)"] = disp_df["CurrentSalary"].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
+    st.dataframe(disp_df[["ManagerID", "ManagerName", "Gender", "Department", "StartDate", "EndDate", "TenureStatus", "CurrentDeptHeadcount", "CurrentSalary ($)"]], hide_index=True, use_container_width=True)
+
+    _render_sql_modal("Đội Ngũ Managers", data["sql"], data["exec_time_ms"], "managers_sql")
+
+    if st.button("💬 Phân tích Lương và Nhiệm kỳ Managers cùng AI", key="btn_ai_mgr_layer", type="secondary"):
+        _trigger_ai_deep_dive("Phân tích danh sách các Manager của các phòng ban: So sánh mức lương của các Trưởng phòng đương nhiệm và đánh giá thâm niên quản lý của từng người.")
+
+
+# =========================================================================
+# FALLBACK VIEW: CRM / TICKETS DASHBOARD (NẾU CƠ SỞ DỮ LIỆU LÀ CRM)
+# =========================================================================
+
+def _render_crm_legacy_view(engine):
+    """Fallback hiển thị CRM Support Dashboard nếu CSDL kết nối là CRM/Tickets."""
+    kpis = fetch_crm_kpis(engine, "All")
+    created_solved_data = fetch_tickets_created_vs_solved(engine, "All")
+    type_data = fetch_tickets_by_type(engine, "All")
+    retention_data = fetch_new_vs_returned(engine, "All")
+    weekday_data = fetch_tickets_by_weekday(engine, "All")
+    wave_data = fetch_latency_wave_data(engine, "All")
+
+    col_kpi1, col_kpi2, col_kpi3, col_wave = st.columns([1.3, 1.3, 1.4, 2.0])
+    with col_kpi1:
         st.markdown(f"""
-        <div class="crm-ai-insight-banner">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 1.4rem;">🧠</span>
-                    <span style="font-size: 1.12rem; font-weight: 800; color: #FFFFFF; letter-spacing: -0.01em;">
-                        Veraxus AI HR Insights • Báo Cáo Tổng Hợp Nhân Sự & Tiền Lương
-                    </span>
-                </div>
-                <span style="background: rgba(99, 102, 241, 0.3); color: #C7D2FE; padding: 4px 12px; border-radius: 20px; font-size: 0.76rem; font-weight: 600;">
-                    Tự động phân tích từ 5 truy vấn SQL CSDL Employees
-                </span>
-            </div>
-            <div style="font-size: 0.90rem; line-height: 1.6; color: #E2E8F0;">
-                <ul style="margin: 0; padding-left: 20px;">
-                    <li><b>Quỹ Lương & Tăng Trưởng Thu Nhập</b>: Mức lương trung bình toàn doanh nghiệp đạt <b>${hr_kpis['avg_salary']:,.0f}</b>, duy trì xu hướng tăng trưởng bền vững qua các năm (đạt đỉnh trên $68k). Khối <b>Sales (${hr_dept_sal['df']['Total'].iloc[0] if not hr_dept_sal['df'].empty else 88852:,.0f})</b> và <b>Marketing</b> có thu nhập bình quân dẫn đầu.</li>
-                    <li><b>Trọng Tâm Lực Lượng Lao Động</b>: Hai khối <b>Development (29.2%)</b> và <b>Production (25.0%)</b> chiếm hơn <b>54%</b> tổng lực lượng lao động (hơn 159,000 nhân sự), là xương sống vận hành của doanh nghiệp.</li>
-                    <li><b>Đa Dạng Giới Tính & Ổn Định Tổ Chức</b>: Cơ cấu giới tính đạt tỷ lệ <b>{hr_kpis['male_pct']}% Nam / {hr_kpis['female_pct']}% Nữ</b>. Giai đoạn tuyển dụng đạt đỉnh cao nhất tập trung vào giữa thập niên 90, phản ánh chiến lược mở rộng thị trường mạnh mẽ.</li>
-                </ul>
-            </div>
+        <div class="kpi-card-purple">
+            <div style="font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Avg First Reply Time</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">{kpis['reply_hours']}h {kpis['reply_mins']}m</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">⚡ SLA < 32h</div>
         </div>
         """, unsafe_allow_html=True)
-
-    # =========================================================================
-    # GIAO DIỆN CHẾ ĐỘ 2: CRM & SUPPORT TICKETS DASHBOARD
-    # =========================================================================
-    else:
-        kpis = fetch_crm_kpis(engine, "All")
-        created_solved_data = fetch_tickets_created_vs_solved(engine, "All")
-        type_data = fetch_tickets_by_type(engine, "All")
-        retention_data = fetch_new_vs_returned(engine, "All")
-        weekday_data = fetch_tickets_by_weekday(engine, "All")
-        wave_data = fetch_latency_wave_data(engine, "All")
-
-        col_kpi1, col_kpi2, col_kpi3, col_wave = st.columns([1.3, 1.3, 1.4, 2.0])
-
-        with col_kpi1:
-            st.markdown(f"""
-            <div class="kpi-card-purple">
-                <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.9; text-transform: uppercase;">Avg First Reply Time</div>
-                <div style="font-size: 1.85rem; font-weight: 850; letter-spacing: -0.02em;">
-                    {kpis['reply_hours']} <span style="font-size: 1.05rem; font-weight: 500;">h</span> {kpis['reply_mins']} <span style="font-size: 1.05rem; font-weight: 500;">min</span>
-                </div>
-                <div style="font-size: 0.75rem; opacity: 0.85;">⚡ SLA Tiêu chuẩn < 32h</div>
-            </div>
-            """, unsafe_allow_html=True)
-            _render_sql_modal("First Reply SLA", kpis["sql"], kpis["exec_time_ms"], "crm_kpi1")
-
-        with col_kpi2:
-            st.markdown(f"""
-            <div class="kpi-card-cyan">
-                <div style="font-size: 0.78rem; font-weight: 600; opacity: 0.9; text-transform: uppercase;">Avg Full Resolve Time</div>
-                <div style="font-size: 1.85rem; font-weight: 850; letter-spacing: -0.02em;">
-                    {kpis['resolve_hours']} <span style="font-size: 1.05rem; font-weight: 500;">h</span> {kpis['resolve_mins']} <span style="font-size: 1.05rem; font-weight: 500;">min</span>
-                </div>
-                <div style="font-size: 0.75rem; opacity: 0.85;">🎯 Tỷ lệ giải quyết: {round(kpis['solved_tickets']*100/max(1, kpis['total_tickets']), 1)}%</div>
-            </div>
-            """, unsafe_allow_html=True)
-            _render_sql_modal("Full Resolve SLA", kpis["sql"], kpis["exec_time_ms"], "crm_kpi2")
-
-        with col_kpi3:
-            st.markdown(f"""
-            <div class="kpi-badge-card">
-                <div class="kpi-badge-row">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: rgba(236, 72, 153, 0.2); color: #F472B6; padding: 4px 8px; border-radius: 8px; font-size: 0.78rem;">💬 Messages</span>
-                    </div>
-                    <span style="color: #EF4444; font-weight: 700; font-size: 0.88rem;">{kpis['messages_growth']}%</span>
-                </div>
-                <div class="kpi-badge-row">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="background: rgba(56, 189, 248, 0.2); color: #38BDF8; padding: 4px 8px; border-radius: 8px; font-size: 0.78rem;">✉️ Emails</span>
-                    </div>
-                    <span style="color: #10B981; font-weight: 700; font-size: 0.88rem;">+{kpis['emails_growth']}%</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            _render_sql_modal("Channel Volume", kpis["sql"], kpis["exec_time_ms"], "crm_kpi3")
-
-        with col_wave:
-            st.markdown("""
-            <div class="crm-card" style="padding-bottom: 8px;">
-                <div class="crm-card-title">
-                    <span>📈 First Reply & Full Resolve Time</span>
-                    <span style="font-size: 0.75rem; color: #00F0FF; font-weight: 500;">Peak: 2.5h</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_wave = build_latency_wave_chart(wave_data["df"])
-            st.plotly_chart(fig_wave, use_container_width=True, config={"displayModeBar": False})
-            _render_sql_modal("Latency Wave", wave_data["sql"], wave_data["exec_time_ms"], "crm_wave")
-
-        # HÀNG 2: TICKETS CREATED VS TICKETS SOLVED
-        st.markdown("""
-        <div class="crm-card">
-            <div class="crm-card-title">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.05rem;">📊</span>
-                    <span>Tickets Created vs Tickets Solved (Xu Hướng Theo Tháng)</span>
-                </div>
-                <span style="font-size: 0.78rem; background: rgba(0, 240, 255, 0.15); color: #00F0FF; padding: 3px 10px; border-radius: 12px; font-weight: 600;">
-                    Đỉnh điểm Max = 68
-                </span>
-            </div>
+    with col_kpi2:
+        st.markdown(f"""
+        <div class="kpi-card-cyan">
+            <div style="font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Avg Full Resolve Time</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">{kpis['resolve_hours']}h {kpis['resolve_mins']}m</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">🎯 Tỷ lệ: {round(kpis['solved_tickets']*100/max(1, kpis['total_tickets']), 1)}%</div>
         </div>
         """, unsafe_allow_html=True)
-
-        fig_center = build_created_vs_solved_chart(created_solved_data["df"], created_solved_data.get("max_point"))
-        st.plotly_chart(fig_center, use_container_width=True, config={"displayModeBar": False})
-
-        c_btn1, c_btn2 = st.columns([3, 1])
-        with c_btn1:
-            _render_sql_modal("Created vs Solved Trend", created_solved_data["sql"], created_solved_data["exec_time_ms"], "center_sql")
-        with c_btn2:
-            if st.button("💬 Phân tích đỉnh điểm cùng AI", key="btn_ai_deep_center", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("Phân tích nguyên nhân lượng Ticket giải quyết (Solved) và tạo mới (Created) đạt đỉnh điểm vào tháng 5/2023 và đưa ra khuyến nghị cân đối nhân sự.")
-
-        # HÀNG 3: 3 BIỂU ĐỒ PHÂN BỔ
-        col_b1, col_b2, col_b3 = st.columns(3)
-
-        with col_b1:
-            st.markdown("""
-            <div class="crm-card">
-                <div class="crm-card-title">
-                    <span>🎯 Tickets By Type</span>
-                    <span style="font-size: 0.75rem; color: #94A3B8;">4 Danh mục</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_type = build_tickets_by_type_donut(type_data["df"])
-            st.plotly_chart(fig_type, use_container_width=True, config={"displayModeBar": False})
-            _render_sql_modal("Tickets By Type", type_data["sql"], type_data["exec_time_ms"], "type_sql")
-            if st.button("💬 Hỏi AI về Tỷ lệ Sales/Bug", key="btn_ai_type", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("Phân tích tỷ lệ các loại Ticket trong CRM: Tại sao Sales chiếm 44% và Bug chiếm 25%? Cần có giải pháp gì cho bộ phận phát triển?")
-
-        with col_b2:
-            st.markdown("""
-            <div class="crm-card">
-                <div class="crm-card-title">
-                    <span>🔄 New vs Returned Tickets</span>
-                    <span style="font-size: 0.75rem; color: #FF007A; font-weight: 600;">61.8% Returned</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_ret = build_new_vs_returned_donut(retention_data["df"], retention_data.get("total_all", 1200), retention_data.get("returned_count", 742))
-            st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
-            _render_sql_modal("New vs Returned", retention_data["sql"], retention_data["exec_time_ms"], "ret_sql")
-            if st.button("💬 Đánh giá Tỷ lệ Khách Quay Lại", key="btn_ai_ret", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("Đánh giá tỷ lệ Khách hàng quay lại (Returned Tickets chiếm 61.8%) và đề xuất chiến lược tối ưu trải nghiệm khách hàng để giảm tỷ lệ khiếu nại lặp lại.")
-
-        with col_b3:
-            st.markdown("""
-            <div class="crm-card">
-                <div class="crm-card-title">
-                    <span>📅 Tickets / Week Day</span>
-                    <span style="font-size: 0.75rem; color: #00F0FF; font-weight: 600;">Peak: Thứ Sáu</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            fig_wk = build_weekday_bar_chart(weekday_data["df"])
-            st.plotly_chart(fig_wk, use_container_width=True, config={"displayModeBar": False})
-            _render_sql_modal("Weekday Load", weekday_data["sql"], weekday_data["exec_time_ms"], "wk_sql")
-            if st.button("💬 Đề xuất Lịch trực Nhân sự", key="btn_ai_wk", use_container_width=True, type="secondary"):
-                _trigger_ai_deep_dive("Phân tích tải lượng ticket theo các ngày trong tuần và đề xuất lịch trực tổng đài tối ưu cho thứ Tư và thứ Sáu.")
-
-        # KHỐI TỔNG HỢP INSIGHT CRM
-        st.markdown("""
-        <div class="crm-ai-insight-banner">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 1.4rem;">🧠</span>
-                    <span style="font-size: 1.12rem; font-weight: 800; color: #FFFFFF; letter-spacing: -0.01em;">
-                        Veraxus AI Executive Insights • Đánh Giá Tổng Thể CRM
-                    </span>
-                </div>
-                <span style="background: rgba(99, 102, 241, 0.3); color: #C7D2FE; padding: 4px 12px; border-radius: 20px; font-size: 0.76rem; font-weight: 600;">
-                    Tự động trích xuất từ 5 câu lệnh SQL
-                </span>
-            </div>
-            <div style="font-size: 0.90rem; line-height: 1.6; color: #E2E8F0;">
-                <ul style="margin: 0; padding-left: 20px;">
-                    <li><b>Hiệu suất Phản hồi & Giải quyết SLA</b>: Thời gian phản hồi đầu đạt <b>30h 15m</b> và giải quyết trung bình <b>22h 40m</b>, tỷ lệ giải quyết thành công đạt <b>70%</b>.</li>
-                    <li><b>Cơ cấu Nhu cầu Khách hàng</b>: Yêu cầu <b>Sales (44%)</b> và <b>Bug (25%)</b> chiếm đa số. Tỷ lệ khách hàng quay lại (Returned Tickets) lên tới <b>61.8%</b>.</li>
-                    <li><b>Tối ưu Hóa Tải lượng Theo Tuần</b>: Thứ Sáu ghi nhận lượng ticket cao nhất trong tuần (<b>85 tickets</b>).</li>
-                </ul>
-            </div>
+    with col_kpi3:
+        st.markdown(f"""
+        <div class="kpi-card-emerald">
+            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase;">Total Tickets</div>
+            <div style="font-size: 1.85rem; font-weight: 850;">{kpis['total_tickets']:,}</div>
+            <div style="font-size: 0.75rem; opacity: 0.85;">✉️ Solved: {kpis['solved_tickets']:,}</div>
         </div>
         """, unsafe_allow_html=True)
+    with col_wave:
+        fig_wave = build_latency_wave_chart(wave_data["df"])
+        st.plotly_chart(fig_wave, use_container_width=True, config={"displayModeBar": False})
+
+    fig_center = build_created_vs_solved_chart(created_solved_data["df"], created_solved_data.get("max_point"))
+    st.plotly_chart(fig_center, use_container_width=True, config={"displayModeBar": False})
