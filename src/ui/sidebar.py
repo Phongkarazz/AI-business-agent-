@@ -218,14 +218,23 @@ def render_main_sidebar():
                 st.session_state["view_mode"] = "settings"
                 st.rerun()
 
-        # Nút chuyển đổi nhanh sang CRM Executive Dashboard
+        # Nút chuyển đổi nhanh sang Executive Dashboard tự động theo CSDL
         current_vmode = st.session_state.get("view_mode", "chat")
+        from src.database.crm_queries import detect_dashboard_domain
+        detected_dom = detect_dashboard_domain(engine)
+        if detected_dom == "hr_employees":
+            dash_btn_label = "👥 HR & Payroll Dashboard"
+        elif detected_dom == "sales_commerce":
+            dash_btn_label = "💰 Sales Executive Dashboard"
+        else:
+            dash_btn_label = "📊 CRM Executive Dashboard"
+
         if current_vmode == "dashboard":
             if st.button("💬 Quay lại Trợ lý AI Chat", use_container_width=True, type="secondary", key="sidebar_btn_toggle_chat"):
                 st.session_state["view_mode"] = "chat"
                 st.rerun()
         else:
-            if st.button("📊 CRM Executive Dashboard", use_container_width=True, type="secondary", key="sidebar_btn_toggle_dash", help="Mở Dashboard phân tích CRM toàn diện theo thời gian thực"):
+            if st.button(dash_btn_label, use_container_width=True, type="secondary", key="sidebar_btn_toggle_dash", help="Mở Dashboard phân tích điều hành thông minh tự động theo cơ sở dữ liệu"):
                 st.session_state["view_mode"] = "dashboard"
                 st.rerun()
 
