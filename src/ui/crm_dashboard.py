@@ -236,11 +236,16 @@ def render_crm_dashboard():
             <div class="crm-card" style="padding-bottom: 8px;">
                 <div class="crm-card-title">
                     <span>📈 Diễn Biến Lương TB Theo Năm ($k)</span>
-                    <span style="font-size: 0.75rem; color: #00F0FF; font-weight: 500;">Đỉnh: {hr_sal_wave.get('peak_info', '2002')}</span>
+                    <span style="font-size: 0.75rem; color: #00F0FF; font-weight: 500;">{hr_sal_wave.get('peak_info', '2002 • $72.6k')}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            fig_wave = build_latency_wave_chart(hr_sal_wave["df"])
+            fig_wave = build_latency_wave_chart(
+                hr_sal_wave["df"],
+                name_1="Lương TB ($k)",
+                name_2="Lương Max ($k)",
+                peak_text=hr_sal_wave.get("peak_info", "2002 • $72.6k")
+            )
             st.plotly_chart(fig_wave, use_container_width=True, config={"displayModeBar": False})
             _render_sql_modal("Xu Hướng Lương", hr_sal_wave["sql"], hr_sal_wave["exec_time_ms"], "hr_wave_sql")
 
@@ -259,7 +264,12 @@ def render_crm_dashboard():
         </div>
         """, unsafe_allow_html=True)
 
-        fig_center = build_created_vs_solved_chart(hr_hiring["df"], hr_hiring.get("max_point"))
+        fig_center = build_created_vs_solved_chart(
+            hr_hiring["df"],
+            hr_hiring.get("max_point"),
+            name_solved="Quy mô duy trì",
+            name_created="Tuyển dụng mới"
+        )
         st.plotly_chart(fig_center, use_container_width=True, config={"displayModeBar": False})
 
         c_btn1, c_btn2 = st.columns([3, 1])
@@ -288,16 +298,23 @@ def render_crm_dashboard():
                 _trigger_ai_deep_dive("Phân tích cơ cấu nhân sự giữa các phòng ban: Tại sao Development và Production chiếm hơn 54% tổng nhân sự toàn công ty?")
 
         with col_b2:
-            st.markdown("""
+            st.markdown(f"""
             <div class="crm-card">
                 <div class="crm-card-title">
                     <span>🚻 Cơ Cấu Giới Tính Nhân Sự</span>
-                    <span style="font-size: 0.75rem; color: #FF007A; font-weight: 600;">60% Nam / 40% Nữ</span>
+                    <span style="font-size: 0.75rem; color: #FF007A; font-weight: 600;">{hr_kpis['male_pct']}% Nam / {hr_kpis['female_pct']}% Nữ</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            fig_ret = build_new_vs_returned_donut(hr_gender["df"], hr_gender.get("total_all", 300024), hr_gender.get("returned_count", 179973))
+            fig_ret = build_new_vs_returned_donut(
+                hr_gender["df"],
+                hr_gender.get("total_all", 300024),
+                hr_gender.get("returned_count", 179973),
+                center_label="Tổng Nhân Sự",
+                center_val_override=hr_gender.get("total_all", 300024)
+            )
             st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
+
             _render_sql_modal("Phân Bố Giới Tính", hr_gender["sql"], hr_gender["exec_time_ms"], "hr_gender_sql")
             if st.button("💬 So sánh Lương Nam vs Nữ", key="btn_ai_gender", use_container_width=True, type="secondary"):
                 _trigger_ai_deep_dive("So sánh mức lương trung bình và cơ hội thăng chức giữa nhân viên Nam và Nữ trong toàn bộ công ty.")

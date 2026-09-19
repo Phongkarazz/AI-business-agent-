@@ -7,18 +7,23 @@ import plotly.graph_objects as go
 import pandas as pd
 
 
-def build_latency_wave_chart(df: pd.DataFrame) -> go.Figure:
-    """Biểu đồ sóng kép First Reply & Full Resolve Time (Top Right Wave Chart)."""
+def build_latency_wave_chart(
+    df: pd.DataFrame,
+    name_1: str = "First Reply (h)",
+    name_2: str = "Full Resolve (h)",
+    peak_text: str = "04 October<br><b>2.5 hours</b>"
+) -> go.Figure:
+    """Biểu đồ sóng kép (Top Right Wave Chart) hỗ trợ đa lĩnh vực."""
     fig = go.Figure()
     x_vals = df["DayLabel"].tolist() if "DayLabel" in df else [f"D{i+1}" for i in range(len(df))]
     
-    # 1. First Reply Hours (Cyan Wave)
+    # 1. Curve 1 (Cyan Wave)
     if "ReplyHours" in df:
         y_rep = df["ReplyHours"].tolist()
         fig.add_trace(go.Scatter(
             x=x_vals,
             y=y_rep,
-            name="First Reply (h)",
+            name=name_1,
             mode="lines",
             line=dict(color="#00F0FF", width=3, shape="spline", smoothing=1.3),
             fill="tozeroy",
@@ -26,13 +31,13 @@ def build_latency_wave_chart(df: pd.DataFrame) -> go.Figure:
             hoverinfo="x+y"
         ))
     
-    # 2. Full Resolve Hours (Purple / Pink Wave)
+    # 2. Curve 2 (Purple / Pink Wave)
     if "ResolveHours" in df:
         y_res = df["ResolveHours"].tolist()
         fig.add_trace(go.Scatter(
             x=x_vals,
             y=y_res,
-            name="Full Resolve (h)",
+            name=name_2,
             mode="lines",
             line=dict(color="#B347EB", width=3, shape="spline", smoothing=1.3),
             fill="tonexty",
@@ -40,9 +45,12 @@ def build_latency_wave_chart(df: pd.DataFrame) -> go.Figure:
             hoverinfo="x+y"
         ))
 
-    # Highlight Marker Peak (e.g. 04 Oct • 2.5 hours)
-    if len(x_vals) >= 4:
-        idx = min(3, len(x_vals) - 1)
+    # Highlight Marker Peak
+    if len(x_vals) >= 1:
+        idx = len(x_vals) - 1 if len(x_vals) <= 4 else min(3, len(x_vals) - 1)
+        # Tìm điểm cao nhất thực tế
+        if "ReplyHours" in df and len(df["ReplyHours"]) > 0:
+            idx = int(df["ReplyHours"].tolist().index(max(df["ReplyHours"])))
         pk_x = x_vals[idx]
         pk_y = df["ReplyHours"].iloc[idx] if "ReplyHours" in df else 2.5
         fig.add_trace(go.Scatter(
@@ -53,10 +61,12 @@ def build_latency_wave_chart(df: pd.DataFrame) -> go.Figure:
             showlegend=False,
             hoverinfo="skip"
         ))
+        
+        display_peak = peak_text if ("<br>" in peak_text or "<b>" in peak_text) else f"Đỉnh: <b>{peak_text}</b>"
         fig.add_annotation(
             x=pk_x,
-            y=pk_y + 0.6,
-            text="04 October<br><b>2.5 hours</b>",
+            y=pk_y * 1.05 if pk_y > 10 else pk_y + 0.6,
+            text=display_peak,
             showarrow=True,
             arrowhead=2,
             arrowcolor="#00F0FF",
@@ -64,7 +74,7 @@ def build_latency_wave_chart(df: pd.DataFrame) -> go.Figure:
             ax=0,
             ay=-36,
             bgcolor="rgba(0, 240, 255, 0.85)",
-            font=dict(color="#0A0E23", size=10, family="Inter"),
+            font=dict(color="#0A0E23", size=10, family="Inter", weight=700),
             borderpad=4,
             bordercolor="#00F0FF"
         )
@@ -92,44 +102,48 @@ def build_latency_wave_chart(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def build_created_vs_solved_chart(df: pd.DataFrame, max_point: dict = None) -> go.Figure:
-    """Biểu đồ chính Tickets Created vs Tickets Solved (Wave Line & Area với Peak Max annotation)."""
+def build_created_vs_solved_chart(
+    df: pd.DataFrame,
+    max_point: dict = None,
+    name_solved: str = "Tickets Solved",
+    name_created: str = "Tickets Created"
+) -> go.Figure:
+    """Biểu đồ chính Wave Line & Area với Peak Max annotation."""
     fig = go.Figure()
     x_vals = df["MonthName"].tolist() if "MonthName" in df else df.iloc[:, 0].tolist()
     
-    # 1. Tickets Solved (Solid Cyan Glow)
+    # 1. Solved / Primary Line (Solid Cyan Glow)
     if "Tickets_Solved" in df:
         y_solved = df["Tickets_Solved"].tolist()
         fig.add_trace(go.Scatter(
             x=x_vals,
             y=y_solved,
-            name="Tickets Solved",
+            name=name_solved,
             mode="lines+markers",
             line=dict(color="#00F0FF", width=3.5, shape="spline", smoothing=1.2),
             marker=dict(size=6, color="#00F0FF"),
             fill="tozeroy",
             fillcolor="rgba(0, 240, 255, 0.08)",
-            hovertemplate="<b>%{x}</b><br>Tickets Solved: <b>%{y}</b><extra></extra>"
+            hovertemplate=f"<b>%{{x}}</b><br>{name_solved}: <b>%{{y:,.0f}}</b><extra></extra>"
         ))
 
-    # 2. Tickets Created (Dotted / Dashed Magenta/Purple Line)
+    # 2. Created / Secondary Line (Dotted / Dashed Magenta/Purple Line)
     if "Tickets_Created" in df:
         y_created = df["Tickets_Created"].tolist()
         fig.add_trace(go.Scatter(
             x=x_vals,
             y=y_created,
-            name="Tickets Created",
+            name=name_created,
             mode="lines+markers",
             line=dict(color="#C084FC", width=2.5, dash="dot", shape="spline", smoothing=1.2),
             marker=dict(size=5, color="#C084FC"),
-            hovertemplate="<b>%{x}</b><br>Tickets Created: <b>%{y}</b><extra></extra>"
+            hovertemplate=f"<b>%{{x}}</b><br>{name_created}: <b>%{{y:,.0f}}</b><extra></extra>"
         ))
 
     # Peak Max Annotation
     if max_point and "month" in max_point and "val" in max_point:
         m_x = max_point["month"]
         m_y = max_point["val"]
-        # Peak glowing dot
         fig.add_trace(go.Scatter(
             x=[m_x],
             y=[m_y],
@@ -141,7 +155,7 @@ def build_created_vs_solved_chart(df: pd.DataFrame, max_point: dict = None) -> g
         fig.add_annotation(
             x=m_x,
             y=m_y,
-            text=f"<b>Max = {m_y}</b>",
+            text=f"<b>Max = {m_y:,}</b>",
             showarrow=True,
             arrowhead=2,
             arrowcolor="#E879F9",
@@ -179,8 +193,7 @@ def build_created_vs_solved_chart(df: pd.DataFrame, max_point: dict = None) -> g
             gridcolor="rgba(255,255,255,0.06)",
             showline=False,
             zeroline=False,
-            tickfont=dict(color="#94A3B8", size=10),
-            dtick=10
+            tickfont=dict(color="#94A3B8", size=10)
         ),
         hoverlabel=dict(
             bgcolor="#1E293B",
@@ -193,16 +206,23 @@ def build_created_vs_solved_chart(df: pd.DataFrame, max_point: dict = None) -> g
 
 
 def build_tickets_by_type_donut(df: pd.DataFrame) -> go.Figure:
-    """Biểu đồ Donut phân loại Tickets theo Type (Sales, Setup, Bug, Features)."""
+    """Biểu đồ Donut phân loại theo danh mục (Type / Department)."""
     labels = df["Type"].tolist()
     values = df["Total"].tolist()
     
     # Futuristic Neon Palette matching mockup
     colors_map = {
-        "Sales": "#0068FF",     # Neon Blue
-        "Features": "#00F0FF",  # Cyan
-        "Setup": "#38BDF8",     # Sky Blue
-        "Bug": "#818CF8"        # Indigo
+        "Sales": "#0068FF",
+        "Features": "#00F0FF",
+        "Setup": "#38BDF8",
+        "Bug": "#818CF8",
+        "Development": "#0068FF",
+        "Production": "#00F0FF",
+        "Customer Service": "#38BDF8",
+        "Research": "#818CF8",
+        "Marketing": "#C084FC",
+        "Human Resources": "#F472B6",
+        "Finance": "#34D399"
     }
     custom_colors = [colors_map.get(lbl, "#00A3FF") for lbl in labels]
 
@@ -215,7 +235,7 @@ def build_tickets_by_type_donut(df: pd.DataFrame) -> go.Figure:
         textinfo="percent",
         textposition="inside",
         textfont=dict(size=12, color="#FFFFFF", family="Inter", weight=700),
-        hovertemplate="<b>%{label}</b><br>Tickets: %{value:,}<br>Tỷ lệ: %{percent}<extra></extra>"
+        hovertemplate="<b>%{label}</b><br>Số lượng: %{value:,}<br>Tỷ lệ: %{percent}<extra></extra>"
     )])
 
     fig.update_layout(
@@ -230,21 +250,29 @@ def build_tickets_by_type_donut(df: pd.DataFrame) -> go.Figure:
             y=0.5,
             xanchor="left",
             x=1.02,
-            font=dict(color="#CBD5E1", size=11)
+            font=dict(color="#CBD5E1", size=10)
         )
     )
     return fig
 
 
-def build_new_vs_returned_donut(df: pd.DataFrame, total_all: int = 1200, returned_count: int = 742) -> go.Figure:
-    """Biểu đồ Concentric Donut: Khách hàng Mới vs Khách hàng Quay lại (New vs Returned)."""
+def build_new_vs_returned_donut(
+    df: pd.DataFrame,
+    total_all: int = 1200,
+    returned_count: int = 742,
+    center_label: str = "Returned Tickets",
+    center_val_override: int = None
+) -> go.Figure:
+    """Biểu đồ Concentric Donut: Khách hàng Mới vs Quay lại hoặc Cơ cấu Giới tính Nam/Nữ."""
     labels = df["CustomerType"].tolist()
     values = df["Total"].tolist()
 
-    # Magenta/Pink (#FF007A) for Returned, Dark Purple (#7C3AED) for New
+    # Magenta/Pink (#FF007A) for Secondary/Male, Dark Purple (#7C3AED) for Primary/Female
     colors_map = {
         "Returned": "#FF007A",
-        "New": "#7C3AED"
+        "New": "#7C3AED",
+        "Nam (Male)": "#00F0FF",
+        "Nữ (Female)": "#FF007A"
     }
     custom_colors = [colors_map.get(lbl, "#EC4899") for lbl in labels]
 
@@ -255,12 +283,12 @@ def build_new_vs_returned_donut(df: pd.DataFrame, total_all: int = 1200, returne
         sort=False,
         marker=dict(colors=custom_colors, line=dict(color="#161B33", width=4)),
         textinfo="none",
-        hovertemplate="<b>%{label} Tickets</b><br>Số lượng: %{value:,}<br>Tỷ lệ: %{percent}<extra></extra>"
+        hovertemplate="<b>%{label}</b><br>Số lượng: %{value:,}<br>Tỷ lệ: %{percent}<extra></extra>"
     )])
 
-    # Center Text in Donut: Returned Tickets 1,200
+    disp_val = center_val_override if center_val_override is not None else returned_count
     fig.add_annotation(
-        text=f"<span style='font-size:10px; color:#94A3B8; text-transform:uppercase;'>Returned Tickets</span><br><b style='font-size:20px; color:#FFFFFF;'>{returned_count:,}</b>",
+        text=f"<span style='font-size:10px; color:#94A3B8; text-transform:uppercase;'>{center_label}</span><br><b style='font-size:18px; color:#FFFFFF;'>{disp_val:,}</b>",
         x=0.5, y=0.5,
         showarrow=False,
         font=dict(family="Inter"),

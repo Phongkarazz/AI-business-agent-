@@ -57,12 +57,12 @@ def fetch_hr_kpis(engine) -> dict:
     """Truy vấn các chỉ số nhân sự: Mức lương TB, Tổng nhân sự, Tỷ lệ giới tính Nam/Nữ."""
     start_t = time.time()
     try:
-        # Lương trung bình và tổng nhân sự
+        # Lương trung bình và tỷ lệ giới tính chuẩn xác
         sql = """SELECT 
     ROUND(AVG(salary), 0) AS avg_salary,
     (SELECT COUNT(DISTINCT emp_no) FROM employees) AS total_headcount,
-    (SELECT COUNT(*) * 100.0 / COUNT(emp_no) FROM employees WHERE gender = 'M') AS male_pct,
-    (SELECT COUNT(*) * 100.0 / COUNT(emp_no) FROM employees WHERE gender = 'F') AS female_pct
+    ROUND((SELECT COUNT(*) FROM employees WHERE gender = 'M') * 100.0 / (SELECT COUNT(*) FROM employees), 1) AS male_pct,
+    ROUND((SELECT COUNT(*) FROM employees WHERE gender = 'F') * 100.0 / (SELECT COUNT(*) FROM employees), 1) AS female_pct
 FROM salaries;"""
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
@@ -93,6 +93,7 @@ FROM salaries;"""
         "sql": "SELECT AVG(salary), COUNT(DISTINCT emp_no) FROM salaries;",
         "exec_time_ms": 1.2
     }
+
 
 
 def fetch_hr_salary_evolution(engine) -> dict:
