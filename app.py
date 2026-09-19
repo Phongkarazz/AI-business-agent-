@@ -27,6 +27,7 @@ from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
 from src.ui.sidebar import perform_connection, render_main_sidebar
 from src.ui.components import render_result, render_voice_input_button, render_veraxus_loading_html
+from src.ui.crm_dashboard import render_crm_dashboard
 from src.llm.agent import run_agent
 
 # ---------------------------------------------------------
@@ -676,21 +677,26 @@ else:
 
     history = st.session_state.get("history", [])
     focused_turn_idx = st.session_state.get("focused_turn_idx", None)
+    view_mode = st.session_state.get("view_mode", "chat")
 
     # Tiếp nhận câu hỏi từ Chat Input hoặc Pending Prompt (từ Thẻ Starter / Gợi ý tiếp nối)
     has_active_conversation = bool(history) or (focused_turn_idx is not None)
     pending_prompt = st.session_state.get("pending_prompt")
 
-    # Chỉ hiển thị chat_input ở chân trang khi ĐÃ CÓ lịch sử trò chuyện (tránh trùng lặp với Hero Search)
+    # Chỉ hiển thị chat_input ở chân trang khi ĐÃ CÓ lịch sử trò chuyện hoặc đang ở chế độ Chat
     user_input = None
-    if has_active_conversation:
+    if has_active_conversation and view_mode == "chat":
         user_input = st.chat_input(" Ask Veraxus...")
         render_voice_input_button(compact=True)
 
     prompt_to_run = pending_prompt or user_input
 
+    # Nếu người dùng chọn xem CRM Executive Dashboard và không có prompt mới đang chờ chạy
+    if view_mode == "dashboard" and not prompt_to_run:
+        render_crm_dashboard()
+
     # 4.2 Hiển thị câu hỏi được chọn trực tiếp (Direct Focus View) hoặc toàn bộ hội thoại
-    if focused_turn_idx is not None and 0 <= focused_turn_idx < len(history):
+    elif focused_turn_idx is not None and 0 <= focused_turn_idx < len(history):
         turn = history[focused_turn_idx]
         col_focus1, col_focus2 = st.columns([5, 1])
         with col_focus1:
@@ -708,7 +714,7 @@ else:
                 st.error(f"⚠️ Có lỗi nhỏ khi hiển thị kết quả lượt này: {e}")
                 if st.button("🔄 Tải lại lượt này", key=f"retry_focus_{focused_turn_idx}"):
                     st.rerun()
-    else:
+    elif history:
         # Hiển thị toàn bộ lịch sử hội thoại
         for i, turn in enumerate(history):
             st.chat_message("user").write(turn["query"])
@@ -721,7 +727,7 @@ else:
                         st.rerun()
 
     # 4.3 Màn hình Khám phá Dữ liệu Chuẩn Thi đấu (Perplexity / CPO Standard)
-    if not history and focused_turn_idx is None and not prompt_to_run:
+    if not history and focused_turn_idx is None and not prompt_to_run and view_mode == "chat":
         engine = st.session_state.get("engine")
         tables = get_table_names(engine)
         schema_context = st.session_state.get("schema_context", "")
@@ -881,9 +887,10 @@ else:
 
 
     if prompt_to_run:
-        # Xóa pending prompt và reset focus view
+        # Xóa pending prompt và reset focus view, chuyển về chế độ chat
         st.session_state["pending_prompt"] = None
         st.session_state["focused_turn_idx"] = None
+        st.session_state["view_mode"] = "chat"
 
         cache_key = prompt_to_run.strip().lower()
         cached = st.session_state.get("query_cache", {}).get(cache_key)

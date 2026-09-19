@@ -97,8 +97,45 @@ def build_demo_engine():
     sales_df.loc[(sales_df["SaleDate"].dt.year == 2021) & (sales_df["SaleDate"].dt.month == 6), "Amount"] *= 2
     sales_df.loc[(sales_df["SaleDate"].dt.year == 2022) & (sales_df["SaleDate"].dt.month == 11), "Amount"] *= 2
 
+    # Tạo bảng CRM Tickets mô phỏng hệ thống hỗ trợ & chăm sóc khách hàng doanh nghiệp
+    num_tickets = 1200
+    ticket_dates = pd.date_range("2023-01-01", "2023-07-31", freq="h")
+    selected_dates = rng.choice(ticket_dates, num_tickets)
+    
+    # Phân bổ Type: Sales 44%, Bug 25%, Features 19%, Setup 12%
+    type_choices = ["Sales", "Bug", "Features", "Setup"]
+    type_probs = [0.44, 0.25, 0.19, 0.12]
+    
+    # Phân bổ Channel: Online Chat 45%, Email 33%, Phone Call 22%
+    channel_choices = ["Online Chat", "Email", "Phone Call"]
+    channel_probs = [0.45, 0.33, 0.22]
+    
+    # Phân bổ CustomerType: Returned 61.8%, New 38.2%
+    cust_type_choices = ["Returned", "New"]
+    cust_type_probs = [0.618, 0.382]
+    
+    # Phân bổ Status: Solved 70%, Responded 15%, Open 10%, Created 5%
+    status_choices = ["Solved", "Responded", "Open", "Created"]
+    status_probs = [0.70, 0.15, 0.10, 0.05]
+
+    crm_tickets_df = pd.DataFrame({
+        "TicketID": [f"TCK-{i:04d}" for i in range(1, num_tickets + 1)],
+        "CustomerID": [f"CUST-{rng.integers(100, 999)}" for _ in range(num_tickets)],
+        "CustomerType": rng.choice(cust_type_choices, num_tickets, p=cust_type_probs),
+        "Channel": rng.choice(channel_choices, num_tickets, p=channel_probs),
+        "Type": rng.choice(type_choices, num_tickets, p=type_probs),
+        "Status": rng.choice(status_choices, num_tickets, p=status_probs),
+        "CreatedAt": selected_dates,
+        "FirstReplyMinutes": np.clip(np.round(rng.normal(1815, 240, num_tickets), 1), 15.0, 4800.0), # ~30h 15m
+        "FullResolveHours": np.clip(np.round(rng.normal(22.67, 4.5, num_tickets), 1), 1.0, 72.0),     # ~22h 40m
+        "SPID": rng.choice(people_df["SPID"], num_tickets),
+        "GeoID": rng.choice(geo_df["GeoID"], num_tickets),
+    }).sort_values("CreatedAt").reset_index(drop=True)
+
     geo_df.to_sql("geo", engine, index=False, if_exists="replace")
     people_df.to_sql("people", engine, index=False, if_exists="replace")
     products_df.to_sql("products", engine, index=False, if_exists="replace")
     sales_df.to_sql("sales", engine, index=False, if_exists="replace")
+    crm_tickets_df.to_sql("crm_tickets", engine, index=False, if_exists="replace")
     return engine
+

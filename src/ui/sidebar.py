@@ -210,11 +210,23 @@ def render_main_sidebar():
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
                 st.session_state["focused_turn_idx"] = None
+                st.session_state["view_mode"] = "chat"
                 st.rerun()
 
         with c_top2:
             if st.button("⚙️ Cấu hình", use_container_width=True, key="sidebar_btn_settings", help="Mở màn hình Cài đặt Database hoặc AI Provider"):
                 st.session_state["view_mode"] = "settings"
+                st.rerun()
+
+        # Nút chuyển đổi nhanh sang CRM Executive Dashboard
+        current_vmode = st.session_state.get("view_mode", "chat")
+        if current_vmode == "dashboard":
+            if st.button("💬 Quay lại Trợ lý AI Chat", use_container_width=True, type="secondary", key="sidebar_btn_toggle_chat"):
+                st.session_state["view_mode"] = "chat"
+                st.rerun()
+        else:
+            if st.button("📊 CRM Executive Dashboard", use_container_width=True, type="secondary", key="sidebar_btn_toggle_dash", help="Mở Dashboard phân tích CRM toàn diện theo thời gian thực"):
+                st.session_state["view_mode"] = "dashboard"
                 st.rerun()
 
         st.markdown("<hr style='margin: 12px 0; border: none; border-top: 1px solid #E2E8F0;' />", unsafe_allow_html=True)
