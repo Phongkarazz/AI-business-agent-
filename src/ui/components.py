@@ -6086,54 +6086,107 @@ def render_veraxus_loading_html(text: str) -> str:
         tag_bg = "rgba(0, 223, 143, 0.16)"
         tag_border = "rgba(0, 223, 143, 0.45)"
 
-    agent_cards_data = [
-        (1, "🧭 1. Supervisor", "PLAN", "#00F0FF", "Phân tích & Phân rã", "Intent & Routing"),
-        (2, "⚡ 2. Data Eng", "SQL", "#38BDF8", "Sinh SQL & Nạp ICL", "CTE / Window Gen"),
-        (3, "🛡️ 3. Auditor", "CHECK", "#10B981", "Kiểm toán 4 Trụ Cột", "Maker-Checker"),
-        (4, "🔍 4. Detective", "SCAN", "#A855F7", "Z-Score & IQR Scan", "Dị biệt thống kê"),
-        (5, "💡 5. Strategy", "ADVISE", "#F59E0B", "Khuyến nghị C-Level", "ESG & Meritocracy"),
+    agent_configs = [
+        {
+            "num": 1,
+            "name": "🧭 1. Supervisor",
+            "color": "#00F0FF",
+            "active_badge": "PLANNING",
+            "active_title": "Phân tích & Phân rã",
+            "active_sub": "🔥 Đang định tuyến...",
+            "standby_badge": "SUPERVISING",
+            "standby_title": "Giám sát tiến trình",
+            "standby_sub": "✓ Task Plan Active",
+        },
+        {
+            "num": 2,
+            "name": "⚡ 2. Data Eng",
+            "color": "#38BDF8",
+            "active_badge": "COMPILING",
+            "active_title": "Sinh SQL & Nạp ICL",
+            "active_sub": "🔥 Đang tối ưu hóa...",
+            "standby_badge": "SQL READY" if active_step > 2 else "PRE-FETCH",
+            "standby_title": "Cấu trúc SQL CTE" if active_step > 2 else "Nạp Dynamic Few-shots",
+            "standby_sub": "✓ SQL Compiled" if active_step > 2 else "⚡ Sẵn sàng biên dịch",
+        },
+        {
+            "num": 3,
+            "name": "🛡️ 3. Auditor",
+            "color": "#10B981",
+            "active_badge": "AUDITING",
+            "active_title": "Kiểm toán 4 Trụ Cột",
+            "active_sub": "🔥 Maker-Checker Loop...",
+            "standby_badge": "VERIFIED" if active_step > 3 else "STANDBY AUDIT",
+            "standby_title": "Đạt 4/4 Trụ Cột" if active_step > 3 else "Nạp luật kiểm toán",
+            "standby_sub": "✓ 100/100 Quality Pass" if active_step > 3 else "🛡️ Đón luồng SQL...",
+        },
+        {
+            "num": 4,
+            "name": "🔍 4. Detective",
+            "color": "#A855F7",
+            "active_badge": "SCANNING",
+            "active_title": "Quét Z-Score & IQR",
+            "active_sub": "🔥 Tìm điểm dị biệt...",
+            "standby_badge": "SCANNED" if active_step > 4 else "PRE-SCAN",
+            "standby_title": "Thống kê dị biệt" if active_step > 4 else "Khởi tạo mô hình Z-score",
+            "standby_sub": "✓ Dị biệt xác thực" if active_step > 4 else "🔍 Sẵn sàng phân tích...",
+        },
+        {
+            "num": 5,
+            "name": "💡 5. Strategy",
+            "color": "#F59E0B",
+            "active_badge": "ADVISING",
+            "active_title": "Khuyến nghị C-Level",
+            "active_sub": "🔥 Đúc kết giải pháp...",
+            "standby_badge": "PRESCRIBED" if active_step >= 5 else "FRAMEWORK",
+            "standby_title": "Nghị quyết HĐQT" if active_step >= 5 else "Nạp khung ESG/Quản trị",
+            "standby_sub": "✓ Action Matrix Ready" if active_step >= 5 else "💡 Sẵn sàng đúc kết...",
+        },
     ]
 
     live_cards_html = []
-    for step_num, name, code, c_color, active_desc, default_desc in agent_cards_data:
-        if step_num == active_step:
+    for cfg in agent_configs:
+        c_num = cfg["num"]
+        c_name = cfg["name"]
+        c_color = cfg["color"]
+        is_lead = (c_num == active_step)
+
+        if is_lead:
             live_cards_html.append(f"""
-            <div style="background: {c_color}14; border: 1.5px solid {c_color}; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 0 14px {c_color}44;">
+            <div style="background: {c_color}18; border: 1.5px solid {c_color}; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 0 16px {c_color}55;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
                     <span style="font-size: 0.72rem; font-weight: 800; color: {c_color}; display: flex; align-items: center; gap: 4px;">
-                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {c_color}; animation: vxPulseDot 0.9s ease-in-out infinite;"></span>
-                        {name}
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {c_color}; animation: vxPulseDot 0.8s ease-in-out infinite;"></span>
+                        {c_name}
                     </span>
-                    <span style="font-size: 0.6rem; font-weight: 800; color: {c_color}; background: {c_color}25; padding: 1px 4px; border-radius: 4px; border: 1px solid {c_color}66;">ACTIVE</span>
+                    <span style="font-size: 0.58rem; font-weight: 800; color: #FFFFFF; background: {c_color}; padding: 1px 5px; border-radius: 4px;">{cfg['active_badge']}</span>
                 </div>
-                <div style="font-size: 0.74rem; font-weight: 700; color: #FFFFFF; margin-bottom: 2px;">{active_desc}</div>
-                <div style="font-size: 0.64rem; color: {c_color}; font-weight: 600;">⚡ Đang thực thi...</div>
-            </div>
-            """)
-        elif step_num < active_step:
-            live_cards_html.append(f"""
-            <div style="background: rgba(0, 223, 143, 0.05); border: 1px solid rgba(0, 223, 143, 0.35); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 700; color: #00DF8F; display: flex; align-items: center; gap: 4px;">✓ {name.split(' ')[-1]}</span>
-                    <span style="font-size: 0.58rem; font-weight: 700; color: #00DF8F; background: rgba(0, 223, 143, 0.15); padding: 1px 4px; border-radius: 4px;">DONE</span>
-                </div>
-                <div style="font-size: 0.72rem; font-weight: 600; color: #CBD5E1; margin-bottom: 2px;">{default_desc}</div>
-                <div style="font-size: 0.64rem; color: #94A3B8;">✓ Đã hoàn tất</div>
+                <div style="font-size: 0.74rem; font-weight: 700; color: #FFFFFF; margin-bottom: 2px;">{cfg['active_title']}</div>
+                <div style="font-size: 0.64rem; color: {c_color}; font-weight: 700;">{cfg['active_sub']}</div>
             </div>
             """)
         else:
+            is_done = (c_num < active_step)
+            card_bg = f"{c_color}0C" if is_done else f"rgba(255, 255, 255, 0.03)"
+            card_border = f"{c_color}55" if is_done else f"{c_color}25"
+            dot_anim = "animation: vxPulseDot 1.6s ease-in-out infinite;" if not is_done else ""
+
             live_cards_html.append(f"""
-            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between; opacity: 0.65;">
+            <div style="background: {card_bg}; border: 1px solid {card_border}; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 600; color: #64748B;">{name.split(' ')[-1]}</span>
-                    <span style="font-size: 0.58rem; font-weight: 600; color: #64748B; background: rgba(255, 255, 255, 0.05); padding: 1px 4px; border-radius: 4px;">WAIT</span>
+                    <span style="font-size: 0.72rem; font-weight: 700; color: {c_color}; display: flex; align-items: center; gap: 4px;">
+                        <span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: {c_color}; {dot_anim}"></span>
+                        {c_name}
+                    </span>
+                    <span style="font-size: 0.58rem; font-weight: 700; color: {c_color}; background: {c_color}18; padding: 1px 4px; border-radius: 4px; border: 1px solid {c_color}44;">{cfg['standby_badge']}</span>
                 </div>
-                <div style="font-size: 0.72rem; font-weight: 500; color: #64748B; margin-bottom: 2px;">{default_desc}</div>
-                <div style="font-size: 0.64rem; color: #475569;">Sẵn sàng nhận dữ liệu</div>
+                <div style="font-size: 0.72rem; font-weight: 600; color: #E2E8F0; margin-bottom: 2px;">{cfg['standby_title']}</div>
+                <div style="font-size: 0.64rem; color: #94A3B8;">{cfg['standby_sub']}</div>
             </div>
             """)
 
     cards_joined = "".join(live_cards_html)
+
 
     raw_html = f"""<style>
 @keyframes vxSpinCW {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
