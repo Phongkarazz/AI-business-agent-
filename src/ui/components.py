@@ -5977,71 +5977,60 @@ def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
 
     # Tiêu đề & Nhãn song ngữ
     hdr_title = "⚡ 5-AGENT COLLABORATIVE PIPELINE • REAL-TIME WORKFLOW" if is_en else "⚡ HỆ THỐNG 5 AGENT PHỐI HỢP THỜI GIAN THỰC (MULTI-AGENT MATRIX)"
-    hdr_badge = "✓ 100% COLLABORATIVE TRACE" if is_en else "✓ 100% MINH BẠCH TƯ DUY"
+    raw_ribbon_html = f"""<div style="background: linear-gradient(135deg, rgba(21, 26, 48, 0.95) 0%, rgba(11, 14, 23, 0.98) 100%); border: 1.5px solid rgba(0, 240, 255, 0.25); border-radius: 14px; padding: 12px 16px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(0, 240, 255, 0.08); backdrop-filter: blur(12px);">
+<div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 8px; margin-bottom: 10px;">
+<div style="display: flex; align-items: center; gap: 8px;">
+<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00DF8F; box-shadow: 0 0 10px #00DF8F; animation: vxPulseDot 1.2s ease-in-out infinite;"></span>
+<span style="font-size: 0.78rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{hdr_title}</span>
+</div>
+<span style="font-size: 0.68rem; font-weight: 700; color: #00DF8F; background: rgba(0, 223, 143, 0.12); border: 1px solid rgba(0, 223, 143, 0.35); padding: 2px 8px; border-radius: 6px; letter-spacing: 0.04em;">{hdr_badge}</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px;">
+<div style="background: rgba(0, 240, 255, 0.04); border: 1px solid rgba(0, 240, 255, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+<span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; display: flex; align-items: center; gap: 4px;">🧭 1. Supervisor</span>
+<span style="font-size: 0.6rem; font-weight: 700; color: #00F0FF; background: rgba(0, 240, 255, 0.15); padding: 1px 4px; border-radius: 4px;">PLAN</span>
+</div>
+<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{comp_badge}</div>
+<div style="font-size: 0.66rem; color: #94A3B8;">📋 {subtasks_cnt} {'Subtasks' if is_en else 'Nhiệm vụ'}</div>
+</div>
+<div style="background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+<span style="font-size: 0.72rem; font-weight: 800; color: #38BDF8; display: flex; align-items: center; gap: 4px;">⚡ 2. Data Eng</span>
+<span style="font-size: 0.6rem; font-weight: 700; color: #38BDF8; background: rgba(56, 189, 248, 0.15); padding: 1px 4px; border-radius: 4px;">SQL</span>
+</div>
+<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{sql_status}</div>
+<div style="font-size: 0.66rem; color: #94A3B8;">⏱️ {exec_time_ms:.0f} ms • CTE/Agg</div>
+</div>
+<div style="background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+<span style="font-size: 0.72rem; font-weight: 800; color: #10B981; display: flex; align-items: center; gap: 4px;">🛡️ 3. Auditor</span>
+<span style="font-size: 0.6rem; font-weight: 700; color: {audit_color}; background: rgba(16, 185, 129, 0.15); padding: 1px 4px; border-radius: 4px;">{score}/100</span>
+</div>
+<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{audit_tag}</div>
+<div style="font-size: 0.66rem; color: #94A3B8;">✅ 4/4 {'Pillars Check' if is_en else 'Trụ cột đạt'}</div>
+</div>
+<div style="background: rgba(168, 85, 247, 0.04); border: 1px solid rgba(168, 85, 247, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+<span style="font-size: 0.72rem; font-weight: 800; color: #A855F7; display: flex; align-items: center; gap: 4px;">🔍 4. Detective</span>
+<span style="font-size: 0.6rem; font-weight: 700; color: #A855F7; background: rgba(168, 85, 247, 0.15); padding: 1px 4px; border-radius: 4px;">SCAN</span>
+</div>
+<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{anom_tag}</div>
+<div style="font-size: 0.66rem; color: #94A3B8;">📊 Z-Score & IQR</div>
+</div>
+<div style="background: rgba(245, 158, 11, 0.04); border: 1px solid rgba(245, 158, 11, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+<span style="font-size: 0.72rem; font-weight: 800; color: #F59E0B; display: flex; align-items: center; gap: 4px;">💡 5. Strategy</span>
+<span style="font-size: 0.6rem; font-weight: 700; color: #F59E0B; background: rgba(245, 158, 11, 0.15); padding: 1px 4px; border-radius: 4px;">ADVISE</span>
+</div>
+<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{strat_tag}</div>
+<div style="font-size: 0.66rem; color: #94A3B8;">🏛️ ESG & Meritocracy</div>
+</div>
+</div>
+</div>"""
+    clean_ribbon_html = re.sub(r'\n\s*', ' ', raw_ribbon_html).strip()
+    st.markdown(clean_ribbon_html, unsafe_allow_html=True)
 
-    ribbon_html = f"""
-    <div style="background: linear-gradient(135deg, rgba(21, 26, 48, 0.95) 0%, rgba(11, 14, 23, 0.98) 100%); border: 1.5px solid rgba(0, 240, 255, 0.25); border-radius: 14px; padding: 12px 16px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(0, 240, 255, 0.08); backdrop-filter: blur(12px);">
-        <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 8px; margin-bottom: 10px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00DF8F; box-shadow: 0 0 10px #00DF8F; animation: vxPulseDot 1.2s ease-in-out infinite;"></span>
-                <span style="font-size: 0.78rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{hdr_title}</span>
-            </div>
-            <span style="font-size: 0.68rem; font-weight: 700; color: #00DF8F; background: rgba(0, 223, 143, 0.12); border: 1px solid rgba(0, 223, 143, 0.35); padding: 2px 8px; border-radius: 6px; letter-spacing: 0.04em;">{hdr_badge}</span>
-        </div>
-        <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px;">
-            <!-- CARD 1: SUPERVISOR -->
-            <div style="background: rgba(0, 240, 255, 0.04); border: 1px solid rgba(0, 240, 255, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; display: flex; align-items: center; gap: 4px;">🧭 1. Supervisor</span>
-                    <span style="font-size: 0.6rem; font-weight: 700; color: #00F0FF; background: rgba(0, 240, 255, 0.15); padding: 1px 4px; border-radius: 4px;">PLAN</span>
-                </div>
-                <div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{comp_badge}</div>
-                <div style="font-size: 0.66rem; color: #94A3B8;">📋 {subtasks_cnt} {'Subtasks' if is_en else 'Nhiệm vụ'}</div>
-            </div>
-
-            <!-- CARD 2: DATA ENGINEER -->
-            <div style="background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #38BDF8; display: flex; align-items: center; gap: 4px;">⚡ 2. Data Eng</span>
-                    <span style="font-size: 0.6rem; font-weight: 700; color: #38BDF8; background: rgba(56, 189, 248, 0.15); padding: 1px 4px; border-radius: 4px;">SQL</span>
-                </div>
-                <div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{sql_status}</div>
-                <div style="font-size: 0.66rem; color: #94A3B8;">⏱️ {exec_time_ms:.0f} ms • CTE/Agg</div>
-            </div>
-
-            <!-- CARD 3: DATA AUDITOR -->
-            <div style="background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #10B981; display: flex; align-items: center; gap: 4px;">🛡️ 3. Auditor</span>
-                    <span style="font-size: 0.6rem; font-weight: 700; color: {audit_color}; background: rgba(16, 185, 129, 0.15); padding: 1px 4px; border-radius: 4px;">{score}/100</span>
-                </div>
-                <div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{audit_tag}</div>
-                <div style="font-size: 0.66rem; color: #94A3B8;">✅ 4/4 {'Pillars Check' if is_en else 'Trụ cột đạt'}</div>
-            </div>
-
-            <!-- CARD 4: ANOMALY DETECTIVE -->
-            <div style="background: rgba(168, 85, 247, 0.04); border: 1px solid rgba(168, 85, 247, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #A855F7; display: flex; align-items: center; gap: 4px;">🔍 4. Detective</span>
-                    <span style="font-size: 0.6rem; font-weight: 700; color: #A855F7; background: rgba(168, 85, 247, 0.15); padding: 1px 4px; border-radius: 4px;">SCAN</span>
-                </div>
-                <div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{anom_tag}</div>
-                <div style="font-size: 0.66rem; color: #94A3B8;">📊 Z-Score & IQR</div>
-            </div>
-
-            <!-- CARD 5: STRATEGY ADVISOR -->
-            <div style="background: rgba(245, 158, 11, 0.04); border: 1px solid rgba(245, 158, 11, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #F59E0B; display: flex; align-items: center; gap: 4px;">💡 5. Strategy</span>
-                    <span style="font-size: 0.6rem; font-weight: 700; color: #F59E0B; background: rgba(245, 158, 11, 0.15); padding: 1px 4px; border-radius: 4px;">ADVISE</span>
-                </div>
-                <div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{strat_tag}</div>
-                <div style="font-size: 0.66rem; color: #94A3B8;">🏛️ ESG & Meritocracy</div>
-            </div>
-        </div>
-    </div>
-    """
-    st.markdown(ribbon_html, unsafe_allow_html=True)
 
 
 def render_veraxus_loading_html(text: str) -> str:
