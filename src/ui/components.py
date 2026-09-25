@@ -5977,7 +5977,10 @@ def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
 
     # Tiêu đề & Nhãn song ngữ
     hdr_title = "⚡ 5-AGENT COLLABORATIVE PIPELINE • REAL-TIME WORKFLOW" if is_en else "⚡ HỆ THỐNG 5 AGENT PHỐI HỢP THỜI GIAN THỰC (MULTI-AGENT MATRIX)"
-    raw_ribbon_html = f"""<div style="background: linear-gradient(135deg, rgba(21, 26, 48, 0.95) 0%, rgba(11, 14, 23, 0.98) 100%); border: 1.5px solid rgba(0, 240, 255, 0.25); border-radius: 14px; padding: 12px 16px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(0, 240, 255, 0.08); backdrop-filter: blur(12px);">
+    hdr_badge = "✓ 100% COLLABORATIVE TRACE" if is_en else "✓ 100% MINH BẠCH TƯ DUY"
+
+    try:
+        raw_ribbon_html = f"""<div style="background: linear-gradient(135deg, rgba(21, 26, 48, 0.95) 0%, rgba(11, 14, 23, 0.98) 100%); border: 1.5px solid rgba(0, 240, 255, 0.25); border-radius: 14px; padding: 12px 16px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(0, 240, 255, 0.08); backdrop-filter: blur(12px);">
 <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 8px; margin-bottom: 10px;">
 <div style="display: flex; align-items: center; gap: 8px;">
 <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00DF8F; box-shadow: 0 0 10px #00DF8F; animation: vxPulseDot 1.2s ease-in-out infinite;"></span>
@@ -6028,8 +6031,11 @@ def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
 </div>
 </div>
 </div>"""
-    clean_ribbon_html = re.sub(r'\n\s*', ' ', raw_ribbon_html).strip()
-    st.markdown(clean_ribbon_html, unsafe_allow_html=True)
+        clean_ribbon_html = re.sub(r'\n\s*', ' ', raw_ribbon_html).strip()
+        st.markdown(clean_ribbon_html, unsafe_allow_html=True)
+    except Exception:
+        pass
+
 
 
 
