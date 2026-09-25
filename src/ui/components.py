@@ -6044,9 +6044,8 @@ def render_veraxus_loading_html(text: str) -> str:
     Hiển thị widget loading với biểu tượng độc quyền VERAXUS & Multi-Agent Live Telemetry HUD:
     - Vòng xoay quỹ đạo kép đa lớp (Dual Kinetic Neon Rings) màu Cyan (#00F0FF) và Emerald (#00DF8F).
     - Lõi pha lê 3D đa giác lập thể (3D Faceted Geometric Crystal Core) thương hiệu Veraxus với hiệu ứng phát quang lơ lửng.
-    - Hệ thống Live Telemetry hiển thị tên Agent đang active và dải 5 pill trạng thái tác tử thời gian thực.
+    - Hệ thống Live Telemetry hiển thị đồng thời cả 5 Agents phối hợp song song ngay từ lúc người dùng gửi câu hỏi.
     """
-
     clean_text = str(text or "").strip()
     low_t = clean_text.lower()
 
@@ -6056,25 +6055,19 @@ def render_veraxus_loading_html(text: str) -> str:
         tag_color = "#00F0FF"
         tag_bg = "rgba(0, 240, 255, 0.16)"
         tag_border = "rgba(0, 240, 255, 0.45)"
-    elif "agent 2" in low_t or "data engineer" in low_t or "sql engine" in low_t or "in-context" in low_t:
+    elif "agent 2" in low_t or "data engineer" in low_t or "sql engine" in low_t or "in-context" in low_t or "database engine" in low_t or "thực thi" in low_t:
         active_step = 2
         agent_tag = "⚡ AGENT 2/5 • DATA ENGINEER & SQL ARCHITECT"
         tag_color = "#38BDF8"
         tag_bg = "rgba(56, 189, 248, 0.16)"
         tag_border = "rgba(56, 189, 248, 0.45)"
-    elif "database engine" in low_t or "thực thi truy vấn" in low_t or "đọc tập kết quả" in low_t:
-        active_step = 2
-        agent_tag = "💾 DATABASE ENGINE • EXECUTING QUERY"
-        tag_color = "#60A5FA"
-        tag_bg = "rgba(96, 165, 250, 0.16)"
-        tag_border = "rgba(96, 165, 250, 0.45)"
-    elif "agent 3" in low_t or "data auditor" in low_t or "evaluator" in low_t or "kiểm định" in low_t:
+    elif "agent 3" in low_t or "data auditor" in low_t or "evaluator" in low_t or "kiểm định" in low_t or "audit" in low_t:
         active_step = 3
         agent_tag = "🛡️ AGENT 3/5 • DATA AUDITOR & QUALITY EVALUATOR"
         tag_color = "#10B981"
         tag_bg = "rgba(16, 185, 129, 0.16)"
         tag_border = "rgba(16, 185, 129, 0.45)"
-    elif "agent 4" in low_t or "anomaly detective" in low_t or "dị biệt" in low_t or "outlier" in low_t:
+    elif "agent 4" in low_t or "anomaly detective" in low_t or "dị biệt" in low_t or "outlier" in low_t or "forensics" in low_t:
         active_step = 4
         agent_tag = "🔍 AGENT 4/5 • ANOMALY DETECTIVE & FORENSICS"
         tag_color = "#A855F7"
@@ -6088,39 +6081,59 @@ def render_veraxus_loading_html(text: str) -> str:
         tag_border = "rgba(245, 158, 11, 0.45)"
     else:
         active_step = 1
-        agent_tag = "🧭 VERAXUS MULTI-AGENT ENGINE • LIVE"
+        agent_tag = "🧭 VERAXUS MULTI-AGENT ENGINE • LIVE CO-PILOT"
         tag_color = "#00DF8F"
         tag_bg = "rgba(0, 223, 143, 0.16)"
         tag_border = "rgba(0, 223, 143, 0.45)"
 
-    agent_pills_data = [
-        (1, "🧭 Supervisor", "#00F0FF"),
-        (2, "⚡ Data Eng", "#38BDF8"),
-        (3, "🛡️ Auditor", "#10B981"),
-        (4, "🔍 Detective", "#A855F7"),
-        (5, "💡 Strategy", "#F59E0B"),
+    agent_cards_data = [
+        (1, "🧭 1. Supervisor", "PLAN", "#00F0FF", "Phân tích & Phân rã", "Intent & Routing"),
+        (2, "⚡ 2. Data Eng", "SQL", "#38BDF8", "Sinh SQL & Nạp ICL", "CTE / Window Gen"),
+        (3, "🛡️ 3. Auditor", "CHECK", "#10B981", "Kiểm toán 4 Trụ Cột", "Maker-Checker"),
+        (4, "🔍 4. Detective", "SCAN", "#A855F7", "Z-Score & IQR Scan", "Dị biệt thống kê"),
+        (5, "💡 5. Strategy", "ADVISE", "#F59E0B", "Khuyến nghị C-Level", "ESG & Meritocracy"),
     ]
 
-    pills_html = []
-    for step_num, name, c_color in agent_pills_data:
+    live_cards_html = []
+    for step_num, name, code, c_color, active_desc, default_desc in agent_cards_data:
         if step_num == active_step:
-            pills_html.append(
-                f'<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 6px; font-size: 0.68rem; font-weight: 700; background: {c_color}22; color: {c_color}; border: 1px solid {c_color}88; box-shadow: 0 0 8px {c_color}55;">'
-                f'<span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: {c_color}; animation: vxPulseDot 1s ease-in-out infinite;"></span>'
-                f'{name}</span>'
-            )
+            live_cards_html.append(f"""
+            <div style="background: {c_color}14; border: 1.5px solid {c_color}; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 0 14px {c_color}44;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="font-size: 0.72rem; font-weight: 800; color: {c_color}; display: flex; align-items: center; gap: 4px;">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {c_color}; animation: vxPulseDot 0.9s ease-in-out infinite;"></span>
+                        {name}
+                    </span>
+                    <span style="font-size: 0.6rem; font-weight: 800; color: {c_color}; background: {c_color}25; padding: 1px 4px; border-radius: 4px; border: 1px solid {c_color}66;">ACTIVE</span>
+                </div>
+                <div style="font-size: 0.74rem; font-weight: 700; color: #FFFFFF; margin-bottom: 2px;">{active_desc}</div>
+                <div style="font-size: 0.64rem; color: {c_color}; font-weight: 600;">⚡ Đang thực thi...</div>
+            </div>
+            """)
         elif step_num < active_step:
-            pills_html.append(
-                f'<span style="display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border-radius: 6px; font-size: 0.66rem; font-weight: 600; background: rgba(255,255,255,0.04); color: #94A3B8; border: 1px solid rgba(255,255,255,0.08);">'
-                f'✓ {name.split(" ")[-1]}</span>'
-            )
+            live_cards_html.append(f"""
+            <div style="background: rgba(0, 223, 143, 0.05); border: 1px solid rgba(0, 223, 143, 0.35); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="font-size: 0.72rem; font-weight: 700; color: #00DF8F; display: flex; align-items: center; gap: 4px;">✓ {name.split(' ')[-1]}</span>
+                    <span style="font-size: 0.58rem; font-weight: 700; color: #00DF8F; background: rgba(0, 223, 143, 0.15); padding: 1px 4px; border-radius: 4px;">DONE</span>
+                </div>
+                <div style="font-size: 0.72rem; font-weight: 600; color: #CBD5E1; margin-bottom: 2px;">{default_desc}</div>
+                <div style="font-size: 0.64rem; color: #94A3B8;">✓ Đã hoàn tất</div>
+            </div>
+            """)
         else:
-            pills_html.append(
-                f'<span style="display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 6px; font-size: 0.66rem; font-weight: 500; background: rgba(255,255,255,0.02); color: #475569; border: 1px solid rgba(255,255,255,0.04);">'
-                f'{name.split(" ")[-1]}</span>'
-            )
+            live_cards_html.append(f"""
+            <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between; opacity: 0.65;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="font-size: 0.72rem; font-weight: 600; color: #64748B;">{name.split(' ')[-1]}</span>
+                    <span style="font-size: 0.58rem; font-weight: 600; color: #64748B; background: rgba(255, 255, 255, 0.05); padding: 1px 4px; border-radius: 4px;">WAIT</span>
+                </div>
+                <div style="font-size: 0.72rem; font-weight: 500; color: #64748B; margin-bottom: 2px;">{default_desc}</div>
+                <div style="font-size: 0.64rem; color: #475569;">Sẵn sàng nhận dữ liệu</div>
+            </div>
+            """)
 
-    pills_joined = "".join(pills_html)
+    cards_joined = "".join(live_cards_html)
 
     raw_html = f"""<style>
 @keyframes vxSpinCW {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
@@ -6128,14 +6141,14 @@ def render_veraxus_loading_html(text: str) -> str:
 @keyframes vxCrystalPulse {{ 0%, 100% {{ transform: scale(0.95); opacity: 0.9; }} 50% {{ transform: scale(1.1); opacity: 1; }} }}
 @keyframes vxPulseDot {{ 0%, 100% {{ transform: scale(0.85); opacity: 0.6; box-shadow: 0 0 6px {tag_color}; }} 50% {{ transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px {tag_color}, 0 0 22px {tag_color}; }} }}
 </style>
-<div class="veraxus-loading-card" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 22px; background: linear-gradient(135deg, #151A30 0%, #0B0E17 100%); border: 1.5px solid rgba(0, 240, 255, 0.45); border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.2); backdrop-filter: blur(14px); margin: 12px 0; max-width: 680px;">
+<div class="veraxus-loading-card" style="display: flex; flex-direction: column; gap: 12px; padding: 14px 18px; background: linear-gradient(135deg, rgba(21, 26, 48, 0.96) 0%, rgba(11, 14, 23, 0.98) 100%); border: 1.5px solid rgba(0, 240, 255, 0.35); border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.15); backdrop-filter: blur(14px); margin: 12px 0;">
 <div style="display: flex; align-items: center; gap: 14px;">
-<div class="veraxus-spinner-wrapper" style="position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-<div style="position: absolute; width: 34px; height: 34px; background: radial-gradient(circle, rgba(0, 240, 255, 0.45) 0%, rgba(0, 104, 255, 0.2) 60%, transparent 80%); border-radius: 50%; filter: blur(4px);"></div>
-<div style="position: absolute; inset: 0; width: 44px; height: 44px; border-radius: 50%; border: 3px solid transparent; border-top: 3px solid #00F0FF; border-right: 3px solid #00DF8F; box-shadow: 0 0 12px rgba(0, 240, 255, 0.7); animation: vxSpinCW 0.8s linear infinite;"></div>
-<div style="position: absolute; inset: 5px; width: 34px; height: 34px; border-radius: 50%; border: 1.5px dashed rgba(0, 240, 255, 0.4); border-left: 2px solid #38BDF8; border-bottom: 2px solid #0068FF; animation: vxSpinCCW 1.4s linear infinite;"></div>
+<div class="veraxus-spinner-wrapper" style="position: relative; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+<div style="position: absolute; width: 32px; height: 32px; background: radial-gradient(circle, rgba(0, 240, 255, 0.45) 0%, rgba(0, 104, 255, 0.2) 60%, transparent 80%); border-radius: 50%; filter: blur(4px);"></div>
+<div style="position: absolute; inset: 0; width: 42px; height: 42px; border-radius: 50%; border: 3px solid transparent; border-top: 3px solid #00F0FF; border-right: 3px solid #00DF8F; box-shadow: 0 0 12px rgba(0, 240, 255, 0.7); animation: vxSpinCW 0.8s linear infinite;"></div>
+<div style="position: absolute; inset: 4px; width: 34px; height: 34px; border-radius: 50%; border: 1.5px dashed rgba(0, 240, 255, 0.4); border-left: 2px solid #38BDF8; border-bottom: 2px solid #0068FF; animation: vxSpinCCW 1.4s linear infinite;"></div>
 <div style="position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; animation: vxCrystalPulse 1.5s ease-in-out infinite;">
-<svg width="22" height="22" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.9));">
+<svg width="20" height="20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.9));">
 <defs>
 <linearGradient id="vxSpinFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%"><stop offset="0%" stop-color="#38BDF8"/><stop offset="60%" stop-color="#0068FF"/><stop offset="100%" stop-color="#0047BA"/></linearGradient>
 <linearGradient id="vxSpinFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#BAE6FD"/><stop offset="100%" stop-color="#38BDF8"/></linearGradient>
@@ -6156,7 +6169,7 @@ def render_veraxus_loading_html(text: str) -> str:
 <div class="veraxus-spinner-text-wrap" style="display: flex; flex-direction: column; gap: 3px; z-index: 2; flex: 1;">
 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
 <div style="display: flex; align-items: center; gap: 6px;">
-<span style="font-size: 0.74rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1;">VERAXUS</span>
+<span style="font-size: 0.74rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1;">VERAXUS LIVE MATRIX</span>
 <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #00DF8F; animation: vxPulseDot 1.2s ease-in-out infinite;"></span>
 </div>
 <span style="font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; color: {tag_color}; background: {tag_bg}; border: 1px solid {tag_border}; padding: 1px 7px; border-radius: 5px;">{agent_tag}</span>
@@ -6164,12 +6177,12 @@ def render_veraxus_loading_html(text: str) -> str:
 <span class="veraxus-spinner-status" style="color: #FFFFFF !important; font-weight: 600; font-size: 0.88rem; letter-spacing: -0.01em; line-height: 1.35; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);">{clean_text}</span>
 </div>
 </div>
-<div style="display: flex; align-items: center; gap: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 7px; margin-top: 2px;">
-<span style="font-size: 0.65rem; color: #64748B; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 2px;">Agents:</span>
-{pills_joined}
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px; margin-top: 2px;">
+{cards_joined}
 </div>
 </div>"""
     return re.sub(r'\n\s*', ' ', raw_html).strip()
+
 
 
 

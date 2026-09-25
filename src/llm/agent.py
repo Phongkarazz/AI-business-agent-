@@ -2054,7 +2054,37 @@ ORDER BY SalaryDifference DESC"""
     return sql
 
 
+def auto_fix_gender_salary_comparison_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa câu hỏi so sánh mức lương trung bình / thu nhập giữa các giới tính (Nam vs Nữ)."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    # Nhận diện câu hỏi so sánh lương theo giới tính
+    is_gender = any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "từng giới tính", "các giới tính", "theo giới tính", "gender", "nam", "nữ"])
+    is_salary = any(k in q_low for k in ["lương", "mức lương", "thu nhập", "salary", "lương trung bình", "lương bình quân"])
+    
+    # Không phải câu hỏi theo phòng ban hoặc thăng chức/quản lý
+    is_by_dept = any(k in q_low for k in ["phòng ban", "từng phòng", "các phòng", "department", "bộ phận"])
+    is_promo = any(k in q_low for k in ["thăng chức", "đổi chức danh", "chuyển chức danh", "bổ nhiệm", "manager", "quản lý", "trưởng phòng"])
+
+    if is_gender and is_salary and not is_by_dept and not is_promo:
+        return """SELECT 
+    CASE WHEN e.gender = 'M' THEN 'Nam (M)' ELSE 'Nữ (F)' END AS `Giới Tính`,
+    ROUND(AVG(s.salary), 2) AS `Lương Trung Bình ($)`,
+    COUNT(DISTINCT e.emp_no) AS `Số Lượng Nhân Sự`,
+    MAX(s.salary) AS `Lương Cao Nhất ($)`,
+    MIN(s.salary) AS `Lương Thấp Nhất ($)`
+FROM employees e
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY e.gender
+ORDER BY `Lương Trung Bình ($)` DESC;""".strip()
+
+    return sql
+
+
 def auto_fix_department_manager_gender_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+
     """Tự động chuẩn hóa câu hỏi thống kê hoặc tìm phòng ban có nhiều/ít quản lý Nam hoặc Nữ nhất."""
     if not sql or not user_query:
         return sql
@@ -7669,12 +7699,13 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             sql_cur = auto_fix_department_share_in_company_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_avg_salary_threshold_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_payroll_query(sql_cur, user_query)
-            sql_cur = auto_fix_time_to_promotion_by_dept_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_gender_promotion_rate_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_gender_salary_comparison_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_gender_salary_gap_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_recent_manager_gender_promotion_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_manager_gender_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_gender_salary_contribution_query(sql_cur, user_query, dialect=dialect)
+
             sql_cur = auto_fix_gender_ratio_query(sql_cur, user_query)
             sql_cur = auto_fix_employee_salary_growth_rate_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_employee_salary_above_title_avg_query(sql_cur, user_query, dialect=dialect)
