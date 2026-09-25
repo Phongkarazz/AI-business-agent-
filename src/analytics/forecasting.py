@@ -250,13 +250,40 @@ def forecast_series(df: pd.DataFrame, periods: int = 3):
         title=f"📈 Biểu đồ Dự báo Xu hướng Thích ứng theo {x_col} (+{periods} kỳ tương lai)",
         xaxis_title=x_col,
         yaxis_title=y_col,
-        template="plotly_white",
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", size=12, color="#FFFFFF"),
+        title_font=dict(size=15, color="#FFFFFF"),
         margin=dict(l=20, r=20, t=50, b=60 if tick_angle != 0 else 30),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(color="#CBD5E1", size=11),
+            bgcolor="rgba(21, 26, 48, 0.8)",
+            bordercolor="rgba(0, 240, 255, 0.2)"
+        ),
         hovermode="x unified"
     )
 
     # Ép kiểu trục X thành category và tự động xoay nghiêng để các mốc thời gian không bị đè chồng
-    fig.update_xaxes(type="category", tickangle=tick_angle, automargin=True)
+    fig.update_xaxes(
+        type="category",
+        tickangle=tick_angle,
+        automargin=True,
+        tickfont=dict(color="#CBD5E1", size=11),
+        title_font=dict(color="#FFFFFF", size=13),
+        gridcolor="rgba(255, 255, 255, 0.08)",
+        linecolor="rgba(255, 255, 255, 0.15)"
+    )
+    fig.update_yaxes(
+        tickfont=dict(color="#CBD5E1", size=11),
+        title_font=dict(color="#FFFFFF", size=13),
+        gridcolor="rgba(255, 255, 255, 0.08)",
+        linecolor="rgba(255, 255, 255, 0.15)"
+    )
 
     return fig, method_name

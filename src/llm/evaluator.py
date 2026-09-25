@@ -68,19 +68,26 @@ def evaluate_execution(
         cols_low = [str(c).lower() for c in df.columns]
 
         # Kiểm tra 2.1: Người dùng hỏi danh sách nhân viên nhưng kết quả lại chỉ có phòng ban
+        is_dept_level_query = any(k in q_low for k in [
+            "phòng ban nào", "phòng nào", "đơn vị nào", "bộ phận nào", "khối nào",
+            "which department", "which dept", "chênh lệch lương", "khoảng cách lương",
+            "salary spread", "salary gap", "nén lương", "wage compression", "top phòng ban",
+            "phòng ban có mức", "phòng ban có chênh lệch", "theo phòng ban", "từng phòng ban"
+        ])
         is_aggregate_query = any(k in q_low for k in [
             "số lượng", "tổng số", "tỷ lệ", "phân bổ", "cơ cấu", "bao nhiêu", "đếm", 
             "count", "headcount", "bình quân", "quy mô", "trung bình", "tổng doanh số", "doanh số",
             "doanh thu", "top phòng ban", "theo phòng ban", "theo chức danh", "theo năm", 
-            "từng năm", "từng tháng", "từng quý", "thống kê"
-        ])
+            "từng năm", "từng tháng", "từng quý", "thống kê", "chênh lệch", "khoảng cách", "spread", "gap",
+            "lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất", "max", "min"
+        ]) or is_dept_level_query
         is_explicit_employee_list = any(k in q_low for k in [
             "danh sách nhân viên", "những nhân viên", "các nhân viên", "liệt kê nhân viên", 
             "danh sách nhân sự", "những nhân sự", "các nhân sự", "liệt kê nhân sự", "liệt kê các nhân sự",
             "ai là", "nhân viên nào", "nhân sự nào", "top nhân viên", "top 5 nhân viên", "top 10 nhân viên",
             "top nhân sự", "top 3 nhân sự", "top 5 nhân sự", "top 10 nhân sự",
             "thông tin nhân viên", "thông tin nhân sự", "họ và tên"
-        ])
+        ]) and not is_dept_level_query
         is_mgr_sub_query = (
             any(k in q_low for k in ["manager", "trưởng phòng", "quản lý"])
             and any(k in q_low for k in ["dưới quyền", "subordinate", "cấp dưới"])
@@ -88,7 +95,8 @@ def evaluate_execution(
         asked_for_employees = (
             any(k in q_low for k in ["nhân viên", "nhân sự", "danh sách", "liệt kê", "ai là", "employee", "employees", "salesperson", "sales person", "người bán"])
             and (is_explicit_employee_list or not is_aggregate_query)
-            and not (is_mgr_sub_query and any(k in q_low for k in ["trung bình", "avg", "cao nhất", "max", "so sánh"]))
+            and not is_dept_level_query
+            and not (is_mgr_sub_query and any(k in q_low for k in ["trung bình", "avg", "cao nhất", "max", "so sánh", "chênh lệch", "gấp"]))
         )
         has_employee_col = (
             any(any(k in c for k in [
@@ -167,29 +175,45 @@ def evaluate_execution(
                 criteria["semantic_alignment"]["passed"] = False
                 msg = "Người dùng hỏi tỷ lệ thăng chức / đổi chức danh theo giới tính nhưng truy vấn chỉ đếm tổng số nhân sự mà không liên kết bảng titles." if not is_en else "User queried gender promotion rate, but query lacks titles table or promotion rate metrics."
                 criteria["semantic_alignment"]["detail"] = msg
+        # Kiểm tra 2.5.5: Người dùng hỏi thời gian để thăng chức giữa các phòng ban
+        asked_time_to_promotion_dept = (
+            any(k in q_low for k in ["thời gian", "bao lâu", "mất bao lâu", "mấy năm", "số năm", "số ngày", "time to", "years to", "khác nhau"])
+            and any(k in q_low for k in ["thăng chức", "thăng tiến", "đổi chức danh", "chuyển chức danh", "promotion"])
+            and any(k in q_low for k in ["phòng ban", "các phòng ban", "department"])
+            and not any(k in q_low for k in ["nam", "nữ", "giới tính", "tỷ lệ", "tỉ lệ"])
+        )
+        if asked_time_to_promotion_dept:
+            has_datediff = bool(re.search(r"(datediff|julianday|timestampdiff)", sql_low))
+            has_proper_time_metric = any(any(k in c for k in ["year", "day", "năm", "ngày", "time", "duration", "avg"]) for c in cols_low)
+            has_invalid_ranking = any("ranking" in c or "rank_change" in c for c in cols_low)
+            if not has_datediff or not has_proper_time_metric or has_invalid_ranking:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = "Người dùng hỏi thời gian thăng chức giữa các phòng ban nhưng truy vấn không tính khoảng thời gian (DATEDIFF / julianday) giữa các chức danh hoặc trả về chỉ số Ranking không đúng nghĩa." if not is_en else "Query does not compute time to promotion (DATEDIFF/julianday) between titles across departments."
+                criteria["semantic_alignment"]["detail"] = msg
                 fails.append(msg)
                 actionable_feedbacks.append(
-                    "BẮT BUỘC liên kết bảng titles để lọc các nhân viên có >= 2 chức danh (đổi chức danh ít nhất 1 lần) và tính tỷ lệ thăng chức riêng cho từng giới tính!"
-                    if not is_en else "MUST join titles table to filter employees with >= 2 titles and calculate promotion rate per gender!"
+                    "BẮT BUỘC dùng CTE RankedTitles với ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date) để lấy rn=1 và rn=2, sau đó tính DATEDIFF(t2.from_date, t1.from_date) và AVG(YearsToPromotion) theo từng phòng ban!"
+                    if not is_en else
+                    "MUST use CTE RankedTitles with ROW_NUMBER() for rn=1 and rn=2, then compute DATEDIFF(t2.from_date, t1.from_date) and AVG(YearsToPromotion) per department!"
                 )
 
         # Kiểm tra 2.6: Người dùng hỏi tìm nhân viên tuyển sau ngày/năm cụ thể được thăng chức lên Manager / Trưởng phòng
         asked_promoted_manager = (
-            any(k in q_low for k in ["manager", "trưởng phòng", "quản lý"])
-            and any(k in q_low for k in ["thăng chức", "bổ nhiệm", "đổi chức danh", "lên chức"])
-            and any(k in q_low for k in ["tuyển dụng", "tuyển", "vào làm", "hire", "sau ngày", "sau năm", "từ ngày", "từ năm"])
+            any(k in q_low for k in ["manager", "trưởng phòng", "quản lý", "quản lí", "ban quản lý"])
+            and any(k in q_low for k in ["thăng chức", "bổ nhiệm", "đổi chức danh", "lên chức", "lên vị trí", "lên chức vụ", "xuất sắc", "trở thành"])
+            and any(k in q_low for k in ["tuyển dụng", "tuyển", "vào làm", "hire", "sau ngày", "sau năm", "từ ngày", "từ năm", "gia nhập"])
         )
         if asked_promoted_manager:
             has_mgr_in_sql = "manager" in sql_low or "dept_manager" in sql_low
             has_hire_date_filter = "hire_date" in sql_low and any(sym in sql_low for sym in [">", "between", ">="])
-            is_wrong_trend_query = "group by" in sql_low and ("newtitleappointments" in sql_low or "year" in sql_low)
+            is_wrong_trend_query = "group by" in sql_low and ("newtitleappointments" in sql_low or "year" in sql_low or "totalhires" in sql_low or "hireyear" in sql_low)
 
             if not has_mgr_in_sql or not has_hire_date_filter or is_wrong_trend_query:
                 criteria["semantic_alignment"]["passed"] = False
                 msg = (
-                    "Người dùng hỏi tìm các nhân viên cụ thể tuyển dụng sau mốc thời gian được thăng chức lên Manager, nhưng câu lệnh lại truy vấn xu hướng bổ nhiệm hoặc thiếu điều kiện lọc Manager/hire_date."
+                    "Người dùng hỏi tìm các nhân viên cụ thể tuyển dụng sau mốc thời gian được thăng chức lên Manager, nhưng câu lệnh lại truy vấn xu hướng tuyển dụng/bổ nhiệm hoặc thiếu điều kiện lọc Manager/hire_date."
                     if not is_en else
-                    "User asked for specific employees hired after a date promoted to Manager, but query returned annual trends or lacks Manager/hire_date filter."
+                    "User asked for specific employees hired after a date promoted to Manager, but query returned annual hiring/appointment trends or lacks Manager/hire_date filter."
                 )
                 criteria["semantic_alignment"]["detail"] = msg
                 fails.append(msg)
@@ -275,28 +299,28 @@ def evaluate_execution(
                     "MUST map 'average' to ROUND(AVG(se.salary), 2) AS SubordinateAvgSalary! DO NOT USE MAX(se.salary)!"
                 )
 
-        # Kiểm tra 2.6.10: So sánh mức lương giữa nhân viên kỳ cựu (> 5 năm) và nhân viên mới (< 2 năm) theo từng phòng ban
+        # Kiểm tra 2.6.10: So sánh mức lương giữa nhân viên kỳ cựu (> X năm) và nhân viên mới (< Y năm) theo từng phòng ban
         asked_tenure_cohort_salary = (
-            any(k in q_low for k in ["kỳ cựu", "thâm niên", "trên 5 năm", "lâu năm", "cống hiến"])
-            and any(k in q_low for k in ["mới", "mới vào", "mới tuyển", "dưới 2 năm", "ít năm"])
-            and any(k in q_low for k in ["lương", "salary", "thu nhập"])
+            any(k in q_low for k in ["kỳ cựu", "thâm niên", "trên 5 năm", "trên 7 năm", "trên 6 năm", "trên 8 năm", "trên 10 năm", "lâu năm", "cống hiến", "nhiều năm"])
+            and any(k in q_low for k in ["mới", "mới vào", "mới tuyển", "dưới 2 năm", "dưới 3 năm", "dưới 1 năm", "ít năm"])
+            and any(k in q_low for k in ["lương", "salary", "thu nhập", "nén lương", "ép lương"])
         )
         if asked_tenure_cohort_salary:
             has_senior_sal = any(any(k in c for k in ["senior", "tenure", "ky_cuu", "kỳ cựu", "lâu năm"]) for c in cols_low)
-            has_new_sal = any(any(k in c for k in ["new", "moi", "mới", "dưới 2", "newbie"]) for c in cols_low)
+            has_new_sal = any(any(k in c for k in ["new", "moi", "mới", "dưới", "newbie"]) for c in cols_low)
             has_wrong_mgr = "dept_manager" in sql_low or "managername" in cols_low
 
             if not has_senior_sal or not has_new_sal or has_wrong_mgr:
                 criteria["semantic_alignment"]["passed"] = False
                 msg = (
-                    "Người dùng yêu cầu so sánh mức lương trung bình giữa nhóm nhân viên kỳ cựu (> 5 năm) và nhóm nhân viên mới (< 2 năm) theo từng phòng ban, nhưng kết quả thiếu cột lương phân nhóm hoặc bị chuyển hướng nhầm sang truy vấn Trưởng phòng (dept_manager)."
+                    "Người dùng yêu cầu so sánh mức lương trung bình giữa nhóm nhân viên kỳ cựu và nhóm nhân viên mới, nhưng kết quả thiếu cột lương phân nhóm hoặc bị chuyển hướng nhầm sang truy vấn Trưởng phòng (dept_manager)."
                     if not is_en else
-                    "User asked to compare average salary between senior (>5 yrs) and new hire (<2 yrs) cohorts across departments, but query lacked cohort salary metrics or falsely joined dept_manager."
+                    "User asked to compare average salary between senior and new hire cohorts, but query lacked cohort salary metrics or falsely joined dept_manager."
                 )
                 criteria["semantic_alignment"]["detail"] = msg
                 fails.append(msg)
                 actionable_feedbacks.append(
-                    "BẮT BUỘC SELECT cả SeniorAvgSalary (thâm niên > 5 năm) và NewHireAvgSalary (thâm niên < 2 năm) bằng CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25. TUYỆT ĐỐI KHÔNG JOIN dept_manager!"
+                    "BẮT BUỘC SELECT cả SeniorAvgSalary và NewHireAvgSalary bằng CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25. TUYỆT ĐỐI KHÔNG JOIN dept_manager!"
                     if not is_en else
                     "MUST compute SeniorAvgSalary and NewHireAvgSalary using CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25. DO NOT join dept_manager!"
                 )
@@ -363,10 +387,15 @@ def evaluate_execution(
 
         # Kiểm tra 2.6.13: Người dùng hỏi mức chênh lệch lương giữa người cao nhất và thấp nhất theo chức danh hoặc phòng ban
         is_salary_spread_eval = (
-            any(k in q_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa"])
-            and any(k in q_low for k in ["lương", "salary", "thu nhập"])
-            and (any(k in q_low for k in ["chức danh", "title", "vị trí"]) or any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"]))
-            and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "gender", "kỳ cựu", "mới vào", "chuẩn", "stddev", "standard deviation", "std("])
+            any(k in q_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa", "difference", "disparity"])
+            and any(k in q_low for k in ["lương", "salary", "thu nhập", "income"])
+            and (
+                any(k in q_low for k in ["chức danh", "title", "vị trí"])
+                or any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"])
+                or any(k in q_low for k in ["nhóm", "các nhóm", "nhóm cao nhất", "nhóm thấp nhất", "giữa nhóm", "nhóm lương", "tier", "phân khúc"])
+                or ("cao nhất" in q_low and "thấp nhất" in q_low)
+            )
+            and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "gender", "kỳ cựu", "mới vào", "chuẩn", "stddev", "standard deviation", "std(", "ép lương", "áp lương", "nén lương", "compression", "wage compression", "pay compression"])
         )
         if is_salary_spread_eval:
             is_title_eval = any(k in q_low for k in ["chức danh", "title", "vị trí"])
@@ -387,6 +416,29 @@ def evaluate_execution(
                     f"BẮT BUỘC tính MAX(s.salary) AS MaxSalary, MIN(s.salary) AS MinSalary, (MAX(s.salary) - MIN(s.salary)) AS SalarySpread trên bảng {'titles t' if is_title_eval else 'departments d'}. TUYỆT ĐỐI KHÔNG tính lương trung bình AVG(salary)!"
                     if not is_en else
                     f"MUST compute MAX(s.salary) AS MaxSalary, MIN(s.salary) AS MinSalary, and SalarySpread = MAX - MIN on {'titles t' if is_title_eval else 'departments d'}. Do NOT compute AVG(salary)!"
+                )
+
+        # Kiểm tra 2.6.13b: Người dùng hỏi Tỷ lệ ép lương / Nén lương (Wage / Salary Compression)
+        is_salary_comp_eval = (
+            any(k in q_low for k in ["ép lương", "áp lương", "nén lương", "compression", "wage compression", "salary compression", "pay compression"])
+            or (any(k in q_low for k in ["tỷ lệ ép", "tỉ lệ ép", "tỷ lệ nén", "tỉ lệ nén"]))
+        )
+        if is_salary_comp_eval:
+            has_comp_calc = any(k in sql_low for k in ["wagecompressionpct", "wage_compression", "wagecompression", "compression", "payratio", "min(s.salary) * 100.0 / avg(s.salary)", "min(s.salary) / avg(s.salary)"]) or (df is not None and any(any(k in str(c).lower() for k in ["wagecompression", "compressionpct", "compression", "nén", "ép"]) for c in df.columns))
+            
+            if not has_comp_calc:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Người dùng hỏi về tỷ lệ ép lương / nén lương (Wage Compression), nhưng câu truy vấn thiếu chỉ số tính toán tỷ lệ ép lương WageCompressionPct (MIN * 100.0 / AVG) hoặc các trường phân tích thu nhập trần - sàn."
+                    if not is_en else
+                    "User asked for wage/salary compression analysis, but query lacked WageCompressionPct calculation or ceiling-floor salary metrics."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC tính toán WageCompressionPct = ROUND(MIN(s.salary) * 100.0 / AVG(s.salary), 2), MaxSalary, MinSalary và SalarySpread = (MAX(s.salary) - MIN(s.salary)) theo từng phòng ban!"
+                    if not is_en else
+                    "MUST compute WageCompressionPct = ROUND(MIN(s.salary) * 100.0 / AVG(s.salary), 2), MaxSalary, MinSalary, and SalarySpread = MAX - MIN grouped by department!"
                 )
 
         # Kiểm tra 2.6.14: Người dùng hỏi phân loại toàn bộ nhân sự thành 3 nhóm lương (Dưới 50k, 50k-80k, Trên 80k)
@@ -457,7 +509,7 @@ def evaluate_execution(
                     "MUST compute CurrentAvgSalary = AVG(salary), SalaryStdDev = STDDEV(salary), FluctuationRate = STDDEV * 100.0 / AVG grouped by d.dept_name ORDER BY SalaryStdDev DESC. Do NOT use MAX - MIN or dept_manager!"
                 )
 
-        # Kiểm tra 2.6.16: Người dùng hỏi Top N phòng ban có tổng quỹ lương cao nhất kèm số lượng nhân sự
+        # Kiểm tra 2.6.16: Người dùng hỏi Tổng quỹ lương theo phòng ban kèm số lượng nhân sự
         is_top_dept_payroll_eval = (
             any(k in q_low for k in ["quỹ lương", "tổng quỹ lương", "tổng chi trả lương", "chi trả quỹ lương", "chi phí lương"])
             or (
@@ -468,21 +520,22 @@ def evaluate_execution(
         if is_top_dept_payroll_eval:
             has_sum_salary = "sum(s.salary)" in sql_low or "sum(salary)" in sql_low or "totalpayroll" in sql_low or (df is not None and any("payroll" in str(c).lower() or "sum" in str(c).lower() for c in df.columns))
             has_headcount = "count(" in sql_low or "headcount" in sql_low or (df is not None and any("headcount" in str(c).lower() for c in df.columns))
-            has_limit = "limit" in sql_low or (df is not None and len(df) <= 5)
+            req_top_num = re.search(r"(?:top\s*|danh\s+sách\s*)(\d+)", q_low)
+            has_limit = ("limit" in sql_low) if req_top_num else True
 
             if not has_sum_salary or not has_headcount or not has_limit:
                 criteria["semantic_alignment"]["passed"] = False
                 msg = (
-                    "Người dùng hỏi Top phòng ban có tổng quỹ lương chi trả cao nhất kèm số lượng nhân sự, nhưng câu lệnh lại thiếu SUM(s.salary) AS TotalPayroll, thiếu COUNT(DISTINCT de.emp_no) AS Headcount, hoặc thiếu LIMIT."
+                    "Người dùng hỏi tổng quỹ lương chi trả theo phòng ban kèm số lượng nhân sự, nhưng câu lệnh lại thiếu SUM(s.salary) AS TotalPayroll hoặc thiếu COUNT(DISTINCT de.emp_no) AS Headcount."
                     if not is_en else
-                    "User asked for Top departments by total payroll and headcount, but query lacked SUM(s.salary) AS TotalPayroll, COUNT(DISTINCT de.emp_no) AS Headcount, or LIMIT."
+                    "User asked for department total payroll and headcount, but query lacked SUM(s.salary) AS TotalPayroll or COUNT(DISTINCT de.emp_no) AS Headcount."
                 )
                 criteria["semantic_alignment"]["detail"] = msg
                 fails.append(msg)
                 actionable_feedbacks.append(
-                    "BẮT BUỘC tính SUM(s.salary) AS TotalPayroll, COUNT(DISTINCT de.emp_no) AS Headcount, ROUND(AVG(s.salary), 2) AS AvgSalary, gom theo d.dept_name, ORDER BY TotalPayroll DESC LIMIT {top_n}!"
+                    "BẮT BUỘC tính SUM(s.salary) AS TotalPayroll, COUNT(DISTINCT de.emp_no) AS Headcount, ROUND(AVG(s.salary), 2) AS AvgSalary, gom theo d.dept_name, ORDER BY TotalPayroll DESC!"
                     if not is_en else
-                    "MUST compute SUM(s.salary) AS TotalPayroll, COUNT(DISTINCT de.emp_no) AS Headcount, AVG(salary) AS AvgSalary, ORDER BY TotalPayroll DESC LIMIT {top_n}!"
+                    "MUST compute SUM(s.salary) AS TotalPayroll, COUNT(DISTINCT de.emp_no) AS Headcount, AVG(salary) AS AvgSalary, ORDER BY TotalPayroll DESC!"
                 )
 
         # Kiểm tra 2.6.17: Người dùng hỏi có bao nhiêu nhân viên từng thay đổi phòng ban ít nhất 1 lần
@@ -698,8 +751,12 @@ def evaluate_execution(
 
         # Kiểm tra 2.6.23: Nhân viên từng bị giảm lương trong lịch sử làm việc tại công ty
         is_salary_reduction_eval = (
-            any(k in q_low for k in ["giảm lương", "hạ lương", "bị giảm", "bị hạ", "salary reduction", "salary decrease", "pay cut"])
-            or (any(k in q_low for k in ["lương", "salary"]) and any(k in q_low for k in ["giảm", "hạ", "tụt", "thấp hơn lần trước", "thấp hơn kỳ trước", "reduction", "decrease", "cut"]))
+            (
+                any(k in q_low for k in ["giảm lương", "hạ lương", "bị giảm lương", "bị hạ lương", "tụt lương", "bị trừ lương", "salary reduction", "salary decrease", "pay cut"])
+                or (any(k in q_low for k in ["lương", "salary"]) and any(k in q_low for k in ["bị giảm", "bị hạ", "tụt", "thấp hơn lần trước", "thấp hơn kỳ trước"]))
+            )
+            and any(k in q_low for k in ["nhân viên", "nhân sự", "ai", "người", "employee", "danh sách"])
+            and not any(k in q_low for k in ["phòng ban", "các phòng", "department", "nhân sự lại sụt giảm", "nhân sự sụt giảm", "số lượng nhân sự", "quy mô nhân sự"])
         )
         if is_salary_reduction_eval:
             has_emp_ident = any(any(k in c for k in ["emp_no", "fullname", "first_name", "last_name", "nhân viên"]) for c in cols_low)

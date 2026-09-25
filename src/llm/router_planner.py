@@ -428,15 +428,58 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
             }
         ]
 
+    # Mẫu 0.094: Phân tích khoảng thời gian / giai đoạn ghi nhận mức lương/chỉ số cao nhất và thấp nhất (Peak & Valley Period Analysis)
+    is_peak_valley_time_plan = (
+        (
+            any(k in q_low for k in ["khoảng thời gian", "thời gian nào", "thời điểm nào", "giai đoạn nào", "mốc thời gian nào", "giai đoạn đạt đỉnh", "thời điểm đạt đỉnh", "chu kỳ nào"])
+            or ("thời gian" in q_low and any(k in q_low for k in ["cao nhất", "thấp nhất", "đỉnh", "đáy"]))
+        )
+        and any(k in q_low for k in ["cao nhất", "thấp nhất", "lớn nhất", "nhỏ nhất", "đạt đỉnh", "chạm đáy", "kỷ lục", "highest", "lowest", "peak"])
+    )
+    if is_peak_valley_time_plan:
+        metric_name = "mức lương" if any(k in q_low for k in ["lương", "thu nhập", "salary", "income"]) else "chỉ số doanh thu/sản lượng"
+        metric_en = "salary" if "lương" in metric_name else "revenue/volume"
+        return [
+            {
+                "step": 1,
+                "name": "Trích xuất và gom nhóm dữ liệu theo từng chu kỳ thời gian (Năm/Tháng)" if not is_en else "Aggregate data across time periods (Year/Month)",
+                "desc": f"Quét bảng dữ liệu theo chuỗi thời gian, nhóm theo Năm/Tháng để tính toán {metric_name} bình quân, cực đại và cực tiểu." if not is_en else f"Group by Year/Month to compute average, max, and min {metric_en}.",
+                "status": "done"
+            },
+            {
+                "step": 2,
+                "name": "Tính toán các chỉ số thống kê đa chiều (Average, Max, Min)" if not is_en else "Compute statistical metrics (Avg, Max, Min)",
+                "desc": "Tính AVG, MAX, MIN và tổng số lượng bản ghi cho từng mốc thời gian để phản ánh độ biến động dữ liệu." if not is_en else "Calculate AVG, MAX, MIN and record counts for each period to reflect variance.",
+                "status": "done"
+            },
+            {
+                "step": 3,
+                "name": "Nhận diện và gán nhãn giai đoạn đạt đỉnh và giai đoạn chạm đáy" if not is_en else "Identify and tag Peak and Valley periods",
+                "desc": "Sử dụng CASE WHEN đối chiếu với giá trị MAX() và MIN() toàn cục để đánh dấu rõ giai đoạn cao nhất 🏆 và thấp nhất 📉." if not is_en else "Use CASE WHEN against global MAX/MIN to tag Peak 🏆 and Valley 📉 periods.",
+                "status": "done"
+            },
+            {
+                "step": 4,
+                "name": "Trực quan hóa xu hướng chuỗi thời gian và thẻ KPI biến động" if not is_en else "Visualize time series trend and render volatility KPI cards",
+                "desc": "Hiển thị biểu đồ đường theo dõi chu kỳ biến động và bộ 4 thẻ KPI ghi nhận các mốc kỷ lục." if not is_en else "Render time-series line chart and executive KPI benchmark cards.",
+                "status": "done"
+            }
+        ]
+
     # Mẫu 0.095: Mức chênh lệch lương giữa người cao nhất và thấp nhất theo chức danh hoặc phòng ban (Salary Spread)
     is_salary_spread_plan = (
-        any(k in q_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa", "difference"])
+        any(k in q_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa", "difference", "disparity"])
         and any(k in q_low for k in ["lương", "thu nhập", "salary", "income"])
-        and (any(k in q_low for k in ["chức danh", "title", "vị trí"]) or any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"]))
+        and (
+            any(k in q_low for k in ["chức danh", "title", "vị trí"])
+            or any(k in q_low for k in ["phòng ban", "phòng", "department", "các phòng", "đơn vị"])
+            or any(k in q_low for k in ["nhóm", "các nhóm", "nhóm cao nhất", "nhóm thấp nhất", "giữa nhóm", "nhóm lương", "tier", "phân khúc"])
+            or ("cao nhất" in q_low and "thấp nhất" in q_low)
+        )
         and not any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "gender", "chuẩn", "stddev", "standard deviation", "std("])
     )
     if is_salary_spread_plan:
-        is_title = any(k in q_low for k in ["chức danh", "title", "vị trí"])
+        is_title = any(k in q_low for k in ["chức danh", "title", "vị trí"]) and not any(k in q_low for k in ["phòng ban", "department", "các phòng", "mỗi phòng"])
         entity_label = "chức danh" if is_title else "phòng ban"
         tbl_info = "bảng titles t" if is_title else "bảng departments d và dept_emp de"
         col_group = "t.title" if is_title else "d.dept_name"

@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import re
 import time
-from google import genai
+try:
+    from google import genai
+except ImportError:
+    genai = None
 
 try:
     from openai import OpenAI as _OpenAIClient
@@ -64,20 +67,12 @@ def extract_clean_content(raw: str) -> str:
 
     extracted = "\n".join(cleaned_lines).strip().strip("`").strip()
 
-    # 4. Tự động tách khoảng trắng nếu mô hình AI sinh dính chữ từ khóa SQL (Bảo vệ các cột như from_date, to_date)
-    keywords_to_space = [
-        ("FROM", r"(?<![\._])\bFROM(?=[a-zA-Z`])(?!_)"),
-        ("SELECT", r"(?<![\._])\bSELECT(?=[a-zA-Z`*])(?!_)"),
-        ("WHERE", r"(?<![\._])\bWHERE(?=[a-zA-Z`])(?!_)"),
-        ("JOIN", r"(?<![\._])\bJOIN(?=[a-zA-Z`])(?!_)"),
-        ("GROUP BY", r"(?<![\._])\bGROUP\s+BY(?=[a-zA-Z`])(?!_)"),
-        ("ORDER BY", r"(?<![\._])\bORDER\s+BY(?=[a-zA-Z`])(?!_)"),
-        ("HAVING", r"(?<![\._])\bHAVING(?=[a-zA-Z`])(?!_)"),
-        ("ON", r"(?<![\._])\bON(?=[a-zA-Z`])(?!_)"),
-        ("LIMIT", r"(?<![\._])\bLIMIT(?=\d)"),
-    ]
-    for kw_name, kw_pattern in keywords_to_space:
-        extracted = re.sub(kw_pattern, kw_name + " ", extracted, flags=re.IGNORECASE)
+    # 4. Tự động tách khoảng trắng cho các ký tự dính (SELECT* -> SELECT *, LIMIT10 -> LIMIT 10, GROUPBY -> GROUP BY)
+    # Tuyệt đối KHÔNG dùng regex \bKEYWORD(?=[a-zA-Z]) vì sẽ phá hỏng các định danh/alias hợp lệ như JoinedCount, SelectedDate, FromDate...
+    extracted = re.sub(r"\bSELECT\*", "SELECT *", extracted, flags=re.IGNORECASE)
+    extracted = re.sub(r"\bLIMIT(\d+)\b", r"LIMIT \1", extracted, flags=re.IGNORECASE)
+    extracted = re.sub(r"\bGROUPBY\b", "GROUP BY", extracted, flags=re.IGNORECASE)
+    extracted = re.sub(r"\bORDERBY\b", "ORDER BY", extracted, flags=re.IGNORECASE)
 
     # 5. Tìm câu lệnh SQL thực sự (phải có SELECT ... FROM hoặc WITH ... SELECT ... FROM)
     # Tránh bắt nhầm các lời thoại bình luận mở đầu như: "Select phần**:", "SELECT mục 1:", "Select câu hỏi..."
@@ -194,23 +189,27 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
     last_exc = None
     for m in target_models:
         try:
-            # 1. Thử gọi qua Interactions API thế hệ mới (Khuyến nghị của Google cho Gemini 3.x)
-            if hasattr(client, "interactions") and hasattr(client.interactions, "create"):
-                try:
-                    interaction = client.interactions.create(model=m, input=prompt)
-                    out_text = getattr(interaction, "output_text", None) or (interaction.text if hasattr(interaction, "text") else None)
-                    if out_text:
-                        return out_text
-                except Exception as ex_interact:
-                    ex_str = str(ex_interact).lower()
-                    if not any(k in ex_str for k in ["404", "not_found", "is not found", "no longer available"]):
-                        raise ex_interact
-
-            # 2. Thử gọi qua models.generate_content
+            # 1. Gọi trực tiếp qua models.generate_content (phương thức chuẩn, ổn định và nhanh nhất của Google GenAI SDK)
             if hasattr(client, "models") and hasattr(client.models, "generate_content"):
-                response = client.models.generate_content(model=m, contents=prompt)
+                try:
+                    from google.genai import types
+                    cfg = types.GenerateContentConfig(
+                        max_output_tokens=max_tokens,
+                        temperature=0.3,
+                    )
+                    response = client.models.generate_content(model=m, contents=prompt, config=cfg)
+                except Exception:
+                    response = client.models.generate_content(model=m, contents=prompt)
+                    
                 if response and hasattr(response, "text") and response.text:
                     return response.text
+
+            # 2. Thử gọi qua Interactions API nếu có
+            if hasattr(client, "interactions") and hasattr(client.interactions, "create"):
+                interaction = client.interactions.create(model=m, input=prompt)
+                out_text = getattr(interaction, "output_text", None) or (interaction.text if hasattr(interaction, "text") else None)
+                if out_text:
+                    return out_text
         except Exception as e:
             last_exc = e
             err_str = str(e).lower()
@@ -306,3 +305,54 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
                 return None, f"Lỗi {provider} ({model_name}): {err}"
 
     return None, f"Server {provider} quá tải sau {max_retries} lần thử: {last_error}"
+
+
+def invoke_llm(prompt: str, client=None, provider: str = "", model_name: str = "", max_tokens: int = 2048) -> str:
+    """Hàm wrapper tự động nhận diện client, provider, model_name từ st.session_state hoặc config_store và trả về chuỗi text."""
+    # 1. Nếu client chưa truyền vào, thử lấy từ Streamlit session_state
+    if client is None:
+        try:
+            import streamlit as st
+            if "client" in st.session_state and st.session_state["client"] is not None:
+                client = st.session_state["client"]
+            if not provider and "provider" in st.session_state:
+                provider = st.session_state["provider"]
+            if not model_name and "model_name" in st.session_state:
+                model_name = st.session_state["model_name"]
+        except Exception:
+            pass
+
+    # 2. Nếu vẫn chưa có client, thử nạp từ config_store
+    if client is None:
+        try:
+            from src.config_store import load_saved_config
+            cfg = load_saved_config()
+            provider = provider or cfg.get("provider", "Gemini (Google)")
+            model_name = model_name or cfg.get("model_name", "gemini-3.7-flash")
+            
+            api_key = ""
+            custom_base_url = None
+            if provider == "OpenRouter":
+                api_key = cfg.get("api_key_openrouter", "")
+                custom_base_url = cfg.get("openrouter_base_url", OPENROUTER_BASE_URL)
+            elif provider == "Gemini (Google)":
+                api_key = cfg.get("api_key_gemini", "")
+            elif provider == "Alibaba Qwen (DashScope)":
+                api_key = cfg.get("api_key_qwen", "")
+                custom_base_url = cfg.get("qwen_base_url", DASHSCOPE_BASE_URL)
+            
+            if api_key:
+                client = get_llm_client(provider, api_key, custom_base_url)
+        except Exception:
+            pass
+
+    if client is None:
+        raise ValueError("Chưa khởi tạo kết nối AI hoặc chưa nhập API Key. Vui lòng vào mục Cấu hình để kiểm tra API Key.")
+
+    provider = provider or "Gemini (Google)"
+    model_name = model_name or "gemini-3.7-flash"
+    
+    res, err = call_llm(client, provider, model_name, prompt, max_tokens=max_tokens)
+    if err:
+        raise RuntimeError(err)
+    return res or ""

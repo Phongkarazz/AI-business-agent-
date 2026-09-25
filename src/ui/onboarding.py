@@ -26,16 +26,16 @@ def render_onboarding():
         if is_already_connected:
             st.markdown(
                 '<div style="margin-bottom: 8px;">'
-                '<h1 style="font-size: 1.85rem; font-weight: 850; color: #0F172A; margin: 0 0 4px 0; letter-spacing: -0.025em;">⚙️ Cài đặt & Cấu hình VERAXUS</h1>'
-                '<p style="color: #64748B; font-size: 0.92rem; margin: 0;">Tùy biến nguồn cơ sở dữ liệu doanh nghiệp và thông số mô hình AI.</p>'
+                '<h1 style="font-size: 1.85rem; font-weight: 900; color: #FFFFFF; margin: 0 0 4px 0; letter-spacing: -0.025em;">⚙️ Cài đặt & Cấu hình VERAXUS</h1>'
+                '<p style="color: #CBD5E1; font-size: 0.92rem; margin: 0;">Tùy biến nguồn cơ sở dữ liệu doanh nghiệp và thông số mô hình AI.</p>'
                 '</div>',
                 unsafe_allow_html=True
             )
         else:
             st.markdown(
                 '<div style="margin-bottom: 8px;">'
-                '<h1 style="font-size: 1.85rem; font-weight: 850; color: #0F172A; margin: 0 0 4px 0; letter-spacing: -0.025em;">💎 Chào mừng đến với VERAXUS</h1>'
-                '<p style="color: #64748B; font-size: 0.92rem; margin: 0;">Trợ lý Dữ liệu Kinh doanh Thông minh & Tin cậy</p>'
+                '<h1 style="font-size: 1.85rem; font-weight: 900; color: #FFFFFF; margin: 0 0 4px 0; letter-spacing: -0.025em;">💎 Chào mừng đến với VERAXUS</h1>'
+                '<p style="color: #CBD5E1; font-size: 0.92rem; margin: 0;">Trợ lý Dữ liệu Kinh doanh Thông minh & Tin cậy</p>'
                 '</div>',
                 unsafe_allow_html=True
             )
@@ -43,7 +43,7 @@ def render_onboarding():
     with col_head2:
         st.markdown(
             '<div style="text-align: right; padding-top: 6px;">'
-            '<span style="background: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; padding: 5px 12px; border-radius: 9999px; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em;">'
+            '<span style="background: rgba(0, 223, 143, 0.15); color: #00DF8F; border: 1px solid #00DF8F; padding: 5px 12px; border-radius: 9999px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em;">'
             '● Local & Secured Engine'
             '</span>'
             '</div>',
@@ -51,7 +51,7 @@ def render_onboarding():
         )
         if is_already_connected:
             st.write("")
-            if st.button("← Quay lại Chat", type="secondary", use_container_width=True, key="btn_back_to_chat_top"):
+            if st.button("⬅️ Quay lại Chat", type="secondary", use_container_width=True, key="btn_back_to_chat_top"):
                 st.session_state["view_mode"] = "chat"
                 st.rerun()
 
@@ -63,7 +63,7 @@ def render_onboarding():
             "👉 Vui lòng kiểm tra và cập nhật lại thông tin MySQL ở bảng **Chế độ Doanh nghiệp** bên dưới."
         )
 
-    st.markdown("<hr style='margin: 12px 0 20px 0; border: none; border-top: 1px solid #E2E8F0;' />", unsafe_allow_html=True)
+    st.markdown("<hr style='margin: 12px 0 20px 0; border: none; border-top: 1px solid rgba(255,255,255,0.1);' />", unsafe_allow_html=True)
 
     # 2. Hai chế độ trải nghiệm rõ ràng (Triết lý 1-Click Connect)
     col_demo, col_enterprise = st.columns(2, gap="large")
@@ -77,15 +77,15 @@ def render_onboarding():
             st.caption("Dành cho Ban Giám khảo & Người dùng muốn trải nghiệm ngay tức thì.")
 
             st.markdown("""
-            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 14px 18px; margin: 12px 0 16px 0;">
-                <div style="margin-bottom: 8px; font-size: 0.88rem; color: #1E293B;">
+            <div style="background: #151A30; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 14px 18px; margin: 12px 0 16px 0;">
+                <div style="margin-bottom: 8px; font-size: 0.88rem; color: #FFFFFF;">
                     📊 <b>CSDL Mẫu:</b> Awesome Chocolates (Doanh thu, Đơn hàng, Nhân sự)
                 </div>
-                <div style="margin-bottom: 8px; font-size: 0.88rem; color: #1E293B;">
+                <div style="margin-bottom: 8px; font-size: 0.88rem; color: #FFFFFF;">
                     🛡️ <b>Mô hình AI:</b> Qwen 2.5 Cục bộ / SQLite In-Memory
                 </div>
-                <div style="font-size: 0.88rem; color: #1E293B;">
-                    ⏱️ <b>Thời gian khởi tạo:</b> <b>1 Chạm • Dưới 1 giây</b> (Zero-Friction)
+                <div style="font-size: 0.88rem; color: #FFFFFF;">
+                    ⏱️ <b>Thời gian khởi tạo:</b> <b style="color: #00DF8F;">1 Chạm • Dưới 1 giây</b> (Zero-Friction)
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -145,7 +145,7 @@ def render_onboarding():
                     db_port = "3306"
                     use_ssl = False
                     st.markdown("""
-                    <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #166534;">
+                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
                         📊 <b>Dữ liệu Mẫu (In-Memory SQLite):</b> Tích hợp sẵn CSDL Awesome Chocolates (bảng <code>sales</code>, <code>products</code>, <code>salespersons</code>, <code>geo</code>). Không cần cài đặt MySQL!
                     </div>
                     """, unsafe_allow_html=True)
@@ -154,7 +154,7 @@ def render_onboarding():
                     use_ssl = False
 
                     st.markdown("""
-                    <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.84rem; color: #166534; display: flex; align-items: center; gap: 8px;">
+                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.84rem; color: #00DF8F; display: flex; align-items: center; gap: 8px;">
                         <span>🟢</span> <span><b>Chế độ Cục bộ (Localhost):</b> <code>127.0.0.1:3306</code> (Không cần cấu hình mạng).</span>
                     </div>
                     """, unsafe_allow_html=True)

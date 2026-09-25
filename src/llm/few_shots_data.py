@@ -55,6 +55,211 @@ ORDER BY SalarySpread DESC
 LIMIT 1;"""
     },
     {
+        "id": "emp_salary_spread_group_comparison",
+        "domain": "employees",
+        "category": "salary_spread",
+        "tags": [
+            "chênh lệch mức lương", "chênh lệch lương", "nhóm cao nhất và nhóm thấp nhất",
+            "nhóm cao nhất", "nhóm thấp nhất", "giữa nhóm cao nhất", "giữa nhóm", "khoảng cách lương",
+            "phân tích sự chênh lệch", "salary spread", "phòng ban", "so sánh nhóm", "các nhóm"
+        ],
+        "question": "Phân tích sự chênh lệch mức lương giữa nhóm cao nhất và nhóm thấp nhất",
+        "question_en": "Analyze the salary difference between the highest and lowest group",
+        "intent_explanation": "Nhóm theo từng phòng ban (nhóm nhân sự), tính mức lương cao nhất, thấp nhất, trung bình và khoảng chênh lệch lương (SalarySpread = MAX - MIN), sau đó sắp xếp theo mức độ chênh lệch giảm dần để đối chiếu rõ nhóm cao nhất vs nhóm thấp nhất.",
+        "sql_mysql": """WITH DeptSalaryStats AS (
+    SELECT 
+        d.dept_name AS Department,
+        ROUND(AVG(s.salary), 2) AS AvgSalary,
+        MAX(s.salary) AS MaxSalary,
+        MIN(s.salary) AS MinSalary,
+        (MAX(s.salary) - MIN(s.salary)) AS SalarySpread,
+        COUNT(DISTINCT de.emp_no) AS Headcount
+    FROM departments d
+    JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+    JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+    GROUP BY d.dept_name
+)
+SELECT 
+    Department,
+    AvgSalary,
+    MaxSalary,
+    MinSalary,
+    SalarySpread,
+    ROUND((MaxSalary - MinSalary) * 100.0 / MinSalary, 2) AS SpreadRatioPct,
+    Headcount
+FROM DeptSalaryStats
+ORDER BY SalarySpread DESC;""",
+        "sql_sqlite": """WITH DeptSalaryStats AS (
+    SELECT 
+        d.dept_name AS Department,
+        ROUND(AVG(s.salary), 2) AS AvgSalary,
+        MAX(s.salary) AS MaxSalary,
+        MIN(s.salary) AS MinSalary,
+        (MAX(s.salary) - MIN(s.salary)) AS SalarySpread,
+        COUNT(DISTINCT de.emp_no) AS Headcount
+    FROM departments d
+    JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+    JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+    GROUP BY d.dept_name
+)
+SELECT 
+    Department,
+    AvgSalary,
+    MaxSalary,
+    MinSalary,
+    SalarySpread,
+    ROUND((MaxSalary - MinSalary) * 100.0 / MinSalary, 2) AS SpreadRatioPct,
+    Headcount
+FROM DeptSalaryStats
+ORDER BY SalarySpread DESC;"""
+    },
+    {
+        "id": "emp_salary_peak_valley_period",
+        "domain": "employees",
+        "category": "time_peak_valley",
+        "tags": ["khoảng thời gian", "thời gian nào", "thời điểm nào", "giai đoạn", "giai đoạn đạt đỉnh", "mức lương cao nhất và thấp nhất", "cao nhất và thấp nhất", "peak period", "chu kỳ lương", "năm đạt đỉnh", "đỉnh và đáy", "highest and lowest period"],
+        "question": "Khoảng thời gian nào ghi nhận mức lương cao nhất và thấp nhất?",
+        "question_en": "Which time period recorded the highest and lowest salary?",
+        "intent_explanation": "Dùng CTE nhóm theo từng năm `YEAR(from_date)` trên bảng salaries để tính mức lương bình quân, cao nhất, thấp nhất và gán nhãn cực trị đỉnh - đáy qua các năm.",
+        "sql_mysql": """WITH YearlySalaryStats AS (
+    SELECT 
+        YEAR(s.from_date) AS Year,
+        ROUND(AVG(s.salary), 2) AS AverageSalary,
+        MAX(s.salary) AS MaxSalary,
+        MIN(s.salary) AS MinSalary,
+        COUNT(*) AS TotalRecords
+    FROM salaries s
+    GROUP BY YEAR(s.from_date)
+)
+SELECT 
+    Year,
+    AverageSalary,
+    MaxSalary,
+    MinSalary,
+    TotalRecords,
+    CASE 
+        WHEN AverageSalary = (SELECT MAX(AverageSalary) FROM YearlySalaryStats) THEN 'Mức lương TB cao nhất 🏆'
+        WHEN AverageSalary = (SELECT MIN(AverageSalary) FROM YearlySalaryStats) THEN 'Mức lương TB thấp nhất 📉'
+        ELSE 'Bình thường'
+    END AS Evaluation
+FROM YearlySalaryStats
+ORDER BY Year ASC;""",
+        "sql_sqlite": """WITH YearlySalaryStats AS (
+    SELECT 
+        CAST(strftime('%Y', s.from_date) AS INTEGER) AS Year,
+        ROUND(AVG(s.salary), 2) AS AverageSalary,
+        MAX(s.salary) AS MaxSalary,
+        MIN(s.salary) AS MinSalary,
+        COUNT(*) AS TotalRecords
+    FROM salaries s
+    GROUP BY CAST(strftime('%Y', s.from_date) AS INTEGER)
+)
+SELECT 
+    Year,
+    AverageSalary,
+    MaxSalary,
+    MinSalary,
+    TotalRecords,
+    CASE 
+        WHEN AverageSalary = (SELECT MAX(AverageSalary) FROM YearlySalaryStats) THEN 'Mức lương TB cao nhất 🏆'
+        WHEN AverageSalary = (SELECT MIN(AverageSalary) FROM YearlySalaryStats) THEN 'Mức lương TB thấp nhất 📉'
+        ELSE 'Bình thường'
+    END AS Evaluation
+FROM YearlySalaryStats
+ORDER BY Year ASC;"""
+    },
+    {
+        "id": "emp_company_salary_trend_yearly",
+        "domain": "employees",
+        "category": "salary_trend",
+        "tags": ["thay đổi như thế nào qua các năm", "mức lương trung bình của toàn công ty thay đổi như thế nào", "lương trung bình qua các năm", "lương thay đổi như thế nào qua các năm", "xu hướng lương qua các năm", "mức lương trung bình", "thay đổi như thế nào", "toàn công ty qua các năm", "average salary trend across years"],
+        "question": "Mức lương trung bình của toàn công ty thay đổi như thế nào qua các năm?",
+        "question_en": "How did the average salary of the entire company change over the years?",
+        "intent_explanation": "Nhóm theo năm trên bảng salaries để tính mức lương trung bình (AverageSalary) của toàn công ty theo từng năm theo đúng thứ tự thời gian tuần tự từ 1985 đến 2002. TUYỆT ĐỐI KHÔNG TỰ JOIN BẢNG tạo cột Year1/Year2.",
+        "sql_mysql": """SELECT 
+    YEAR(s.from_date) AS Year,
+    ROUND(AVG(s.salary), 2) AS AverageSalary
+FROM salaries s
+GROUP BY YEAR(s.from_date)
+ORDER BY Year ASC;""",
+        "sql_sqlite": """SELECT 
+    CAST(strftime('%Y', s.from_date) AS INTEGER) AS Year,
+    ROUND(AVG(s.salary), 2) AS AverageSalary
+FROM salaries s
+GROUP BY CAST(strftime('%Y', s.from_date) AS INTEGER)
+ORDER BY Year ASC;"""
+    },
+    {
+        "id": "emp_salary_compression_yearly",
+        "domain": "employees",
+        "category": "salary_compression",
+        "tags": ["ép lương", "tỷ lệ ép lương", "nén lương", "tỷ lệ nén lương", "salary compression", "wage compression", "năm nào", "cao nhất", "pay compression", "biên độ lương"],
+        "question": "Năm nào thể hiện tỷ lệ ép lương cao nhất?",
+        "question_en": "Which year exhibits the highest wage/salary compression ratio?",
+        "intent_explanation": "Nhóm theo năm trên bảng salaries để tính mức lương tối thiểu (MinSalary), trung bình (AvgSalary), tối đa (MaxSalary), khoảng chênh lệch (SalarySpread = MAX - MIN), tỷ lệ nén lương (WageCompressionPct = MIN * 100 / AVG) và tỷ số lương (PayRatio = MAX / MIN), sau đó ORDER BY WageCompressionPct DESC.",
+        "sql_mysql": """SELECT 
+    YEAR(s.from_date) AS Year,
+    MIN(s.salary) AS MinSalary,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    MAX(s.salary) AS MaxSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread,
+    ROUND(MIN(s.salary) * 100.0 / AVG(s.salary), 2) AS WageCompressionPct,
+    ROUND(MAX(s.salary) / MIN(s.salary), 2) AS PayRatio
+FROM salaries s
+GROUP BY YEAR(s.from_date)
+ORDER BY WageCompressionPct DESC;""",
+        "sql_sqlite": """SELECT 
+    CAST(strftime('%Y', s.from_date) AS INTEGER) AS Year,
+    MIN(s.salary) AS MinSalary,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    MAX(s.salary) AS MaxSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread,
+    ROUND(CAST(MIN(s.salary) AS FLOAT) * 100.0 / AVG(s.salary), 2) AS WageCompressionPct,
+    ROUND(CAST(MAX(s.salary) AS FLOAT) / MIN(s.salary), 2) AS PayRatio
+FROM salaries s
+GROUP BY CAST(strftime('%Y', s.from_date) AS INTEGER)
+ORDER BY WageCompressionPct DESC;"""
+    },
+    {
+        "id": "emp_salary_compression_dept",
+        "domain": "employees",
+        "category": "salary_compression",
+        "tags": ["ép lương", "tỷ lệ ép lương", "tỉ lệ ép lương", "bị ép lương", "nén lương", "tỷ lệ nén lương", "salary compression", "wage compression", "phòng ban", "phòng ban nào", "lớn nhất", "cao nhất", "pay compression"],
+        "question": "Phòng ban nào có tỉ lệ bị ép lương lớn nhất?",
+        "question_en": "Which department has the highest wage/salary compression ratio?",
+        "intent_explanation": "Nhóm theo phòng ban trên bảng departments JOIN dept_emp và salaries với to_date = '9999-01-01' để tính quy mô (ActiveHeadcount), mức lương tối thiểu (MinSalary), trung bình (AvgSalary), tối đa (MaxSalary), khoảng chênh lệch (SalarySpread = MAX - MIN), tỷ lệ nén lương (WageCompressionPct = MIN * 100 / AVG) và tỷ số lương (PayRatio = MAX / MIN), sau đó ORDER BY WageCompressionPct DESC LIMIT 10.",
+        "sql_mysql": """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS ActiveHeadcount,
+    MIN(s.salary) AS MinSalary,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    MAX(s.salary) AS MaxSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread,
+    ROUND(MIN(s.salary) * 100.0 / AVG(s.salary), 2) AS WageCompressionPct,
+    ROUND(MAX(s.salary) / MIN(s.salary), 2) AS PayRatio
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_no, d.dept_name
+ORDER BY WageCompressionPct DESC
+LIMIT 10;""",
+        "sql_sqlite": """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS ActiveHeadcount,
+    MIN(s.salary) AS MinSalary,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    MAX(s.salary) AS MaxSalary,
+    (MAX(s.salary) - MIN(s.salary)) AS SalarySpread,
+    ROUND(CAST(MIN(s.salary) AS FLOAT) * 100.0 / AVG(s.salary), 2) AS WageCompressionPct,
+    ROUND(CAST(MAX(s.salary) AS FLOAT) / MIN(s.salary), 2) AS PayRatio
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_no, d.dept_name
+ORDER BY WageCompressionPct DESC
+LIMIT 10;"""
+    },
+    {
         "id": "emp_top10_percent_salary",
         "domain": "employees",
         "category": "window_function",
@@ -187,6 +392,41 @@ JOIN employees e ON de.emp_no = e.emp_no
 JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
 GROUP BY d.dept_name, e.gender
 ORDER BY d.dept_name, e.gender;"""
+    },
+    {
+        "id": "emp_title_salary_above_company_avg",
+        "domain": "employees",
+        "category": "salary_comparison",
+        "tags": ["chức danh", "title", "mức lương", "lương trung bình", "vượt mức trung bình", "trên mức trung bình", "cao hơn trung bình", "salary", "avg salary"],
+        "question": "Những chức danh nào có mức lương vượt trên mức trung bình?",
+        "question_en": "Which job titles have an average salary above the overall company average?",
+        "intent_explanation": "Tính mức lương trung bình của từng chức danh hiện tại (TitleAvgSalary) và so sánh với mức lương trung bình toàn công ty (CompanyAvgSalary), chỉ lấy những chức danh có TitleAvgSalary > CompanyAvgSalary.",
+        "sql_mysql": """SELECT 
+    t.title AS Title,
+    ROUND(AVG(s.salary), 2) AS TitleAvgSalary,
+    (SELECT ROUND(AVG(salary), 2) FROM salaries WHERE to_date = '9999-01-01') AS CompanyAvgSalary,
+    ROUND(AVG(s.salary) - (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01'), 2) AS SalarySurplus,
+    ROUND((AVG(s.salary) - (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01')) * 100.0 / (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01'), 2) AS SurplusPct,
+    COUNT(DISTINCT t.emp_no) AS Headcount
+FROM titles t
+JOIN salaries s ON t.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+HAVING AVG(s.salary) > (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01')
+ORDER BY TitleAvgSalary DESC;""",
+        "sql_sqlite": """SELECT 
+    t.title AS Title,
+    ROUND(AVG(s.salary), 2) AS TitleAvgSalary,
+    (SELECT ROUND(AVG(salary), 2) FROM salaries WHERE to_date = '9999-01-01') AS CompanyAvgSalary,
+    ROUND(AVG(s.salary) - (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01'), 2) AS SalarySurplus,
+    ROUND((AVG(s.salary) - (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01')) * 100.0 / (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01'), 2) AS SurplusPct,
+    COUNT(DISTINCT t.emp_no) AS Headcount
+FROM titles t
+JOIN salaries s ON t.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE t.to_date = '9999-01-01'
+GROUP BY t.title
+HAVING AVG(s.salary) > (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-01-01')
+ORDER BY TitleAvgSalary DESC;"""
     },
     {
         "id": "emp_title_progression",
@@ -338,6 +578,622 @@ GROUP BY d.dept_no, d.dept_name
 ORDER BY TransferredOutCount DESC
 LIMIT 1;"""
     },
+    {
+        "id": "emp_dept_manager_female_rank",
+        "domain": "employees",
+        "category": "manager_gender_rank",
+        "tags": [
+            "quản lý nữ", "quản lí nữ", "quản lý nam", "quản lí nam", "nhiều quản lý nữ nhất", "nhiều quản lí nữ nhất",
+            "nhiều quản lý nam nhất", "nhiều quản lí nam nhất", "trưởng phòng nữ", "trưởng phòng nam", "ban quản lý", "dept_manager"
+        ],
+        "question": "Phòng ban nào có nhiều quản lí Nữ nhất?",
+        "question_en": "Which department has the most female managers?",
+        "intent_explanation": "Join departments với dept_manager và employees để thống kê số lượng và tỷ lệ quản lý Nam, Nữ theo từng phòng ban, sắp xếp theo số lượng quản lý Nữ giảm dần.",
+        "sql_mysql": """SELECT 
+    d.dept_name AS Department,
+    SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers,
+    SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers,
+    COUNT(*) AS TotalManagers,
+    ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct,
+    ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct
+FROM departments d
+JOIN dept_manager dm ON d.dept_no = dm.dept_no
+JOIN employees e ON dm.emp_no = e.emp_no
+GROUP BY d.dept_name
+ORDER BY FemaleManagers DESC, d.dept_name ASC;""",
+        "sql_sqlite": """SELECT 
+    d.dept_name AS Department,
+    SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers,
+    SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers,
+    COUNT(*) AS TotalManagers,
+    ROUND(SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS FemalePct,
+    ROUND(SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 1) AS MalePct
+FROM departments d
+JOIN dept_manager dm ON d.dept_no = dm.dept_no
+JOIN employees e ON dm.emp_no = e.emp_no
+GROUP BY d.dept_name
+ORDER BY FemaleManagers DESC, d.dept_name ASC;"""
+    },
+    {
+        "id": "emp_recent_manager_gender_promotion",
+        "domain": "employees",
+        "category": "manager_gender_promotion",
+        "tags": [
+            "so sánh số lượng nhân sự nam và nữ", "bổ nhiệm lên vị trí quản lý", "trong 5 năm gần nhất",
+            "vị trí quản lý trong 5 năm gần nhất", "quản lý nam và nữ trong 5 năm", "bổ nhiệm quản lý",
+            "5 năm gần nhất của công ty", "manager promotion recent 5 years"
+        ],
+        "question": "So sánh số lượng nhân sự nam và nữ được bổ nhiệm lên vị trí Quản lý (Manager) trong 5 năm gần nhất của công ty?",
+        "question_en": "Compare the number of male and female personnel appointed to Manager positions in the company's last 5 years?",
+        "intent_explanation": "Dùng recursive CTE để tạo danh sách 5 năm liên tục gần nhất so với mốc bổ nhiệm mới nhất trong dept_manager, sau đó LEFT JOIN với thống kê bổ nhiệm nam/nữ để đảm bảo không bị khuyết thiếu các năm có 0 lượt bổ nhiệm.",
+        "sql_mysql": """WITH RECURSIVE YearRange AS (
+    SELECT (SELECT MAX(YEAR(from_date)) - 4 FROM dept_manager) AS Year
+    UNION ALL
+    SELECT Year + 1 FROM YearRange WHERE Year < (SELECT MAX(YEAR(from_date)) FROM dept_manager)
+),
+ManagerPromotions AS (
+    SELECT 
+        YEAR(dm.from_date) AS PromoYear,
+        SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers,
+        SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers,
+        COUNT(*) AS TotalManagers
+    FROM dept_manager dm
+    JOIN employees e ON dm.emp_no = e.emp_no
+    WHERE YEAR(dm.from_date) >= (SELECT MAX(YEAR(from_date)) FROM dept_manager) - 4
+    GROUP BY YEAR(dm.from_date)
+)
+SELECT 
+    yr.Year,
+    COALESCE(mp.MaleManagers, 0) AS MaleManagers,
+    COALESCE(mp.FemaleManagers, 0) AS FemaleManagers,
+    COALESCE(mp.TotalManagers, 0) AS TotalManagers,
+    COALESCE(ROUND(mp.MaleManagers * 100.0 / NULLIF(mp.TotalManagers, 0), 1), 0.0) AS MalePct,
+    COALESCE(ROUND(mp.FemaleManagers * 100.0 / NULLIF(mp.TotalManagers, 0), 1), 0.0) AS FemalePct
+FROM YearRange yr
+LEFT JOIN ManagerPromotions mp ON yr.Year = mp.PromoYear
+ORDER BY yr.Year ASC;""",
+        "sql_sqlite": """WITH RECURSIVE YearRange AS (
+    SELECT (SELECT MAX(CAST(strftime('%Y', from_date) AS INTEGER)) - 4 FROM dept_manager) AS Year
+    UNION ALL
+    SELECT Year + 1 FROM YearRange WHERE Year < (SELECT MAX(CAST(strftime('%Y', from_date) AS INTEGER)) FROM dept_manager)
+),
+ManagerPromotions AS (
+    SELECT 
+        CAST(strftime('%Y', dm.from_date) AS INTEGER) AS PromoYear,
+        SUM(CASE WHEN e.gender = 'M' THEN 1 ELSE 0 END) AS MaleManagers,
+        SUM(CASE WHEN e.gender = 'F' THEN 1 ELSE 0 END) AS FemaleManagers,
+        COUNT(*) AS TotalManagers
+    FROM dept_manager dm
+    JOIN employees e ON dm.emp_no = e.emp_no
+    WHERE CAST(strftime('%Y', dm.from_date) AS INTEGER) >= (SELECT MAX(CAST(strftime('%Y', from_date) AS INTEGER)) FROM dept_manager) - 4
+    GROUP BY CAST(strftime('%Y', dm.from_date) AS INTEGER)
+)
+SELECT 
+    yr.Year,
+    COALESCE(mp.MaleManagers, 0) AS MaleManagers,
+    COALESCE(mp.FemaleManagers, 0) AS FemaleManagers,
+    COALESCE(mp.TotalManagers, 0) AS TotalManagers,
+    COALESCE(ROUND(mp.MaleManagers * 100.0 / NULLIF(mp.TotalManagers, 0), 1), 0.0) AS MalePct,
+    COALESCE(ROUND(mp.FemaleManagers * 100.0 / NULLIF(mp.TotalManagers, 0), 1), 0.0) AS FemalePct
+FROM YearRange yr
+LEFT JOIN ManagerPromotions mp ON yr.Year = mp.PromoYear
+ORDER BY yr.Year ASC;"""
+    },
+    {
+        "id": "emp_promoted_managers_after_year",
+        "domain": "employees",
+        "category": "promoted_managers",
+        "tags": [
+            "những nhân viên nào", "tuyển dụng sau năm 1990", "xuất sắc được thăng chức", "vị trí quản lý",
+            "manager", "thăng chức lên vị trí quản lý", "tuyển dụng sau", "bổ nhiệm lên quản lý"
+        ],
+        "question": "Những nhân viên nào được tuyển dụng sau năm 1990 nhưng đã xuất sắc được thăng chức lên vị trí Quản lý (Manager)?",
+        "question_en": "Which employees were hired after 1990 but were promoted to Manager positions?",
+        "intent_explanation": "Trích xuất danh sách cá nhân nhân sự có ngày tuyển dụng sau năm 1990 (YEAR(e.hire_date) > 1990), join với bảng titles (title = 'Manager'), dept_manager và departments để lấy thông tin chi tiết về phòng ban quản lý và ngày bổ nhiệm.",
+        "sql_mysql": """SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+    e.gender AS Gender,
+    e.hire_date AS HireDate,
+    d.dept_name AS Department,
+    COALESCE(t_init.title, 'Khởi điểm Quản lý') AS InitialTitle,
+    t_mgr.title AS PromotedTitle,
+    dm.from_date AS PromotionDate,
+    s.salary AS CurrentSalary
+FROM employees e
+JOIN titles t_mgr ON e.emp_no = t_mgr.emp_no AND t_mgr.title = 'Manager'
+LEFT JOIN titles t_init ON e.emp_no = t_init.emp_no AND t_init.from_date = e.hire_date AND t_init.title != 'Manager'
+JOIN dept_manager dm ON e.emp_no = dm.emp_no
+JOIN departments d ON dm.dept_no = d.dept_no
+LEFT JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE YEAR(e.hire_date) > 1990
+ORDER BY e.hire_date ASC;""",
+        "sql_sqlite": """SELECT 
+    e.emp_no,
+    (e.first_name || ' ' || e.last_name) AS FullName,
+    e.gender AS Gender,
+    e.hire_date AS HireDate,
+    d.dept_name AS Department,
+    COALESCE(t_init.title, 'Khởi điểm Quản lý') AS InitialTitle,
+    t_mgr.title AS PromotedTitle,
+    dm.from_date AS PromotionDate,
+    s.salary AS CurrentSalary
+FROM employees e
+JOIN titles t_mgr ON e.emp_no = t_mgr.emp_no AND t_mgr.title = 'Manager'
+LEFT JOIN titles t_init ON e.emp_no = t_init.emp_no AND t_init.from_date = e.hire_date AND t_init.title != 'Manager'
+JOIN dept_manager dm ON e.emp_no = dm.emp_no
+JOIN departments d ON dm.dept_no = d.dept_no
+LEFT JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE CAST(strftime('%Y', e.hire_date) AS INTEGER) > 1990
+ORDER BY e.hire_date ASC;"""
+    },
+    {
+        "id": "emp_time_to_promotion_by_dept",
+        "domain": "employees",
+        "category": "promotion_time_by_dept",
+        "tags": [
+            "thời gian để thăng chức", "thời gian thăng chức", "thăng chức khác nhau", "giữa các phòng ban",
+            "thời gian thăng chức giữa các phòng ban", "thăng tiến", "thời gian thăng tiến", "time to promotion",
+            "đổi chức danh", "thời gian chuyển chức danh", "bao lâu để thăng chức"
+        ],
+        "question": "Thời gian để thăng chức khác nhau như thế nào giữa các phòng ban",
+        "question_en": "How does time to promotion differ across departments?",
+        "intent_explanation": "Xác định các nhân viên đã được thăng chức (chuyển từ chức danh khởi đầu rn=1 sang chức danh tiếp theo rn=2), tính số ngày/năm thăng chức, sau đó join với dept_emp và departments để tính thời gian thăng chức trung bình theo từng phòng ban.",
+        "sql_mysql": """WITH RankedTitles AS (
+    SELECT 
+        emp_no,
+        title,
+        from_date,
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM titles
+),
+PromotionTime AS (
+    SELECT 
+        t1.emp_no,
+        t1.title AS InitialTitle,
+        t2.title AS PromotedTitle,
+        DATEDIFF(t2.from_date, t1.from_date) AS DaysToPromotion,
+        ROUND(DATEDIFF(t2.from_date, t1.from_date) / 365.25, 2) AS YearsToPromotion
+    FROM RankedTitles t1
+    JOIN RankedTitles t2 ON t1.emp_no = t2.emp_no AND t1.rn = 1 AND t2.rn = 2
+)
+SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT pt.emp_no) AS PromotedEmployeesCount,
+    ROUND(AVG(pt.YearsToPromotion), 2) AS AvgYearsToPromotion,
+    ROUND(AVG(pt.DaysToPromotion), 0) AS AvgDaysToPromotion,
+    ROUND(MIN(pt.YearsToPromotion), 2) AS MinYearsToPromotion,
+    ROUND(MAX(pt.YearsToPromotion), 2) AS MaxYearsToPromotion
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN PromotionTime pt ON de.emp_no = pt.emp_no
+GROUP BY d.dept_name
+ORDER BY AvgYearsToPromotion ASC;""",
+        "sql_sqlite": """WITH RankedTitles AS (
+    SELECT 
+        emp_no,
+        title,
+        from_date,
+        ROW_NUMBER() OVER (PARTITION BY emp_no ORDER BY from_date ASC) AS rn
+    FROM titles
+),
+PromotionTime AS (
+    SELECT 
+        t1.emp_no,
+        t1.title AS InitialTitle,
+        t2.title AS PromotedTitle,
+        (julianday(t2.from_date) - julianday(t1.from_date)) AS DaysToPromotion,
+        ROUND((julianday(t2.from_date) - julianday(t1.from_date)) / 365.25, 2) AS YearsToPromotion
+    FROM RankedTitles t1
+    JOIN RankedTitles t2 ON t1.emp_no = t2.emp_no AND t1.rn = 1 AND t2.rn = 2
+)
+SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT pt.emp_no) AS PromotedEmployeesCount,
+    ROUND(AVG(pt.YearsToPromotion), 2) AS AvgYearsToPromotion,
+    ROUND(AVG(pt.DaysToPromotion), 0) AS AvgDaysToPromotion,
+    ROUND(MIN(pt.YearsToPromotion), 2) AS MinYearsToPromotion,
+    ROUND(MAX(pt.YearsToPromotion), 2) AS MaxYearsToPromotion
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN PromotionTime pt ON de.emp_no = pt.emp_no
+GROUP BY d.dept_name
+ORDER BY AvgYearsToPromotion ASC;"""
+    },
+    {
+        "id": "emp_multiple_titles_progression_detail",
+        "domain": "employees",
+        "category": "title_progression",
+        "tags": [
+            "trải qua ít nhất 3 chức danh", "ít nhất 3 chức danh", "nhiều chức danh", "lộ trình chức danh",
+            "chức danh đầu tiên", "chức danh hiện tại", "thời gian bắt đầu", "3 titles", "career progression",
+            "thay đổi chức danh", "ít nhất ba chức danh"
+        ],
+        "question": "Liệt kê những nhân viên đã từng trải qua ít nhất 3 chức danh (titles) khác nhau kể từ khi gia nhập công ty, hiển thị thời gian bắt đầu chức danh đầu tiên và chức danh hiện tại.",
+        "question_en": "List employees who have held at least 3 distinct titles since joining the company, showing the start date of their initial title and current title.",
+        "intent_explanation": "Đếm số chức danh khác nhau của mỗi nhân viên trong bảng titles (HAVING COUNT(DISTINCT title) >= 3), xếp hạng thứ tự thời gian chức danh (rn_first = 1 cho chức danh đầu tiên, rn_last = 1 cho chức danh hiện tại/mới nhất), sau đó kết hợp với bảng employees để lấy thông tin chi tiết.",
+        "sql_mysql": """WITH TitleCounts AS (
+    SELECT 
+        emp_no,
+        COUNT(DISTINCT title) AS TitleCount
+    FROM titles
+    GROUP BY emp_no
+    HAVING COUNT(DISTINCT title) >= 3
+),
+RankedTitles AS (
+    SELECT 
+        t.emp_no,
+        t.title,
+        t.from_date,
+        ROW_NUMBER() OVER (PARTITION BY t.emp_no ORDER BY t.from_date ASC) AS rn_first,
+        ROW_NUMBER() OVER (PARTITION BY t.emp_no ORDER BY t.from_date DESC) AS rn_last
+    FROM titles t
+    JOIN TitleCounts tc ON t.emp_no = tc.emp_no
+)
+SELECT 
+    e.emp_no,
+    CONCAT(e.first_name, ' ', e.last_name) AS FullName,
+    tc.TitleCount,
+    t_first.title AS InitialTitle,
+    t_first.from_date AS InitialTitleStartDate,
+    t_last.title AS CurrentTitle,
+    t_last.from_date AS CurrentTitleStartDate
+FROM TitleCounts tc
+JOIN employees e ON tc.emp_no = e.emp_no
+JOIN RankedTitles t_first ON tc.emp_no = t_first.emp_no AND t_first.rn_first = 1
+JOIN RankedTitles t_last ON tc.emp_no = t_last.emp_no AND t_last.rn_last = 1
+ORDER BY tc.TitleCount DESC, t_last.from_date DESC
+LIMIT 10;""",
+        "sql_sqlite": """WITH TitleCounts AS (
+    SELECT 
+        emp_no,
+        COUNT(DISTINCT title) AS TitleCount
+    FROM titles
+    GROUP BY emp_no
+    HAVING COUNT(DISTINCT title) >= 3
+),
+RankedTitles AS (
+    SELECT 
+        t.emp_no,
+        t.title,
+        t.from_date,
+        ROW_NUMBER() OVER (PARTITION BY t.emp_no ORDER BY t.from_date ASC) AS rn_first,
+        ROW_NUMBER() OVER (PARTITION BY t.emp_no ORDER BY t.from_date DESC) AS rn_last
+    FROM titles t
+    JOIN TitleCounts tc ON t.emp_no = tc.emp_no
+)
+SELECT 
+    e.emp_no,
+    (e.first_name || ' ' || e.last_name) AS FullName,
+    tc.TitleCount,
+    t_first.title AS InitialTitle,
+    t_first.from_date AS InitialTitleStartDate,
+    t_last.title AS CurrentTitle,
+    t_last.from_date AS CurrentTitleStartDate
+FROM TitleCounts tc
+JOIN employees e ON tc.emp_no = e.emp_no
+JOIN RankedTitles t_first ON tc.emp_no = t_first.emp_no AND t_first.rn_first = 1
+JOIN RankedTitles t_last ON tc.emp_no = t_last.emp_no AND t_last.rn_last = 1
+ORDER BY tc.TitleCount DESC, t_last.from_date DESC
+LIMIT 10;"""
+    },
+    {
+        "id": "emp_tenure_cohort_salary_dept",
+        "domain": "employees",
+        "category": "tenure_cohort_comparison",
+        "tags": [
+            "kỳ cựu", "mới vào", "dưới 2 năm", "trên 7 năm", "nén lương", "thâm niên", "phòng kỹ thuật",
+            "development", "so sánh lương", "tenure cohort", "salary compression"
+        ],
+        "question": "So sánh mức lương trung bình của nhóm nhân viên mới vào dưới 2 năm với nhóm nhân viên kỳ cựu trên 7 năm tại phòng Kỹ thuật (Development) để đánh giá xem có hiện tượng nén lương không?",
+        "question_en": "Compare average salaries between new hires (< 2 years) and senior employees (> 7 years) in the Development department to evaluate salary compression.",
+        "intent_explanation": "Tính thâm niên nhân viên so với ngày tuyển dụng tối đa (SELECT MAX(hire_date) FROM employees), phân nhóm kỳ cựu (> 7 năm) và mới vào (< 2 năm), lọc chính xác phòng Development và tính chênh lệch lương.",
+        "sql_mysql": """SELECT 
+    d.dept_name AS Department,
+    ROUND(AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 7 THEN s.salary END), 2) AS SeniorAvgSalary,
+    ROUND(AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END), 2) AS NewHireAvgSalary,
+    ROUND(AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 7 THEN s.salary END) - 
+          AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END), 2) AS SalaryDifference,
+    ROUND((AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 7 THEN s.salary END) - 
+           AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END)) * 100.0 / 
+           AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END), 2) AS DifferencePercentage,
+    COUNT(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 7 THEN 1 END) AS SeniorCount,
+    COUNT(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN 1 END) AS NewHireCount
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE d.dept_name = 'Development'
+GROUP BY d.dept_name;""",
+        "sql_sqlite": """SELECT 
+    d.dept_name AS Department,
+    ROUND(AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 7 THEN s.salary END), 2) AS SeniorAvgSalary,
+    ROUND(AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END), 2) AS NewHireAvgSalary,
+    ROUND(AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 7 THEN s.salary END) - 
+          AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END), 2) AS SalaryDifference,
+    ROUND((AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 7 THEN s.salary END) - 
+           AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END)) * 100.0 / 
+           AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END), 2) AS DifferencePercentage,
+    COUNT(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 7 THEN 1 END) AS SeniorCount,
+    COUNT(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN 1 END) AS NewHireCount
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE d.dept_name = 'Development'
+GROUP BY d.dept_name;"""
+    },
+    {
+        "id": "emp_tenure_cohort_salary_all",
+        "domain": "employees",
+        "category": "tenure_cohort_comparison",
+        "tags": [
+            "kỳ cựu", "mới vào", "dưới 2 năm", "trên 5 năm", "thâm niên", "từng phòng ban",
+            "so sánh lương", "tenure cohort", "nén lương"
+        ],
+        "question": "So sánh mức lương trung bình giữa nhân viên kỳ cựu trên 5 năm và nhân viên mới vào dưới 2 năm theo từng phòng ban",
+        "question_en": "Compare average salary between senior employees (> 5 years) and new hires (< 2 years) across departments.",
+        "intent_explanation": "Tính thâm niên nhân viên so với ngày tuyển dụng tối đa (SELECT MAX(hire_date) FROM employees), phân nhóm kỳ cựu (> 5 năm) và mới vào (< 2 năm) theo từng phòng ban, sắp xếp theo độ chênh lệch lương giảm dần.",
+        "sql_mysql": """SELECT 
+    d.dept_name AS Department,
+    ROUND(AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 5 THEN s.salary END), 2) AS SeniorAvgSalary,
+    ROUND(AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END), 2) AS NewHireAvgSalary,
+    ROUND(AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 5 THEN s.salary END) - 
+          AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END), 2) AS SalaryDifference,
+    ROUND((AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 5 THEN s.salary END) - 
+           AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END)) * 100.0 / 
+           AVG(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN s.salary END), 2) AS DifferencePercentage,
+    COUNT(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 > 5 THEN 1 END) AS SeniorCount,
+    COUNT(CASE WHEN DATEDIFF((SELECT MAX(hire_date) FROM employees), e.hire_date) / 365.25 < 2 THEN 1 END) AS NewHireCount
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalaryDifference DESC;""",
+        "sql_sqlite": """SELECT 
+    d.dept_name AS Department,
+    ROUND(AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 5 THEN s.salary END), 2) AS SeniorAvgSalary,
+    ROUND(AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END), 2) AS NewHireAvgSalary,
+    ROUND(AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 5 THEN s.salary END) - 
+          AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END), 2) AS SalaryDifference,
+    ROUND((AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 5 THEN s.salary END) - 
+           AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END)) * 100.0 / 
+           AVG(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN s.salary END), 2) AS DifferencePercentage,
+    COUNT(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 > 5 THEN 1 END) AS SeniorCount,
+    COUNT(CASE WHEN (julianday((SELECT MAX(hire_date) FROM employees)) - julianday(e.hire_date)) / 365.25 < 2 THEN 1 END) AS NewHireCount
+FROM employees e
+JOIN dept_emp de ON e.emp_no = de.emp_no AND de.to_date = '9999-01-01'
+JOIN departments d ON de.dept_no = d.dept_no
+JOIN salaries s ON e.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_name
+ORDER BY SalaryDifference DESC;"""
+    },
+    {
+        "id": "emp_department_group_salary_comparison",
+        "domain": "employees",
+        "category": "department_group_comparison",
+        "tags": [
+            "khối kỹ thuật", "khối thương mại", "khối kinh doanh", "development, research", "sales, marketing",
+            "so sánh mức lương trung bình", "lương cao nhất", "tổng quỹ lương", "quỹ lương", "departmentgroup",
+            "giữa khối kỹ thuật và khối thương mại", "so sánh giữa hai khối"
+        ],
+        "question": "So sánh mức lương trung bình, lương cao nhất và tổng quỹ lương giữa Khối Kỹ thuật (Development, Research) và Khối Thương mại (Sales, Marketing).",
+        "question_en": "Compare average salary, maximum salary, and total payroll between Technical Block (Development, Research) and Commercial Block (Sales, Marketing).",
+        "intent_explanation": "Phân loại 4 phòng ban vào 2 Khối (DepartmentGroup) bằng CASE WHEN, kết hợp bảng dept_emp và salaries với to_date = '9999-01-01' để tính Quy mô nhân sự (Headcount), Lương trung bình (AvgSalary), Lương cao nhất (MaxSalary) và Tổng quỹ lương (TotalPayroll).",
+        "sql_mysql": """SELECT 
+    CASE 
+        WHEN d.dept_name IN ('Sales', 'Marketing') THEN 'Khối Thương mại (Sales, Marketing)'
+        WHEN d.dept_name IN ('Development', 'Research') THEN 'Khối Kỹ thuật (Development, Research)'
+    END AS DepartmentGroup,
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    MAX(s.salary) AS MaxSalary,
+    SUM(s.salary) AS TotalPayroll
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing')
+GROUP BY DepartmentGroup, d.dept_name
+ORDER BY DepartmentGroup, AvgSalary DESC;""",
+        "sql_sqlite": """SELECT 
+    CASE 
+        WHEN d.dept_name IN ('Sales', 'Marketing') THEN 'Khối Thương mại (Sales, Marketing)'
+        WHEN d.dept_name IN ('Development', 'Research') THEN 'Khối Kỹ thuật (Development, Research)'
+    END AS DepartmentGroup,
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    MAX(s.salary) AS MaxSalary,
+    SUM(s.salary) AS TotalPayroll
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+WHERE d.dept_name IN ('Development', 'Research', 'Sales', 'Marketing')
+GROUP BY DepartmentGroup, d.dept_name
+ORDER BY DepartmentGroup, AvgSalary DESC;"""
+    },
+    {
+        "id": "emp_inflow_outflow_yearly",
+        "domain": "employees",
+        "category": "headcount_movement",
+        "tags": ["nhân sự vào", "nhân sự ra", "vào và ra", "tuyển dụng", "rời đi", "biến động", "inflow", "outflow", "tăng giảm", "net change"],
+        "question": "Thống kê nhân sự vào và nhân sự ra năm 1999 và năm 2000",
+        "question_en": "Statistics of joined (hires) and left (departures) employees in 1999 and 2000",
+        "intent_explanation": "Nhân sự vào (JoinedCount) tính từ hire_date trong bảng employees. Nhân sự ra (LeftCount) tính từ to_date != '9999-01-01' trong bảng dept_emp. Kết hợp qua CTE và lọc chính xác các năm được yêu cầu bằng WHERE ay.Year IN (1999, 2000).",
+        "sql_mysql": """WITH YearlyJoined AS (
+    SELECT 
+        YEAR(e.hire_date) AS Year,
+        COUNT(DISTINCT e.emp_no) AS JoinedCount
+    FROM employees e
+    GROUP BY YEAR(e.hire_date)
+),
+YearlyLeft AS (
+    SELECT 
+        YEAR(de.to_date) AS Year,
+        COUNT(DISTINCT de.emp_no) AS LeftCount
+    FROM dept_emp de
+    WHERE de.to_date != '9999-01-01'
+    GROUP BY YEAR(de.to_date)
+),
+AllYears AS (
+    SELECT Year FROM YearlyJoined
+    UNION
+    SELECT Year FROM YearlyLeft
+)
+SELECT 
+    ay.Year,
+    COALESCE(yj.JoinedCount, 0) AS JoinedCount,
+    COALESCE(yl.LeftCount, 0) AS LeftCount,
+    (COALESCE(yj.JoinedCount, 0) - COALESCE(yl.LeftCount, 0)) AS NetChange
+FROM AllYears ay
+LEFT JOIN YearlyJoined yj ON ay.Year = yj.Year
+LEFT JOIN YearlyLeft yl ON ay.Year = yl.Year
+WHERE ay.Year IN (1999, 2000)
+ORDER BY ay.Year ASC;""",
+        "sql_sqlite": """WITH YearlyJoined AS (
+    SELECT 
+        CAST(strftime('%Y', e.hire_date) AS INTEGER) AS Year,
+        COUNT(DISTINCT e.emp_no) AS JoinedCount
+    FROM employees e
+    GROUP BY CAST(strftime('%Y', e.hire_date) AS INTEGER)
+),
+YearlyLeft AS (
+    SELECT 
+        CAST(strftime('%Y', de.to_date) AS INTEGER) AS Year,
+        COUNT(DISTINCT de.emp_no) AS LeftCount
+    FROM dept_emp de
+    WHERE de.to_date != '9999-01-01'
+    GROUP BY CAST(strftime('%Y', de.to_date) AS INTEGER)
+),
+AllYears AS (
+    SELECT Year FROM YearlyJoined
+    UNION
+    SELECT Year FROM YearlyLeft
+)
+SELECT 
+    ay.Year,
+    COALESCE(yj.JoinedCount, 0) AS JoinedCount,
+    COALESCE(yl.LeftCount, 0) AS LeftCount,
+    (COALESCE(yj.JoinedCount, 0) - COALESCE(yl.LeftCount, 0)) AS NetChange
+FROM AllYears ay
+LEFT JOIN YearlyJoined yj ON ay.Year = yj.Year
+LEFT JOIN YearlyLeft yl ON ay.Year = yl.Year
+WHERE ay.Year IN (1999, 2000)
+ORDER BY ay.Year ASC;"""
+    },
+    {
+        "id": "emp_manager_tenure_vs_turnover",
+        "domain": "employees",
+        "category": "manager_tenure_turnover",
+        "tags": [
+            "thâm niên của quản lý", "thâm niên quản lý", "tác động đến tỷ lệ", "ảnh hưởng đến tỷ lệ",
+            "tỷ lệ nhân sự nghỉ việc", "tỉ lệ nhân sự nghỉ việc", "tỷ lệ nghỉ việc", "tỉ lệ nghỉ việc",
+            "nghỉ việc", "rời đi", "rời khỏi", "turnover rate", "attrition rate", "resignation rate",
+            "thâm niên quản lý và nghỉ việc", "tác động của thâm niên", "mối quan hệ giữa thâm niên và nghỉ việc"
+        ],
+        "question": "thâm niên của quản lý có tác động đến tỷ lệ nhân sự nghỉ việc không",
+        "question_en": "Does manager tenure impact employee turnover rate across departments?",
+        "intent_explanation": "Thống kê thâm niên của từng Trưởng phòng hiện tại (ManagerTenureYears) và tỷ lệ nhân sự nghỉ việc theo từng phòng ban (TurnoverRatePercent = ResignedEmployees / TotalEmployees * 100) để phân tích mối tương quan và tác động điều hành.",
+        "sql_mysql": """WITH DeptTurnover AS (
+    SELECT 
+        de.dept_no,
+        COUNT(DISTINCT de.emp_no) AS TotalEmployees,
+        COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) AS ResignedEmployees,
+        COUNT(DISTINCT CASE WHEN de.to_date = '9999-01-01' THEN de.emp_no END) AS ActiveEmployees,
+        ROUND(COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) * 100.0 / COUNT(DISTINCT de.emp_no), 2) AS TurnoverRatePercent
+    FROM dept_emp de
+    GROUP BY de.dept_no
+),
+CurrentManager AS (
+    SELECT 
+        dm.dept_no,
+        CONCAT(em.first_name, ' ', em.last_name) AS ManagerName,
+        ROUND(DATEDIFF(IF(dm.to_date = '9999-01-01', '2002-08-01', dm.to_date), dm.from_date) / 365.25, 2) AS ManagerTenureYears,
+        ROUND(DATEDIFF(IF(dm.to_date = '9999-01-01', '2002-08-01', dm.to_date), em.hire_date) / 365.25, 2) AS ManagerTotalTenureYears
+    FROM dept_manager dm
+    JOIN employees em ON dm.emp_no = em.emp_no
+    WHERE dm.to_date = '9999-01-01'
+)
+SELECT 
+    d.dept_name AS Department,
+    cm.ManagerName,
+    cm.ManagerTenureYears,
+    dt.TotalEmployees,
+    dt.ResignedEmployees,
+    dt.ActiveEmployees,
+    dt.TurnoverRatePercent
+FROM departments d
+JOIN DeptTurnover dt ON d.dept_no = dt.dept_no
+JOIN CurrentManager cm ON d.dept_no = cm.dept_no
+ORDER BY dt.TurnoverRatePercent DESC;""",
+        "sql_sqlite": """WITH DeptTurnover AS (
+    SELECT 
+        de.dept_no,
+        COUNT(DISTINCT de.emp_no) AS TotalEmployees,
+        COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) AS ResignedEmployees,
+        COUNT(DISTINCT CASE WHEN de.to_date = '9999-01-01' THEN de.emp_no END) AS ActiveEmployees,
+        ROUND(COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) * 100.0 / COUNT(DISTINCT de.emp_no), 2) AS TurnoverRatePercent
+    FROM dept_emp de
+    GROUP BY de.dept_no
+),
+CurrentManager AS (
+    SELECT 
+        dm.dept_no,
+        em.first_name || ' ' || em.last_name AS ManagerName,
+        ROUND((julianday(CASE WHEN dm.to_date = '9999-01-01' THEN '2002-08-01' ELSE dm.to_date END) - julianday(dm.from_date)) / 365.25, 2) AS ManagerTenureYears,
+        ROUND((julianday(CASE WHEN dm.to_date = '9999-01-01' THEN '2002-08-01' ELSE dm.to_date END) - julianday(em.hire_date)) / 365.25, 2) AS ManagerTotalTenureYears
+    FROM dept_manager dm
+    JOIN employees em ON dm.emp_no = em.emp_no
+    WHERE dm.to_date = '9999-01-01'
+)
+SELECT 
+    d.dept_name AS Department,
+    cm.ManagerName,
+    cm.ManagerTenureYears,
+    dt.TotalEmployees,
+    dt.ResignedEmployees,
+    dt.ActiveEmployees,
+    dt.TurnoverRatePercent
+FROM departments d
+JOIN DeptTurnover dt ON d.dept_no = dt.dept_no
+JOIN CurrentManager cm ON d.dept_no = cm.dept_no
+ORDER BY dt.TurnoverRatePercent DESC;"""
+    },
+    {
+        "id": "emp_dept_turnover_rate",
+        "domain": "employees",
+        "category": "dept_turnover_rate",
+        "tags": [
+            "tỷ lệ nghỉ việc", "tỉ lệ nghỉ việc", "tỷ lệ nhân sự nghỉ việc", "tỉ lệ nhân sự nghỉ việc",
+            "tỷ lệ rời đi", "tỉ lệ rời đi", "turnover rate", "attrition rate", "resignation rate",
+            "phòng ban có tỷ lệ nghỉ việc cao nhất", "tỷ lệ nghỉ việc theo phòng ban"
+        ],
+        "question": "Tỷ lệ nhân sự nghỉ việc theo từng phòng ban là bao nhiêu?",
+        "question_en": "What is the employee turnover rate by department?",
+        "intent_explanation": "Join departments với dept_emp để đếm tổng số nhân sự từng thuộc phòng ban và số nhân sự đã rời đi (to_date != '9999-01-01'), từ đó tính tỷ lệ nghỉ việc (%) theo từng phòng ban.",
+        "sql_mysql": """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS TotalEmployees,
+    COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) AS ResignedEmployees,
+    COUNT(DISTINCT CASE WHEN de.to_date = '9999-01-01' THEN de.emp_no END) AS ActiveEmployees,
+    ROUND(COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) * 100.0 / COUNT(DISTINCT de.emp_no), 2) AS TurnoverRatePercent
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TurnoverRatePercent DESC;""",
+        "sql_sqlite": """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS TotalEmployees,
+    COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) AS ResignedEmployees,
+    COUNT(DISTINCT CASE WHEN de.to_date = '9999-01-01' THEN de.emp_no END) AS ActiveEmployees,
+    ROUND(COUNT(DISTINCT CASE WHEN de.to_date != '9999-01-01' THEN de.emp_no END) * 100.0 / COUNT(DISTINCT de.emp_no), 2) AS TurnoverRatePercent
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no
+GROUP BY d.dept_no, d.dept_name
+ORDER BY TurnoverRatePercent DESC;"""
+    },
 
     # =========================================================================
     # NHÓM 2: CSDL AWESOME CHOCOLATES (KINH DOANH, ĐỘI NGŨ & SẢN PHẨM)
@@ -404,6 +1260,76 @@ GROUP BY PID, Product
 HAVING COUNT(DISTINCT SalesQuarter) = 4;"""
     },
     {
+        "id": "choco_product_quarterly_sales_threshold_consistency",
+        "domain": "awesome_chocolates",
+        "category": "quarterly_consistency",
+        "tags": [
+            "doanh số trên 50,000", "trên 50000", "tất cả các quý", "luôn đạt doanh số", "sản phẩm",
+            "mỗi quý", "ổn định", "nhất quán", "quarterly sales threshold", "năm 2022", "năm 2021"
+        ],
+        "question": "Tìm các sản phẩm luôn đạt doanh số trên 50,000 USD trong tất cả các quý của năm 2022.",
+        "question_en": "Find products that consistently achieved sales over 50,000 USD in all quarters of 2022.",
+        "intent_explanation": "Pivot doanh thu từng quý (Q1, Q2, Q3, Q4) của mỗi sản phẩm trong năm 2022, lọc các sản phẩm luôn vượt ngưỡng $50,000 ở tất cả các quý có phát sinh dữ liệu trong năm.",
+        "sql_mysql": """WITH ProductQuarterlySales AS (
+    SELECT 
+        p.PID,
+        p.Product,
+        p.Category,
+        SUM(CASE WHEN QUARTER(s.SaleDate) = 1 THEN s.Amount ELSE 0 END) AS Q1_Revenue,
+        SUM(CASE WHEN QUARTER(s.SaleDate) = 2 THEN s.Amount ELSE 0 END) AS Q2_Revenue,
+        SUM(CASE WHEN QUARTER(s.SaleDate) = 3 THEN s.Amount ELSE 0 END) AS Q3_Revenue,
+        SUM(CASE WHEN QUARTER(s.SaleDate) = 4 THEN s.Amount ELSE 0 END) AS Q4_Revenue,
+        SUM(s.Amount) AS TotalAnnualRevenue
+    FROM products p
+    JOIN sales s ON p.PID = s.PID
+    WHERE YEAR(s.SaleDate) = 2022
+    GROUP BY p.PID, p.Product, p.Category
+)
+SELECT 
+    Product,
+    Category,
+    Q1_Revenue,
+    Q2_Revenue,
+    Q3_Revenue,
+    Q4_Revenue,
+    TotalAnnualRevenue
+FROM ProductQuarterlySales
+WHERE Q1_Revenue > 50000
+  AND (Q2_Revenue > 50000 OR (SELECT COUNT(DISTINCT QUARTER(SaleDate)) FROM sales WHERE YEAR(SaleDate) = 2022) < 2)
+  AND (Q3_Revenue > 50000 OR (SELECT COUNT(DISTINCT QUARTER(SaleDate)) FROM sales WHERE YEAR(SaleDate) = 2022) < 3)
+  AND (Q4_Revenue > 50000 OR (SELECT COUNT(DISTINCT QUARTER(SaleDate)) FROM sales WHERE YEAR(SaleDate) = 2022) < 4)
+ORDER BY TotalAnnualRevenue DESC;""",
+        "sql_sqlite": """WITH ProductQuarterlySales AS (
+    SELECT 
+        p.PID,
+        p.Product,
+        p.Category,
+        SUM(CASE WHEN ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = 1 THEN s.Amount ELSE 0 END) AS Q1_Revenue,
+        SUM(CASE WHEN ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = 2 THEN s.Amount ELSE 0 END) AS Q2_Revenue,
+        SUM(CASE WHEN ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = 3 THEN s.Amount ELSE 0 END) AS Q3_Revenue,
+        SUM(CASE WHEN ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = 4 THEN s.Amount ELSE 0 END) AS Q4_Revenue,
+        SUM(s.Amount) AS TotalAnnualRevenue
+    FROM products p
+    JOIN sales s ON p.PID = s.PID
+    WHERE strftime('%Y', s.SaleDate) = '2022'
+    GROUP BY p.PID, p.Product, p.Category
+)
+SELECT 
+    Product,
+    Category,
+    Q1_Revenue,
+    Q2_Revenue,
+    Q3_Revenue,
+    Q4_Revenue,
+    TotalAnnualRevenue
+FROM ProductQuarterlySales
+WHERE Q1_Revenue > 50000
+  AND (Q2_Revenue > 50000 OR (SELECT COUNT(DISTINCT ((CAST(strftime('%m', SaleDate) AS INTEGER) + 2) / 3)) FROM sales WHERE strftime('%Y', SaleDate) = '2022') < 2)
+  AND (Q3_Revenue > 50000 OR (SELECT COUNT(DISTINCT ((CAST(strftime('%m', SaleDate) AS INTEGER) + 2) / 3)) FROM sales WHERE strftime('%Y', SaleDate) = '2022') < 3)
+  AND (Q4_Revenue > 50000 OR (SELECT COUNT(DISTINCT ((CAST(strftime('%m', SaleDate) AS INTEGER) + 2) / 3)) FROM sales WHERE strftime('%Y', SaleDate) = '2022') < 4)
+ORDER BY TotalAnnualRevenue DESC;"""
+    },
+    {
         "id": "choco_product_margin_pnl",
         "domain": "awesome_chocolates",
         "category": "margin_pnl",
@@ -436,7 +1362,7 @@ ORDER BY ProfitMarginPct DESC;"""
         "id": "choco_team_revenue_boxes",
         "domain": "awesome_chocolates",
         "category": "team_comparison",
-        "tags": ["team", "đội ngũ", "so sánh", "doanh số", "số lượng hộp", "avg price", "hộp bán ra", "team kinh doanh"],
+        "tags": ["team", "đội ngũ", "nhóm", "giữa các nhóm", "so sánh", "doanh số", "số lượng hộp", "avg price", "hộp bán ra", "team kinh doanh"],
         "question": "So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh",
         "question_en": "Compare total sales revenue and boxes sold across business teams",
         "intent_explanation": "Nhóm theo Team của bảng people, tính SUM(Amount), SUM(Boxes) và đơn giá bình quân SUM(Amount)/SUM(Boxes).",
@@ -460,6 +1386,37 @@ JOIN sales s ON p.SPID = s.SPID
 WHERE p.Team IS NOT NULL AND p.Team != ''
 GROUP BY p.Team
 ORDER BY "Tổng Doanh Thu ($)" DESC;"""
+    },
+    {
+        "id": "choco_team_disparity_spread",
+        "domain": "awesome_chocolates",
+        "category": "team_comparison",
+        "tags": ["nhóm cao nhất", "nhóm thấp nhất", "chênh lệch", "sự chênh lệch", "giữa nhóm", "giữa các nhóm", "team", "đội ngũ", "nhóm bán hàng", "so sánh nhóm"],
+        "question": "Phân tích sự chênh lệch số tiền giữa nhóm cao nhất và nhóm thấp nhất",
+        "question_en": "Analyze the sales amount disparity between the highest and lowest business teams",
+        "intent_explanation": "Nhóm theo Team của bảng people (loại bỏ Team rỗng), tính tổng doanh số SUM(Amount), tổng số hộp SUM(Boxes), số đơn hàng COUNT(PID) và giá trị đơn hàng trung bình AVG(Amount), sắp xếp theo TotalSales DESC để đối chiếu khoảng cách chênh lệch giữa nhóm dẫn đầu và nhóm thấp nhất.",
+        "sql_mysql": """SELECT 
+    pe.Team AS Team,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold,
+    COUNT(s.PID) AS TotalOrders,
+    ROUND(AVG(s.Amount), 2) AS AvgOrderValue
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;""",
+        "sql_sqlite": """SELECT 
+    pe.Team AS Team,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxesSold,
+    COUNT(s.PID) AS TotalOrders,
+    ROUND(AVG(s.Amount), 2) AS AvgOrderValue
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;"""
     },
     {
         "id": "choco_team_headcount",
@@ -812,6 +1769,88 @@ SELECT Country, Product, TotalRevenue
 FROM GeoProductSales
 WHERE CountryRank = 1
 ORDER BY TotalRevenue DESC;"""
+    },
+    {
+        "id": "choco_dominant_market_top_product",
+        "domain": "awesome_chocolates",
+        "category": "market_product_analysis",
+        "tags": [
+            "thị trường", "quốc gia", "chiếm trên 30%", "30%", "doanh số toàn cầu", 
+            "sản phẩm bán chạy nhất", "sản phẩm bán chạy", "top product", "geo", "market share"
+        ],
+        "question": "Thị trường nào đang chiếm trên 30% tổng doanh số toàn cầu của công ty và sản phẩm bán chạy nhất tại thị trường đó là gì?",
+        "question_en": "Which market accounts for over 30% of global total sales and what is the best-selling product in that market?",
+        "intent_explanation": "Sử dụng 2 CTE: CTE 1 (MarketSales) tính doanh thu và tỷ trọng toàn cầu SUM(Amount)*100/(SELECT SUM(Amount) FROM sales) của từng thị trường, lọc HAVING tỷ trọng > 30%. CTE 2 (RankedMarketProducts) xếp hạng ROW_NUMBER() các sản phẩm theo doanh số trong từng thị trường. Cuối cùng lọc WHERE rn = 1 để lấy đúng sản phẩm dẫn đầu.",
+        "sql_mysql": """WITH MarketSales AS (
+    SELECT 
+        g.GeoID,
+        g.Geo AS Market,
+        SUM(s.Amount) AS MarketRevenue,
+        ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales), 2) AS MarketSharePct
+    FROM sales s
+    JOIN geo g ON s.GeoID = g.GeoID
+    GROUP BY g.GeoID, g.Geo
+    HAVING (SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales)) > 30
+),
+RankedMarketProducts AS (
+    SELECT 
+        ms.Market,
+        ms.MarketRevenue,
+        ms.MarketSharePct,
+        pr.Product AS TopProduct,
+        pr.Category AS ProductCategory,
+        SUM(s.Amount) AS TopProductRevenue,
+        ROW_NUMBER() OVER (PARTITION BY ms.GeoID ORDER BY SUM(s.Amount) DESC) AS rn
+    FROM MarketSales ms
+    JOIN sales s ON ms.GeoID = s.GeoID
+    JOIN products pr ON s.PID = pr.PID
+    GROUP BY ms.GeoID, ms.Market, ms.MarketRevenue, ms.MarketSharePct, pr.PID, pr.Product, pr.Category
+)
+SELECT 
+    Market,
+    MarketRevenue,
+    MarketSharePct,
+    TopProduct,
+    ProductCategory,
+    TopProductRevenue
+FROM RankedMarketProducts
+WHERE rn = 1
+ORDER BY MarketRevenue DESC;""",
+        "sql_sqlite": """WITH MarketSales AS (
+    SELECT 
+        g.GeoID,
+        g.Geo AS Market,
+        SUM(s.Amount) AS MarketRevenue,
+        ROUND(SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales), 2) AS MarketSharePct
+    FROM sales s
+    JOIN geo g ON s.GeoID = g.GeoID
+    GROUP BY g.GeoID, g.Geo
+    HAVING (SUM(s.Amount) * 100.0 / (SELECT SUM(Amount) FROM sales)) > 30
+),
+RankedMarketProducts AS (
+    SELECT 
+        ms.Market,
+        ms.MarketRevenue,
+        ms.MarketSharePct,
+        pr.Product AS TopProduct,
+        pr.Category AS ProductCategory,
+        SUM(s.Amount) AS TopProductRevenue,
+        ROW_NUMBER() OVER (PARTITION BY ms.GeoID ORDER BY SUM(s.Amount) DESC) AS rn
+    FROM MarketSales ms
+    JOIN sales s ON ms.GeoID = s.GeoID
+    JOIN products pr ON s.PID = pr.PID
+    GROUP BY ms.GeoID, ms.Market, ms.MarketRevenue, ms.MarketSharePct, pr.PID, pr.Product, pr.Category
+)
+SELECT 
+    Market,
+    MarketRevenue,
+    MarketSharePct,
+    TopProduct,
+    ProductCategory,
+    TopProductRevenue
+FROM RankedMarketProducts
+WHERE rn = 1
+ORDER BY MarketRevenue DESC;"""
     },
     {
         "id": "choco_product_price_spread_by_geo",

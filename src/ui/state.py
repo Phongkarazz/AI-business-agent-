@@ -25,6 +25,7 @@ def init_session_state():
         "enable_auto_insights": True,
         "enable_self_check": True,
         "enable_cache": True,
+        "language": "vi",
         "forecast_periods": 3,
         "_db_pass_for_sanitize": "",
         "_auto_connect_attempted": False,

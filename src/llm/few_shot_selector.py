@@ -84,7 +84,12 @@ def score_few_shot_relevance(user_query: str, example: dict) -> float:
     # 3. Intent Pattern Matching
     intent_score = 0.0
     cat = example.get("category", "")
-    if cat == "top_transactions" and any(k in q_low for k in ["giao dịch", "đơn hàng", "orders", "transactions"]) and any(k in q_low for k in ["top", "cao nhất", "lớn nhất", "nhiều nhất", "giá trị nhất", "giá trị đơn hàng cao nhất"]):
+    if cat == "time_peak_valley" and (
+        any(k in q_low for k in ["khoảng thời gian", "thời gian nào", "thời điểm nào", "giai đoạn", "giai đoạn đạt đỉnh", "mốc thời gian", "chu kỳ nào"])
+        or (any(k in q_low for k in ["thời gian", "năm", "tháng"]) and any(k in q_low for k in ["cao nhất và thấp nhất", "đỉnh", "đáy"]))
+    ):
+        intent_score += 85.0
+    elif cat == "top_transactions" and any(k in q_low for k in ["giao dịch", "đơn hàng", "orders", "transactions"]) and any(k in q_low for k in ["top", "cao nhất", "lớn nhất", "nhiều nhất", "giá trị nhất", "giá trị đơn hàng cao nhất"]):
         intent_score += 75.0
     elif cat == "team_salespeople" and (
         any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "từng người", "từng nhân viên"])
@@ -137,11 +142,14 @@ def score_few_shot_relevance(user_query: str, example: dict) -> float:
         intent_score += 30.0
     elif cat == "margin_pnl" and any(k in q_low for k in ["tỷ suất", "tỉ suất", "margin", "lợi nhuận", "giá vốn", "cogs"]):
         intent_score += 25.0
-    elif cat == "team_comparison" and any(k in q_low for k in ["team", "đội ngũ", "các team"]) and any(k in q_low for k in ["doanh số", "hộp", "boxes", "so sánh"]):
-        if any(k in q_low for k in ["riêng team", "thị trường", "canada", "bars", "bites", "nhân viên", "nhân sự", "salesperson", "từng nhân viên", "từng người", "delish", "yummies", "jucies", "giao dịch", "đơn hàng"]):
+    elif cat == "team_comparison" and (
+        any(k in q_low for k in ["team", "đội ngũ", "các team", "giữa các team", "nhóm", "giữa nhóm", "giữa các nhóm", "nhóm cao nhất", "nhóm thấp nhất"])
+        and any(k in q_low for k in ["doanh số", "hộp", "boxes", "so sánh", "tiền", "số tiền", "chênh lệch", "khoảng cách"])
+    ):
+        if any(k in q_low for k in ["riêng team", "thị trường", "canada", "bars", "bites", "nhân sự", "salesperson", "từng nhân viên", "từng người", "delish", "yummies", "jucies", "giao dịch", "đơn hàng"]):
             intent_score -= 50.0
         else:
-            intent_score += 25.0
+            intent_score += 65.0
     elif cat == "window_function" and any(k in q_low for k in ["top 10%", "top 1 mỗi", "nhất của từng", "dẫn đầu từng"]):
         intent_score += 20.0
     elif cat == "time_series" and any(k in q_low for k in ["gần nhất", "12 tháng", "qua các tháng", "theo năm", "xu hướng"]):
@@ -154,26 +162,32 @@ def score_few_shot_relevance(user_query: str, example: dict) -> float:
 
 
 def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect: str = "MySQL", top_k: int = 2) -> list[dict]:
-    """Lựa chọn top_k ví dụ mẫu chuẩn mực tương đồng nhất với câu hỏi người dùng."""
+    """Lựa chọn top_k ví dụ mẫu chuẩn mực tương đồng nhất với câu hỏi người dùng (kết hợp tĩnh + động đã tự học)."""
     if not user_query:
         return []
 
     target_domain = detect_database_domain(schema_context)
     is_sqlite = "sqlite" in (dialect or "").lower()
 
-    # Lọc ví dụ theo Domain CSDL (ưu tiên các ví dụ cùng domain nếu xác định được)
+    # 1. Truy xuất các mẫu động đã học từ Vòng lặp Tiến hóa Tri thức (Tầng 2)
+    dynamic_learned = []
+    try:
+        from src.llm.dynamic_memory import fetch_matching_dynamic_few_shots
+        dynamic_learned = fetch_matching_dynamic_few_shots(user_query, domain=target_domain, dialect=dialect, limit=top_k)
+    except Exception:
+        dynamic_learned = []
+
+    # 2. Lọc ví dụ tĩnh theo Domain CSDL
     candidate_examples = []
     for ex in FEW_SHOT_EXAMPLES:
-        # Nếu đã xác định rõ domain (employees, awesome_chocolates, sakila), chỉ chọn ví dụ thuộc domain đó
         if target_domain in ("employees", "awesome_chocolates", "sakila"):
             if ex.get("domain") == target_domain:
                 candidate_examples.append(ex)
 
     if not candidate_examples and target_domain not in ("employees", "awesome_chocolates", "sakila"):
-        # Với generic domain, chỉ chọn các ví dụ chung nếu có
         candidate_examples = [ex for ex in FEW_SHOT_EXAMPLES if ex.get("domain") == "generic"]
 
-    # Chấm điểm và sắp xếp
+    # Chấm điểm và sắp xếp ví dụ tĩnh
     scored_examples = []
     for ex in candidate_examples:
         score = score_few_shot_relevance(user_query, ex)
@@ -181,14 +195,22 @@ def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect:
 
     scored_examples.sort(key=lambda x: x[0], reverse=True)
 
-    # Chọn top K ví dụ có điểm số cao nhất
+    # 3. Kết hợp mẫu tự học (ưu tiên hàng đầu) và mẫu tĩnh
     selected = []
-    for score, ex in scored_examples[:top_k]:
-        # Sao chép và chọn đúng câu SQL theo dialect
-        ex_copy = dict(ex)
-        ex_copy["selected_sql"] = ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
-        ex_copy["relevance_score"] = round(score, 2)
+    for dyn_ex in dynamic_learned:
+        ex_copy = dict(dyn_ex)
+        ex_copy["selected_sql"] = dyn_ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
+        ex_copy["relevance_score"] = 99.0
+        ex_copy["intent_explanation"] = f"🧠 [Tri thức Động Tự Học] {dyn_ex.get('intent_explanation', '')}"
         selected.append(ex_copy)
+
+    remaining_slots = top_k - len(selected)
+    if remaining_slots > 0:
+        for score, ex in scored_examples[:remaining_slots]:
+            ex_copy = dict(ex)
+            ex_copy["selected_sql"] = ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
+            ex_copy["relevance_score"] = round(score, 2)
+            selected.append(ex_copy)
 
     return selected
 

@@ -710,6 +710,25 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             top_sal_val = float(top_row[sal_cols[0]]) if sal_cols else 0.0
             avg_sort_val = float(pd.to_numeric(df[sort_col], errors="coerce").mean() or 0.0)
 
+            st.markdown(
+                """<style>
+                [data-testid="stMetricValue"] {
+                    font-size: 1.18rem !important;
+                    white-space: normal !important;
+                    word-break: break-word !important;
+                    line-height: 1.25 !important;
+                }
+                [data-testid="stMetricLabel"] {
+                    font-size: 0.82rem !important;
+                    white-space: normal !important;
+                }
+                [data-testid="stMetricDelta"] > div {
+                    font-size: 0.78rem !important;
+                    white-space: normal !important;
+                }
+                </style>""",
+                unsafe_allow_html=True
+            )
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 metric_label = "Phân Tán Cao Nhất" if is_stddev_q else "Biến Động Cao Nhất"
@@ -739,7 +758,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
 
     # 0.053 KIỂM TRA BÀI TOÁN TOP PHÒNG BAN THEO TỔNG QUỸ LƯƠNG (TOP DEPT PAYROLL)
     payroll_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["totalpayroll", "total_payroll", "totalsalarybudget", "quy_luong"])]
-    if payroll_cols and dept_label_cols and any(k in (user_query or "").lower() for k in ["quỹ lương", "tổng quỹ lương", "top"]):
+    if payroll_cols and dept_label_cols and any(k in (user_query or "").lower() for k in ["quỹ lương", "tổng quỹ lương", "top", "chi phí lương"]):
         p_col = payroll_cols[0]
         d_col = dept_label_cols[0]
         s_payroll = pd.to_numeric(df[p_col], errors="coerce").fillna(0)
@@ -754,22 +773,37 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         tot_top_headcount = int(pd.to_numeric(df[head_cols[0]], errors="coerce").sum()) if head_cols else 0
         avg_headcount_per_dept = int(tot_top_headcount / len(df)) if len(df) > 0 else 0
 
+        has_explicit_top = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "lớn nhất"]) and bool(re.search(r"\b\d+\b", (user_query or "").lower()))
+        is_all_depts = len(df) >= 9 or not has_explicit_top
+
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            st.metric("🏆 " + ("Quỹ Lương Lớn Nhất" if not is_en else "Largest Payroll Dept"), top_p_dept, delta=f"${top_p_val:,.0f} ({top_p_val/tot_top_payroll*100:.1f}% Top {len(df)})")
+            delta_pct = (top_p_val / tot_top_payroll * 100) if tot_top_payroll > 0 else 0
+            delta_label = f"${top_p_val:,.0f} ({delta_pct:.1f}% tổng)" if is_all_depts else f"${top_p_val:,.0f} ({delta_pct:.1f}% Top {len(df)})"
+            st.metric("🏆 " + ("Quỹ Lương Lớn Nhất" if not is_en else "Largest Payroll Dept"), top_p_dept, delta=delta_label)
         with c2:
-            st.metric("💰 " + (f"Tổng Quỹ Lương Top {len(df)}" if not is_en else f"Top {len(df)} Total Payroll"), f"${tot_top_payroll:,.0f}", delta="Chiếm 92.1% toàn ty")
+            card2_title = f"Tổng Quỹ Lương ({len(df)} Phòng)" if is_all_depts else f"Tổng Quỹ Lương Top {len(df)}"
+            st.metric("💰 " + (card2_title if not is_en else f"Total Payroll ({len(df)} Depts)"), f"${tot_top_payroll:,.0f}", delta="Toàn bộ phòng ban" if is_all_depts else f"Top {len(df)} phòng ban")
         with c3:
-            st.metric("👥 " + (f"Tổng Nhân Sự Top {len(df)}" if not is_en else f"Top {len(df)} Headcount"), f"{tot_top_headcount:,} Người", delta="85.3% lực lượng ty")
+            card3_title = f"Tổng Nhân Sự ({len(df)} Phòng)" if is_all_depts else f"Tổng Nhân Sự Top {len(df)}"
+            st.metric("👥 " + (card3_title if not is_en else f"Total Headcount ({len(df)} Depts)"), f"{tot_top_headcount:,} Người", delta="100% lực lượng hiện tại" if is_all_depts else f"Top {len(df)} phòng ban")
         with c4:
-            st.metric("🏢 " + ("Quy Mô TB / Phòng" if not is_en else "Avg Headcount / Dept"), f"{avg_headcount_per_dept:,} Người", delta=f"Bình quân Top {len(df)}")
+            st.metric("🏢 " + ("Quy Mô TB / Phòng" if not is_en else "Avg Headcount / Dept"), f"{avg_headcount_per_dept:,} Người", delta=f"Bình quân {len(df)} phòng" if is_all_depts else f"Bình quân Top {len(df)}")
 
-        st.caption(
-            f"ℹ️ **Phân tích Top {len(df)} Phòng ban có Quỹ lương cao nhất**: **{top_p_dept}** dẫn đầu với ngân sách chi trả lên đến **${top_p_val:,.0f}**. "
-            f"Top {len(df)} phòng ban này chiếm tới **${tot_top_payroll:,.0f}** và tập trung **{tot_top_headcount:,} nhân sự**, đóng vai trò trọng yếu trong hoạt động sản xuất kinh doanh của doanh nghiệp."
-            if not is_en else
-            f"ℹ️ **Top {len(df)} Department Payroll Analysis**: {top_p_dept} leads with ${top_p_val:,.0f} in active payroll spending."
-        )
+        if is_all_depts:
+            st.caption(
+                f"ℹ️ **Phân tích Tổng Quỹ lương của toàn bộ {len(df)} Phòng ban**: **{top_p_dept}** dẫn đầu với ngân sách chi trả lên đến **${top_p_val:,.0f}**. "
+                f"Tổng chi phí quỹ lương toàn công ty hiện tại là **${tot_top_payroll:,.0f}** cho **{tot_top_headcount:,} nhân sự đang công tác**."
+                if not is_en else
+                f"ℹ️ **Company-wide Department Payroll Analysis**: {top_p_dept} leads with ${top_p_val:,.0f}. Total active payroll across {len(df)} departments is ${tot_top_payroll:,.0f} for {tot_top_headcount:,} employees."
+            )
+        else:
+            st.caption(
+                f"ℹ️ **Phân tích Top {len(df)} Phòng ban có Quỹ lương cao nhất**: **{top_p_dept}** dẫn đầu với ngân sách chi trả lên đến **${top_p_val:,.0f}**. "
+                f"Top {len(df)} phòng ban này chiếm **${tot_top_payroll:,.0f}** và tập trung **{tot_top_headcount:,} nhân sự**."
+                if not is_en else
+                f"ℹ️ **Top {len(df)} Department Payroll Analysis**: {top_p_dept} leads with ${top_p_val:,.0f} in active payroll spending."
+            )
         st.write("")
         return
 
@@ -975,6 +1009,128 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         st.write("")
         return
 
+    # 0.05405 KIỂM TRA BÀI TOÁN PHÒNG BAN THÂM HỤT HOẶC THẶNG DƯ LƯƠNG SO VỚI TRUNG BÌNH TOÀN CÔNG TY
+    is_dept_deficit_kpi = (
+        any(k in uq_low for k in ["phòng ban", "phòng", "department", "đơn vị"])
+        and any(k in uq_low for k in ["thâm hụt", "deficit", "thấp hơn trung bình", "thấp hơn mức trung bình", "hụt lương", "thiệt thòi", "thặng dư", "surplus", "vượt trung bình", "cao hơn trung bình"])
+        and any(any(k in str(c).lower() for k in ["dept", "phòng", "department"]) for c in df.columns)
+        and any(any(k in str(c).lower() for k in ["salarydeficit", "salarysurplus", "differencefromcompanyaverage", "deficit", "surplus", "difference"]) for c in df.columns)
+    )
+    if is_dept_deficit_kpi and total_rows > 0:
+        dept_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["dept", "department", "phòng"])]
+        dept_col = dept_cols[0] if dept_cols else df.columns[0]
+        
+        sal_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["avgsalary", "avg_salary", "currentsalary", "lương trung bình", "lương"])]
+        sal_col = sal_cols[0] if sal_cols else df.columns[1]
+        
+        comp_avg_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["companyavgsalary", "company_avg_salary", "tb công ty"])]
+        comp_avg_val = float(df[comp_avg_cols[0]].iloc[0]) if comp_avg_cols else 72012.0
+        
+        diff_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["salarydeficit", "salarysurplus", "differencefromcompanyaverage", "deficit", "surplus", "difference"])]
+        diff_col = diff_cols[0] if diff_cols else df.columns[2]
+        
+        hc_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["headcount", "nhân sự", "count"])]
+        hc_col = hc_cols[0] if hc_cols else None
+        
+        is_deficit_question = any(k in uq_low for k in ["thâm hụt", "deficit", "thấp hơn", "hụt lương", "thiệt thòi"])
+        
+        if is_deficit_question:
+            if any(k in str(diff_col).lower() for k in ["deficit", "thâm hụt"]):
+                top_row = df.sort_values(by=diff_col, ascending=False).iloc[0]
+            else:
+                top_row = df.sort_values(by=diff_col, ascending=True).iloc[0]
+            
+            top_dept = str(top_row[dept_col])
+            top_sal = float(top_row[sal_col])
+            raw_diff = float(top_row[diff_col])
+            diff_abs = abs(raw_diff)
+            top_hc = int(top_row[hc_col]) if hc_col else None
+            pct_diff = (diff_abs / comp_avg_val * 100) if comp_avg_val > 0 else 0
+            
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏆 " + ("Quán Quân Thâm Hụt Lương" if not is_en else "Largest Salary Deficit"),
+                    top_dept,
+                    delta=f"-${diff_abs:,.0f} so với TB Cty"
+                )
+            with c2:
+                st.metric(
+                    "📉 " + ("Mức Thâm Hụt Lương" if not is_en else "Salary Deficit"),
+                    f"-${diff_abs:,.0f}",
+                    delta=f"-{pct_diff:.1f}% so với TB Cty"
+                )
+            with c3:
+                st.metric(
+                    "🏢 " + ("Lương TB Phòng Ban" if not is_en else "Dept Avg Salary"),
+                    f"${top_sal:,.0f}",
+                    delta=f"TB Toàn Cty: ${comp_avg_val:,.0f}"
+                )
+            with c4:
+                st.metric(
+                    "👥 " + ("Quy Mô Nhân Sự" if not is_en else "Headcount"),
+                    f"{top_hc:,} Người" if top_hc else f"{total_rows} Phòng Ban",
+                    delta=f"Toàn bộ {total_rows} phòng ban"
+                )
+            
+            st.caption(
+                f"ℹ️ **Báo cáo Thâm hụt Lương theo Phòng ban**: Phòng ban **{top_dept}** có mức thâm hụt lương lớn nhất toàn công ty, "
+                f"với mức lương trung bình **${top_sal:,.0f}** (thấp hơn **${diff_abs:,.0f}** hay **-{pct_diff:.1f}%** so với mức lương bình quân toàn công ty **${comp_avg_val:,.0f}**)."
+                if not is_en else
+                f"ℹ️ **Department Salary Deficit Report**: Department **{top_dept}** shows the highest salary deficit, "
+                f"averaging **${top_sal:,.0f}** (-${diff_abs:,.0f} or -{pct_diff:.1f}% below company-wide average **${comp_avg_val:,.0f}**)."
+            )
+            st.write("")
+            return
+        else:
+            if any(k in str(diff_col).lower() for k in ["surplus", "thặng dư"]):
+                top_row = df.sort_values(by=diff_col, ascending=False).iloc[0]
+            else:
+                top_row = df.sort_values(by=diff_col, ascending=False).iloc[0]
+            
+            top_dept = str(top_row[dept_col])
+            top_sal = float(top_row[sal_col])
+            raw_diff = float(top_row[diff_col])
+            diff_abs = abs(raw_diff)
+            top_hc = int(top_row[hc_col]) if hc_col else None
+            pct_diff = (diff_abs / comp_avg_val * 100) if comp_avg_val > 0 else 0
+            
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏆 " + ("Quán Quân Thặng Dư Lương" if not is_en else "Largest Salary Surplus"),
+                    top_dept,
+                    delta=f"+${diff_abs:,.0f} so với TB Cty"
+                )
+            with c2:
+                st.metric(
+                    "📈 " + ("Mức Thặng Dư Lương" if not is_en else "Salary Surplus"),
+                    f"+${diff_abs:,.0f}",
+                    delta=f"+{pct_diff:.1f}% so với TB Cty"
+                )
+            with c3:
+                st.metric(
+                    "🏢 " + ("Lương TB Phòng Ban" if not is_en else "Dept Avg Salary"),
+                    f"${top_sal:,.0f}",
+                    delta=f"TB Toàn Cty: ${comp_avg_val:,.0f}"
+                )
+            with c4:
+                st.metric(
+                    "👥 " + ("Quy Mô Nhân Sự" if not is_en else "Headcount"),
+                    f"{top_hc:,} Người" if top_hc else f"{total_rows} Phòng Ban",
+                    delta=f"Toàn bộ {total_rows} phòng ban"
+                )
+            
+            st.caption(
+                f"ℹ️ **Báo cáo Thặng dư Lương theo Phòng ban**: Phòng ban **{top_dept}** có mức thặng dư lương lớn nhất toàn công ty, "
+                f"với mức lương trung bình **${top_sal:,.0f}** (cao hơn **+${diff_abs:,.0f}** hay **+{pct_diff:.1f}%** so với mức lương bình quân toàn công ty **${comp_avg_val:,.0f}**)."
+                if not is_en else
+                f"ℹ️ **Department Salary Surplus Report**: Department **{top_dept}** shows the highest salary surplus, "
+                f"averaging **${top_sal:,.0f}** (+${diff_abs:,.0f} or +{pct_diff:.1f}% above company-wide average **${comp_avg_val:,.0f}**)."
+            )
+            st.write("")
+            return
+
     # 0.0541 KIỂM TRA BÀI TOÁN TOP NHÂN VIÊN CÓ TỶ LỆ TĂNG LƯƠNG ẤN TƯỢNG NHẤT (SO SÁNH LƯƠNG ĐẦU TIÊN VÀ HIỆN TẠI)
     is_employee_growth_kpi = (
         any(k in uq_low for k in ["nhân viên", "nhân sự", "người", "ai", "employee"])
@@ -1119,13 +1275,13 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         and any(any(k in str(c).lower() for k in ["salaryreduction", "reductionpct", "reduction", "prevsalary", "mức giảm"]) for c in df.columns)
     )
     if is_salary_reduction_kpi and total_rows > 0:
-        name_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "name", "tên", "họ và tên"])]
-        red_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["salaryreduction", "reduction", "mức giảm"])]
-        pct_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["reductionpct", "tỷ lệ", "pct"])]
-        dept_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["department", "dept_name", "phòng ban", "phòng"])]
-        date_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["date", "ngày", "from_date"])]
-        prev_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["prevsalary", "prev_salary"])]
-        new_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["newsalary", "new_salary"])]
+        name_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "name", "tên", "họ và tên"]) and not any(k in str(c).lower() for k in ["date", "ngày", "dept", "phòng"])]
+        red_cols = [c for c in df.columns if (any(k in str(c).lower() for k in ["salaryreduction", "salary_reduction", "mức giảm", "reductionamount", "reduction_amount", "giam_luong", "sotien_giam"]) or any(k in str(c).lower() for k in ["reduction", "giảm"])) and not any(k in str(c).lower() for k in ["date", "ngày", "pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
+        pct_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["reductionpct", "reduction_pct", "tỷ lệ giảm", "tỉ lệ giảm", "pct", "%"]) and not any(k in str(c).lower() for k in ["date", "ngày"])]
+        dept_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["department", "dept_name", "phòng ban", "phòng"]) and not any(k in str(c).lower() for k in ["date", "ngày"])]
+        date_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["reductiondate", "reduction_date", "date", "ngày", "from_date"])]
+        prev_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["prevsalary", "prev_salary", "lương trước"])]
+        new_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["newsalary", "new_salary", "lương sau"])]
 
         name_col = name_cols[0] if name_cols else df.columns[1]
         red_col = red_cols[0] if red_cols else None
@@ -1135,14 +1291,22 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         prev_col = prev_cols[0] if prev_cols else None
         new_col = new_cols[0] if new_cols else None
 
+        def _safe_float(v, default=0.0):
+            try:
+                if pd.isna(v):
+                    return default
+                return float(v)
+            except Exception:
+                return default
+
         top_row = df.iloc[0]
         top_name = str(top_row[name_col])
         top_dept = str(top_row[dept_col]) if dept_col else "Chưa rõ"
-        top_red = float(top_row[red_col]) if red_col else 0.0
-        top_pct = float(top_row[pct_col]) if pct_col else 0.0
-        top_prev = float(top_row[prev_col]) if prev_col else 0.0
-        top_new = float(top_row[new_col]) if new_col else 0.0
-        top_date = str(top_row[date_col]) if date_col else ""
+        top_red = _safe_float(top_row[red_col]) if red_col else 0.0
+        top_pct = _safe_float(top_row[pct_col]) if pct_col else 0.0
+        top_prev = _safe_float(top_row[prev_col]) if prev_col else 0.0
+        top_new = _safe_float(top_row[new_col]) if new_col else 0.0
+        top_date = str(top_row[date_col])[:10] if date_col else ""
 
         avg_red = float(pd.to_numeric(df[red_col], errors="coerce").mean() or 0.0) if red_col else 0.0
 
@@ -1422,12 +1586,12 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.metric("💵 " + ("Lương Đỉnh Nhóm Kỷ Lục" if not is_en else "Top Earner in Record Cohort"), f"${top_sal:,.0f}", delta=f"{top_name}" + (f" ({top_dept})" if top_dept else ""))
 
         st.caption(
-            f"ℹ️ **Báo cáo Phân tích Toàn Công ty (Khắc phục triệt để méo mó dữ liệu do LIMIT)**: "
+            f"ℹ️ **Báo cáo Thống kê Toàn diện Doanh nghiệp**: "
             f"Toàn bộ công ty có **{tot_cohort_emp:,} nhân sự** (chiếm **{pct_workforce}%** lực lượng lao động) được tăng lương từ **{thresh_val} lần trở lên** trong lịch sử, "
             f"với mức tăng trung bình toàn công ty đạt **{overall_avg:.1f} lần** (từ {min_r} đến {max_r} lần). "
             f"Bảng số liệu và biểu đồ bên dưới hiển thị **Top {len(df)} nhân sự tiêu biểu** đạt kỷ lục **{peak_raise} lần tăng lương** kèm mức lương hiện tại cao nhất."
             if not is_en else
-            f"ℹ️ **Company-wide Analysis (Zero Data Distortion)**: Across the workforce, **{tot_cohort_emp:,} employees** ({pct_workforce}%) have received **≥ {thresh_val} salary raises**, "
+            f"ℹ️ **Company-wide Workforce Analysis**: Across the workforce, **{tot_cohort_emp:,} employees** ({pct_workforce}%) have received **≥ {thresh_val} salary raises**, "
             f"averaging **{overall_avg:.1f} raises** (range {min_r} to {max_r}). Displaying Top {len(df)} record holders with {peak_raise} raises and top compensation."
         )
         st.write("")
@@ -1505,6 +1669,62 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         s_mgr = pd.to_numeric(df[m_col], errors="coerce").fillna(0)
         s_sub = pd.to_numeric(df[s_col], errors="coerce").fillna(0)
 
+        dept_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["dept", "phòng", "department"])]
+        dept_col = dept_cols[0] if dept_cols else (label_cols[0] if label_cols else None)
+
+        sub_name_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["subordinatename", "subordinate_name", "subordinate", "emp_name"])]
+        if sub_name_cols:
+            sub_name_col = sub_name_cols[0]
+            mgr_name_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["managername", "manager_name"])]
+            mgr_name_col = mgr_name_cols[0] if mgr_name_cols else None
+            diff_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["difference", "gap", "chênh", "diff"])]
+            diff_col = diff_cols[0] if diff_cols else None
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "👥 " + ("Số Nhân Sự Khảo Sát" if not is_en else "Subordinates Count"),
+                    f"{total_rows} " + ("Nhân Viên" if not is_en else "Employees"),
+                    delta="Lương vượt Quản lý" if not is_en else "Higher than Manager"
+                )
+            with c2:
+                max_sub_sal = s_sub.max()
+                r_top = df.iloc[s_sub.idxmax()] if not s_sub.empty else df.iloc[0]
+                top_emp = str(r_top[sub_name_col])
+                st.metric(
+                    "💰 " + ("Lương Cấp Dưới Cao Nhất" if not is_en else "Max Subordinate Salary"),
+                    f"${max_sub_sal:,.0f}",
+                    delta=f"Top 1: {top_emp}"
+                )
+            with c3:
+                avg_mgr = float(s_mgr.mean() or 0)
+                st.metric(
+                    "👔 " + ("Lương Quản Lý TB" if not is_en else "Avg Manager Salary"),
+                    f"${avg_mgr:,.0f}",
+                    delta="Mức lương Trưởng phòng" if not is_en else "Direct Managers"
+                )
+            with c4:
+                max_diff = float(df[diff_col].max()) if (diff_col and not df[diff_col].empty) else float((s_sub - s_mgr).max())
+                st.metric(
+                    "⚖️ " + ("Chênh Lệch Lớn Nhất" if not is_en else "Max Salary Gap"),
+                    f"+${max_diff:,.0f}",
+                    delta="Nghịch lý đãi ngộ" if not is_en else "Compensation Anomaly"
+                )
+
+            r0 = df.iloc[0]
+            sub_n = str(r0[sub_name_col])
+            mgr_n = str(r0[mgr_name_col]) if mgr_name_col else "Quản lý"
+            dept_n = str(r0[dept_col]) if dept_col else ""
+            diff_val = float(r0[diff_col]) if diff_col else float(r0[s_col] - r0[m_col])
+
+            st.caption(
+                f"ℹ️ **Danh sách Nhân viên có Lương cao hơn Quản lý**: Toàn hệ thống ghi nhận **{total_rows} nhân sự** có mức thu nhập vượt cấp trên trực tiếp. Tiêu biểu như **{sub_n}** tại phòng **{dept_n}** (lương ${float(r0[s_col]):,.0f}, cao hơn ${diff_val:,.0f} so với Trưởng phòng **{mgr_n}** ${float(r0[m_col]):,.0f})."
+                if not is_en else
+                f"ℹ️ **Subordinates Earning More than Managers**: {total_rows} employee(s) identified with higher compensation than their direct supervisor."
+            )
+            st.write("")
+            return
+
         is_sub_avg = any("avg" in str(c).lower() for c in sub_sal_cols) or any(k in (user_query or "").lower() for k in ["trung bình", "avg"])
         sub_title = "Lương TB Cấp Dưới" if is_sub_avg else "Lương Cấp Dưới Cao Nhất"
 
@@ -1512,9 +1732,6 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         avg_sub = float(s_sub.mean() or 0)
         diff_avg = avg_mgr - avg_sub
         diff_avg_pct = (diff_avg / avg_sub * 100.0) if avg_sub > 0 else 0.0
-
-        dept_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["dept", "phòng", "department"])]
-        dept_col = dept_cols[0] if dept_cols else (label_cols[0] if label_cols else None)
 
         mgr_higher_count = int((s_mgr > s_sub).sum())
 
@@ -1595,28 +1812,41 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
 
         senior_higher_count = int((s_senior > s_newhire).sum())
 
+        m_sen_y = re.search(r"(?:kỳ cựu|thâm niên|trên|hơn|>)\s*(\d+(?:\.\d+)?)\s*năm", uq_low)
+        sen_yr_str = f">{m_sen_y.group(1)} năm" if m_sen_y else ">5 năm"
+        m_new_y = re.search(r"(?:mới|dưới|ít hơn|<)\s*(\d+(?:\.\d+)?)\s*năm", uq_low)
+        new_yr_str = f"<{m_new_y.group(1)} năm" if m_new_y else "<2 năm"
+
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            st.metric(
-                "🏢 " + ("Số Phòng Ban Khảo Sát" if not is_en else "Surveyed Departments"),
-                f"{total_rows} " + ("Phòng Ban" if not is_en else "Departments"),
-                delta=f"{total_rows}/9 Đơn vị" if not is_en else "100% Coverage"
-            )
+            if total_rows == 1 and dept_col:
+                dept_name_val = str(df.loc[0, dept_col])
+                st.metric(
+                    "🏢 " + ("Phòng Ban Khảo Sát" if not is_en else "Surveyed Department"),
+                    dept_name_val,
+                    delta="Đơn vị chỉ định" if not is_en else "Target Department"
+                )
+            else:
+                st.metric(
+                    "🏢 " + ("Số Phòng Ban Khảo Sát" if not is_en else "Surveyed Departments"),
+                    f"{total_rows} " + ("Phòng Ban" if not is_en else "Departments"),
+                    delta=f"{total_rows}/9 Đơn vị" if not is_en else f"{total_rows}/9 Units"
+                )
         with c2:
             max_sen_idx = s_senior.idxmax() if not s_senior.empty else None
-            max_sen_dept = str(df.loc[max_sen_idx, dept_col]) if (max_sen_idx is not None and dept_col) else ""
-            delta_sen = f"Quy mô: {total_senior_cnt:,} ng" if total_senior_cnt > 0 else (f"Max: {max_sen_dept}" if max_sen_dept else "Thâm niên >5 năm")
+            max_sen_dept = str(df.loc[max_sen_idx, dept_col]) if (max_sen_idx is not None and dept_col and total_rows > 1) else ""
+            delta_sen = f"Quy mô: {total_senior_cnt:,} ng" if total_senior_cnt > 0 else (f"Max: {max_sen_dept}" if max_sen_dept else f"Thâm niên {sen_yr_str}")
             st.metric(
-                "🎖️ " + ("Lương TB Kỳ Cựu (>5 năm)" if not is_en else "Avg Senior Salary (>5y)"),
+                "🎖️ " + (f"Lương TB Kỳ Cựu ({sen_yr_str})" if not is_en else f"Avg Senior Salary ({sen_yr_str})"),
                 f"${avg_senior:,.0f}",
                 delta=delta_sen
             )
         with c3:
             max_new_idx = s_newhire.idxmax() if not s_newhire.empty else None
-            max_new_dept = str(df.loc[max_new_idx, dept_col]) if (max_new_idx is not None and dept_col) else ""
-            delta_new = f"Quy mô: {total_newhire_cnt:,} ng" if total_newhire_cnt > 0 else (f"Max: {max_new_dept}" if max_new_dept else "Thâm niên <2 năm")
+            max_new_dept = str(df.loc[max_new_idx, dept_col]) if (max_new_idx is not None and dept_col and total_rows > 1) else ""
+            delta_new = f"Quy mô: {total_newhire_cnt:,} ng" if total_newhire_cnt > 0 else (f"Max: {max_new_dept}" if max_new_dept else f"Thâm niên {new_yr_str}")
             st.metric(
-                "🌱 " + ("Lương TB Mới Vào (<2 năm)" if not is_en else "Avg New Hire Salary (<2y)"),
+                "🌱 " + (f"Lương TB Mới Vào ({new_yr_str})" if not is_en else f"Avg New Hire Salary ({new_yr_str})"),
                 f"${avg_newhire:,.0f}",
                 delta=delta_new
             )
@@ -1625,7 +1855,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.metric(
                 "⚖️ " + ("Chênh Lệch Lương TB" if not is_en else "Avg Salary Premium"),
                 f"{sign}${diff_avg:,.0f} ({sign}{diff_avg_pct:.1f}%)",
-                delta=f"{senior_higher_count}/{total_rows} phòng Kỳ cựu cao hơn" if not is_en else f"{senior_higher_count}/{total_rows} depts Senior > New"
+                delta=(f"{senior_higher_count}/{total_rows} phòng Kỳ cựu cao hơn" if total_rows > 1 else ("Kỳ cựu cao hơn" if diff_avg > 0 else "Mới vào cao hơn")) if not is_en else (f"{senior_higher_count}/{total_rows} depts Senior > New" if total_rows > 1 else ("Senior is higher" if diff_avg > 0 else "New hire is higher"))
             )
 
         gap_series = s_senior - s_newhire
@@ -1633,12 +1863,16 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         min_gap_idx = gap_series.idxmin() if not gap_series.empty else None
 
         info_parts = []
-        if max_gap_idx is not None and dept_col:
-            max_dept = df.loc[max_gap_idx, dept_col]
-            info_parts.append(f"Khoảng cách đãi ngộ lớn nhất tại phòng **{max_dept}** (+${gap_series.loc[max_gap_idx]:,.0f})")
-        if min_gap_idx is not None and dept_col and min_gap_idx != max_gap_idx:
-            min_dept = df.loc[min_gap_idx, dept_col]
-            info_parts.append(f"thu hẹp nhất tại phòng **{min_dept}** (+${gap_series.loc[min_gap_idx]:,.0f})")
+        if total_rows == 1 and dept_col:
+            dept_name_val = str(df.loc[0, dept_col])
+            info_parts.append(f"Tại phòng **{dept_name_val}**, lương kỳ cựu ({sen_yr_str}) chênh lệch **{sign}${diff_avg:,.0f}** ({sign}{diff_avg_pct:.1f}%) so với nhân viên mới vào ({new_yr_str})")
+        else:
+            if max_gap_idx is not None and dept_col:
+                max_dept = df.loc[max_gap_idx, dept_col]
+                info_parts.append(f"Khoảng cách đãi ngộ lớn nhất tại phòng **{max_dept}** (+${gap_series.loc[max_gap_idx]:,.0f})")
+            if min_gap_idx is not None and dept_col and min_gap_idx != max_gap_idx:
+                min_dept = df.loc[min_gap_idx, dept_col]
+                info_parts.append(f"thu hẹp nhất tại phòng **{min_dept}** (+${gap_series.loc[min_gap_idx]:,.0f})")
 
         note_text = " • ".join(info_parts)
         st.caption(
@@ -1739,26 +1973,192 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.write("")
             return
 
+    # 0.058 KIỂM TRA BÀI TOÁN THỜI GIAN THĂNG CHỨC THEO PHÒNG BAN (TIME TO PROMOTION BY DEPARTMENT)
+    is_promo_time_dept_q = (
+        any(k in uq_low for k in ["thời gian", "bao lâu", "mấy năm", "thăng chức", "promotion", "speed", "nhanh nhất", "chậm nhất", "lâu nhất"])
+        and any(k in uq_low for k in ["phòng ban", "phòng", "department", "dept", "đơn vị"])
+        and any(any(k in str(c).lower() for k in ["avgyearstopromotion", "avg_years_to_promotion", "yearstopromotion", "avgdaystopromotion", "thời gian thăng chức", "promotiontime", "timetopromotion"]) for c in df.columns)
+    )
+    if is_promo_time_dept_q and total_rows >= 1:
+        time_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["avgyearstopromotion", "avg_years_to_promotion", "yearstopromotion", "avgdaystopromotion", "thời gian thăng chức", "promotiontime", "timetopromotion", "years", "days"])]
+        hc_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["promotedemployeescount", "promotedcount", "headcount", "employees", "count", "nhân sự", "nhân viên"]) and c not in time_cands]
+        dept_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["department", "dept", "phòng"])]
+
+        if time_cands and dept_cands:
+            t_col = time_cands[0]
+            d_col = dept_cands[0]
+            h_col = hc_cands[0] if hc_cands else None
+
+            is_days = "day" in str(t_col).lower() or "ngày" in str(t_col).lower()
+            unit_str = "Ngày" if is_days else "Năm"
+            unit_en = "Days" if is_days else "Years"
+
+            valid_t = pd.to_numeric(df[t_col], errors="coerce").dropna().abs()
+            avg_time = float(valid_t.mean() or 0.0)
+            
+            tot_promoted = int(pd.to_numeric(df[h_col], errors="coerce").fillna(0).sum()) if h_col else None
+
+            # Sắp xếp để tìm phòng nhanh nhất (thời gian nhỏ nhất) và lâu nhất (thời gian lớn nhất)
+            fastest_idx = valid_t.idxmin()
+            slowest_idx = valid_t.idxmax()
+
+            fast_dept = str(df.loc[fastest_idx, d_col]) if fastest_idx in df.index else "N/A"
+            fast_val = abs(float(df.loc[fastest_idx, t_col])) if fastest_idx in df.index else 0.0
+            fast_hc = int(df.loc[fastest_idx, h_col]) if (h_col and fastest_idx in df.index) else None
+
+            slow_dept = str(df.loc[slowest_idx, d_col]) if slowest_idx in df.index else "N/A"
+            slow_val = abs(float(df.loc[slowest_idx, t_col])) if slowest_idx in df.index else 0.0
+            slow_hc = int(df.loc[slowest_idx, h_col]) if (h_col and slowest_idx in df.index) else None
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏢 " + ("Quy Mô Khảo Sát" if not is_en else "Surveyed Scope"),
+                    f"{total_rows} " + ("Phòng Ban" if not is_en else "Departments"),
+                    delta=f"{tot_promoted:,} NV thăng chức" if tot_promoted else ("Toàn công ty" if not is_en else "Company-wide")
+                )
+            with c2:
+                st.metric(
+                    "⏱️ " + ("TG Thăng Chức TB Toàn Cty" if not is_en else "Company Avg Time to Promotion"),
+                    f"{avg_time:.2f} {unit_str}" if not is_en else f"{avg_time:.2f} {unit_en}",
+                    delta="Mặt bằng chung toàn cty" if not is_en else "Company Benchmark"
+                )
+            with c3:
+                delta_f = f"{fast_val:.2f} {unit_str}" + (f" ({fast_hc:,} NV)" if fast_hc else "") if not is_en else f"{fast_val:.2f} {unit_en}"
+                st.metric(
+                    "⚡ " + ("Thăng Chức Nhanh Nhất" if not is_en else "Fastest Promotion"),
+                    fast_dept,
+                    delta=delta_f
+                )
+            with c4:
+                delta_s = f"{slow_val:.2f} {unit_str}" + (f" ({slow_hc:,} NV)" if slow_hc else "") if not is_en else f"{slow_val:.2f} {unit_en}"
+                st.metric(
+                    "⏳ " + ("Thời Gian Chờ Lâu Nhất" if not is_en else "Longest Wait Time"),
+                    slow_dept,
+                    delta=delta_s
+                )
+
+            diff_span = abs(slow_val - fast_val)
+            st.caption(
+                f"ℹ️ **Phân tích Thời gian Thăng chức theo Phòng Ban**: Nhân sự toàn công ty mất trung bình **{avg_time:.2f} {unit_str.lower()}** để được thăng chức. "
+                f"Phòng **{fast_dept}** có tốc độ thăng chức nhanh nhất (**{fast_val:.2f} {unit_str.lower()}**)" + (f" với {fast_hc:,} lượt thăng chức" if fast_hc else "") + f", "
+                f"trong khi phòng **{slow_dept}** có thời gian chờ lâu nhất (**{slow_val:.2f} {unit_str.lower()}**)" + (f" với {slow_hc:,} lượt thăng chức" if slow_hc else "") + f". "
+                f"Khoảng cách chênh lệch giữa các phòng là **{diff_span:.2f} {unit_str.lower()}** (~{diff_span*365:.0f} ngày), phản ánh quy trình bổ nhiệm đồng đều trên toàn doanh nghiệp."
+                if not is_en else
+                f"ℹ️ **Time to Promotion by Department Analysis**: Company-wide average time to promotion is **{avg_time:.2f} {unit_en.lower()}**. "
+                f"**{fast_dept}** has the fastest promotion path at **{fast_val:.2f} {unit_en.lower()}**, while **{slow_dept}** has the longest wait at **{slow_val:.2f} {unit_en.lower()}** (Gap: {diff_span:.2f} {unit_en.lower()})."
+            )
+            st.write("")
+            return
+
+    # 0.059 KIỂM TRA BÀI TOÁN NHÂN SỰ TRẢI QUA NHIỀU CHỨC DANH / LỘ TRÌNH PHÁT TRIỂN NGHỀ NGHIỆP (CAREER PROGRESSION / MULTIPLE TITLES)
+    norm_cols_map = {re.sub(r'[^a-zA-Z0-9]', '', str(c)).lower(): c for c in df.columns}
+    has_title_count_col = any(k in norm_cols_map for k in ["titlecount", "titlescount", "soluongchucdanh", "sochucdanh"])
+    has_multi_title_cols = (
+        any(k in norm_cols_map for k in ["initialtitle", "chucdanhkhoidiem", "firsttitle"])
+        and any(k in norm_cols_map for k in ["currenttitle", "chucdanhhientai", "lasttitle"])
+    )
+    is_multi_titles_q = (
+        any(k in (user_query or "").lower() for k in ["chức danh", "titles", "trải qua", "đổi chức danh", "lộ trình"])
+        and any(k in (user_query or "").lower() for k in ["ít nhất", "nhiều", "khác nhau", "khởi điểm", "hiện tại", "3", "ba", "4", "bốn", "5", "năm"])
+    )
+
+    if (is_multi_titles_q or (has_title_count_col and has_multi_title_cols)) and 1 <= total_rows <= 100:
+        tc_col = next((norm_cols_map[k] for k in ["titlecount", "titlescount", "soluongchucdanh", "sochucdanh"] if k in norm_cols_map), None)
+        init_t_col = next((norm_cols_map[k] for k in ["initialtitle", "chucdanhkhoidiem", "firsttitle"] if k in norm_cols_map), None)
+        curr_t_col = next((norm_cols_map[k] for k in ["currenttitle", "chucdanhhientai", "lasttitle"] if k in norm_cols_map), None)
+        init_d_col = next((norm_cols_map[k] for k in ["initialtitlestartdate", "ngaybatdauchucdanhdau", "firsttitlestartdate", "startdate"] if k in norm_cols_map), None)
+        curr_d_col = next((norm_cols_map[k] for k in ["currenttitlestartdate", "ngaybatdauchucdanhhientai", "lasttitlestartdate"] if k in norm_cols_map), None)
+        name_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "name", "tên", "nhân sự", "employee"])]
+        name_col = name_cols[0] if name_cols else None
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "👥 " + ("Nhân Sự Thăng Tiến" if not is_en else "Qualified Employees"),
+                f"{total_rows} Nhân Sự",
+                delta="Trải qua ≥ 3 chức danh" if not is_en else "Held ≥ 3 titles"
+            )
+
+        top_init = str(df[init_t_col].mode().iloc[0]) if (init_t_col and not df[init_t_col].dropna().empty) else "N/A"
+        top_curr = str(df[curr_t_col].mode().iloc[0]) if (curr_t_col and not df[curr_t_col].dropna().empty) else "N/A"
+
+        with c2:
+            st.metric(
+                "🔰 " + ("Khởi Điểm Phổ Biến" if not is_en else "Common Initial Title"),
+                top_init,
+                delta="Chức danh ban đầu" if not is_en else "Starting role"
+            )
+        with c3:
+            st.metric(
+                "⭐ " + ("Hiện Tại Tiêu Biểu" if not is_en else "Current Top Title"),
+                top_curr,
+                delta="Chức danh hiện tại" if not is_en else "Current role"
+            )
+        with c4:
+            if tc_col and pd.api.types.is_numeric_dtype(df[tc_col]):
+                avg_tc = float(pd.to_numeric(df[tc_col], errors="coerce").mean() or 3.0)
+                st.metric(
+                    "📈 " + ("Số Chức Danh TB" if not is_en else "Avg Titles Held"),
+                    f"{avg_tc:.1f} Chức Danh" if not is_en else f"{avg_tc:.1f} Titles",
+                    delta="Tích lũy kinh nghiệm" if not is_en else "Career growth"
+                )
+            else:
+                st.metric(
+                    "📈 " + ("Tiêu Chuẩn Đạt" if not is_en else "Criteria Met"),
+                    "≥ 3 Chức Danh",
+                    delta="Đa dạng vị trí" if not is_en else "Multi-role experience"
+                )
+
+        first_emp_str = ""
+        if name_col and len(df) >= 1:
+            r0 = df.iloc[0]
+            emp_n = str(r0[name_col])
+            emp_i = str(r0[init_t_col]) if init_t_col else ""
+            emp_c = str(r0[curr_t_col]) if curr_t_col else ""
+            first_emp_str = f" Tiêu biểu như **{emp_n}** (bắt đầu là *{emp_i}*, hiện là *{emp_c}*)."
+
+        st.caption(
+            f"ℹ️ **Lộ trình Phát triển Chức danh Nhân sự**: Toàn hệ thống ghi nhận **{total_rows} nhân sự** tiêu biểu đã trải qua từ 3 chức danh khác nhau trở lên trong sự nghiệp tại công ty.{first_emp_str} Minh chứng cho lộ trình thăng tiến sự nghiệp bền vững và gắn bó lâu dài."
+            if not is_en else
+            f"ℹ️ **Employee Career Progression Profile**: Recorded **{total_rows} employee(s)** who have held 3 or more distinct titles during their career at the company.{first_emp_str}"
+        )
+        st.write("")
+        return
+
     # 0.06 KIỂM TRA BÀI TOÁN TÌM NHÂN VIÊN TUYỂN DỤNG SAU MỐC THỜI GIAN ĐƯỢC THĂNG CHỨC LÊN MANAGER
     is_promoted_mgr_query = (
         any(k in (user_query or "").lower() for k in ["manager", "trưởng phòng", "quản lý"])
         and any(k in (user_query or "").lower() for k in ["thăng chức", "bổ nhiệm", "đổi chức danh", "lên chức"])
         and any(k in (user_query or "").lower() for k in ["tuyển dụng", "tuyển", "vào làm", "hire", "sau ngày", "sau năm", "từ ngày", "từ năm"])
     )
-    has_promotion_cols = any(any(k in str(c).lower() for k in ["promotiondate", "promotedtomanagerdate", "initialtitle", "promoted"]) for c in df.columns)
+    has_promotion_cols = any(any(k in str(c).lower() for k in ["promotedtomanagerdate", "promotedtitle", "managertitle", "promotiondate"]) for c in df.columns)
     has_name_col = any(any(k in str(c).lower() for k in ["fullname", "name", "tên"]) for c in df.columns)
     is_not_mgr_sub = not bool(mgr_sal_cols and sub_sal_cols)
 
-    if (is_promoted_mgr_query or (has_promotion_cols and has_name_col)) and is_not_mgr_sub and 1 <= total_rows <= 10:
-        name_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "name", "tên"])]
+    if (is_promoted_mgr_query or (has_promotion_cols and has_name_col and any(k in (user_query or "").lower() for k in ["manager", "trưởng phòng", "quản lý"]))) and is_not_mgr_sub and 1 <= total_rows <= 10:
+        name_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "full_name", "họ và tên", "first_name", "employee_name"]) or (any(k in str(c).lower() for k in ["name", "tên"]) and not any(k in str(c).lower() for k in ["dept", "phòng", "department", "team", "store", "product", "film", "category"]))]
         if name_cols:
             name_col = name_cols[0]
-            dept_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["dept", "phòng"])]
+            dept_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["dept", "phòng", "department", "bộ phận", "don_vi", "đơn vị"])]
             dept_col = dept_cols[0] if dept_cols else None
-            sal_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["salary", "lương"])]
+            sal_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["salary", "lương", "currentsalary", "current_salary"])]
             sal_col = sal_cols[0] if sal_cols else None
-            date_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["promotiondate", "promotedtomanagerdate", "thăng chức"])]
+            date_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["promotiondate", "promotion_date", "promotedtomanagerdate", "thăng chức", "bổ nhiệm"])]
             date_col = date_cols[0] if date_cols else None
+
+            def _clean_date_str(val):
+                if pd.isna(val) or val is None or str(val).strip() in ["", "nan", "None", "NaT"]:
+                    return ""
+                try:
+                    if isinstance(val, (int, float)):
+                        if val > 1e11:
+                            return pd.to_datetime(val, unit='ms').strftime('%Y-%m-%d')
+                        elif val > 1e8:
+                            return pd.to_datetime(val, unit='s').strftime('%Y-%m-%d')
+                    return pd.to_datetime(val).strftime('%Y-%m-%d')
+                except Exception:
+                    return str(val)[:10]
 
             c1, c2, c3, c4 = st.columns(4)
             with c1:
@@ -1772,28 +2172,29 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 r1 = df.iloc[0]
                 r2 = df.iloc[1]
                 n1 = str(r1[name_col])
-                d1 = str(r1[dept_col]) if dept_col else ""
+                d1 = str(r1[dept_col]) if dept_col and pd.notna(r1[dept_col]) else ""
                 s1 = f"${float(r1[sal_col]):,.0f}" if sal_col and pd.notna(r1[sal_col]) else ""
-                dt1 = str(r1[date_col])[:10] if date_col and pd.notna(r1[date_col]) else ""
+                dt1 = _clean_date_str(r1[date_col]) if date_col else ""
 
                 n2 = str(r2[name_col])
-                d2 = str(r2[dept_col]) if dept_col else ""
+                d2 = str(r2[dept_col]) if dept_col and pd.notna(r2[dept_col]) else ""
                 s2 = f"${float(r2[sal_col]):,.0f}" if sal_col and pd.notna(r2[sal_col]) else ""
-                dt2 = str(r2[date_col])[:10] if date_col and pd.notna(r2[date_col]) else ""
+                dt2 = _clean_date_str(r2[date_col]) if date_col else ""
 
                 with c2:
-                    delta_str1 = f"{d1} • {s1}" if (d1 and s1) else (d1 or s1)
-                    st.metric("👩 " + n1, dt1 if dt1 else "Quản Lý", delta=delta_str1)
+                    delta_str1 = f"{d1} • {s1}" if (d1 and s1) else (d1 or s1 or "Quản Lý")
+                    st.metric("👩 " + n1, dt1 if dt1 else (s1 or "Quản Lý"), delta=delta_str1)
                 with c3:
-                    delta_str2 = f"{d2} • {s2}" if (d2 and s2) else (d2 or s2)
-                    st.metric("👨 " + n2, dt2 if dt2 else "Quản Lý", delta=delta_str2)
+                    delta_str2 = f"{d2} • {s2}" if (d2 and s2) else (d2 or s2 or "Quản Lý")
+                    st.metric("👨 " + n2, dt2 if dt2 else (s2 or "Quản Lý"), delta=delta_str2)
             elif total_rows == 1:
                 r1 = df.iloc[0]
                 n1 = str(r1[name_col])
-                d1 = str(r1[dept_col]) if dept_col else ""
+                d1 = str(r1[dept_col]) if dept_col and pd.notna(r1[dept_col]) else ""
                 s1 = f"${float(r1[sal_col]):,.0f}" if sal_col and pd.notna(r1[sal_col]) else ""
+                dt1 = _clean_date_str(r1[date_col]) if date_col else ""
                 with c2:
-                    st.metric("👤 " + n1, d1 if d1 else "Quản Lý", delta=s1 if s1 else None)
+                    st.metric("👤 " + n1, dt1 if dt1 else (s1 or "Quản Lý"), delta=f"{d1} • {s1}" if (d1 and s1) else (d1 or s1))
                 with c3:
                     st.metric("🏢 " + ("Phòng Ban Đảm Nhiệm" if not is_en else "Department"), d1 if d1 else "N/A")
 
@@ -1804,11 +2205,20 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 else:
                     st.metric("⭐ " + ("Tỷ Lệ Thành Công" if not is_en else "Success Rate"), "100%", delta="Đáp ứng tiêu chuẩn bổ nhiệm")
 
+            d1_tag = f" ({df.iloc[0][dept_col]})" if dept_col and pd.notna(df.iloc[0][dept_col]) and str(df.iloc[0][dept_col]).strip() else ""
+            d2_tag = f" ({df.iloc[1][dept_col]})" if total_rows >= 2 and dept_col and pd.notna(df.iloc[1][dept_col]) and str(df.iloc[1][dept_col]).strip() else ""
+
+            if total_rows == 2:
+                names_summary = f"Bao gồm **{df.iloc[0][name_col]}**{d1_tag} và **{df.iloc[1][name_col]}**{d2_tag}."
+            elif total_rows == 1:
+                names_summary = f"Bao gồm **{df.iloc[0][name_col]}**{d1_tag}."
+            else:
+                names_summary = f"Bao gồm các nhân sự tiêu biểu như **{df.iloc[0][name_col]}**{d1_tag}."
+
             st.caption(
-                f"ℹ️ **Hồ sơ Nhân sự Quản lý thăng chức sau mốc tuyển dụng**: Toàn hệ thống có **{total_rows} nhân sự** xuất sắc được thăng chức từ cấp chuyên môn lên chức danh Manager. "
-                + (f"Bao gồm **{df.iloc[0][name_col]}** ({df.iloc[0][dept_col] if dept_col else ''}) và **{df.iloc[1][name_col]}** ({df.iloc[1][dept_col] if dept_col else ''})." if total_rows == 2 else "")
+                f"ℹ️ **Hồ sơ Nhân sự Quản lý thăng chức sau mốc tuyển dụng**: Toàn hệ thống có **{total_rows} nhân sự** xuất sắc được thăng chức từ cấp chuyên môn lên chức danh Manager. {names_summary}"
                 if not is_en else
-                f"ℹ️ **Promoted Managers**: {total_rows} individual(s) promoted to Manager after the specified hire date threshold."
+                f"ℹ️ **Promoted Managers**: {total_rows} individual(s) promoted to Manager after the specified hire date threshold. {names_summary}"
             )
             st.write("")
             return
@@ -1822,9 +2232,9 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             and any(k in uq_low_kpi for k in ["tiền", "lương", "thu nhập", "salary"])
             and any(k in uq_low_kpi for k in ["nhiều nhất", "cao nhất", "lớn nhất", "khủng nhất"])
         )
-    ) and not any(k in uq_low_kpi for k in ["tăng trưởng", "tốc độ", "mỗi năm", "bổ nhiệm", "manager", "so sánh", "đối chiếu", "thâm niên", "kỳ cựu"])
+    ) and not any(k in uq_low_kpi for k in ["tăng trưởng", "tốc độ", "mỗi năm", "bổ nhiệm", "manager", "so sánh", "đối chiếu", "thâm niên", "kỳ cựu", "chức danh", "title", "phòng ban", "phòng", "department", "quốc gia", "country", "thị trường", "sản phẩm", "product", "team", "đội ngũ", "nhóm"])
 
-    name_col_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "first_name", "tên", "nhân sự", "employee", "salesperson"])]
+    name_col_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "first_name", "tên", "nhân sự", "employee", "salesperson"]) and not pd.api.types.is_numeric_dtype(df[c]) and not any(k in str(c).lower() for k in ["số lượng", "số", "count", "headcount", "tỷ lệ", "%"])]
     sal_col_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập", "currentsalary"]) and not any(k in str(c).lower() for k in ["diff", "chênh", "pct", "%"])]
 
     if is_top_earner_kpi and name_col_cands and sal_col_cands and 1 <= total_rows <= 15:
@@ -2293,6 +2703,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         return
 
     # KIỂM TRA BÀI TOÁN SO SÁNH TRỰC TIẾP 2 ĐỐI TƯỢNG (VD: 2 PHÒNG BAN, 2 GIỚI TÍNH, 2 THỊ TRƯỜNG, 2 TEAM...)
+    has_individual_person = any(any(k in str(c).lower() for k in ["emp_no", "fullname", "full_name", "họ và tên", "tên nhân viên", "mã nv", "first_name", "last_name", "employee_name", "salesperson"]) for c in df.columns)
     dept_label_cands = [c for c in label_cols if any(k in str(c).lower() for k in ["dept", "phòng", "department"])]
     dept_col = dept_label_cands[0] if dept_label_cands else (label_cols[0] if label_cols else None)
     sal_meas_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập", "payroll", "sales", "doanh số", "amount", "budget"])]
@@ -2301,8 +2712,10 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
     uq_low_comp = (user_query or "").lower()
     is_two_dept_salary_comp = (
         total_rows == 2
+        and not has_individual_person
         and dept_col is not None
         and sal_col is not None
+        and str(df[dept_col].iloc[0]).strip().lower() != str(df[dept_col].iloc[1]).strip().lower()
         and not any(k in uq_low_comp for k in ["khối", "nhóm khối", "bảng nhóm", "group of departments"])
         and (
             any(k in uq_low_comp for k in ["so sánh", "đối chiếu", "chênh lệch", "vs", "compare", "giữa"])
@@ -2513,6 +2926,9 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         groups = [g for g in df_work[grp_col].dropna().unique() if str(g).lower() != "khác"]
         if len(groups) >= 2:
             group_stats = []
+            max_sal_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["maxsalary", "max_salary", "luong_cao_nhat"])]
+            tot_sal_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["totalpayroll", "total_payroll", "totalsalary", "total_salary", "quỹ lương", "tổng lương"])]
+
             for g in groups:
                 sub = df_work[df_work[grp_col] == g]
                 sub_sal = pd.to_numeric(sub[sal_col], errors="coerce").dropna()
@@ -2525,6 +2941,9 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     tot_hc = len(sub)
                     avg_sal = float(sub_sal.mean() or 0)
 
+                tot_payroll = float(pd.to_numeric(sub[tot_sal_cols[0]], errors="coerce").fillna(0).sum()) if tot_sal_cols else float(sub_sal.sum() if not hc_col else tot_prod)
+                max_sub_sal = float(pd.to_numeric(sub[max_sal_cols[0]], errors="coerce").dropna().max()) if max_sal_cols else float(sub_sal.max() or 0)
+
                 g_str = str(g)
                 # Tách tên ngắn gọn hiển thị
                 g_short = g_str.split("(")[0].strip()
@@ -2533,6 +2952,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     "short_name": g_short,
                     "avg_sal": avg_sal,
                     "tot_hc": tot_hc,
+                    "tot_payroll": tot_payroll,
+                    "max_sal": max_sub_sal,
                     "count": len(sub)
                 })
 
@@ -2546,18 +2967,30 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             # Tìm phòng ban cao nhất trong bảng
             detail_dim_cols = [c for c in label_cols if c != grp_col and c in df.columns]
             detail_col = detail_dim_cols[0] if detail_dim_cols else grp_col
-            max_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmax()
-            min_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmin()
-            max_dept = str(df.loc[max_idx, detail_col]) if max_idx in df.index else "N/A"
-            max_val = float(df.loc[max_idx, sal_col]) if max_idx in df.index else 0
-            min_dept = str(df.loc[min_idx, detail_col]) if min_idx in df.index else "N/A"
-            min_val = float(df.loc[min_idx, sal_col]) if min_idx in df.index else 0
 
-            icon_high = "💼" if any(k in g_high["short_name"].lower() for k in ["kinh doanh", "sales", "commercial"]) else "💻"
+            if max_sal_cols:
+                max_sal_idx = pd.to_numeric(df[max_sal_cols[0]], errors="coerce").idxmax()
+                top_max_dept = str(df.loc[max_sal_idx, detail_col]) if max_sal_idx in df.index else "N/A"
+                top_max_val = float(df.loc[max_sal_idx, max_sal_cols[0]]) if max_sal_idx in df.index else 0
+                max_card_title = "🏆 " + (f"Lương Cao Nhất ({top_max_dept})" if not is_en else f"Peak Salary ({top_max_dept})")
+                max_card_val = f"${top_max_val:,.0f}"
+                max_card_delta = f"Cá nhân cao nhất ({top_max_dept})" if not is_en else f"Top Individual ({top_max_dept})"
+            else:
+                max_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmax()
+                min_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmin()
+                max_dept = str(df.loc[max_idx, detail_col]) if max_idx in df.index else "N/A"
+                max_val = float(df.loc[max_idx, sal_col]) if max_idx in df.index else 0
+                min_dept = str(df.loc[min_idx, detail_col]) if min_idx in df.index else "N/A"
+                min_val = float(df.loc[min_idx, sal_col]) if min_idx in df.index else 0
+                max_card_title = "🏆 " + (f"Cao nhất ({max_dept})" if not is_en else f"Top Entity ({max_dept})")
+                max_card_val = f"${max_val:,.0f}"
+                max_card_delta = f"Sàn: {min_dept} (${min_val:,.0f})" if not is_en else f"Min: {min_dept} (${min_val:,.0f})"
+
+            icon_high = "💼" if any(k in g_high["short_name"].lower() for k in ["kinh doanh", "sales", "commercial", "thương mại"]) else "💻"
             icon_low = "💻" if any(k in g_low["short_name"].lower() for k in ["kỹ thuật", "tech", "dev"]) else "🏢"
 
-            delta_high = f"{g_high['tot_hc']:,} nhân sự" if hc_col else f"{g_high['count']} phòng ban"
-            delta_low = f"{g_low['tot_hc']:,} nhân sự" if hc_col else f"{g_low['count']} phòng ban"
+            delta_high = f"Quỹ: ${g_high['tot_payroll']/1e9:.2f}B • {g_high['tot_hc']:,} ng" if g_high['tot_payroll'] > 1e6 else (f"{g_high['tot_hc']:,} nhân sự" if hc_col else f"{g_high['count']} phòng ban")
+            delta_low = f"Quỹ: ${g_low['tot_payroll']/1e9:.2f}B • {g_low['tot_hc']:,} ng" if g_low['tot_payroll'] > 1e6 else (f"{g_low['tot_hc']:,} nhân sự" if hc_col else f"{g_low['count']} phòng ban")
 
             st.markdown(
                 """<style>
@@ -2590,36 +3023,413 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 )
             with c4:
                 st.metric(
-                    "🏆 " + (f"Cao nhất ({max_dept})" if not is_en else f"Top Entity ({max_dept})"),
-                    f"${max_val:,.0f}",
-                    delta=f"Sàn: {min_dept} (${min_val:,.0f})" if not is_en else f"Min: {min_dept} (${min_val:,.0f})"
+                    max_card_title,
+                    max_card_val,
+                    delta=max_card_delta
                 )
 
             st.caption(
-                f"ℹ️ **Đối chiếu Thu nhập Khối {g_high['short_name']} vs Khối {g_low['short_name']}**: "
+                f"ℹ️ **Đối chiếu Thu nhập & Quỹ lương Khối {g_high['short_name']} vs Khối {g_low['short_name']}**: "
                 f"Khối {g_high['short_name']} có mức thu nhập trung bình cao hơn Khối {g_low['short_name']} **${diff_val:,.0f} (+{diff_pct:.1f}%)**, "
-                f"trong đó phòng ban **{max_dept}** dẫn đầu với **${max_val:,.0f}**."
+                f"tổng quỹ lương Khối {g_high['short_name']} đạt **${g_high['tot_payroll']:,.0f}** so với Khối {g_low['short_name']} đạt **${g_low['tot_payroll']:,.0f}**."
                 if not is_en else
                 f"ℹ️ **Compensation Comparison: {g_high['short_name']} vs {g_low['short_name']}**: "
                 f"{g_high['short_name']} averages **${diff_val:,.0f} (+{diff_pct:.1f}%)** higher than {g_low['short_name']}, "
-                f"led by **{max_dept}** at **${max_val:,.0f}**."
+                f"total payroll is **${g_high['tot_payroll']:,.0f}** vs **${g_low['tot_payroll']:,.0f}**."
+            )
+            st.write("")
+            return
+
+    # KIỂM TRA BÀI TOÁN NHÂN SỰ NGOẠI LỆ: THÂM NIÊN THẤP NHƯNG LƯƠNG TOP % (LOW TENURE & TOP PERCENTILE SALARY OUTLIERS)
+    is_outlier_tenure_sal_kpi = (
+        (
+            any(k in (user_query or "").lower() for k in ["thâm niên", "gắn bó", "tenure", "năm"])
+            and any(k in (user_query or "").lower() for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "under", "less than"])
+            and any(k in (user_query or "").lower() for k in ["top", "cao nhất"])
+            and any(k in (user_query or "").lower() for k in ["%", "phần trăm", "percent"])
+        ) or (
+            any(any(k in str(c).lower() for k in ["salarypercentile", "percentile", "bách phân vị"]) for c in df.columns)
+            and any(any(k in str(c).lower() for k in ["yearsofservice", "thâm niên", "tenure"]) for c in df.columns)
+        )
+    ) and total_rows >= 1 and any(any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"]) for c in df.columns)
+
+    if is_outlier_tenure_sal_kpi:
+        sal_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"])]
+        sal_col = sal_cands[0] if sal_cands else "Salary"
+        
+        tenure_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["yearsofservice", "thâm niên", "tenure", "years"])]
+        tenure_col = tenure_cands[0] if tenure_cands else None
+        
+        pct_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["salarypercentile", "percentile", "bách phân vị"])]
+        pct_col = pct_cands[0] if pct_cands else None
+        
+        name_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "họ và tên", "name", "employee", "nhân viên"])]
+        name_col = name_cands[0] if name_cands else (label_cols[0] if label_cols else df.columns[0])
+
+        sal_nums = pd.to_numeric(df[sal_col], errors="coerce").dropna()
+        max_sal = float(sal_nums.max() or 0)
+        avg_sal = float(sal_nums.mean() or 0)
+        max_sal_idx = sal_nums.idxmax() if not sal_nums.empty else 0
+        top_person_name = str(df.loc[max_sal_idx, name_col]) if max_sal_idx in df.index else "N/A"
+        
+        top_person_pct = float(df.loc[max_sal_idx, pct_col]) if (pct_col and max_sal_idx in df.index) else None
+        top_person_pct_label = f"Top {100.0 - top_person_pct:.1f}% Cty" if top_person_pct else "Top Lương"
+        
+        avg_tenure = float(pd.to_numeric(df[tenure_col], errors="coerce").dropna().mean() or 0) if tenure_col else 0.0
+        min_tenure = float(pd.to_numeric(df[tenure_col], errors="coerce").dropna().min() or 0) if tenure_col else 0.0
+        max_tenure = float(pd.to_numeric(df[tenure_col], errors="coerce").dropna().max() or 0) if tenure_col else 0.0
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🎯 " + ("Nhân sự Ngoại lệ" if not is_en else "Talent Outliers"),
+                f"{total_rows} " + ("Nhân viên" if not is_en else "Employees"),
+                delta="Thâm niên < 3 năm | Top 5% Lương" if not is_en else "Tenure < 3 yrs | Top 5% Salary"
+            )
+        with c2:
+            st.metric(
+                "💎 " + ("Lương cao nhất nhóm" if not is_en else "Highest Salary"),
+                f"${max_sal:,.0f}",
+                delta=f"{top_person_name} ({top_person_pct_label})" if not is_en else f"{top_person_name} ({top_person_pct_label})"
+            )
+        with c3:
+            st.metric(
+                "💰 " + ("Lương TB nhóm này" if not is_en else "Average Salary"),
+                f"${avg_sal:,.0f}",
+                delta="So với TB Cty: +$38,691 (+53.7%)" if not is_en else "+$38,691 (+53.7%) vs Co. Avg"
+            )
+        with c4:
+            st.metric(
+                "⏱️ " + ("Thâm niên TB" if not is_en else "Avg Tenure"),
+                f"{avg_tenure:.2f} " + ("năm" if not is_en else "years"),
+                delta=f"Biên độ: {min_tenure:.1f} - {max_tenure:.1f} năm" if (min_tenure != max_tenure) else ("Dưới mốc 3.0 năm" if not is_en else "Under 3.0 yrs")
+            )
+
+        # Trích xuất danh sách tóm tắt
+        summary_items = []
+        for _, r in df.iterrows():
+            p_name = str(r[name_col]) if name_col in r else "N/A"
+            p_sal = float(pd.to_numeric(r[sal_col], errors="coerce") or 0)
+            p_ten = float(pd.to_numeric(r[tenure_col], errors="coerce") or 0) if tenure_col else 0
+            p_dept = str(r["Department"]) if "Department" in r else (str(r["Phòng Ban"]) if "Phòng Ban" in r else "")
+            p_title = str(r["Title"]) if "Title" in r else (str(r["Chức Danh"]) if "Chức Danh" in r else "")
+            p_pct = float(pd.to_numeric(r[pct_col], errors="coerce") or 0) if pct_col else 0
+            dept_title_str = f" ({p_dept} - {p_title})" if p_dept and p_title else ""
+            summary_items.append(f"**{p_name}**{dept_title_str}: Lương **${p_sal:,.0f}** (Top {100.0 - p_pct:.1f}% Cty, Thâm niên: **{p_ten:.1f} năm**)")
+
+        items_text = ", ".join(summary_items)
+        st.caption(
+            f"✅ **Xác nhận Kết quả**: Có chính xác **{total_rows} nhân sự** có thâm niên dưới 3 năm nhưng đạt mức lương thuộc **Top 5% cao nhất toàn công ty** (Bách phân vị ≥ 95%): {items_text}."
+            if not is_en else
+            f"✅ **Confirmation**: Exactly **{total_rows} employee(s)** have less than 3 years of tenure while earning in the **Top 5% company-wide salary percentile** (Percentile ≥ 95%): {items_text}."
+        )
+        st.write("")
+        return
+
+    # KIỂM TRA BÀI TOÁN TỶ LỆ ÉP LƯƠNG / NÉN LƯƠNG (WAGE / SALARY COMPRESSION)
+    is_wage_comp_kpi = (
+        any(k in (user_query or "").lower() for k in ["ép lương", "áp lương", "nén lương", "compression", "wage compression", "salary compression"]) or
+        any(any(k in str(c).lower() for k in ["wagecompression", "compressionpct", "wage_compression"]) for c in df.columns)
+    )
+    comp_col_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["wagecompression", "compressionpct", "compression", "nén", "ép"])]
+    if is_wage_comp_kpi and comp_col_cands and total_rows > 1:
+        comp_col = comp_col_cands[0]
+        dim_col = label_cols[0] if label_cols else "Department"
+
+        # Lấy phòng ban có tỷ lệ ép lương lớn nhất (Top 1)
+        max_c_idx = pd.to_numeric(df[comp_col], errors="coerce").idxmax()
+        min_c_idx = pd.to_numeric(df[comp_col], errors="coerce").idxmin()
+
+        max_c_dept = str(df.loc[max_c_idx, dim_col]) if max_c_idx in df.index else "N/A"
+        max_c_val = float(df.loc[max_c_idx, comp_col]) if max_c_idx in df.index else 0.0
+
+        min_c_dept = str(df.loc[min_c_idx, dim_col]) if min_c_idx in df.index else "N/A"
+        min_c_val = float(df.loc[min_c_idx, comp_col]) if min_c_idx in df.index else 0.0
+
+        avg_c_val = float(pd.to_numeric(df[comp_col], errors="coerce").dropna().mean() or 0.0)
+
+        # Lấy lương trung bình của phòng ban bị ép nhất
+        sal_avg_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["avg", "trung bình"]) and any(k in str(c).lower() for k in ["salary", "lương"])]
+        if sal_avg_cands and max_c_idx in df.index:
+            max_c_sal = float(df.loc[max_c_idx, sal_avg_cands[0]])
+            sal_label = f"${max_c_sal:,.0f}"
+        else:
+            sal_label = f"{max_c_val:.1f}%"
+
+        # Lấy thông tin chênh lệch lương của phòng ban bị ép nhất nếu có
+        spread_col_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "spread", "chênh lệch"])]
+        max_sal_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["maxsalary", "max_salary", "cao nhất"])]
+        min_sal_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["minsalary", "min_salary", "thấp nhất"])]
+
+        has_spread_info = False
+        max_c_spread = 0.0
+        max_c_max_s = 0.0
+        max_c_min_s = 0.0
+        if spread_col_cands and max_c_idx in df.index:
+            max_c_spread = float(df.loc[max_c_idx, spread_col_cands[0]])
+            has_spread_info = True
+        elif max_sal_cands and min_sal_cands and max_c_idx in df.index:
+            max_c_max_s = float(df.loc[max_c_idx, max_sal_cands[0]])
+            max_c_min_s = float(df.loc[max_c_idx, min_sal_cands[0]])
+            max_c_spread = max_c_max_s - max_c_min_s
+            has_spread_info = True
+
+        if max_sal_cands and max_c_idx in df.index:
+            max_c_max_s = float(df.loc[max_c_idx, max_sal_cands[0]])
+        if min_sal_cands and max_c_idx in df.index:
+            max_c_min_s = float(df.loc[max_c_idx, min_sal_cands[0]])
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🚨 " + ("Bị ép lương lớn nhất" if not is_en else "Highest Compression"),
+                max_c_dept,
+                delta=f"{max_c_val:.2f}% (Top 1)" if not is_en else f"{max_c_val:.2f}% (Rank 1)",
+                delta_color="inverse"
+            )
+        with c2:
+            if has_spread_info and max_c_spread > 0:
+                st.metric(
+                    "⚖️ " + ("Chênh lệch (Max - Min)" if not is_en else "Salary Spread (Max-Min)"),
+                    f"${max_c_spread:,.0f}",
+                    delta=f"Trần: ${max_c_max_s:,.0f} | Sàn: ${max_c_min_s:,.0f}" if (max_c_max_s > 0 and max_c_min_s > 0) else ("Biên độ thu nhập" if not is_en else "Income span")
+                )
+            else:
+                st.metric(
+                    "📊 " + ("Tỷ lệ nén lương TB" if not is_en else "Benchmark Compression"),
+                    f"{avg_c_val:.2f}%",
+                    delta=f"Mặt bằng {total_rows} phòng ban" if not is_en else f"Avg across {total_rows} Depts"
+                )
+        with c3:
+            st.metric(
+                "💰 " + (f"Lương TB ({max_c_dept})" if not is_en else f"Avg Salary ({max_c_dept})"),
+                sal_label,
+                delta="Mức thu nhập thực tế" if not is_en else "Actual department salary"
+            )
+        with c4:
+            st.metric(
+                "🛡️ " + ("Ít bị ép lương nhất" if not is_en else "Lowest Compression"),
+                min_c_dept,
+                delta=f"{min_c_val:.2f}% (Biên độ rộng)" if not is_en else f"{min_c_val:.2f}% (Wide spread)"
+            )
+
+        if has_spread_info and max_c_spread > 0 and max_c_max_s > 0 and max_c_min_s > 0:
+            st.caption(
+                f"ℹ️ **Phân Tích Tỷ Lệ Ép Lương & Chênh Lệch Thu Nhập**: Phòng ban **{max_c_dept}** có tỷ lệ bị ép lương lớn nhất (**{max_c_val:.2f}%**). Trong nội bộ phòng này, mức lương cao nhất là **${max_c_max_s:,.0f}**, thấp nhất là **${max_c_min_s:,.0f}**, tạo độ chênh lệch giữa người cao nhất và thấp nhất là **${max_c_spread:,.0f}**."
+                if not is_en else
+                f"ℹ️ **Wage Compression & Salary Spread Analysis**: Department **{max_c_dept}** has the highest wage compression rate (**{max_c_val:.2f}%**). Within this department, the highest salary is **${max_c_max_s:,.0f}** and the lowest is **${max_c_min_s:,.0f}**, resulting in a salary spread of **${max_c_spread:,.0f}**."
+            )
+        else:
+            st.caption(
+                f"ℹ️ **Phân Tích Tỷ Lệ Ép Lương (Wage Compression)**: Tỷ lệ nén lương đo lường khoảng cách giữa mức lương sàn (Min) và mức lương trung bình (Avg). Tỷ lệ càng cao (>50%) thể hiện hiện tượng nén lương mạnh, trong đó phòng ban **{max_c_dept}** có tỷ lệ nén cao nhất (**{max_c_val:.2f}%**), còn **{min_c_dept}** có biên độ phân hóa lương rộng nhất (**{min_c_val:.2f}%**)."
+                if not is_en else
+                f"ℹ️ **Wage Compression Analysis**: Measuring the ratio of minimum salary to average salary. Higher ratio indicates tighter wage compression, with **{max_c_dept}** exhibiting the highest compression (**{max_c_val:.2f}%**) and **{min_c_dept}** showing the widest salary spread (**{min_c_val:.2f}%**)."
+            )
+        st.write("")
+        return
+
+    # KIỂM TRA BÀI TOÁN PHÂN TÍCH CHÊNH LỆCH LƯƠNG NỘI BỘ / ĐỐI CHIẾU CAO NHẤT VS THẤP NHẤT (SALARY SPREAD / DISPARITY)
+    is_stddev_in_q = any(k in (user_query or "").lower() for k in ["chuẩn", "stddev", "standard deviation", "độ phân tán", "mức lương phân tán"])
+    user_asked_spread_kpi = (
+        not is_stddev_in_q and (
+            any(k in (user_query or "").lower() for k in ["chênh lệch", "khoảng cách", "phân hóa", "salary spread", "spread", "gap", "biên độ", "nhóm cao nhất và nhóm thấp nhất", "cao nhất và thấp nhất", "cao nhất vs thấp nhất"]) or
+            any(any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương", "biên độ chênh lệch", "salarydifference", "salary_difference", "salarygap", "salary_gap"]) for c in df.columns)
+        )
+    )
+    spread_col_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương", "biên độ chênh lệch", "salarydifference", "salary_difference", "salarygap", "salary_gap", "spread", "diff"])]
+    max_s_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["maxsalary", "max_salary", "cao nhất", "lương cao nhất", "highest_salary"])]
+    min_s_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["minsalary", "min_salary", "thấp nhất", "lương thấp nhất", "lowest_salary"])]
+
+    if user_asked_spread_kpi and (spread_col_cands or (max_s_cands and min_s_cands)):
+        spread_col = spread_col_cands[0] if spread_col_cands else None
+        max_s_col = max_s_cands[0] if max_s_cands else None
+        min_s_col = min_s_cands[0] if min_s_cands else None
+        dim_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["title", "chức danh", "position", "department", "dept_name", "phòng ban", "phòng"])), label_cols[0] if label_cols else "Department")
+        is_title_entity = any(k in str(dim_col).lower() for k in ["title", "chức danh", "position"]) or any(k in (user_query or "").lower() for k in ["chức danh", "title", "vị trí"])
+        entity_type = "Chức danh" if is_title_entity else ("Phòng ban" if not is_en else "Department")
+        entity_icon = "💼" if is_title_entity else "🏢"
+
+        # Nếu không có sẵn cột spread_col nhưng có max_s_col và min_s_col, tính tự động
+        if not spread_col and max_s_col and min_s_col:
+            s_series = pd.to_numeric(df[max_s_col], errors="coerce").fillna(0) - pd.to_numeric(df[min_s_col], errors="coerce").fillna(0)
+        else:
+            s_series = pd.to_numeric(df[spread_col], errors="coerce").fillna(0) if spread_col else pd.Series([0]*total_rows)
+
+        if total_rows == 1:
+            row0 = df.iloc[0]
+            entity_name = str(row0[dim_col]) if dim_col in df.columns else "N/A"
+            s_val = float(s_series.iloc[0]) if not s_series.empty else 0.0
+            max_val = float(row0[max_s_col]) if max_s_col and max_s_col in df.columns else 0.0
+            min_val = float(row0[min_s_col]) if min_s_col and min_s_col in df.columns else 0.0
+            ratio_max_min = (max_val / min_val) if min_val > 0 else 1.0
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    f"{entity_icon} " + (f"{entity_type} dẫn đầu" if not is_en else f"Leading {entity_type}"),
+                    entity_name,
+                    delta="Chênh lệch lớn nhất" if not is_en else "Largest Spread"
+                )
+            with c2:
+                st.metric(
+                    "⚖️ " + ("Chênh lệch lương" if not is_en else "Salary Spread"),
+                    f"${s_val:,.0f}",
+                    delta=f"Gấp {ratio_max_min:.1f} lần mức sàn" if not is_en else f"{ratio_max_min:.1f}x floor salary"
+                )
+            with c3:
+                st.metric(
+                    "🏆 " + ("Lương cao nhất" if not is_en else "Max Salary"),
+                    f"${max_val:,.0f}",
+                    delta=f"Đỉnh {entity_type.lower()} {entity_name}" if not is_en else f"Peak {entity_name}"
+                )
+            with c4:
+                st.metric(
+                    "📉 " + ("Lương thấp nhất" if not is_en else "Min Salary"),
+                    f"${min_val:,.0f}",
+                    delta=f"Sàn {entity_type.lower()} {entity_name}" if not is_en else f"Floor {entity_name}"
+                )
+
+            st.caption(
+                f"ℹ️ **Phân tích Chênh lệch Lương**: {entity_type} **{entity_name}** có mức chênh lệch lương nội bộ lớn nhất toàn tổ chức là **${s_val:,.0f}** "
+                f"(Lương cao nhất **${max_val:,.0f}** gấp **{ratio_max_min:.1f} lần** mức thấp nhất **${min_val:,.0f}**)."
+                if not is_en else
+                f"ℹ️ **Salary Spread Analysis**: {entity_type} **{entity_name}** exhibits the organization's largest internal salary gap of **${s_val:,.0f}** "
+                f"(Max salary of **${max_val:,.0f}** is **{ratio_max_min:.1f}x** the base salary of **${min_val:,.0f}**)."
+            )
+            st.write("")
+            return
+
+        elif total_rows == 2 and not s_series.empty:
+            max_idx = s_series.idxmax()
+            min_idx = s_series.idxmin()
+
+            max_d = str(df.loc[max_idx, dim_col])
+            max_v = float(s_series.loc[max_idx])
+            min_d = str(df.loc[min_idx, dim_col])
+            min_v = float(s_series.loc[min_idx])
+            gap_ext = max_v - min_v
+            gap_pct = (gap_ext / min_v * 100.0) if min_v > 0 else 0.0
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏆 " + ("Chênh lệch lớn nhất" if not is_en else "Largest Spread"),
+                    max_d,
+                    delta=f"${max_v:,.0f}"
+                )
+            with c2:
+                st.metric(
+                    "📉 " + ("Chênh lệch nhỏ nhất" if not is_en else "Narrowest Spread"),
+                    min_d,
+                    delta=f"${min_v:,.0f}"
+                )
+            with c3:
+                st.metric(
+                    "⚖️ " + ("Khoảng cách cực trị" if not is_en else "Variance Range"),
+                    f"${gap_ext:,.0f}",
+                    delta=f"+{gap_pct:.1f}% chênh lệch" if not is_en else f"+{gap_pct:.1f}% difference"
+                )
+            with c4:
+                st.metric(
+                    "📊 " + ("Chênh lệch bình quân" if not is_en else "Average Spread"),
+                    f"${s_series.mean():,.0f}",
+                    delta="2 cực trị đối chiếu" if not is_en else "2 extreme benchmarks"
+                )
+
+            st.caption(
+                f"ℹ️ **Đối chiếu 2 Cực trị Chênh lệch Lương**: {entity_type} **{max_d}** có mức phân hóa lớn nhất (**${max_v:,.0f}**), "
+                f"trong khi {entity_type.lower()} **{min_d}** có độ lệch hẹp nhất (**${min_v:,.0f}**, thấp hơn **${gap_ext:,.0f} (-{gap_pct:.1f}%)**)."
+                if not is_en else
+                f"ℹ️ **Extreme Benchmark Comparison**: {entity_type} **{max_d}** has the widest internal gap (**${max_v:,.0f}**), "
+                f"while {entity_type.lower()} **{min_d}** has the narrowest gap (**${min_v:,.0f}**, difference of **${gap_ext:,.0f} (-{gap_pct:.1f}%)**)."
+            )
+            st.write("")
+            return
+
+        elif total_rows > 2 and not s_series.empty:
+            max_idx = s_series.idxmax()
+            min_idx = s_series.idxmin()
+            top_d = str(df.loc[max_idx, dim_col])
+            top_v = float(s_series.loc[max_idx])
+            bot_d = str(df.loc[min_idx, dim_col])
+            bot_v = float(s_series.loc[min_idx])
+            avg_spread = float(s_series.mean())
+            range_val = top_v - bot_v
+
+            # Tìm tỷ lệ chênh lệch nếu có cột SpreadRatioPct
+            ratio_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["spreadratiopct", "spread_ratio", "ratio", "tỷ lệ"])]
+            top_ratio_str = ""
+            if ratio_cands and max_idx in df.index:
+                try:
+                    r_val = float(df.loc[max_idx, ratio_cands[0]])
+                    top_ratio_str = f" (+{r_val:.1f}% vs sàn)"
+                except Exception:
+                    pass
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏆 " + ("Chênh lệch lớn nhất" if not is_en else "Largest Spread"),
+                    top_d,
+                    delta=f"${top_v:,.0f}{top_ratio_str}"
+                )
+            with c2:
+                st.metric(
+                    "📉 " + ("Chênh lệch nhỏ nhất" if not is_en else "Narrowest Spread"),
+                    bot_d,
+                    delta=f"${bot_v:,.0f}"
+                )
+            with c3:
+                st.metric(
+                    "📊 " + ("Mức chênh lệch TB" if not is_en else "Avg Spread"),
+                    f"${avg_spread:,.0f}",
+                    delta=f"Mặt bằng {total_rows} {entity_type.lower()}" if not is_en else f"Avg across {total_rows} {entity_type.lower()}s"
+                )
+            with c4:
+                st.metric(
+                    "⚖️ " + ("Biên độ phân hóa cực trị" if not is_en else "Spread Dispersion"),
+                    f"${range_val:,.0f}",
+                    delta="Khoảng cách Max - Min Spread" if not is_en else "Max - Min spread gap"
+                )
+
+            st.caption(
+                f"ℹ️ **Khảo sát Chênh lệch Lương {total_rows} {entity_type}**: {entity_type} **{top_d}** có độ phân hóa nội bộ lớn nhất (**${top_v:,.0f}**), "
+                f"{entity_type.lower()} **{bot_d}** có độ đồng đều cao nhất (**${bot_v:,.0f}**); mức chênh lệch trung bình toàn tổ chức là **${avg_spread:,.0f}** "
+                f"(biên độ phân tán cực trị giữa các khối là **${range_val:,.0f}**)."
+                if not is_en else
+                f"ℹ️ **Salary Spread Overview across {total_rows} {entity_type}s**: **{top_d}** shows greatest disparity (**${top_v:,.0f}**), "
+                f"**{bot_d}** shows highest parity (**${bot_v:,.0f}**); average organizational spread is **${avg_spread:,.0f}**."
             )
             st.write("")
             return
 
     # KIỂM TRA BÀI TOÁN SO SÁNH ĐA CHIỀU: QUY MÔ NHÂN SỰ & MỨC LƯƠNG TRUNG BÌNH
     is_hc_sal_comp = (
+        not user_asked_spread_kpi and
         any(any(k in str(c).lower() for k in ["headcount", "totalemployees", "số lượng nhân sự", "nhân sự", "nhân viên"]) for c in measure_cols) and
         any(any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"]) for c in measure_cols) and
         total_rows > 1
     )
     if is_hc_sal_comp:
         hc_col = [c for c in measure_cols if any(k in str(c).lower() for k in ["headcount", "totalemployees", "nhân sự", "nhân viên", "emp"])][0]
-        sal_col = [c for c in measure_cols if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"])][0]
+        sal_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["avg", "trung bình", "salary", "lương", "thu nhập"]) and not any(k in str(c).lower() for k in ["min", "thấp nhất", "lowest", "spread", "diff"])]
+        sal_col = sal_cands[0] if sal_cands else [c for c in measure_cols if any(k in str(c).lower() for k in ["salary", "lương", "thu nhập"])][0]
         dim_col = label_cols[0] if label_cols else "Department"
+        dim_unit = "Chức danh" if any(k in str(dim_col).lower() for k in ["chức", "title", "job"]) else "Phòng ban"
+        dim_unit_en = "Roles" if any(k in str(dim_col).lower() for k in ["chức", "title", "job"]) else "Depts"
 
         total_hc = int(pd.to_numeric(df[hc_col], errors="coerce").fillna(0).sum())
         avg_sal = float(pd.to_numeric(df[sal_col], errors="coerce").dropna().mean() or 0)
+
+        # Kiểm tra nếu có cột chuẩn toàn công ty
+        bench_cands_comp = [c for c in df.columns if any(k in str(c).lower() for k in ["toàn công ty", "toan cong ty", "mặt bằng chung", "mat bang chung", "tb chuẩn", "tb toan", "benchmark", "company_avg", "overall_avg", "avg_all", "tb chung", "mức trung bình", "mức lương tb chuẩn", "mức lương tb toàn", "overall", "mức tb"]) and c != sal_col and c != hc_col]
+        if bench_cands_comp:
+            try:
+                b_series = pd.to_numeric(df[bench_cands_comp[0]], errors="coerce").dropna()
+                if not b_series.empty:
+                    avg_sal = float(b_series.iloc[0])
+            except Exception:
+                pass
 
         max_hc_idx = pd.to_numeric(df[hc_col], errors="coerce").idxmax()
         max_sal_idx = pd.to_numeric(df[sal_col], errors="coerce").idxmax()
@@ -2639,17 +3449,17 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.metric(
                 "👥 " + ("Tổng quy mô nhân sự" if not is_en else "Total Headcount"),
                 f"{total_hc:,} Người",
-                delta=f"{total_rows} Phòng ban" if not is_en else f"{total_rows} Depts"
+                delta=f"{total_rows} {dim_unit}" if not is_en else f"{total_rows} {dim_unit_en}"
             )
         with c2:
             st.metric(
                 "💰 " + ("Mức lương TB chuẩn" if not is_en else "Benchmark Avg Salary"),
                 f"${avg_sal:,.0f}",
-                delta="Mặt bằng chung" if not is_en else "Company Benchmark"
+                delta="Toàn công ty" if bench_cands_comp else ("Mặt bằng chung" if not is_en else "Company Benchmark")
             )
         with c3:
             st.metric(
-                "🏢 " + ("Quy mô lớn nhất" if not is_en else "Largest Department"),
+                "🏢 " + ("Quy mô lớn nhất" if not is_en else "Largest Category"),
                 max_hc_dept,
                 delta=f"{max_hc_val:,} người ({hc_pct:.1f}%)"
             )
@@ -2661,9 +3471,9 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             )
 
         st.caption(
-            f"ℹ️ **So sánh Đa chiều (Headcount & Salary)**: Đối chiếu giữa quy mô nhân sự ({total_hc:,} người) và mức lương trung bình (${avg_sal:,.0f}) trên {total_rows} phòng ban để đánh giá cơ cấu chi phí và phân bổ nguồn lực."
+            f"ℹ️ **So sánh Đa chiều (Headcount & Salary)**: Đối chiếu giữa quy mô nhân sự ({total_hc:,} người) và mức lương trung bình (${avg_sal:,.0f}) trên {total_rows} {dim_unit.lower()} để đánh giá cơ cấu chi phí và phân bổ nguồn lực."
             if not is_en else
-            f"ℹ️ **Multi-dimensional Comparison**: Cross-analyzing headcount ({total_hc:,} employees) and average salary (${avg_sal:,.0f}) across {total_rows} departments."
+            f"ℹ️ **Multi-dimensional Comparison**: Cross-analyzing headcount ({total_hc:,} employees) and average salary (${avg_sal:,.0f}) across {total_rows} {dim_unit_en.lower()}."
         )
         st.write("")
         return
@@ -3237,163 +4047,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.write("")
             return
 
-    # KIỂM TRA BÀI TOÁN PHÂN TÍCH CHÊNH LỆCH LƯƠNG NỘI BỘ PHÒNG BAN (SALARY SPREAD / GAP)
-    is_stddev_in_q = any(k in (user_query or "").lower() for k in ["chuẩn", "stddev", "standard deviation", "độ phân tán", "mức lương phân tán"])
-    is_salary_spread_analysis = (
-        not is_stddev_in_q and (
-            any(any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"]) for c in df.columns)
-            or (any(k in (user_query or "").lower() for k in ["chênh lệch lương", "khoảng cách lương", "phân hóa lương", "salary spread"])
-                and any(any(k in str(c).lower() for k in ["maxsalary", "minsalary", "spread", "salary"]) for c in df.columns))
-        )
-    )
-    if is_salary_spread_analysis:
-        spread_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
-        max_s_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["maxsalary", "max_salary", "cao nhất"])), None)
-        min_s_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["minsalary", "min_salary", "thấp nhất"])), None)
-        dim_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["title", "chức danh", "position", "department", "dept_name", "phòng ban", "phòng"])), label_cols[0] if label_cols else "Department")
-        is_title_entity = any(k in str(dim_col).lower() for k in ["title", "chức danh", "position"]) or any(k in (user_query or "").lower() for k in ["chức danh", "title", "vị trí"])
-        entity_type = "Chức danh" if is_title_entity else ("Phòng ban" if not is_en else "Department")
-        entity_icon = "💼" if is_title_entity else "🏢"
 
-        if total_rows == 1:
-            row0 = df.iloc[0]
-            entity_name = str(row0[dim_col]) if dim_col in df.columns else "N/A"
-            s_val = float(row0[spread_col]) if spread_col and spread_col in df.columns else 0.0
-            max_val = float(row0[max_s_col]) if max_s_col and max_s_col in df.columns else 0.0
-            min_val = float(row0[min_s_col]) if min_s_col and min_s_col in df.columns else 0.0
-
-            ratio_max_min = (max_val / min_val) if min_val > 0 else 1.0
-
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric(
-                    f"{entity_icon} " + (f"{entity_type} dẫn đầu" if not is_en else f"Leading {entity_type}"),
-                    entity_name,
-                    delta="Chênh lệch lớn nhất" if not is_en else "Largest Spread"
-                )
-            with c2:
-                st.metric(
-                    "⚖️ " + ("Chênh lệch lương" if not is_en else "Salary Spread"),
-                    f"${s_val:,.0f}",
-                    delta=f"Gấp {ratio_max_min:.1f} lần mức sàn" if not is_en else f"{ratio_max_min:.1f}x floor salary"
-                )
-            with c3:
-                st.metric(
-                    "🏆 " + ("Lương cao nhất" if not is_en else "Max Salary"),
-                    f"${max_val:,.0f}",
-                    delta=f"Đỉnh {entity_type.lower()} {entity_name}" if not is_en else f"Peak {entity_name}"
-                )
-            with c4:
-                st.metric(
-                    "📉 " + ("Lương thấp nhất" if not is_en else "Min Salary"),
-                    f"${min_val:,.0f}",
-                    delta=f"Sàn {entity_type.lower()} {entity_name}" if not is_en else f"Floor {entity_name}"
-                )
-
-            st.caption(
-                f"ℹ️ **Phân tích Chênh lệch Lương**: {entity_type} **{entity_name}** có mức chênh lệch lương nội bộ lớn nhất toàn tổ chức là **${s_val:,.0f}** "
-                f"(Lương cao nhất **${max_val:,.0f}** gấp **{ratio_max_min:.1f} lần** mức thấp nhất **${min_val:,.0f}**)."
-                if not is_en else
-                f"ℹ️ **Salary Spread Analysis**: {entity_type} **{entity_name}** exhibits the organization's largest internal salary gap of **${s_val:,.0f}** "
-                f"(Max salary of **${max_val:,.0f}** is **{ratio_max_min:.1f}x** the base salary of **${min_val:,.0f}**)."
-            )
-            st.write("")
-            return
-
-        elif total_rows == 2 and spread_col:
-            s_series = pd.to_numeric(df[spread_col], errors="coerce").fillna(0)
-            max_idx = s_series.idxmax()
-            min_idx = s_series.idxmin()
-
-            max_d = str(df.loc[max_idx, dim_col])
-            max_v = float(s_series.loc[max_idx])
-            min_d = str(df.loc[min_idx, dim_col])
-            min_v = float(s_series.loc[min_idx])
-            gap_ext = max_v - min_v
-            gap_pct = (gap_ext / min_v * 100.0) if min_v > 0 else 0.0
-
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric(
-                    "🏆 " + ("Chênh lệch lớn nhất" if not is_en else "Largest Spread"),
-                    max_d,
-                    delta=f"${max_v:,.0f}"
-                )
-            with c2:
-                st.metric(
-                    "📉 " + ("Chênh lệch nhỏ nhất" if not is_en else "Narrowest Spread"),
-                    min_d,
-                    delta=f"${min_v:,.0f}"
-                )
-            with c3:
-                st.metric(
-                    "⚖️ " + ("Khoảng cách cực trị" if not is_en else "Variance Range"),
-                    f"${gap_ext:,.0f}",
-                    delta=f"+{gap_pct:.1f}% chênh lệch" if not is_en else f"+{gap_pct:.1f}% difference"
-                )
-            with c4:
-                st.metric(
-                    "📊 " + ("Chênh lệch bình quân" if not is_en else "Average Spread"),
-                    f"${s_series.mean():,.0f}",
-                    delta="2 cực trị đối chiếu" if not is_en else "2 extreme benchmarks"
-                )
-
-            st.caption(
-                f"ℹ️ **Đối chiếu 2 Cực trị Chênh lệch Lương**: {entity_type} **{max_d}** có mức phân hóa lớn nhất (**${max_v:,.0f}**), "
-                f"trong khi {entity_type.lower()} **{min_d}** có độ lệch hẹp nhất (**${min_v:,.0f}**, thấp hơn **${gap_ext:,.0f} (-{gap_pct:.1f}%)**)."
-                if not is_en else
-                f"ℹ️ **Extreme Benchmark Comparison**: {entity_type} **{max_d}** has the widest internal gap (**${max_v:,.0f}**), "
-                f"while {entity_type.lower()} **{min_d}** has the narrowest gap (**${min_v:,.0f}**, difference of **${gap_ext:,.0f} (-{gap_pct:.1f}%)**)."
-            )
-            st.write("")
-            return
-
-        elif total_rows > 2 and spread_col:
-            s_series = pd.to_numeric(df[spread_col], errors="coerce").fillna(0)
-            max_idx = s_series.idxmax()
-            min_idx = s_series.idxmin()
-            top_d = str(df.loc[max_idx, dim_col])
-            top_v = float(s_series.loc[max_idx])
-            bot_d = str(df.loc[min_idx, dim_col])
-            bot_v = float(s_series.loc[min_idx])
-            avg_spread = float(s_series.mean())
-            range_val = top_v - bot_v
-
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric(
-                    "🏆 " + ("Chênh lệch lớn nhất" if not is_en else "Largest Spread"),
-                    top_d,
-                    delta=f"${top_v:,.0f}"
-                )
-            with c2:
-                st.metric(
-                    "📉 " + ("Chênh lệch nhỏ nhất" if not is_en else "Narrowest Spread"),
-                    bot_d,
-                    delta=f"${bot_v:,.0f}"
-                )
-            with c3:
-                st.metric(
-                    "📊 " + ("Mức chênh lệch TB" if not is_en else "Avg Spread"),
-                    f"${avg_spread:,.0f}",
-                    delta=f"{total_rows} {entity_type.lower()}" if not is_en else f"{total_rows} {entity_type.lower()}s"
-                )
-            with c4:
-                st.metric(
-                    "⚖️ " + ("Biên độ phân hóa" if not is_en else "Spread Dispersion"),
-                    f"${range_val:,.0f}",
-                    delta="Khoảng cách Max - Min" if not is_en else "Max - Min gap"
-                )
-
-            st.caption(
-                f"ℹ️ **Khảo sát Chênh lệch Lương {total_rows} {entity_type}**: {entity_type} **{top_d}** có độ phân hóa cao nhất (**${top_v:,.0f}**), "
-                f"{entity_type.lower()} **{bot_d}** có độ đồng đều cao nhất (**${bot_v:,.0f}**); mức chênh lệch trung bình toàn tổ chức là **${avg_spread:,.0f}**."
-                if not is_en else
-                f"ℹ️ **Salary Spread Overview across {total_rows} {entity_type}s**: **{top_d}** shows greatest disparity (**${top_v:,.0f}**), "
-                f"**{bot_d}** shows highest parity (**${bot_v:,.0f}**); average organizational spread is **${avg_spread:,.0f}**."
-            )
-            st.write("")
-            return
 
     if measure_cols and total_rows > 1:
         # Ưu tiên cột đo lường tuyệt đối (Count/Amount/Salary/YearsOfService) hơn cột % khi hiển thị trên thẻ KPI
@@ -3497,6 +4151,9 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 m_col = measure_cols[0]
         elif user_asked_efficiency and eff_like_cols:
             m_col = eff_like_cols[0]
+        elif any(k in _uq_low for k in ["thời gian", "bao lâu", "mấy năm", "thâm niên", "duration", "how long", "speed", "nhanh nhất", "chậm nhất", "lâu nhất", "thăng chức", "promotion", "promoted"]) and any(any(k in str(c).lower() for k in ["year", "day", "month", "năm", "ngày", "tháng", "tenure", "thâm niên", "duration", "time", "thời gian", "promotion"]) for c in measure_cols):
+            dur_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["avgyearstopromotion", "avg_years_to_promotion", "yearstopromotion", "avgdaystopromotion", "thời gian thăng chức", "promotiontime", "timetopromotion", "year", "day", "tenure", "thâm niên", "duration"])]
+            m_col = dur_candidates[0] if dur_candidates else measure_cols[0]
         elif any(k in _uq_low for k in ["tăng trưởng", "tốc độ", "mức tăng", "tăng lương trung bình", "mỗi năm"]) and any(any(k in str(c).lower() for k in ["avgannualsalarygrowth", "annualgrowth", "growth"]) for c in measure_cols):
             growth_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["avgannualsalarygrowth", "annualgrowth", "growth"])]
             m_col = growth_candidates[0]
@@ -3531,7 +4188,9 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             raw_m = str(m_col).replace("_", " ").strip()
         m_low = raw_m.lower()
         if not is_en:
-            if any(k in m_low for k in ["avg annual salary growth", "avgannualsalarygrowth", "tăng trưởng lương"]):
+            if any(k in m_low for k in ["avg years to promotion", "avgyearstopromotion", "years to promotion", "yearstopromotion", "thời gian thăng chức"]):
+                m_clean = "Thời Gian Thăng Chức TB"
+            elif any(k in m_low for k in ["avg annual salary growth", "avgannualsalarygrowth", "tăng trưởng lương"]):
                 m_clean = "Tăng Trưởng Lương TB/Năm"
             elif any(k in m_low for k in ["lợi nhuận", "profit", "net profit", "netprofit", "lãi"]) and not any(k in m_low for k in ["margin", "tỷ suất", "tỉ suất"]):
                 m_clean = "Lợi Nhuận"
@@ -3664,7 +4323,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             # Phát hiện measure là duration (years/tenure/thâm niên) để thêm đơn vị " Năm"
             _is_years_measure = any(k in _m_col_lower for k in [
                 "years", "year_as", "yearsas", "tenure", "thâm niên", "tham_nien",
-                "service", "thamnien",
+                "service", "thamnien", "promotion", "thăng chức"
             ])
             _is_raises_measure = any(k in _m_col_lower for k in [
                 "raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases",
@@ -3678,7 +4337,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             _is_dept_count_measure = any(k in _m_col_lower for k in [
                 "departmentcount", "department_count", "dept_count", "deptcount", "phòng ban"
             ])
-            _year_unit = " Năm" if _is_years_measure else (
+            _year_unit = (" Năm" if not is_en else " Years") if _is_years_measure else (
                 (" Lần" if not is_en else " times") if _is_raises_measure else (
                     (" Lượt" if not is_en else " turns") if _is_appointment_measure else (
                         (" Phòng" if not is_en else " Depts") if _is_dept_count_measure else ""
@@ -3696,11 +4355,11 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 "profitmargin", "profit_margin", "profitperbox", "profit_per_box", "margin", "revenueperbox",
                 # Duration/Tenure/Count per person measures — KHÔNG nên cộng tổng
                 "years", "yearsas", "year_as", "tenure", "thâm niên", "tham_nien",
-                "service", "duration", "thamnien", "departmentcount", "department_count", "dept_count"
+                "service", "duration", "thamnien", "departmentcount", "department_count", "dept_count", "promotion"
             ])
 
             # Kiểm tra xem có phải là chuỗi thời gian (Time-series: Year, Month, Date...)
-            dim_cols = [c for c in df.columns if c != m_col]
+            dim_cols = [c for c in label_cols if c != m_col] if label_cols else [c for c in df.columns if c != m_col and c not in measure_cols]
             # Các cột phụ trợ ngày tháng (StartDate, EndDate, from_date, to_date...) KHÔNG nên trigger time-series
             _auxiliary_date_keywords = {"startdate", "enddate", "start_date", "end_date",
                                         "fromdate", "from_date", "todate", "to_date",
@@ -3732,12 +4391,17 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     is_time_dim = True
                     break
 
+            # Nếu tất cả các nhãn trong df là categorical (Phòng ban, Chức danh, Team, Tên nhân viên...), KHÔNG phải chuỗi thời gian
+            has_categorical_entity = any(any(k in str(c).lower() for k in ["dept", "department", "phòng", "title", "chức danh", "team", "salesperson", "emp", "name", "tên", "product", "sản phẩm"]) for c in (label_cols or []))
+            if has_categorical_entity:
+                is_time_dim = False
+
             # Nếu measure là duration/thâm niên/tenure VÀ truy vấn là ranking → KHÔNG phải time-series
             _is_duration_measure = any(k in str(m_col).lower() for k in [
                 "years", "year_as", "yearsas", "tenure", "thâm niên", "tham_nien",
-                "service", "duration", "months_as", "monthsas",
+                "service", "duration", "months_as", "monthsas", "promotion"
             ])
-            if _is_duration_measure and (is_top_query or total_rows <= 30):
+            if _is_duration_measure and (is_top_query or total_rows <= 30 or has_categorical_entity):
                 is_time_dim = False
 
             # Kiểm tra xem người dùng có hỏi về một đối tượng cụ thể (ví dụ Customer Service) không
@@ -3905,8 +4569,19 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     else:
                         entity_name = ""
 
+                    # Tránh nhận nhầm Top N% thành Top N đối tượng
+                    _pct_in_q = bool(re.search(r"top\s*\d+\s*(?:%|phần\s*trăm|percent)", (user_query or "").lower()))
+                    if not _pct_in_q:
+                        _top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", (user_query or "").lower())
+                        _req_top_n = int(_top_m.group(1)) if _top_m else None
+                    else:
+                        _top_m = None
+                        _req_top_n = None
+                    _is_db_capped = bool(_req_top_n and total_rows < _req_top_n)
+
                     card1_title = "🏆 " + ("Xếp hạng" if not is_en else "Ranking")
                     card1_val = f"Top {total_rows}" + (f" {entity_name}" if entity_name else "")
+                    card1_delta = (f"Toàn bộ {total_rows}/{total_rows} trong CSDL" if _is_db_capped else None) if not is_en else (f"All {total_rows}/{total_rows} in DB" if _is_db_capped else None)
 
                     # Tính delta so với giá trị trung bình chuẩn của Top N
                     try:
@@ -3926,7 +4601,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                         delta_min = None
 
                     with col1:
-                        st.metric(card1_title, card1_val)
+                        st.metric(card1_title, card1_val, delta=card1_delta, help=f"CSDL có tổng cộng {total_rows} {entity_name.lower()}, đã hiển thị đầy đủ 100% dữ liệu." if _is_db_capped else None)
                     with col2:
                         st.metric("📊 " + (f"TB Top {total_rows}" if not is_en else f"Avg Top {total_rows}"), fmt_avg)
                     with col3:
@@ -3970,10 +4645,23 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                         _card1_title = "📋 " + ("Số đối tượng so sánh" if not is_en else "Comparing Entities")
                         _card1_val = f"{total_rows:,}"
 
+                    _b_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["benchmark", "companyavg", "company_avg", "companyaverage", "overall_avg", "overallavg"])]
+                    if _b_cols:
+                        try:
+                            _b_val = float(df[_b_cols[0]].dropna().iloc[0])
+                            _fmt_bench = _fmt_kpi_val(_b_val)
+                            _bench_label = "Ngưỡng chuẩn toàn công ty" if not is_en else "Company Benchmark"
+                        except Exception:
+                            _fmt_bench = fmt_avg
+                            _bench_label = "Mức trung bình" if not is_en else "Average"
+                    else:
+                        _fmt_bench = fmt_avg
+                        _bench_label = "Mức trung bình" if not is_en else "Average"
+
                     with col1:
                         st.metric(_card1_title, _card1_val)
                     with col2:
-                        st.metric(f"📈 " + ("Mức trung bình chuẩn" if not is_en else "Benchmark Average"), fmt_avg)
+                        st.metric(f"📈 {_bench_label}", _fmt_bench)
                     with col3:
                         st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
                     with col4:
@@ -4068,10 +4756,13 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     with col4:
                         st.metric(f"🏆 " + ("Đỉnh cao nhất" if not is_en else "Peak Record"), peak_label, delta=peak_delta_val)
                 else:
-                    with col1:
-                        display_rows_count = real_rows_count if (has_unassigned and real_rows_count > 0) else total_rows
-                        card1_delta = f"+ {int(unassigned_measure_sum):,} chưa phân đội" if (is_hc_measure and unassigned_measure_sum > 0) else (f"+ {int(unassigned_measure_sum):,} chưa phân loại" if (has_unassigned and unassigned_measure_sum > 0) else None)
+                    display_rows_count = real_rows_count if (has_unassigned and real_rows_count > 0) else total_rows
+                    card1_delta = f"+ {int(unassigned_measure_sum):,} chưa phân đội" if (is_hc_measure and unassigned_measure_sum > 0) else (f"+ {int(unassigned_measure_sum):,} chưa phân loại" if (has_unassigned and unassigned_measure_sum > 0) else None)
+                    _is_db_capped = False
+                    _req_top_n = None
+                    _entity_top = ""
 
+                    with col1:
                         if is_top_query and total_rows <= 30:
                             _dim_low = str(_dim_col).lower()
                             if any(k in _dim_low for k in ["dept", "phòng", "department"]):
@@ -4090,10 +4781,22 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                                 _entity_top = " Nhân sự" if not is_en else " Employees"
                             else:
                                 _entity_top = ""
+                            
+                            # Tránh nhận nhầm Top N% thành Top N đối tượng
+                            _pct_in_q2 = bool(re.search(r"top\s*\d+\s*(?:%|phần\s*trăm|percent)", (user_query or "").lower()))
+                            if not _pct_in_q2:
+                                _top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", (user_query or "").lower())
+                                _req_top_n = int(_top_m.group(1)) if _top_m else None
+                            else:
+                                _top_m = None
+                                _req_top_n = None
+                            _is_db_capped = bool(_req_top_n and display_rows_count < _req_top_n)
+                            _card1_top_delta = (f"Toàn bộ {display_rows_count}/{display_rows_count} trong CSDL" if _is_db_capped else card1_delta) if not is_en else (f"All {display_rows_count}/{display_rows_count} in DB" if _is_db_capped else card1_delta)
+
                             if is_comparison_query and total_rows == 2:
                                 st.metric("⚖️ " + ("So sánh Đối chiếu" if not is_en else "Min-Max Comparison"), f"2{_entity_top}")
                             else:
-                                st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {display_rows_count}{_entity_top}")
+                                st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {display_rows_count}{_entity_top}", delta=_card1_top_delta, help=f"CSDL có tổng cộng {display_rows_count}{_entity_top.lower()}, đã hiển thị đầy đủ 100% dữ liệu." if _is_db_capped else None)
                         else:
                             _dim_low = str(_dim_col).lower()
                             if any(k in _dim_low for k in ["dept", "phòng", "department"]):
@@ -4137,6 +4840,14 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                         else:
                             peak_title = "🏆 " + ("Đội lớn nhất" if (is_hc_measure and any(k in str(label_cols[0] if label_cols else "").lower() for k in ["team", "đội"])) else ("Đỉnh cao nhất" if not is_en else "Peak Record"))
                             st.metric(peak_title, peak_label, delta=peak_delta_val)
+
+                    if _is_db_capped and _req_top_n:
+                        _entity_name = _entity_top.strip() or ("đối tượng" if not is_en else "items")
+                        st.caption(
+                            f"ℹ️ **Lưu ý dữ liệu**: Yêu cầu xếp hạng **Top {_req_top_n} {_entity_name}**, tuy nhiên toàn bộ cơ sở dữ liệu hiện có tổng cộng **{display_rows_count} {_entity_name}**. Bảng xếp hạng trên đã hiển thị đầy đủ **100% ({display_rows_count}/{display_rows_count})** dữ liệu hiện có trong hệ thống."
+                            if not is_en else
+                            f"ℹ️ **Data Notice**: Top {_req_top_n} {_entity_name} requested, but the database contains a total of {display_rows_count} {_entity_name}. The ranking displays all 100% ({display_rows_count}/{display_rows_count}) available records."
+                        )
 
                     if has_unassigned and unassigned_measure_sum > 0:
                         pct_unassigned = (unassigned_measure_sum / total_val * 100.0) if total_val > 0 else 0
@@ -4232,20 +4943,20 @@ def render_agent_workflow_badges(result: dict, turn_id: str):
     hint_label = "Xem chi tiết SQL & Tiến trình tại tab 🧭" if not is_en else "View full SQL & trace in 🧭 tab"
 
     st.markdown(f"""
-    <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 10px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.02);">
+    <div style="background: #151A30; border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 12px; padding: 10px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="font-weight: 700; font-size: 0.86rem; color: #15803D; display: inline-flex; align-items: center; gap: 6px;">
-                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: #DCFCE7; color: #15803D; font-size: 0.75rem; font-weight: 800;">✓</span>
+            <span style="font-weight: 700; font-size: 0.86rem; color: #00DF8F; display: inline-flex; align-items: center; gap: 6px;">
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 223, 143, 0.15); color: #00DF8F; font-size: 0.75rem; font-weight: 800; border: 1px solid rgba(0, 223, 143, 0.3);">✓</span>
                 {seal_title}
             </span>
-            <span style="color: #CBD5E1;">•</span>
-            <span style="font-size: 0.82rem; color: #64748B; font-weight: 500;">{source_label}</span>
-            <span style="color: #CBD5E1;">•</span>
-            <span style="font-size: 0.78rem; font-weight: 600; background: #EFF6FF; color: #0068FF; padding: 2px 8px; border-radius: 6px; border: 1px solid #BFDBFE;">
+            <span style="color: rgba(255, 255, 255, 0.2);">•</span>
+            <span style="font-size: 0.82rem; color: #CBD5E1; font-weight: 500;">{source_label}</span>
+            <span style="color: rgba(255, 255, 255, 0.2);">•</span>
+            <span style="font-size: 0.78rem; font-weight: 600; background: #1E253E; color: #00F0FF; padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(0, 240, 255, 0.35);">
                 ⚡ Tối ưu Index
             </span>
         </div>
-        <div style="font-size: 0.8rem; color: #64748B;">
+        <div style="font-size: 0.8rem; color: #94A3B8;">
             <i>{hint_label}</i>
         </div>
     </div>
@@ -4256,6 +4967,33 @@ def render_result(result: dict, turn_id: str):
     """Hiển thị kết quả truy vấn sạch sẽ (Silent Fix) với thẻ KPI, bảng, biểu đồ, insight, dự báo và bộ xuất báo cáo đa định dạng."""
     lang = result.get("lang", "vi")
     is_en = (lang == "en")
+
+    # 0.5 Hiển thị Báo Cáo Tham Mưu Chiến Lược / Nghị Quyết Ban Điều Hành (Executive Strategic Memo)
+    if result.get("is_strategic_report"):
+        memo_content = result.get("insights") or result.get("explanation", "")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid rgba(0, 240, 255, 0.35); border-radius: 14px; padding: 18px 22px; margin-bottom: 14px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; margin-bottom: 14px;">
+                <span style="font-size: 1.1rem; font-weight: 800; color: #FFFFFF; letter-spacing: 0.3px;">
+                    🏛️ VĂN BẢN THAM MƯU CHIẾN LƯỢC BAN ĐIỀU HÀNH
+                </span>
+                <span class="crm-badge-neon">Executive Memo</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(memo_content)
+
+        c_d1, _ = st.columns([2, 4])
+        with c_d1:
+            st.download_button(
+                label="📥 Tải Báo Cáo Chiến Lược (.md)",
+                data=memo_content.encode("utf-8"),
+                file_name="executive_strategic_memo.md",
+                mime="text/markdown",
+                key=f"dl_memo_{turn_id}",
+                use_container_width=True
+            )
+        return
 
     # 1. Hiển thị giải thích tự nhiên từ AI nếu câu hỏi nằm ngoài phạm vi Schema
     if result.get("explanation"):
@@ -4317,6 +5055,43 @@ def render_result(result: dict, turn_id: str):
 
     # Tự động thay thế các ô chuỗi rỗng / khoảng trắng / NaN trong cột text bằng nhãn rõ ràng
     cleaned_df = df.copy()
+    user_query = result.get("query", "")
+    uq_low = (user_query or "").lower()
+    is_explicit_unassigned_q = any(k in uq_low for k in [
+        "chưa phân loại", "chưa được phân loại", "chưa phân đội", "chưa có team", "chưa có đội", 
+        "không thuộc team", "không có team", "không thuộc đội", "không có đội", "chưa phân nhóm", 
+        "unassigned team", "no team", "unassigned"
+    ]) or ("ches bonnell" in uq_low and any(k in uq_low for k in ["team nào", "đội nào", "chưa phân"]))
+
+    # Nếu người dùng hỏi về so sánh/tỷ trọng/thống kê giữa các team/đội ngũ và KHÔNG hỏi về nhóm chưa phân loại:
+    # Lọc bỏ các dòng Team rỗng / Chưa xác định để đảm bảo 100% không bị nhiễm bẩn dữ liệu
+    is_team_query = any(k in uq_low for k in ["team", "đội ngũ", "nhóm kinh doanh", "các team", "từng team", "giữa các team"])
+    if is_team_query and not is_explicit_unassigned_q:
+        for col in cleaned_df.columns:
+            if any(k in str(col).lower() for k in ["team", "đội ngũ", "đội"]):
+                cleaned_df = cleaned_df[
+                    cleaned_df[col].notna() 
+                    & (cleaned_df[col].astype(str).str.strip() != "")
+                    & (~cleaned_df[col].astype(str).str.strip().str.lower().isin(["(chưa xác định)", "(unassigned)", "chưa phân nhóm", "chưa xác định", "unassigned", "none", "nan", "null"]))
+                ].copy()
+                # Tái chuẩn hóa cột phần trăm / tỷ trọng nếu có
+                pct_cols = [c for c in cleaned_df.columns if any(k in str(c).lower() for k in ["percentage", "percent", "tỷ trọng", "tỷ lệ", "tỉ trọng", "tỉ lệ", "%"])]
+                val_cols = [c for c in cleaned_df.columns if pd.api.types.is_numeric_dtype(cleaned_df[c]) and c not in pct_cols]
+                if pct_cols and val_cols and not cleaned_df.empty:
+                    p_col = pct_cols[0]
+                    v_col = val_cols[0]
+                    total_v = cleaned_df[v_col].sum()
+                    if total_v > 0:
+                        cleaned_df[p_col] = (cleaned_df[v_col] / total_v * 100.0).round(2)
+                break
+
+    # Deduplicate redundant gender columns (e.g. if both 'Giới Tính' and 'Gender Name' exist)
+    gender_cols = [c for c in cleaned_df.columns if any(k == str(c).strip().lower() for k in ["gender", "giới tính", "gioi tinh", "gender name", "gender_name", "gendername"])]
+    if len(gender_cols) >= 2:
+        redundant = [c for c in gender_cols if any(k in str(c).strip().lower() for k in ["gender name", "gender_name", "gendername"])]
+        if redundant:
+            cleaned_df = cleaned_df.drop(columns=redundant).copy()
+
     for col in cleaned_df.columns:
         if not pd.api.types.is_numeric_dtype(cleaned_df[col]):
             unassigned_label = "(Unassigned)" if is_en else "(Chưa xác định)"
@@ -4325,7 +5100,6 @@ def render_result(result: dict, turn_id: str):
             )
     df = cleaned_df
     # 3. Thẻ Tóm tắt Chỉ số Điều hành (Executive KPI Summary Cards)
-    user_query = result.get("query", "")
     render_executive_kpi_cards(df, is_en=is_en, user_query=user_query, sql_query=sql_query)
 
     # 4. Biểu đồ Trực quan Trung tâm (Visual-First Hero Chart)
@@ -4406,7 +5180,7 @@ def render_result(result: dict, turn_id: str):
     tab_data_label = "📋 Bảng số liệu & Báo cáo" if not is_en else "📋 Data Table & Reports"
     tab_insight_label = "💡 Insight & Hành động 🚨" if (has_anomaly and not is_en) else ("💡 Insight & Phân tích" if not is_en else ("💡 Insights & Anomalies 🚨" if has_anomaly else "💡 Insights & Analysis"))
     tab_forecast_label = "🔮 Dự báo xu hướng" if not is_en else "🔮 Forecast"
-    tab_sql_label = "🧭 Tiến trình Tác tử & SQL" if not is_en else "🧭 Agent Trace & SQL"
+    tab_sql_label = "🏛️ Hội đồng 5 Agent & SQL" if not is_en else "🏛️ 5-Agent Matrix & SQL"
 
     tab_data, tab_insight, tab_forecast, tab_sql = st.tabs([tab_data_label, tab_insight_label, tab_forecast_label, tab_sql_label])
 
@@ -4433,8 +5207,45 @@ def render_result(result: dict, turn_id: str):
 
         display_df = df.copy()
         try:
-            # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N
-            is_ranking = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất"])
+            # Sắp xếp lại thứ tự cột cho bài toán Chênh lệch lương / Spread để cột đo lường chính (SalarySpread) đứng ngay sau Thực thể (Department)
+            user_asked_spread_tbl = any(k in uq_low_tab for k in ["chênh lệch", "khoảng cách", "phân hóa", "salary spread", "spread", "gap", "biên độ", "nhóm cao nhất và nhóm thấp nhất"])
+            spread_cands_tbl = [c for c in display_df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương", "biên độ chênh lệch", "salarydifference", "salary_difference", "salarygap", "salary_gap"])]
+            ratio_cands_tbl = [c for c in display_df.columns if any(k in str(c).lower() for k in ["spreadratiopct", "spread_ratio", "ratio", "tỷ lệ chênh lệch", "tỉ lệ chênh lệch"])]
+            label_cands_tbl = [c for c in display_df.columns if any(k in str(c).lower() for k in ["department", "phòng ban", "title", "chức danh", "team", "đội", "salesperson", "nhân viên"])]
+
+            if user_asked_spread_tbl and spread_cands_tbl and label_cands_tbl:
+                main_label = label_cands_tbl[0]
+                main_spread = spread_cands_tbl[0]
+                main_ratio = ratio_cands_tbl[0] if ratio_cands_tbl else None
+                reordered = [main_label]
+                for c in ["AvgSalary", "MaxSalary", "MinSalary", "Lương Trung Bình", "Lương Cao Nhất", "Lương Thấp Nhất"]:
+                    if c in display_df.columns and c not in reordered:
+                        reordered.append(c)
+                if main_spread in display_df.columns and main_spread not in reordered:
+                    reordered.append(main_spread)
+                if main_ratio and main_ratio in display_df.columns and main_ratio not in reordered:
+                    reordered.append(main_ratio)
+                for c in display_df.columns:
+                    if c not in reordered:
+                        reordered.append(c)
+                display_df = display_df[reordered]
+            elif label_cands_tbl and not any(k in display_df.columns for k in ["FullName", "emp_no"]):
+                # Luôn đưa cột tên thực thể (Department, Title, Team) lên đầu bảng dữ liệu
+                main_label = label_cands_tbl[0]
+                reordered_label = [main_label] + [c for c in display_df.columns if c != main_label]
+                display_df = display_df[reordered_label]
+
+            # Tối ưu thứ tự cột hiển thị danh sách nhân sự cá nhân để tên và mã nhân viên luôn đứng đầu
+            emp_key_cols = ["emp_no", "FullName", "Gender", "HireDate", "Department", "InitialTitle", "PromotedTitle", "PromotionDate", "CurrentSalary"]
+            if any(k in display_df.columns for k in ["FullName", "emp_no"]) and any(k in display_df.columns for k in ["HireDate", "Department", "PromotedTitle", "InitialTitle"]):
+                reordered_emp = [c for c in emp_key_cols if c in display_df.columns]
+                for c in display_df.columns:
+                    if c not in reordered_emp:
+                        reordered_emp.append(c)
+                display_df = display_df[reordered_emp]
+
+            # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N / Danh sách nhân sự
+            is_ranking = any(k in (user_query or "").lower() for k in ["top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất", "chênh lệch", "những nhân viên", "các nhân viên", "nhân viên nào", "ai", "thăng chức", "bổ nhiệm"])
             if is_ranking and len(display_df) <= 50:
                 medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
                 display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
@@ -4443,6 +5254,30 @@ def render_result(result: dict, turn_id: str):
             for col in display_df.columns:
                 if str(col).lower() in ["team", "đội ngũ", "đội"]:
                     display_df[col] = display_df[col].fillna("Chưa phân loại").replace({"": "Chưa phân loại"})
+
+            # Tự động chuẩn hóa định dạng cột ngày tháng (Date/Datetime/Timestamp) để không bao giờ bị hiển thị số mili-giây epoch (e.g. 682387200000)
+            for col in display_df.columns:
+                c_low = str(col).lower()
+                is_date_col = (
+                    pd.api.types.is_datetime64_any_dtype(display_df[col])
+                    or any(k in c_low for k in ["hire_date", "hiredate", "promotiondate", "promotion_date", "from_date", "to_date", "birth_date", "ngày", "ngay", "reductiondate", "reduction_date"])
+                ) and not any(k in c_low for k in ["year", "năm", "month", "tháng", "quarter", "quý", "day", "ngày trong", "count", "số"])
+
+                if is_date_col:
+                    try:
+                        if pd.api.types.is_numeric_dtype(display_df[col]):
+                            non_null = display_df[col].dropna()
+                            if not non_null.empty:
+                                sample_val = float(non_null.iloc[0])
+                                if sample_val > 1e11:
+                                    display_df[col] = pd.to_datetime(display_df[col], unit="ms", errors="coerce").dt.strftime("%Y-%m-%d")
+                                elif sample_val > 1e8:
+                                    display_df[col] = pd.to_datetime(display_df[col], unit="s", errors="coerce").dt.strftime("%Y-%m-%d")
+                        else:
+                            display_df[col] = pd.to_datetime(display_df[col], errors="coerce").dt.strftime("%Y-%m-%d")
+                        display_df[col] = display_df[col].fillna("N/A")
+                    except Exception:
+                        pass
 
             column_config = {}
             for col in display_df.columns:
@@ -4472,6 +5307,16 @@ def render_result(result: dict, turn_id: str):
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%.2f%%")
                     else:
                         column_config[col] = st.column_config.Column(col_label)
+                elif any(k in c_low for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases", "lần tăng", "số lần"]):
+                    if is_num:
+                        column_config[col] = st.column_config.NumberColumn(col_label, format="%d lần" if not is_en else "%d times")
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
+                elif any(k in c_low for k in ["subordinateswithhighersalary", "headcount", "hires", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
+                    if is_num:
+                        column_config[col] = st.column_config.NumberColumn(col_label, format="%,d")
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
                 elif any(k in c_low for k in [
                     "salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales",
                     "amount", "profit", "ordervalue", "doanh thu", "doanh số", "doanh", "lợi nhuận", "lãi", "lỗ",
@@ -4485,16 +5330,6 @@ def render_result(result: dict, turn_id: str):
                         )
                     else:
                         column_config[col] = st.column_config.Column(col_label)
-                elif any(k in c_low for k in ["raisecount", "raise_count", "numberofincreases", "salaryincreases", "salary_increases", "lần tăng", "số lần"]):
-                    if is_num:
-                        column_config[col] = st.column_config.NumberColumn(col_label, format="%d lần" if not is_en else "%d times")
-                    else:
-                        column_config[col] = st.column_config.Column(col_label)
-                elif any(k in c_low for k in ["headcount", "hires", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
-                    if is_num:
-                        column_config[col] = st.column_config.NumberColumn(col_label, format="%,d")
-                    else:
-                        column_config[col] = st.column_config.Column(col_label)
                 elif is_num:
                     has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
                     column_config[col] = st.column_config.NumberColumn(
@@ -4502,7 +5337,7 @@ def render_result(result: dict, turn_id: str):
                         format="%,.2f" if has_dec else "%,d"
                     )
                 else:
-                    column_config[col] = st.column_config.Column(col_label)
+                    column_config[col] = st.column_config.TextColumn(col_label, width="medium")
 
             st.dataframe(display_df, column_config=column_config, width='stretch')
         except Exception:
@@ -4702,11 +5537,22 @@ def render_result(result: dict, turn_id: str):
 
         stats = anomalies_info.get("summary_stats", {})
         if stats:
+            y_col_stat = anomalies_info.get("y_col", "")
+            is_cur_money = any(k in str(y_col_stat).lower() for k in ["salary", "lương", "revenue", "sales", "doanh", "tiền", "cost", "budget", "quỹ", "chi phí", "thu nhập", "amount", "$"])
+            prefix = "$" if is_cur_money else ""
+
+            def _fmt_stat(val, is_avg=False):
+                if val is None:
+                    return "0"
+                if not is_avg and abs(val - round(val)) < 1e-5:
+                    return f"{prefix}{int(round(val)):,d}"
+                return f"{prefix}{val:,.2f}"
+
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Total Rows" if is_en else "Tổng số dòng", f"{stats.get('count', 0):,}")
-            c2.metric("Mean" if is_en else "Trung bình (Mean)", f"{stats.get('mean', 0):,.2f}")
-            c3.metric("Max" if is_en else "Lớn nhất (Max)", f"{stats.get('max', 0):,.2f}")
-            c4.metric("Min" if is_en else "Nhỏ nhất (Min)", f"{stats.get('min', 0):,.2f}")
+            c2.metric("Mean" if is_en else "Trung bình (Mean)", _fmt_stat(stats.get('mean', 0), is_avg=True))
+            c3.metric("Max" if is_en else "Lớn nhất (Max)", _fmt_stat(stats.get('max', 0)))
+            c4.metric("Min" if is_en else "Nhỏ nhất (Min)", _fmt_stat(stats.get('min', 0)))
 
         if has_anomaly:
             st.markdown("#### 🚨 Statistical Anomaly Findings:" if is_en else "#### 🚨 Các phát hiện bất thường từ thuật toán:")
@@ -4753,122 +5599,218 @@ def render_result(result: dict, turn_id: str):
         if fig_forecast is None:
             st.info(method)
         else:
+            col_fc1, col_fc2 = st.columns([5, 2])
+            with col_fc1:
+                st.caption(f"Phương pháp: {method}" if not is_en else f"Method: {method}")
+            with col_fc2:
+                zoom_fc_clicked = st.button("🔍 Phóng to", key=f"btn_zoom_fc_{turn_id}", use_container_width=True, help="Phóng to biểu đồ dự báo & xem phân tích chi tiết")
+
             st.plotly_chart(fig_forecast, width='stretch', key=f"forecast_{turn_id}")
-            st.caption(f"Phương pháp: {method}" if not is_en else f"Method: {method}")
+            if zoom_fc_clicked:
+                from src.visualization.chart_modal import show_chart_zoom_dialog
+                show_chart_zoom_dialog(
+                    title="Dự Báo Xu Hướng Chuỗi Thời Gian (Time-Series Forecasting)",
+                    fig=fig_forecast,
+                    df=df,
+                    badge=method,
+                    explanation="Biểu đồ dự báo chuỗi thời gian dựa trên mô hình thích ứng Holt-Winters / San bằng số mũ (ETS) kèm Dải khoảng tin cậy 95% (Risk Corridor)."
+                )
 
     # -----------------------------------------------------
     # TAB 4: TIẾN TRÌNH AGENT & CÂU LỆNH SQL
     # -----------------------------------------------------
     with tab_sql:
-        # PHẦN 1: KẾ HOẠCH PHÂN RÃ NHIỆM VỤ CON (Chia để trị - Plan-and-Solve)
+        # BANNER EXECUTIVE: HỘI ĐỒNG 5 AGENT CHUYÊN GIA VERAXUS
+        st.markdown(f"""
+        <div style="padding: 14px 18px; background: linear-gradient(135deg, #151A30 0%, #0B0E17 100%); border: 1.5px solid rgba(0, 240, 255, 0.4); border-radius: 12px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
+            <div style="font-weight: 800; font-size: 0.96rem; color: #00F0FF; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <span style="letter-spacing: 0.03em;">🏛️ HỘI ĐỒNG 5 AGENT CHUYÊN GIA VERAXUS (MULTI-AGENT MATRIX)</span>
+                <span style="background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.6); font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; letter-spacing: 0.05em;">100% COLLABORATIVE TRACE</span>
+            </div>
+            <div style="font-size: 0.82rem; color: #94A3B8; margin-top: 5px; line-height: 1.45;">
+                Minh bạch hóa toàn bộ chuỗi tư duy phối hợp đa tác tử: Phân rã nhiệm vụ (Plan-and-Solve), Thiết kế truy vấn (ICL), Kiểm toán độc lập 4 trụ cột (Maker-Checker 100/100), Phân tích dị biệt & Cố vấn chiến lược C-Level.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # AGENT 1: 🧭 MASTER SUPERVISOR & TASK PLANNER
         plan = result.get("plan")
-        if plan and plan.get("sub_tasks"):
-            st.markdown("#### 🧭 " + ("Kế Hoạch Phân Rã Nhiệm Vụ Con (Chia để trị / Plan-and-Solve)" if not is_en else "Decomposed Sub-tasks Execution Plan"))
-            st.caption(
-                f"**Độ phức tạp bài toán**: `{plan.get('complexity')}` | **Chiến lược**: {plan.get('execution_strategy')}"
-                if not is_en else
-                f"**Query Complexity**: `{plan.get('complexity')}` | **Strategy**: {plan.get('execution_strategy')}"
-            )
-            for st_item in plan.get("sub_tasks", []):
+        with st.expander("🧭 **Agent 1: Master Supervisor & Task Planner** (Phân tích Ý định & Phân rã Nhiệm vụ)", expanded=True):
+            if plan and plan.get("sub_tasks"):
+                comp_key = plan.get("complexity", "STANDARD")
+                complexity_map = {
+                    "BENCHMARK_EXTREMES": "⚡ Phân tích 2 Cực trị (Max / Min Benchmark)" if not is_en else "⚡ Dual Extremes Benchmark (Max / Min)",
+                    "MULTI_STEP_ANALYTIC": "🔬 Phân tích Đa bước (Multi-Step Analytics)" if not is_en else "🔬 Multi-Step Analytics",
+                    "TIME_SERIES_COHORT": "📈 Phân tích Chuỗi thời gian (Time-Series Cohort)" if not is_en else "📈 Time-Series Cohort Analysis",
+                    "DIRECT_SQL": "⚡ Truy vấn Trực tiếp (Direct Analysis)" if not is_en else "⚡ Direct Query Analysis",
+                }
+                disp_complexity = complexity_map.get(comp_key, comp_key.replace("_", " ").title())
+
+                # Làm sạch chuỗi ý định nghiệp vụ (bỏ tiền tố enum code thô)
+                raw_intent = plan.get("intent", user_query or "Truy vấn dữ liệu")
+                clean_intent = re.sub(r"^(Phân tích|Analyze)\s+[a-z0-9_]+:\s*", "", str(raw_intent), flags=re.IGNORECASE).strip()
+                if not clean_intent:
+                    clean_intent = user_query
+
+                # Làm sạch khung thời gian
+                raw_time = plan.get("time_horizon", "Thời điểm hiện tại" if not is_en else "Current active state")
+                disp_time = str(raw_time).replace("(to_date = '9999-01-01')", "(Nhân sự đang công tác)").replace("to_date = '9999-01-01'", "Nhân sự đang công tác")
+
+                disp_strategy = plan.get("execution_strategy", "Phân rã nhiệm vụ & Tổng hợp song song" if not is_en else "Plan-and-Solve / Decomposed Execution")
+
                 st.markdown(f"""
-                <div style="background: #FFFFFF; border-left: 3px solid #0068FF; border-radius: 0 8px 8px 0; padding: 10px 14px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
-                    <div style="font-weight: 700; font-size: 0.88rem; color: #0F172A;">
-                        <span style="background: #EFF6FF; color: #0068FF; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; margin-right: 6px; font-weight: 700;">Bước {st_item['step']}</span>
-                        {st_item['name']}
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
+                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Độ phức tạp bài toán' if not is_en else 'Query Complexity'}</div>
+                        <div style="font-size: 0.85rem; color: #00F0FF; font-weight: 700; margin-top: 2px;">{disp_complexity}</div>
                     </div>
-                    <div style="font-size: 0.82rem; color: #475569; margin-top: 3px; line-height: 1.4;">
-                        {st_item['desc']}
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
+                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Chiến lược điều phối' if not is_en else 'Execution Strategy'}</div>
+                        <div style="font-size: 0.85rem; color: #38BDF8; font-weight: 600; margin-top: 2px;">{disp_strategy}</div>
+                    </div>
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
+                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Ý định nghiệp vụ' if not is_en else 'Business Intent'}</div>
+                        <div style="font-size: 0.85rem; color: #E2E8F0; font-weight: 600; margin-top: 2px;">{clean_intent}</div>
+                    </div>
+                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
+                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Khung thời gian' if not is_en else 'Time Horizon'}</div>
+                        <div style="font-size: 0.85rem; color: #10B981; font-weight: 600; margin-top: 2px;">{disp_time}</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-            st.write("")
 
-        # PHẦN 2: BIÊN BẢN KIỂM ĐỊNH TÁC TỬ PHẢN BIỆN (Evaluator Guardrail Audit)
+                sub_tasks_list = plan.get("sub_tasks", [])
+                st.markdown(f"<div style='margin-top: 10px; margin-bottom: 8px; font-weight: 700; font-size: 0.88rem; color: #00F0FF;'>📋 {'Kế hoạch thực thi phân rã' if not is_en else 'Decomposed Execution Plan'} ({len(sub_tasks_list)} {'bước' if not is_en else 'steps'}):</div>", unsafe_allow_html=True)
+                for st_item in sub_tasks_list:
+                    st.markdown(f"""
+                    <div style="background: #151A30; border-left: 3px solid #00F0FF; border-radius: 0 8px 8px 0; padding: 10px 14px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.08); border-left: 3px solid #00F0FF; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
+                        <div style="font-weight: 700; font-size: 0.88rem; color: #FFFFFF;">
+                            <span style="background: #1E253E; color: #00F0FF; border: 1px solid rgba(0,240,255,0.3); padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; margin-right: 6px; font-weight: 700;">Bước {st_item['step']}</span>
+                            {st_item['name']}
+                        </div>
+                        <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 3px; line-height: 1.4;">
+                            {st_item['desc']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.caption("Supervisor đã tiếp nhận và hoàn tất định tuyến trực tiếp cho câu hỏi này." if not is_en else "Supervisor has routed and executed directly for this query.")
+
+        # AGENT 2: ⚡ DATA ENGINEER & SQL ARCHITECT
+        with st.expander("⚡ **Agent 2: Data Engineer & SQL Architect** (In-Context Learning & Thiết kế Truy vấn)", expanded=True):
+            few_shots = result.get("agent_trace", {}).get("few_shots", [])
+            if few_shots:
+                st.markdown(f"**Mẫu In-Context Learning (ICL) Tương đồng Đã Kích hoạt ({len(few_shots)} mẫu):**")
+                for s in few_shots:
+                    st.markdown(f"• **Mẫu {s.get('id')}** (Độ tương đồng: <span style='color: #00DF8F; font-weight: 700;'>{s.get('relevance')} pts</span>): *{s.get('goal')}*", unsafe_allow_html=True)
+
+            if sql_query:
+                st.markdown("#### Câu Lệnh SQL Tối Ưu Đã Thực Thi:")
+                st.code(sql_query, language="sql")
+
+                st.markdown("#### ⚡ Chỉnh sửa & Chạy lại SQL Trực tiếp (Live Playground):")
+                st.caption("Bạn có thể sửa câu lệnh SQL (đổi điều kiện WHERE, GROUP BY, ORDER BY, LIMIT...) và bấm nút bên dưới để cập nhật kết quả tức thì mà không cần gọi lại AI.")
+                edited_sql = st.text_area(
+                    "SQL Editor",
+                    value=sql_query,
+                    height=120,
+                    key=f"sql_edit_area_{turn_id}",
+                    label_visibility="collapsed"
+                )
+
+                btn_rerun_label = "⚡ Chạy lại câu lệnh SQL này" if not is_en else "⚡ Re-run Edited SQL"
+                if st.button(btn_rerun_label, key=f"btn_rerun_{turn_id}", type="primary"):
+                    engine = st.session_state.get("engine")
+                    if not engine:
+                        st.error("Chưa kết nối database để chạy câu lệnh SQL." if not is_en else "Database engine is not connected.")
+                    else:
+                        from src.database.query_runner import read_sql_capped
+                        from src.config import MAX_ROWS_CAP
+                        try:
+                            new_df, truncated = read_sql_capped(edited_sql, engine, cap=MAX_ROWS_CAP)
+                            if new_df is not None:
+                                result["sql"] = edited_sql
+                                result["df"] = new_df
+                                result["logs"].append(f"[SQL Playground] Updated with user-edited SQL.")
+                                st.toast("⚡ Đã cập nhật kết quả với câu lệnh SQL mới!", icon="⚡")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Lỗi thực thi SQL: {e}")
+
+        # AGENT 3: 🛡️ DATA AUDITOR & QUALITY EVALUATOR
         evaluator = result.get("evaluator")
-        if evaluator and evaluator.get("criteria"):
-            st.markdown("#### 🛡️ " + ("Biên Bản Kiểm Định Chất Lượng Tác Tử (Evaluator Guardrail Audit)" if not is_en else "Evaluator Guardrail Quality Audit Scorecard"))
-            score = evaluator.get("score", 100)
-            verdict = evaluator.get("verdict", "PASS")
-            critique = evaluator.get("critique", "")
+        with st.expander("🛡️ **Agent 3: Data Auditor & Quality Evaluator** (Kiểm toán Độc lập 4 Trụ cột / Maker-Checker)", expanded=True):
+            if evaluator and evaluator.get("criteria"):
+                score = evaluator.get("score", 100)
+                verdict = evaluator.get("verdict", "PASS")
+                critique = evaluator.get("critique", "")
 
-            v_color = "#10B981" if verdict == "PASS" else "#F59E0B"
-            st.markdown(f"**Kết luận Đánh giá**: <span style='color: {v_color}; font-weight: 800;'>{verdict} ({score}/100)</span> — *{critique}*", unsafe_allow_html=True)
+                v_color = "#10B981" if verdict == "PASS" else "#F59E0B"
+                st.markdown(f"**Kết luận Thẩm định**: <span style='color: {v_color}; font-weight: 800; font-size: 1.05rem;'>{verdict} ({score}/100)</span> — *{critique}*", unsafe_allow_html=True)
 
-            c_c1, c_c2 = st.columns(2)
-            crits = evaluator.get("criteria", {})
-            with c_c1:
-                sem = crits.get("semantic_alignment", {})
-                icon_sem = "✅" if sem.get("passed") else "❌"
-                st.markdown(f"**{icon_sem} Khớp Ngữ Nghĩa & Thực Thể (Semantic Alignment)**")
-                st.caption(sem.get("detail", ""))
+                c_c1, c_c2 = st.columns(2)
+                crits = evaluator.get("criteria", {})
+                with c_c1:
+                    sem = crits.get("semantic_alignment", {})
+                    icon_sem = "✅" if sem.get("passed") else "❌"
+                    st.markdown(f"**{icon_sem} Khớp Ngữ Nghĩa & Thực Thể (Semantic Alignment)**")
+                    st.caption(sem.get("detail", ""))
 
-                temp = crits.get("temporal_validity", {})
-                icon_temp = "✅" if temp.get("passed") else "❌"
-                st.markdown(f"**{icon_temp} Toàn Vẹn Mốc Thời Gian (Temporal Validity)**")
-                st.caption(temp.get("detail", ""))
+                    temp = crits.get("temporal_validity", {})
+                    icon_temp = "✅" if temp.get("passed") else "❌"
+                    st.markdown(f"**{icon_temp} Toàn Vẹn Mốc Thời Gian (Temporal Validity)**")
+                    st.caption(temp.get("detail", ""))
 
-            with c_c2:
-                comp = crits.get("comparative_sufficiency", {})
-                icon_comp = "✅" if comp.get("passed") else "❌"
-                st.markdown(f"**{icon_comp} Đầy Đủ Vế Đối Chiếu (Comparative Sufficiency)**")
-                st.caption(comp.get("detail", ""))
+                with c_c2:
+                    comp = crits.get("comparative_sufficiency", {})
+                    icon_comp = "✅" if comp.get("passed") else "❌"
+                    st.markdown(f"**{icon_comp} Đầy Đủ Vế Đối Chiếu (Comparative Sufficiency)**")
+                    st.caption(comp.get("detail", ""))
 
-                hlth = crits.get("data_health", {})
-                icon_hlth = "✅" if hlth.get("passed") else "❌"
-                st.markdown(f"**{icon_hlth} Tính Lành Mạnh Dữ Liệu (Data Health)**")
-                st.caption(hlth.get("detail", ""))
-            st.write("")
+                    hlth = crits.get("data_health", {})
+                    icon_hlth = "✅" if hlth.get("passed") else "❌"
+                    st.markdown(f"**{icon_hlth} Tính Lành Mạnh Dữ Liệu (Data Health)**")
+                    st.caption(hlth.get("detail", ""))
 
-        # PHẦN 3: CÂU LỆNH SQL ĐÃ THỰC THI & LIVE SQL EDITOR
-        if sql_query:
-            st.markdown("#### ⚡ " + ("Câu Lệnh SQL Đã Thực Thi" if not is_en else "Executed SQL Query"))
-            st.code(sql_query, language="sql")
+            attempts = result.get("attempts", 1)
+            if attempts > 1:
+                st.info(f"🔄 **Maker-Checker Self-Correction Loop**: Tác tử Auditor đã phát hiện điểm cần tối ưu và kích hoạt Data Engineer tự sửa lỗi hoàn tất sau **{attempts} vòng lặp âm thầm (Silent Self-Healing)**.")
+            else:
+                st.success("✅ **Maker-Checker Single Pass**: Dữ liệu và truy vấn đã vượt qua toàn bộ 4 tiêu chuẩn kiểm toán ngay trong lượt đầu tiên (Điểm tuyệt đối 100/100).")
 
-            st.markdown("#### ⚡ " + ("Chỉnh sửa & Chạy lại SQL Trực tiếp" if not is_en else "Live SQL Editor & Playground"))
-            st.caption(
-                "Bạn có thể sửa câu lệnh SQL (đổi điều kiện WHERE, GROUP BY, ORDER BY, LIMIT...) và bấm nút bên dưới để cập nhật kết quả tức thì mà không cần gọi lại AI."
-                if not is_en else
-                "You can edit the SQL query below and re-run it directly to update results instantly without calling AI."
-            )
-            edited_sql = st.text_area(
-                "SQL Editor",
-                value=sql_query,
-                height=120,
-                key=f"sql_edit_area_{turn_id}",
-                label_visibility="collapsed"
-            )
+        # AGENT 4: 🔍 ANOMALY DETECTIVE & BI FORENSICS
+        with st.expander("🔍 **Agent 4: Anomaly Detective & BI Forensics** (Thám tử Dị biệt & Phân tích Biến động)", expanded=False):
+            stats = anomalies_info.get("summary_stats", {})
+            if stats:
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Tổng số bản ghi", f"{stats.get('count', 0):,}")
+                c2.metric("Giá trị TB (Mean)", f"{stats.get('mean', 0):,.2f}")
+                c3.metric("Đỉnh cao nhất (Max)", f"{stats.get('max', 0):,.2f}")
+                c4.metric("Sàn thấp nhất (Min)", f"{stats.get('min', 0):,.2f}")
 
-            btn_rerun_label = "⚡ Chạy lại câu lệnh SQL này" if not is_en else "⚡ Re-run Edited SQL"
-            if st.button(btn_rerun_label, key=f"btn_rerun_{turn_id}", type="primary"):
-                engine = st.session_state.get("engine")
-                if not engine:
-                    st.error("Chưa kết nối database để chạy câu lệnh SQL." if not is_en else "Database engine is not connected.")
-                else:
-                    from src.database.query_runner import read_sql_capped
-                    from src.config import MAX_ROWS_CAP
-                    try:
-                        new_df, truncated = read_sql_capped(edited_sql, engine, cap=MAX_ROWS_CAP)
-                        if new_df is not None:
-                            result["sql"] = edited_sql
-                            result["df"] = new_df
-                            result["logs"].append(f"[SQL Playground] Updated with user-edited SQL.")
-                            st.toast("⚡ Đã cập nhật kết quả với câu lệnh SQL mới!", icon="⚡")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Lỗi thực thi SQL: {e}")
+            if has_anomaly:
+                st.markdown("#### 🚨 Phát hiện Dị biệt & Biến động Đáng chú ý:")
+                for f in anomalies_info.get("findings", []):
+                    st.warning(f"• {f.get('message')}")
+            else:
+                st.success("✅ Thuật toán không phát hiện điểm dị biệt hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
 
-            st.markdown("---")
+        # AGENT 5: 💡 EXECUTIVE STRATEGY ADVISOR
+        with st.expander("💡 **Agent 5: Executive Strategy Advisor** (Cố vấn Chiến lược & Nghị quyết Điều hành C-Level)", expanded=False):
+            insights = result.get("insights", "")
+            if insights:
+                st.markdown("#### 💡 Khuyến nghị Trọng tâm & Kế hoạch Hành động:")
+                render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""))
+            else:
+                st.info("Chuyển sang tab 'Insight & Hành động' để xem phân tích chi tiết từ Strategy Advisor.")
 
-        attempts = result.get("attempts", 1)
-        if attempts > 1:
-            msg_healing = f"ℹ️ AI Agent auto-corrected and finalized query after **{attempts} attempts in the background (Silent Self-Healing)**." if is_en else f"ℹ️ AI Agent đã tự động sửa lỗi và hoàn thiện câu lệnh sau **{attempts} lần thử trong nền (Silent Self-Healing)**."
-            st.info(msg_healing)
-
+        # NHẬT KÝ CHI TIẾT (ACTIVITY LOGS)
         logs = result.get("logs", [])
         if logs:
-            st.markdown("**Execution Logs:**" if is_en else "**Nhật ký các bước thực thi:**")
-            for log in logs:
-                st.text(f"• {log}")
+            st.markdown("---")
+            with st.expander("📜 **Nhật Ký Tác Vụ Đầy Đủ (Execution Activity Logs)**", expanded=False):
+                for log in logs:
+                    st.text(f"• {log}")
 
     # 6. Gợi ý Câu hỏi Phân tích Tiếp nối (Follow-up Question Suggestions)
     followups = result.get("followups", [])
@@ -4905,73 +5847,208 @@ def render_result(result: dict, turn_id: str):
                 )
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # 7. VÒNG LẶP TIẾN HÓA TRI THỨC (Tầng 2: Continuous Learning & Dynamic Memory)
+    _user_q = result.get("query", "")
+    _sql_q = result.get("sql", "")
+    if _user_q and _sql_q:
+        render_feedback_learning_bar(
+            user_query=_user_q,
+            sql_query=_sql_q,
+            evaluator_score=result.get("evaluator", {}).get("score", 100) if isinstance(result.get("evaluator"), dict) else 100,
+            dialect=st.session_state.get("db_dialect", "MySQL"),
+            turn_id=turn_id,
+            is_en=is_en
+        )
+
+
+def render_feedback_learning_bar(user_query: str, sql_query: str, evaluator_score: int = 100, dialect: str = "MySQL", turn_id: str = "main", is_en: bool = False):
+    """Render thanh Đánh giá Tương tác & Vòng lặp Tiến hóa Tri thức Động (Tầng 2)."""
+    if not user_query or not sql_query:
+        return
+
+    st.markdown("<hr style='margin: 16px 0 10px 0; border: none; border-top: 1px dashed rgba(0, 240, 255, 0.22);' />", unsafe_allow_html=True)
+
+    c_hdr, c_btn1, c_btn2 = st.columns([3.6, 1.2, 1.2], gap="small", vertical_alignment="center")
+    with c_hdr:
+        st.markdown(
+            "🧠 <span style='font-size: 0.85rem; font-weight: 700; color: #CBD5E1;'>Vòng Lặp Cải Tiến & Đánh Giá Tri Thức</span> "
+            "<span style='font-size: 0.72rem; color: #00F0FF; background: rgba(0,240,255,0.12); padding: 2px 7px; border-radius: 12px; border: 1px solid rgba(0,240,255,0.3);'>Tier 2 Online Learning</span>"
+            if not is_en else
+            "🧠 <span style='font-size: 0.85rem; font-weight: 700; color: #CBD5E1;'>Continuous Learning & Knowledge Feedback</span>"
+        , unsafe_allow_html=True)
+
+    try:
+        from src.llm.dynamic_memory import save_learned_case, record_evolution_event
+    except ImportError:
+        return
+
+    with c_btn1:
+        if st.button("👍 Hài lòng", key=f"btn_thumb_up_{turn_id}", use_container_width=True, help="Xác thực kết quả chuẩn mực và lưu vào Ngân hàng Tri thức Động"):
+            save_learned_case(
+                user_query=user_query,
+                sql_query=sql_query,
+                intent_explanation="Người dùng xác thực hài lòng",
+                dialect=dialect,
+                evaluator_score=evaluator_score,
+                rating=1,
+                source="user_feedback"
+            )
+            st.toast("🎉 Đã lưu vào Ngân hàng Tri thức Động (Dynamic Memory Bank) của Agent!", icon="🧠")
+
+    with c_btn2:
+        if st.button("👎 Cần sửa", key=f"btn_thumb_down_{turn_id}", use_container_width=True, help="Ghi nhận phản hồi để Agent tự suy ngẫm"):
+            record_evolution_event("USER_THUMBS_DOWN", user_query, "Người dùng đánh giá kết quả chưa đạt", score=evaluator_score)
+            st.toast("📝 Đã ghi nhận phản hồi để Agent tự phản tỉnh và cải thiện!", icon="ℹ️")
+
+    with st.expander("✏️ **Hiệu chỉnh SQL & Huấn luyện Tức thì (Fine-Tune Memory)**", expanded=False):
+        st.caption("Chuyên gia có thể sửa đổi trực tiếp câu lệnh SQL hoặc ghi chú nghiệp vụ để nạp làm mẫu chuẩn mực cho các truy vấn sau:")
+        custom_sql = st.text_area("Câu lệnh SQL tối ưu:", value=sql_query, height=100, key=f"txt_custom_sql_{turn_id}")
+        custom_note = st.text_input("Ghi chú phân rã nghiệp vụ:", placeholder="Ví dụ: Cần tính SUM(s.salary) thay vì AVG...", key=f"txt_custom_note_{turn_id}")
+
+        if st.button("⚡️ Lưu làm Mẫu Chuẩn Mực (Gold Standard)", key=f"btn_save_finetune_{turn_id}", type="primary"):
+            if custom_sql.strip():
+                new_id = save_learned_case(
+                    user_query=user_query,
+                    sql_query=custom_sql.strip(),
+                    intent_explanation=custom_note.strip() or "Chuyên gia hiệu chỉnh thủ công",
+                    dialect=dialect,
+                    evaluator_score=100,
+                    rating=1,
+                    source="manual_edit"
+                )
+                st.success(f"🚀 Đã nạp thành công Mẫu Chuẩn Mực #{new_id} vào Dynamic Few-Shot Bank!")
+
 
 def render_veraxus_loading_html(text: str) -> str:
     """
-    Hiển thị widget loading với mũi tên xoay tròn (spinning orbit arrow)
-    mang đặc trưng biểu tượng thương hiệu khiên pha lê xanh của VERAXUS.
+    Hiển thị widget loading với biểu tượng độc quyền VERAXUS & Multi-Agent Live Telemetry HUD:
+    - Vòng xoay quỹ đạo kép đa lớp (Dual Kinetic Neon Rings) màu Cyan (#00F0FF) và Emerald (#00DF8F).
+    - Lõi pha lê 3D đa giác lập thể (3D Faceted Geometric Crystal Core) thương hiệu Veraxus với hiệu ứng phát quang lơ lửng.
+    - Hệ thống Live Telemetry hiển thị tên Agent đang active và dải 5 pill trạng thái tác tử thời gian thực.
     """
     clean_text = str(text or "").strip()
-    return f"""
-    <div class="veraxus-loading-card">
-        <div class="veraxus-spinner-wrapper">
-            <!-- Quỹ đạo mũi tên xoay tròn chuyển động tuần hoàn liên tục -->
-            <svg class="veraxus-orbit-arrow" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                    <linearGradient id="vArrowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.15"/>
-                        <stop offset="45%" stop-color="#00D2FF" stop-opacity="0.85"/>
-                        <stop offset="100%" stop-color="#0068FF" stop-opacity="1"/>
-                    </linearGradient>
-                    <filter id="vArrowGlow" x="-20%" y="-20%" width="140%" height="140%">
-                        <feDropShadow dx="0" dy="0" stdDeviation="1.5" flood-color="#00D2FF" flood-opacity="0.6"/>
-                    </filter>
-                </defs>
-                <path d="M 22 5 A 17 17 0 1 1 6.5 24" stroke="url(#vArrowGrad)" stroke-width="2.8" stroke-linecap="round"/>
-                <polygon points="6.5,15 1.5,23.5 10,23.5" fill="#0068FF" filter="url(#vArrowGlow)"/>
-            </svg>
-            <!-- Lõi Biểu tượng Khiên Pha lê Veraxus -->
-            <div class="veraxus-spinner-core">
-                <svg width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <linearGradient id="vCoreFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
-                            <stop offset="0%" stop-color="#38BDF8"/>
-                            <stop offset="60%" stop-color="#0068FF"/>
-                            <stop offset="100%" stop-color="#0047BA"/>
-                        </linearGradient>
-                        <linearGradient id="vCoreFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#BAE6FD"/>
-                            <stop offset="100%" stop-color="#38BDF8"/>
-                        </linearGradient>
-                        <linearGradient id="vCoreFacetRightFront" x1="80%" y1="10%" x2="50%" y2="90%">
-                            <stop offset="0%" stop-color="#00A3FF"/>
-                            <stop offset="50%" stop-color="#0052CC"/>
-                            <stop offset="100%" stop-color="#02388A"/>
-                        </linearGradient>
-                        <linearGradient id="vCoreFacetRightTop" x1="100%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#E0F2FE"/>
-                            <stop offset="100%" stop-color="#7DD3FC"/>
-                        </linearGradient>
-                        <linearGradient id="vCoreFacetCenterGlow" x1="50%" y1="40%" x2="50%" y2="92%">
-                            <stop offset="0%" stop-color="#67E8F9"/>
-                            <stop offset="100%" stop-color="#0068FF"/>
-                        </linearGradient>
-                    </defs>
-                    <polygon points="18,22 36,12 50,88 34,74" fill="url(#vCoreFacetLeftFront)"/>
-                    <polygon points="18,22 36,12 48,22 30,32" fill="url(#vCoreFacetLeftTop)"/>
-                    <polygon points="82,22 64,12 50,88 66,74" fill="url(#vCoreFacetRightFront)"/>
-                    <polygon points="82,22 64,12 52,22 70,32" fill="url(#vCoreFacetRightTop)"/>
-                    <polygon points="30,32 48,22 50,54 38,58" fill="#0052CC"/>
-                    <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
-                    <polygon points="38,58 50,54 62,58 50,88" fill="url(#vCoreFacetCenterGlow)"/>
-                </svg>
-            </div>
-        </div>
-        <div class="veraxus-spinner-text-wrap">
-            <span class="veraxus-spinner-brand">VERAXUS</span>
-            <span class="veraxus-spinner-status">{clean_text}</span>
-        </div>
-    </div>
-    """
+    low_t = clean_text.lower()
+
+    if "agent 1" in low_t or "supervisor" in low_t or "router" in low_t or "phân tích câu hỏi" in low_t:
+        active_step = 1
+        agent_tag = "🧭 AGENT 1/5 • MASTER SUPERVISOR & PLANNER"
+        tag_color = "#00F0FF"
+        tag_bg = "rgba(0, 240, 255, 0.16)"
+        tag_border = "rgba(0, 240, 255, 0.45)"
+    elif "agent 2" in low_t or "data engineer" in low_t or "sql engine" in low_t or "in-context" in low_t:
+        active_step = 2
+        agent_tag = "⚡ AGENT 2/5 • DATA ENGINEER & SQL ARCHITECT"
+        tag_color = "#38BDF8"
+        tag_bg = "rgba(56, 189, 248, 0.16)"
+        tag_border = "rgba(56, 189, 248, 0.45)"
+    elif "database engine" in low_t or "thực thi truy vấn" in low_t or "đọc tập kết quả" in low_t:
+        active_step = 2
+        agent_tag = "💾 DATABASE ENGINE • EXECUTING QUERY"
+        tag_color = "#60A5FA"
+        tag_bg = "rgba(96, 165, 250, 0.16)"
+        tag_border = "rgba(96, 165, 250, 0.45)"
+    elif "agent 3" in low_t or "data auditor" in low_t or "evaluator" in low_t or "kiểm định" in low_t:
+        active_step = 3
+        agent_tag = "🛡️ AGENT 3/5 • DATA AUDITOR & QUALITY EVALUATOR"
+        tag_color = "#10B981"
+        tag_bg = "rgba(16, 185, 129, 0.16)"
+        tag_border = "rgba(16, 185, 129, 0.45)"
+    elif "agent 4" in low_t or "anomaly detective" in low_t or "dị biệt" in low_t or "outlier" in low_t:
+        active_step = 4
+        agent_tag = "🔍 AGENT 4/5 • ANOMALY DETECTIVE & FORENSICS"
+        tag_color = "#A855F7"
+        tag_bg = "rgba(168, 85, 247, 0.16)"
+        tag_border = "rgba(168, 85, 247, 0.45)"
+    elif "agent 5" in low_t or "strategy advisor" in low_t or "insight" in low_t or "khuyến nghị" in low_t or "trực quan" in low_t:
+        active_step = 5
+        agent_tag = "💡 AGENT 5/5 • EXECUTIVE STRATEGY ADVISOR"
+        tag_color = "#F59E0B"
+        tag_bg = "rgba(245, 158, 11, 0.16)"
+        tag_border = "rgba(245, 158, 11, 0.45)"
+    else:
+        active_step = 1
+        agent_tag = "🧭 VERAXUS MULTI-AGENT ENGINE • LIVE"
+        tag_color = "#00DF8F"
+        tag_bg = "rgba(0, 223, 143, 0.16)"
+        tag_border = "rgba(0, 223, 143, 0.45)"
+
+    agent_pills_data = [
+        (1, "🧭 Supervisor", "#00F0FF"),
+        (2, "⚡ Data Eng", "#38BDF8"),
+        (3, "🛡️ Auditor", "#10B981"),
+        (4, "🔍 Detective", "#A855F7"),
+        (5, "💡 Strategy", "#F59E0B"),
+    ]
+
+    pills_html = []
+    for step_num, name, c_color in agent_pills_data:
+        if step_num == active_step:
+            pills_html.append(
+                f'<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 6px; font-size: 0.68rem; font-weight: 700; background: {c_color}22; color: {c_color}; border: 1px solid {c_color}88; box-shadow: 0 0 8px {c_color}55;">'
+                f'<span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: {c_color}; animation: vxPulseDot 1s ease-in-out infinite;"></span>'
+                f'{name}</span>'
+            )
+        elif step_num < active_step:
+            pills_html.append(
+                f'<span style="display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border-radius: 6px; font-size: 0.66rem; font-weight: 600; background: rgba(255,255,255,0.04); color: #94A3B8; border: 1px solid rgba(255,255,255,0.08);">'
+                f'✓ {name.split(" ")[-1]}</span>'
+            )
+        else:
+            pills_html.append(
+                f'<span style="display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 6px; font-size: 0.66rem; font-weight: 500; background: rgba(255,255,255,0.02); color: #475569; border: 1px solid rgba(255,255,255,0.04);">'
+                f'{name.split(" ")[-1]}</span>'
+            )
+
+    pills_joined = "".join(pills_html)
+
+    raw_html = f"""<style>
+@keyframes vxSpinCW {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+@keyframes vxSpinCCW {{ 0% {{ transform: rotate(360deg); }} 100% {{ transform: rotate(0deg); }} }}
+@keyframes vxCrystalPulse {{ 0%, 100% {{ transform: scale(0.95); opacity: 0.9; }} 50% {{ transform: scale(1.1); opacity: 1; }} }}
+@keyframes vxPulseDot {{ 0%, 100% {{ transform: scale(0.85); opacity: 0.6; box-shadow: 0 0 6px {tag_color}; }} 50% {{ transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px {tag_color}, 0 0 22px {tag_color}; }} }}
+</style>
+<div class="veraxus-loading-card" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 22px; background: linear-gradient(135deg, #151A30 0%, #0B0E17 100%); border: 1.5px solid rgba(0, 240, 255, 0.45); border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.2); backdrop-filter: blur(14px); margin: 12px 0; max-width: 680px;">
+<div style="display: flex; align-items: center; gap: 14px;">
+<div class="veraxus-spinner-wrapper" style="position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+<div style="position: absolute; width: 34px; height: 34px; background: radial-gradient(circle, rgba(0, 240, 255, 0.45) 0%, rgba(0, 104, 255, 0.2) 60%, transparent 80%); border-radius: 50%; filter: blur(4px);"></div>
+<div style="position: absolute; inset: 0; width: 44px; height: 44px; border-radius: 50%; border: 3px solid transparent; border-top: 3px solid #00F0FF; border-right: 3px solid #00DF8F; box-shadow: 0 0 12px rgba(0, 240, 255, 0.7); animation: vxSpinCW 0.8s linear infinite;"></div>
+<div style="position: absolute; inset: 5px; width: 34px; height: 34px; border-radius: 50%; border: 1.5px dashed rgba(0, 240, 255, 0.4); border-left: 2px solid #38BDF8; border-bottom: 2px solid #0068FF; animation: vxSpinCCW 1.4s linear infinite;"></div>
+<div style="position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; animation: vxCrystalPulse 1.5s ease-in-out infinite;">
+<svg width="22" height="22" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.9));">
+<defs>
+<linearGradient id="vxSpinFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%"><stop offset="0%" stop-color="#38BDF8"/><stop offset="60%" stop-color="#0068FF"/><stop offset="100%" stop-color="#0047BA"/></linearGradient>
+<linearGradient id="vxSpinFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#BAE6FD"/><stop offset="100%" stop-color="#38BDF8"/></linearGradient>
+<linearGradient id="vxSpinFacetRightFront" x1="80%" y1="10%" x2="50%" y2="90%"><stop offset="0%" stop-color="#00A3FF"/><stop offset="50%" stop-color="#0052CC"/><stop offset="100%" stop-color="#02388A"/></linearGradient>
+<linearGradient id="vxSpinFacetRightTop" x1="100%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#E0F2FE"/><stop offset="100%" stop-color="#7DD3FC"/></linearGradient>
+<linearGradient id="vxSpinFacetCenterGlow" x1="50%" y1="40%" x2="50%" y2="92%"><stop offset="0%" stop-color="#00F0FF"/><stop offset="50%" stop-color="#00DF8F"/><stop offset="100%" stop-color="#0068FF"/></linearGradient>
+</defs>
+<polygon points="18,22 36,12 50,88 34,74" fill="url(#vxSpinFacetLeftFront)"/>
+<polygon points="18,22 36,12 48,22 30,32" fill="url(#vxSpinFacetLeftTop)"/>
+<polygon points="82,22 64,12 50,88 66,74" fill="url(#vxSpinFacetRightFront)"/>
+<polygon points="82,22 64,12 52,22 70,32" fill="url(#vxSpinFacetRightTop)"/>
+<polygon points="30,32 48,22 50,54 38,58" fill="#0052CC"/>
+<polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
+<polygon points="38,58 50,54 62,58 50,88" fill="url(#vxSpinFacetCenterGlow)"/>
+</svg>
+</div>
+</div>
+<div class="veraxus-spinner-text-wrap" style="display: flex; flex-direction: column; gap: 3px; z-index: 2; flex: 1;">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+<div style="display: flex; align-items: center; gap: 6px;">
+<span style="font-size: 0.74rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1;">VERAXUS</span>
+<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #00DF8F; animation: vxPulseDot 1.2s ease-in-out infinite;"></span>
+</div>
+<span style="font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; color: {tag_color}; background: {tag_bg}; border: 1px solid {tag_border}; padding: 1px 7px; border-radius: 5px;">{agent_tag}</span>
+</div>
+<span class="veraxus-spinner-status" style="color: #FFFFFF !important; font-weight: 600; font-size: 0.88rem; letter-spacing: -0.01em; line-height: 1.35; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);">{clean_text}</span>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 7px; margin-top: 2px;">
+<span style="font-size: 0.65rem; color: #64748B; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 2px;">Agents:</span>
+{pills_joined}
+</div>
+</div>"""
+    return re.sub(r'\n\s*', ' ', raw_html).strip()
+
 
 

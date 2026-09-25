@@ -15,6 +15,7 @@ from src.database.schema import (
 )
 from src.database.query_runner import sanitize_error
 from src.llm.client import get_llm_client, normalize_model_for_openrouter
+from src.i18n import t, get_current_language, render_language_switcher_button
 
 
 def perform_connection(
@@ -137,17 +138,73 @@ def show_table_preview_dialog(engine, tables: list[str], default_table: str = No
 
 
 def render_main_sidebar():
-    """Hiển thị Sidebar với nút Cài đặt, Khám phá Bảng DB và Danh sách Lịch sử Chat tương tác (Click to View)."""
+    """Hiển thị Sidebar tinh gọn, chuyên nghiệp, sắc nét của VERAXUS với Dark Theme (#12141C)."""
     engine = st.session_state.get("engine")
     is_demo = st.session_state.get("is_demo", True)
     provider = st.session_state.get("provider", "OpenRouter")
     model_name = st.session_state.get("model_name", "deepseek/deepseek-chat")
 
     with st.sidebar:
-        # --- PHẦN 1: TOP SIDEBAR (THƯƠNG HIỆU & ĐIỀU HÀNH) ---
-        db_badge = "Dữ liệu Mẫu (Demo)" if is_demo else "CSDL Doanh Nghiệp"
+        # --- DARK THEME SIDEBAR CSS (#12141C) & VIBRANT HIGH-CONTRAST ACCENTS ---
+        st.markdown("""
+        <style>
+            [data-testid="stSidebar"],
+            [data-testid="stSidebar"] > div:first-child,
+            [data-testid="stSidebarContent"],
+            [data-testid="stSidebarUserContent"] {
+                background-color: #12141C !important;
+            }
+            [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+            [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] span {
+                color: #FFFFFF !important;
+            }
+            .sidebar-section-hdr {
+                font-size: 0.8rem;
+                font-weight: 800;
+                letter-spacing: 0.05em;
+                text-transform: uppercase;
+                color: #38BDF8 !important;
+                margin: 16px 0 8px 2px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            [data-testid="stSidebar"] .stButton > button {
+                border-radius: 9px !important;
+                font-weight: 750 !important;
+                font-size: 0.86rem !important;
+            }
+            [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+                background: linear-gradient(135deg, #0052D4 0%, #0068FF 100%) !important;
+                color: #FFFFFF !important;
+                border: 1px solid rgba(255, 255, 255, 0.25) !important;
+                box-shadow: 0 4px 14px rgba(0, 104, 255, 0.4) !important;
+            }
+            [data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+                background: linear-gradient(135deg, #0068FF 0%, #00F0FF 100%) !important;
+                color: #090D1A !important;
+                box-shadow: 0 6px 18px rgba(0, 240, 255, 0.5) !important;
+                transform: translateY(-1px) !important;
+            }
+            [data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+                background: #181D2F !important;
+                border: 1px solid rgba(255, 255, 255, 0.15) !important;
+                color: #FFFFFF !important;
+            }
+            [data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+                background: #232A42 !important;
+                border-color: #00F0FF !important;
+                color: #00F0FF !important;
+                transform: translateY(-1px) !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # --- PHẦN 1: TOP BRANDING, LANGUAGE SWITCHER & STATUS ---
+        is_en = (get_current_language() == "en")
+        db_badge = ("Demo DB (SQLite)" if is_en else "Dữ liệu Mẫu (Demo)") if is_demo else ("Enterprise DB" if is_en else "CSDL Doanh Nghiệp")
         if "qwen" in model_name.lower() or "ollama" in provider.lower():
-            engine_badge = "Nội bộ (Local Engine)"
+            engine_badge = "Local Engine"
         elif "deepseek" in model_name.lower():
             engine_badge = "DeepSeek V3"
         elif "gemini" in model_name.lower():
@@ -155,58 +212,51 @@ def render_main_sidebar():
         elif "claude" in model_name.lower():
             engine_badge = "Claude 3.5"
         else:
-            engine_badge = "Veraxus Engine"
+            engine_badge = "AI Engine"
 
         st.markdown(textwrap.dedent(f"""
-        <div style="padding: 4px 4px 14px 4px;">
-            <div style="font-size: 1.22rem; font-weight: 850; color: #0F172A; display: flex; align-items: center; gap: 8px;">
-                <svg width="22" height="22" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 6px rgba(0, 104, 255, 0.30)); flex-shrink: 0;">
+        <div style="padding: 4px 4px 10px 4px;">
+            <div style="font-size: 1.35rem; font-weight: 900; color: #FFFFFF; display: flex; align-items: center; gap: 9px;">
+                <svg width="26" height="26" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 8px rgba(0, 240, 255, 0.5)); flex-shrink: 0;">
                     <defs>
                         <linearGradient id="sbFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
-                            <stop offset="0%" stop-color="#38BDF8"/>
+                            <stop offset="0%" stop-color="#00F0FF"/>
                             <stop offset="60%" stop-color="#0068FF"/>
                             <stop offset="100%" stop-color="#0047BA"/>
                         </linearGradient>
-                        <linearGradient id="sbFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#BAE6FD"/>
-                            <stop offset="100%" stop-color="#38BDF8"/>
-                        </linearGradient>
                         <linearGradient id="sbFacetRightFront" x1="80%" y1="10%" x2="50%" y2="90%">
-                            <stop offset="0%" stop-color="#00A3FF"/>
-                            <stop offset="50%" stop-color="#0052CC"/>
+                            <stop offset="0%" stop-color="#7928CA"/>
+                            <stop offset="50%" stop-color="#FF0080"/>
                             <stop offset="100%" stop-color="#02388A"/>
-                        </linearGradient>
-                        <linearGradient id="sbFacetRightTop" x1="100%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stop-color="#E0F2FE"/>
-                            <stop offset="100%" stop-color="#7DD3FC"/>
-                        </linearGradient>
-                        <linearGradient id="sbFacetCenterGlow" x1="50%" y1="40%" x2="50%" y2="92%">
-                            <stop offset="0%" stop-color="#67E8F9"/>
-                            <stop offset="100%" stop-color="#0068FF"/>
                         </linearGradient>
                     </defs>
                     <polygon points="18,22 36,12 50,88 34,74" fill="url(#sbFacetLeftFront)"/>
-                    <polygon points="18,22 36,12 48,22 30,32" fill="url(#sbFacetLeftTop)"/>
+                    <polygon points="18,22 36,12 48,22 30,32" fill="#38BDF8"/>
                     <polygon points="82,22 64,12 50,88 66,74" fill="url(#sbFacetRightFront)"/>
-                    <polygon points="82,22 64,12 52,22 70,32" fill="url(#sbFacetRightTop)"/>
+                    <polygon points="82,22 64,12 52,22 70,32" fill="#E0F2FE"/>
                     <polygon points="30,32 48,22 50,54 38,58" fill="#0052CC"/>
                     <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
-                    <polygon points="38,58 50,54 62,58 50,88" fill="url(#sbFacetCenterGlow)"/>
+                    <polygon points="38,58 50,54 62,58 50,88" fill="#00F0FF"/>
                 </svg>
-                <span style="color: #0068FF; letter-spacing: -0.025em; font-weight: 900;">VERAXUS</span>
+                <span style="background: linear-gradient(90deg, #FFFFFF, #00F0FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.02em; font-weight: 900;">VERAXUS</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-left: 2px;">
-                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10B981; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);"></span>
-                <span style="font-size: 0.78rem; font-weight: 600; color: #15803D;">{db_badge}</span>
-                <span style="font-size: 0.72rem; color: #CBD5E1;">•</span>
-                <span style="font-size: 0.76rem; color: #64748B; font-weight: 500;">{engine_badge}</span>
+            <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-left: 2px;">
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00DF8F; box-shadow: 0 0 8px rgba(0, 223, 143, 0.7);"></span>
+                <span style="font-size: 0.8rem; font-weight: 750; color: #00DF8F;">{db_badge}</span>
+                <span style="font-size: 0.72rem; color: #64748B;">•</span>
+                <span style="font-size: 0.78rem; color: #CBD5E1; font-weight: 600;">{engine_badge}</span>
             </div>
         </div>
         """).strip(), unsafe_allow_html=True)
 
+        # Nút chuyển đổi ngôn ngữ gọn gàng trên thanh Sidebar
+        render_language_switcher_button(key_suffix="sidebar")
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+
+        # Action Buttons: New Chat & Settings
         c_top1, c_top2 = st.columns(2)
         with c_top1:
-            if st.button("➕ Chat Mới", type="primary", use_container_width=True, key="sidebar_btn_new_chat", help="Bắt đầu một phiên hội thoại mới"):
+            if st.button(t("sidebar_btn_new_chat"), type="primary", use_container_width=True, key="sidebar_btn_new_chat", help="Start a new conversation" if is_en else "Bắt đầu một phiên hội thoại mới"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
                 st.session_state["focused_turn_idx"] = None
@@ -214,84 +264,104 @@ def render_main_sidebar():
                 st.rerun()
 
         with c_top2:
-            if st.button("⚙️ Cấu hình", use_container_width=True, key="sidebar_btn_settings", help="Mở màn hình Cài đặt Database hoặc AI Provider"):
+            if st.button(t("sidebar_btn_settings"), use_container_width=True, key="sidebar_btn_settings", help="Open Database / AI configuration" if is_en else "Mở màn hình Cài đặt Database hoặc AI Provider"):
                 st.session_state["view_mode"] = "settings"
                 st.rerun()
 
-        # Nút chuyển đổi nhanh sang Executive Dashboard tự động theo CSDL
+        # Nút chuyển đổi nhanh sang Executive Dashboard & Self-Evolution Dashboard
         current_vmode = st.session_state.get("view_mode", "chat")
         from src.database.crm_queries import detect_dashboard_domain
         detected_dom = detect_dashboard_domain(engine)
         if detected_dom == "hr_employees":
-            dash_btn_label = "👥 HR & Payroll Dashboard"
+            dash_btn_label = t("sidebar_btn_hr_dashboard")
         elif detected_dom == "sales_commerce":
-            dash_btn_label = "💰 Sales Executive Dashboard"
+            dash_btn_label = t("sidebar_btn_sales_dashboard")
         else:
-            dash_btn_label = "📊 CRM Executive Dashboard"
+            dash_btn_label = t("sidebar_btn_crm_dashboard")
 
-        if current_vmode == "dashboard":
-            if st.button("💬 Quay lại Trợ lý AI Chat", use_container_width=True, type="secondary", key="sidebar_btn_toggle_chat"):
+        if current_vmode in ("dashboard", "evolution"):
+            if st.button(t("back_to_chat"), use_container_width=True, type="secondary", key="sidebar_btn_toggle_chat"):
                 st.session_state["view_mode"] = "chat"
                 st.rerun()
         else:
-            if st.button(dash_btn_label, use_container_width=True, type="secondary", key="sidebar_btn_toggle_dash", help="Mở Dashboard phân tích điều hành thông minh tự động theo cơ sở dữ liệu"):
-                st.session_state["view_mode"] = "dashboard"
-                st.rerun()
+            c_dash1, c_dash2 = st.columns(2)
+            with c_dash1:
+                if st.button(dash_btn_label, use_container_width=True, type="secondary", key="sidebar_btn_toggle_dash", help="Open Executive Intelligence Dashboard" if is_en else "Mở Dashboard phân tích điều hành thông minh tự động theo cơ sở dữ liệu"):
+                    st.session_state["view_mode"] = "dashboard"
+                    st.rerun()
+            with c_dash2:
+                if st.button(t("sidebar_btn_evolution"), use_container_width=True, type="secondary", key="sidebar_btn_toggle_evo", help="Open Multi-Agent Self-Evolution Loop Dashboard" if is_en else "Mở Bảng Điều Khiển Tiến Hóa Đa Tác Tử & Ngân Hàng Tri Thức Động"):
+                    st.session_state["view_mode"] = "evolution"
+                    st.rerun()
 
-        st.markdown("<hr style='margin: 12px 0; border: none; border-top: 1px solid #E2E8F0;' />", unsafe_allow_html=True)
+        st.markdown("<hr style='margin: 14px 0 10px 0; border: none; border-top: 1px solid rgba(255,255,255,0.08);' />", unsafe_allow_html=True)
 
         # --- PHẦN 2: KHÁM PHÁ BẢNG DỮ LIỆU ---
-        st.markdown("<div style='font-size: 0.88rem; font-weight: 700; color: #334155; margin-bottom: 6px; padding-left: 2px;'>🗄️ Danh mục Bảng Dữ liệu</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class='sidebar-section-hdr'>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align:-2px; margin-right:5px;"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+            {t("sidebar_schema_title")}
+        </div>
+        """, unsafe_allow_html=True)
 
         if engine:
             tables = get_table_names(engine)
             if tables:
-                st.caption(f"Cơ sở dữ liệu gồm **{len(tables)} danh mục** nghiệp vụ:")
                 selected_table = st.selectbox(
                     "Chọn bảng",
                     tables,
                     key="sidebar_selected_table",
                     label_visibility="collapsed",
-                    help="Chọn một bảng để xem cấu trúc schema và 10 dòng dữ liệu mẫu."
+                    help="Select a table to inspect schema and 10 sample records." if is_en else "Chọn một bảng để xem cấu trúc schema và 10 dòng dữ liệu mẫu."
                 )
                 cols_info = get_table_columns_info(engine, selected_table)
-                st.caption(f"📊 Bảng `{selected_table}`: **{len(cols_info)} trường thông tin**")
+                st.markdown(f"""
+                <div style='font-size:0.78rem; color:#94A3B8; margin-bottom:6px;'>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align:-1px; margin-right:4px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                    {t("sidebar_schema_table_info", table=selected_table, count=len(cols_info))}
+                </div>
+                """, unsafe_allow_html=True)
 
                 if st.button(
-                    f"👁️ Mở bảng `{selected_table}`",
+                    t("sidebar_schema_open_table", table=selected_table),
                     key=f"sidebar_btn_preview_{selected_table}",
                     use_container_width=True,
                     type="secondary",
-                    help=f"Xem cấu trúc schema và 10 dòng mẫu của bảng {selected_table}"
+                    help=f"Inspect schema and 10 sample rows of {selected_table}" if is_en else f"Xem cấu trúc schema và 10 dòng mẫu của bảng {selected_table}"
                 ):
                     show_table_preview_dialog(engine, tables, selected_table)
             else:
-                st.caption("Không tìm thấy bảng nào trong cơ sở dữ liệu.")
+                st.caption("No tables found in the database." if is_en else "Không tìm thấy bảng nào trong cơ sở dữ liệu.")
         else:
-            st.caption("Chưa kết nối cơ sở dữ liệu.")
+            st.caption("Database disconnected." if is_en else "Chưa kết nối cơ sở dữ liệu.")
 
-        st.markdown("<hr style='margin: 12px 0; border: none; border-top: 1px solid #E2E8F0;' />", unsafe_allow_html=True)
+        st.markdown("<hr style='margin: 14px 0 10px 0; border: none; border-top: 1px solid rgba(255,255,255,0.08);' />", unsafe_allow_html=True)
 
         # --- PHẦN 3: LỊCH SỬ HỘI THOẠI ---
-        st.markdown("<div style='font-size: 0.88rem; font-weight: 700; color: #334155; margin-bottom: 6px; padding-left: 2px;'>💬 Lịch sử Hội thoại</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class='sidebar-section-hdr'>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align:-2px; margin-right:5px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+            {t("sidebar_history_title")}
+        </div>
+        """, unsafe_allow_html=True)
 
         history = st.session_state.get("history", [])
         focused_turn_idx = st.session_state.get("focused_turn_idx", None)
 
         if history:
             if focused_turn_idx is not None:
-                if st.button("🌐 Xem toàn bộ hội thoại", use_container_width=True, key="sidebar_btn_show_all_chat", type="secondary"):
+                if st.button("All conversations" if is_en else "Toàn bộ cuộc trò chuyện", use_container_width=True, key="sidebar_btn_show_all_chat", type="secondary"):
                     st.session_state["focused_turn_idx"] = None
                     st.rerun()
 
-            st.caption("💡 *Bấm vào câu hỏi để xem lại kết quả tức thì:*")
+            st.markdown(f"<div style='font-size:0.76rem; color:#64748B; margin-bottom:8px;'><i>{t('sidebar_history_click_hint')}</i></div>", unsafe_allow_html=True)
 
             for i, turn in enumerate(history):
                 query_text = turn.get("query", "")
                 short_q = query_text if len(query_text) <= 30 else query_text[:27] + "..."
                 is_active = (focused_turn_idx == i)
 
-                btn_label = f"👉 {i+1}. {short_q}" if is_active else f"💬 {i+1}. {short_q}"
+                btn_label = f"› {i+1}. {short_q}" if is_active else f"  {i+1}. {short_q}"
                 btn_type = "primary" if is_active else "secondary"
 
                 if st.button(
@@ -299,17 +369,17 @@ def render_main_sidebar():
                     key=f"sidebar_hist_btn_{i}",
                     use_container_width=True,
                     type=btn_type,
-                    help=f"Xem trực tiếp câu hỏi: {query_text}"
+                    help=f"View query: {query_text}" if is_en else f"Xem trực tiếp câu hỏi: {query_text}"
                 ):
                     st.session_state["focused_turn_idx"] = i
                     st.rerun()
 
-            st.markdown("###")
-            if st.button("🗑️ Dọn dẹp lịch sử", use_container_width=True, key="sidebar_btn_clear_history"):
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            if st.button(t("sidebar_history_clear_btn"), use_container_width=True, key="sidebar_btn_clear_history"):
                 st.session_state["history"] = []
                 st.session_state["query_cache"] = {}
                 st.session_state["focused_turn_idx"] = None
-                st.toast("🧹 Đã dọn dẹp toàn bộ lịch sử trò chuyện!", icon="🗑️")
+                st.toast(t("sidebar_history_clear_confirm"))
                 st.rerun()
         else:
-            st.caption("Chưa có câu hỏi nào. Hãy nhập câu hỏi đầu tiên ở khung chat bên phải!")
+            st.markdown(f"<div style='font-size:0.8rem; color:#64748B; line-height:1.4;'>{t('sidebar_history_empty')}</div>", unsafe_allow_html=True)

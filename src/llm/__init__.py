@@ -2,9 +2,16 @@
 LLM package for multi-provider AI communication, SQL generation agent, and automated business insights.
 """
 
-from .client import get_llm_client, call_llm, normalize_model_for_openrouter
+from .client import get_llm_client, call_llm, invoke_llm, normalize_model_for_openrouter
 from .router_planner import route_and_plan, classify_query_complexity, decompose_subtasks
 from .evaluator import evaluate_execution
+from .dynamic_memory import (
+    init_memory_db,
+    save_learned_case,
+    fetch_matching_dynamic_few_shots,
+    get_evolution_metrics,
+    record_evolution_event,
+)
 from .agent import (
     run_agent,
     is_safe_select,
@@ -27,6 +34,7 @@ from .few_shot_selector import (
 __all__ = [
     "get_llm_client",
     "call_llm",
+    "invoke_llm",
     "normalize_model_for_openrouter",
     "route_and_plan",
     "classify_query_complexity",
