@@ -173,9 +173,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 
         # KPI Summary Cards
         "kpi_overview_header": "Chỉ Số Tổng Hợp Doanh Nghiệp (Executive Overview KPIs):",
-        "kpi_total_employees": "Tổng Số Nhân Viên",
-        "kpi_sub_total_employees_all": "👥 Quy mô nhân sự toàn công ty",
-        "kpi_sub_total_employees_period": "👥 Nhân sự tuyển ({period})",
+        "kpi_total_employees": "Nhân Sự Đang Làm Việc",
+        "kpi_sub_total_employees_all": "👥 Nhân sự đang làm việc (Active Headcount)",
+        "kpi_sub_total_employees_period": "👥 Nhân sự active trong kỳ ({period})",
         "kpi_total_depts": "Số Department",
         "kpi_sub_total_depts": "🏢 Khối phòng ban hoạt động",
         "kpi_avg_salary": "Mức Lương Bình Quân",
@@ -404,9 +404,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 
         # KPI Summary Cards
         "kpi_overview_header": "Executive Overview Key Performance Indicators:",
-        "kpi_total_employees": "Total Headcount",
-        "kpi_sub_total_employees_all": "👥 Company-wide total employees",
-        "kpi_sub_total_employees_period": "👥 Hired during ({period})",
+        "kpi_total_employees": "Active Headcount",
+        "kpi_sub_total_employees_all": "👥 Currently active workforce",
+        "kpi_sub_total_employees_period": "👥 Active personnel in period ({period})",
         "kpi_total_depts": "Departments",
         "kpi_sub_total_depts": "🏢 Active operational departments",
         "kpi_avg_salary": "Average Salary",
