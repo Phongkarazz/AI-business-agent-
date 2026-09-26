@@ -284,6 +284,67 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
     return sql
 
 
+def auto_fix_active_headcount_per_year_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động phát hiện và chuẩn hóa câu hỏi về số lượng nhân viên còn đang làm việc qua từng năm
+    (Active Headcount by Year) trong CSDL Employees.
+    Ví dụ: 'Từ năm 1985 đến 2002 có bao nhiêu nhân viên còn đang làm việc'
+    """
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    is_headcount_intent = (
+        any(k in q_low for k in ["bao nhiêu nhân viên", "số lượng nhân viên", "có bao nhiêu người", "nhân viên còn đang làm việc", "nhân viên đang làm việc", "nhân sự đang làm việc", "nhân sự còn làm việc", "còn đang làm việc", "đang làm việc", "headcount", "active headcount", "số nhân viên"])
+        and any(k in q_low for k in ["từ năm", "qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "1985", "2002"])
+        and not any(k in q_low for k in ["lương", "salary", "thu nhập", "cao nhất", "thấp nhất", "lớn nhất", "top 1", "top 5", "top 10", "doanh số", "doanh thu", "sales"])
+    )
+
+    if not is_headcount_intent:
+        return sql
+
+    start_year = 1985
+    end_year = 2002
+
+    m_range = re.search(r"(?:từ\s*(?:năm\s*)?)?(\d{4})\s*(?:đến|-|tới)\s*(?:năm\s*)?(\d{4})", q_low)
+    if m_range:
+        try:
+            start_year = int(m_range.group(1))
+            end_year = int(m_range.group(2))
+        except (ValueError, IndexError):
+            pass
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+
+    if is_sqlite:
+        return f"""WITH RECURSIVE Years(year) AS (
+    SELECT {start_year}
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < {end_year}
+)
+SELECT 
+    y.year AS year,
+    COUNT(DISTINCT de.emp_no) AS active_headcount
+FROM Years y
+JOIN dept_emp de ON CAST(strftime('%Y', de.from_date) AS INTEGER) <= y.year 
+    AND (de.to_date = '9999-01-01' OR CAST(strftime('%Y', de.to_date) AS INTEGER) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;"""
+    else:
+        return f"""WITH RECURSIVE Years AS (
+    SELECT {start_year} AS year
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < {end_year}
+)
+SELECT 
+    y.year AS year,
+    COUNT(DISTINCT de.emp_no) AS active_headcount
+FROM Years y
+JOIN dept_emp de ON YEAR(de.from_date) <= y.year 
+    AND (de.to_date = '9999-01-01' OR YEAR(de.to_date) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;"""
+
+
 def auto_fix_top_employee_per_year_query(sql: str, user_query: str, schema_context: str = "", dialect: str = "MySQL") -> str:
     """Tự động phát hiện và chuẩn hóa câu hỏi: Danh sách nhân viên đạt mức lương / tổng doanh thu lớn nhất qua từng năm."""
     if not user_query:
@@ -305,9 +366,9 @@ def auto_fix_top_employee_per_year_query(sql: str, user_query: str, schema_conte
         and any(k in q_low for k in [
             "lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "thu nhập lớn nhất",
             "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất",
-            "cao nhất", "lớn nhất", "nhiều nhất", "khủng nhất", "highest", "top 1", "dẫn đầu", "1985", "tất cả các năm"
+            "cao nhất", "lớn nhất", "nhiều nhất", "khủng nhất", "highest", "top 1", "dẫn đầu"
         ])
-        and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng"])
+        and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng", "bao nhiêu", "số lượng", "headcount", "active", "làm việc", "công tác"])
     )
 
     if not is_top_person:
@@ -7745,6 +7806,7 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             sql_cur = auto_fix_department_salary_fluctuation_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_department_top_payroll_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_employee_salary_growth_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_active_headcount_per_year_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_top_employee_per_year_query(sql_cur, user_query, schema_context=schema_context, dialect=dialect)
             sql_cur = auto_fix_salary_compression_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_top_employee_salary_query(sql_cur, user_query, dialect=dialect)

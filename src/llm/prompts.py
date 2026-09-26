@@ -4917,15 +4917,70 @@ ORDER BY Year ASC;
 4. TUYỆT ĐỐI KHÔNG JOIN BẢNG employees hay departments (để truy vấn đạt tốc độ tức thì 0.1 giây), TUYỆT ĐỐI KHÔNG lọc `to_date = '9999-01-01'`!)
 """
 
+    # 2.39 Số lượng nhân viên còn đang làm việc / công tác qua từng năm (Active Headcount by Year)
+    elif (
+        any(k in q_low for k in ["bao nhiêu nhân viên", "số lượng nhân viên", "quy mô nhân sự", "nhân sự", "nhân viên", "headcount", "active", "active headcount", "số nhân viên", "bao nhiêu người"])
+        and any(k in q_low for k in ["còn đang làm việc", "đang làm việc", "còn làm việc", "làm việc", "công tác", "còn đang công tác", "active", "đang công tác", "tại vị", "đang hoạt động", "hợp đồng"])
+        and (
+            any(k in q_low for k in ["từ năm", "đến năm", "1985", "2002", "qua các năm", "qua từng năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "toàn bộ các năm", "các năm"])
+            or (re.search(r'\b(19\d{2}|20\d{2})\b', q_low) and any(k in q_low for k in ["đến", "từ", "-"]))
+        )
+        and not any(k in q_low for k in ["lương", "salary", "thu nhập", "thăng chức", "bổ nhiệm", "quản lý", "manager", "doanh thu", "sales", "hộp", "boxes"])
+    ):
+        years_found = [int(y) for y in re.findall(r'\b(19\d{2}|20\d{2})\b', q_low)]
+        start_y = min(years_found) if len(years_found) >= 2 else (years_found[0] if len(years_found) == 1 and any(k in q_low for k in ["từ", "sau", "từ năm"]) else 1985)
+        end_y = max(years_found) if len(years_found) >= 2 else (years_found[0] if len(years_found) == 1 and any(k in q_low for k in ["đến", "trước", "đến năm"]) else 2002)
+
+        if is_sqlite:
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN CÒN ĐANG LÀM VIỆC TỪ NĂM {start_y} ĐẾN NĂM {end_y}):
+WITH RECURSIVE Years(year) AS (
+    SELECT {start_y}
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < {end_y}
+)
+SELECT 
+    y.year AS year,
+    COUNT(DISTINCT de.emp_no) AS active_headcount
+FROM Years y
+JOIN dept_emp de ON CAST(strftime('%Y', de.from_date) AS INTEGER) <= y.year AND (de.to_date = '9999-01-01' OR CAST(strftime('%Y', de.to_date) AS INTEGER) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;
+(CẢNH BÁO BẮT BUỘC:
+1. Trả về đúng 2 cột: `year` (Năm) và `active_headcount` (Số lượng nhân sự còn đang làm việc trong năm đó).
+2. Dùng CTE đệ quy Years để lấy đầy đủ tất cả các năm từ {start_y} đến {end_y}.
+3. Nhân viên được tính là đang làm việc trong năm Y nếu: ngày bắt đầu hợp đồng <= năm Y và ngày kết thúc hợp đồng >= năm Y (hoặc to_date = '9999-01-01')!)
+"""
+        else:
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SỐ LƯỢNG NHÂN VIÊN CÒN ĐANG LÀM VIỆC TỪ NĂM {start_y} ĐẾN NĂM {end_y}):
+WITH RECURSIVE Years AS (
+    SELECT {start_y} AS year
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < {end_y}
+)
+SELECT 
+    y.year AS year,
+    COUNT(DISTINCT de.emp_no) AS active_headcount
+FROM Years y
+JOIN dept_emp de ON YEAR(de.from_date) <= y.year AND (de.to_date = '9999-01-01' OR YEAR(de.to_date) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;
+(CẢNH BÁO BẮT BUỘC:
+1. Trả về đúng 2 cột: `year` (Năm) và `active_headcount` (Số lượng nhân sự còn đang làm việc trong năm đó).
+2. Dùng CTE đệ quy Years để lấy đầy đủ tất cả các năm từ {start_y} đến {end_y}.
+3. Nhân viên được tính là đang làm việc trong năm Y nếu: YEAR(de.from_date) <= y.year AND (de.to_date = '9999-01-01' OR YEAR(de.to_date) >= y.year)!)
+"""
+
     # 2.4 Danh sách nhân viên đạt mức lương / tổng doanh thu lớn nhất qua từng năm
     elif (
-        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "danh sách", "tất cả", "năm từ", "2 năm"])
-        and any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất", "lớn nhất", "cao nhất", "nhiều nhất", "khủng nhất", "1985", "tất cả các năm"])
+        any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "danh sách", "năm từ", "2 năm"])
+        and any(k in q_low for k in ["lương cao nhất", "thu nhập cao nhất", "lương lớn nhất", "doanh thu lớn nhất", "doanh số lớn nhất", "doanh thu cao nhất", "doanh số cao nhất", "khủng nhất"])
         and (
             any(k in q_low for k in ["qua từng năm", "qua các năm", "theo từng năm", "theo năm", "mỗi năm", "hàng năm", "từng năm", "từng năm đó", "tất cả các năm", "các năm"])
             or ("1985" in q_low and any(yr in q_low for yr in ["2001", "2002", "đến"]))
         )
-        and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng"])
+        and not any(k in q_low for k in ["lương trung bình", "tổng quỹ lương", "tăng trưởng", "bổ nhiệm", "tuyển dụng", "chức danh", "title", "quý", "tháng", "bao nhiêu", "số lượng", "headcount", "active", "làm việc", "công tác"])
     ):
         if is_sqlite:
             return """

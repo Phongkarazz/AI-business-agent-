@@ -169,6 +169,41 @@ FROM YearlySalaryStats
 ORDER BY Year ASC;"""
     },
     {
+        "id": "emp_active_headcount_by_year_history",
+        "domain": "employees",
+        "category": "active_headcount_history",
+        "tags": ["từ năm 1985 đến 2002 có bao nhiêu nhân viên còn đang làm việc", "từ năm 1985 đến năm 2002", "có bao nhiêu nhân viên còn đang làm việc", "nhân viên còn đang làm việc qua từng năm", "số lượng nhân viên đang làm việc theo từng năm", "headcount qua các năm", "active headcount by year", "làm việc từ năm 1985 đến 2002"],
+        "question": "Từ năm 1985 đến năm 2002 có bao nhiêu nhân viên còn đang làm việc?",
+        "question_en": "From 1985 to 2002, how many employees were active/working each year?",
+        "intent_explanation": "Sử dụng CTE đệ quy tạo danh sách các năm từ 1985 đến 2002 rồi JOIN với bảng `dept_emp` với điều kiện năm bắt đầu làm việc `<= year` và ngày kết thúc `de.to_date = '9999-01-01' OR YEAR(de.to_date) >= year`. Trả về 2 cột: `year` và `active_headcount` sắp xếp tăng dần theo `year`.",
+        "sql_mysql": """WITH RECURSIVE Years AS (
+    SELECT 1985 AS year
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < 2002
+)
+SELECT 
+    y.year AS year,
+    COUNT(DISTINCT de.emp_no) AS active_headcount
+FROM Years y
+JOIN dept_emp de ON YEAR(de.from_date) <= y.year 
+    AND (de.to_date = '9999-01-01' OR YEAR(de.to_date) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;""",
+        "sql_sqlite": """WITH RECURSIVE Years(year) AS (
+    SELECT 1985
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < 2002
+)
+SELECT 
+    y.year AS year,
+    COUNT(DISTINCT de.emp_no) AS active_headcount
+FROM Years y
+JOIN dept_emp de ON CAST(strftime('%Y', de.from_date) AS INTEGER) <= y.year 
+    AND (de.to_date = '9999-01-01' OR CAST(strftime('%Y', de.to_date) AS INTEGER) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;"""
+    },
+    {
         "id": "emp_company_salary_trend_yearly",
         "domain": "employees",
         "category": "salary_trend",

@@ -32,7 +32,7 @@ from src.ui.crm_dashboard import render_crm_dashboard
 from src.llm.agent import run_agent
 
 # Tự động xóa sạch query cache cũ khi có phiên bản cập nhật code mới
-CACHE_BUILD_ID = "20260926_team_disparity_fix_v2"
+CACHE_BUILD_ID = "20260926_headcount_1985_2002_fix"
 if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
     st.session_state["_cache_build_id"] = CACHE_BUILD_ID
     st.session_state["query_cache"] = {}
