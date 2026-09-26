@@ -6770,12 +6770,15 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     if time_where_parts:
         year_clause = "WHERE " + " AND ".join(time_where_parts)
 
-    # Xác định chỉ số đo lường: Hộp/Thùng (Boxes) hay Doanh số (Sales Amount)
-    has_boxes = (
-        any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"])
-        or (any(k in q_low for k in ["số lượng", "so luong"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "người bán", "khách hàng", "customer"]))
-        or any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
-    )
+    # Xác định chỉ số đo lường: Hộp/Thùng (Boxes) hay Doanh số/Tiền mặt (Sales Amount / Cash)
+    has_explicit_sales = any(k in q_low for k in ["tiền mặt", "tiền", "amount", "doanh số", "doanh thu", "sales", "cash", "chi tiêu", "revenue", "dollar", "$", "giá trị"])
+    has_explicit_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"]) or (any(k in q_low for k in ["số lượng", "so luong"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "người bán", "khách hàng", "customer"]))
+    if has_explicit_sales and not has_explicit_boxes:
+        has_boxes = False
+    elif has_explicit_boxes:
+        has_boxes = True
+    else:
+        has_boxes = any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
     metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
     order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
 
@@ -6803,7 +6806,7 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
         or any(k in sql_low for k in ["people", "spid", "salesperson", "employeename", "first_name", "last_name", "sales_person"])
     )
     is_asking_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai", "thành viên"])
-    if is_person and not is_asking_team and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country"]):
+    if is_person and not is_asking_team and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country", "customer", "customers", "khách hàng"]):
         specific_team = None
         for tm in ["yummies", "delish", "jucies"]:
             if tm in q_low:
@@ -6887,7 +6890,7 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     if is_category and not any(k in q_low for k in [
         "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "quốc gia", 
         "country", "yummies", "delish", "jucies", "thành viên", "sales rep", "rep",
-        "team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh"
+        "team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "customer", "customers", "khách hàng"
     ]):
         needs_fix = (
             "with " in sql_low
@@ -6917,16 +6920,13 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     # 3. Bảng xếp hạng Sản phẩm (Products)
     is_product = (
-        (any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola", "chocolate"]) 
-        or (any(k in sql_low for k in ["products", "pid", "product"]) and not any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "nhóm", "đội"])))
-        and not any(k in q_low for k in ["category", "danh mục", "nhóm sản phẩm", "nhóm hàng"])
+        any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola", "chocolate"])
+        and not any(k in q_low for k in [
+            "category", "danh mục", "nhóm sản phẩm", "nhóm hàng", "customer", "customers", 
+            "khách hàng", "nhân viên", "salesperson", "quốc gia", "country", "team", "đội ngũ"
+        ])
     )
-    if is_product and not any(k in q_low for k in [
-        "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "quốc gia", 
-        "country", "yummies", "delish", "jucies", "thành viên", "sales rep", "rep",
-        "team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "nhóm", "đội",
-        "category", "danh mục", "nhóm sản phẩm", "nhóm hàng"
-    ]):
+    if is_product:
         needs_fix = (
             "with " in sql_low
             or "s.product" in sql_low
@@ -6953,6 +6953,33 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             if limit_clause:
                 lines.append(limit_clause)
             return "\n".join(lines)
+
+    # 4. Truy vấn Khách hàng / Giao dịch có tiền mặt lớn nhất (Customer / Transactions by Cash Amount)
+    is_customer = any(k in q_low for k in ["customer", "customers", "khách hàng"])
+    if is_customer and not any(k in q_low for k in ["sản phẩm", "product", "category", "danh mục", "quốc gia", "country"]):
+        year_cond = ""
+        if year_val:
+            year_cond = f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {year_val}"
+        
+        lim = limit_clause if limit_clause else "LIMIT 10"
+        lines = [
+            "SELECT",
+            "    s.SaleDate AS `Ngày Bán`,",
+            "    pe.Salesperson AS `Nhân Viên`,",
+            "    pr.Product AS `Sản Phẩm`,",
+            "    g.Geo AS `Thị Trường`,",
+            "    s.Customers AS `Số Khách Hàng`,",
+            "    s.Amount AS `Số Tiền Mặt`",
+            "FROM sales s",
+            "JOIN people pe ON s.SPID = pe.SPID",
+            "JOIN products pr ON s.PID = pr.PID",
+            "JOIN geo g ON s.GeoID = g.GeoID",
+        ]
+        if year_cond:
+            lines.append(year_cond)
+        lines.append(f"ORDER BY s.Amount {order_dir}, s.Customers {order_dir}")
+        lines.append(lim)
+        return "\n".join(lines)
 
     # 3. Bảng xếp hạng Thị trường / Quốc gia (Country / Geo)
     from src.llm.prompts import match_chocolates_specific_country
@@ -7521,6 +7548,28 @@ ORDER BY Month ASC;"""
 FROM payment p
 GROUP BY {date_expr}
 ORDER BY Month ASC;"""
+
+    # 4. Top khách hàng chi tiêu / tiền mặt nhiều nhất (Sakila Top Customers by Spending)
+    is_cust_spending = (
+        any(k in q_low for k in ["khách hàng", "customer", "customers"])
+        and any(k in q_low for k in ["chi tiêu", "tiền mặt", "nhiều tiền", "nhiều nhất", "lớn nhất", "top", "doanh thu", "spent", "spending", "tiền"])
+    )
+    if is_cust_spending:
+        name_concat = "cu.first_name || ' ' || cu.last_name" if is_sqlite else "CONCAT(cu.first_name, ' ', cu.last_name)"
+        limit_m = re.search(r"(?:top\s*|danh\s+sách\s*)(\d+)", q_low)
+        lim_val = int(limit_m.group(1)) if limit_m else 10
+        yr_m = re.search(r'\b(20\d{2})\b', q_low)
+        yr_cond = f"WHERE strftime('%Y', p.payment_date) = '{yr_m.group(1)}'" if (yr_m and is_sqlite) else (f"WHERE YEAR(p.payment_date) = {yr_m.group(1)}" if yr_m else "")
+        return f"""SELECT 
+    cu.customer_id,
+    {name_concat} AS CustomerName,
+    SUM(p.amount) AS TotalSpent
+FROM customer cu
+JOIN payment p ON cu.customer_id = p.customer_id
+{yr_cond}
+GROUP BY cu.customer_id, CustomerName
+ORDER BY TotalSpent DESC
+LIMIT {lim_val};"""
 
     return sql
 

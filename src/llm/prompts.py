@@ -1237,6 +1237,30 @@ ORDER BY MarketRevenue DESC;
 5. SELECT cuối cùng BẮT BUỘC lọc `WHERE rn = 1` để chỉ lấy đúng sản phẩm dẫn đầu doanh số tại thị trường đó!)
 """
 
+        # 0.00000 Customer / Khách hàng trong Awesome Chocolates có số tiền mặt lớn nhất
+        is_choco_cust = any(k in q_low for k in ["customer", "customers", "khách hàng"])
+        if is_choco_cust and any(k in q_low for k in ["tiền mặt", "tiền", "lớn nhất", "cao nhất", "nhiều nhất", "top", "amount", "doanh số", "doanh thu", "chi tiêu"]):
+            yr_m = re.search(r'\b(20\d{2})\b', q_low)
+            yr_cond = f"WHERE strftime('%Y', s.SaleDate) = '{yr_m.group(1)}'\n" if (yr_m and is_sqlite) else (f"WHERE YEAR(s.SaleDate) = {yr_m.group(1)}\n" if yr_m else "")
+            lim_val = req_limit or 10
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP GIAO DỊCH / KHÁCH HÀNG CÓ SỐ TIỀN MẶT LỚN NHẤT TRONG AWESOME CHOCOLATES):
+SELECT 
+    s.SaleDate AS `Ngày Bán`,
+    pe.Salesperson AS `Nhân Viên`,
+    pr.Product AS `Sản Phẩm`,
+    g.Geo AS `Thị Trường`,
+    s.Customers AS `Số Khách Hàng`,
+    s.Amount AS `Số Tiền Mặt`
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+JOIN products pr ON s.PID = pr.PID
+JOIN geo g ON s.GeoID = g.GeoID
+{yr_cond}ORDER BY s.Amount DESC, s.Customers DESC
+LIMIT {lim_val};
+(LƯU Ý CSDL AWESOME CHOCOLATES: Bảng `sales` lưu thông tin từng giao dịch gồm `Amount` (số tiền mặt), `Customers` (số lượng khách hàng), liên kết với `people`, `products`, `geo`).
+"""
+
         # 0.00000 Top N Giao dịch / Đơn hàng cá nhân có giá trị hoặc sản lượng lớn nhất (Top N Individual Transactions / Orders Ranking)
         # Ví dụ: "Cho biết thông tin top 5 giao dịch có giá trị đơn hàng cao nhất tại thị trường India: hiển thị ngày bán, tên nhân viên, tên sản phẩm và số tiền."
         is_top_tx = (
