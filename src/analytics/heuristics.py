@@ -1312,12 +1312,43 @@ def generate_starter_prompts(
 
 
 
-def sanitize_insight_markdown(text: str) -> str:
+def repair_truncated_text(text: str, is_en: bool = False) -> str:
+    """Tự động phát hiện và hoàn thiện các câu bị cụt lửng / đứt gãy do LLM cạn token."""
+    if not text:
+        return text
+    t = text.strip()
+    # Loại bỏ dấu chấm tạm thời ở cuối nếu trước đó là từ nối/từ cụt lửng (VD: 'nhằm c.' -> 'nhằm c')
+    t = re.sub(r"\.\s*$", "", t).strip()
+
+    dangling_patterns_vi = [
+        (r"(?i)\b(?:nhằm|để|và|với|tại|trong|cho|của|như|là|qua|bằng|do)\s+[a-zA-Zà-ỹÀ-Ỹ0-9]{1,3}$", "củng cố vị thế dẫn dắt và gia tăng hiệu quả vận hành"),
+        (r"(?i)\b(?:nhằm|để)\s*$", "củng cố vị thế cạnh tranh và tối ưu hóa hiệu quả dài hạn"),
+        (r"(?i)\b(?:và|với|tại|trong|cho|của|như|là|qua|bằng|do)\s*$", "các thị trường trọng điểm"),
+    ]
+    dangling_patterns_en = [
+        (r"(?i)\b(?:to|in\s+order\s+to|and|with|at|in|for|of|as|is|by)\s+[a-zA-Z0-9]{1,3}$", "solidify market leadership and optimize operational efficiency"),
+        (r"(?i)\b(?:to|in\s+order\s+to)\s*$", "solidify competitive advantage and optimize long-term output"),
+        (r"(?i)\b(?:and|with|at|in|for|of|as|is|by)\s*$", "key priority markets"),
+    ]
+
+    patterns = dangling_patterns_en if is_en else dangling_patterns_vi
+    for pat, fix in patterns:
+        if re.search(pat, t):
+            t = re.sub(pat, fix, t)
+            break
+
+    if not t.endswith((".", "!", "?")):
+        t += "."
+    return t
+
+
+def sanitize_insight_markdown(text: str, is_en: bool = False) -> str:
     """Tự động làm sạch hoàn toàn các lỗi định dạng markdown của AI:
     - CẤM TỰ Ý IN ĐẬM TRONG CÂU: Chỉ in đậm duy nhất Tiêu đề ở đầu gạch đầu dòng trước dấu hai chấm.
     - Xóa toàn bộ dấu ** thừa, mồ côi hoặc chèn lung tung trong thân câu.
     - Tách toàn bộ chữ dính với %, số, và tên riêng (Jucies để, đạt 28,490,175, 11.0% so).
     - Khôi phục và chuẩn hóa tiêu đề ### 2.1. 🚨, ### 2.2. 🔍, ### 2.3. 🎯
+    - Tự động phát hiện và vá các câu bị cắt cụt do cạn token.
     """
     if not text:
         return ""
@@ -1543,10 +1574,12 @@ def sanitize_insight_markdown(text: str) -> str:
 
             # XÓA SẠCH TOÀN BỘ DẤU ** TRONG THÂN CÂU (rest)
             clean_rest = rest.replace("**", "").replace("*", "").strip()
+            clean_rest = repair_truncated_text(clean_rest, is_en=is_en)
             l = f"{prefix_out}: {clean_rest}"
         else:
             # Dòng không có dấu hai chấm: Xóa TOÀN BỘ **
             clean_l = l.replace("**", "").replace("*", "").strip()
+            clean_l = repair_truncated_text(clean_l, is_en=is_en)
             if not clean_l.startswith("•") and not clean_l.startswith("-"):
                 clean_l = f"• {clean_l}"
             l = clean_l
@@ -3448,6 +3481,7 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
             clean_body = re.sub(r"^\[?(?:Ưu\s*tiên\s*(?:Cao|Trung\s*bình|Thấp)|High\s*Priority|Medium\s*Priority|Low\s*Priority)[^\]:]*\]?:?\s*", "", clean_body, flags=re.IGNORECASE).strip()
             clean_body = clean_body.lstrip("•-* :").strip()
             clean_body = clean_body.replace("**", "").strip()
+            clean_body = repair_truncated_text(clean_body, is_en=is_en)
 
             if "ưu tiên cao" in l.lower() or "cấp bách" in l.lower() or "thực hiện ngay" in l.lower():
                 if any(c in clean_body for c in ["🟡", "🟢"]) or len(clean_body) < 15:
@@ -3463,8 +3497,7 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
                 l = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: {clean_body}"
 
             # Sửa câu bị cụt lửng ở đuôi
-            if l.startswith("•") and not l.endswith((".", "!", "?", ":")):
-                l += "."
+            l = repair_truncated_text(l, is_en=is_en)
             cleaned_23.append(l)
 
         # Luôn đảm bảo đúng 3 gạch đầu dòng chuẩn mực hoặc fallback sang data-grounded engine
