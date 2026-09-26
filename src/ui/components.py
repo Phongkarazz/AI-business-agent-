@@ -5943,11 +5943,17 @@ def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
     attempts = result.get("attempts", 1)
     exec_time_ms = result.get("execution_time_ms", 185.0)
 
-    # Agent 1: Supervisor
+    # Agent 1: Supervisor & Schema Linking
     complexity = plan.get("complexity", "DIRECT_SQL")
     subtasks = plan.get("subtasks", [])
     subtasks_cnt = len(subtasks) if subtasks else 2
     comp_badge = complexity.replace("_", " ")
+    schema_link = trace.get("schema_linking", {})
+    sel_tbls = schema_link.get("selected_tables", [])
+    if sel_tbls:
+        tbl_info = f"{len(sel_tbls)} Tables" if is_en else f"{len(sel_tbls)} Bảng"
+    else:
+        tbl_info = f"{subtasks_cnt} {'Subtasks' if is_en else 'Nhiệm vụ'}"
 
     # Agent 2: Data Engineer
     num_few_shots = len(few_shots) if few_shots else (2 if "icl" in str(result.get("logs", "")).lower() else 1)
@@ -5995,7 +6001,7 @@ def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
 <span style="font-size: 0.6rem; font-weight: 700; color: #00F0FF; background: rgba(0, 240, 255, 0.15); padding: 1px 4px; border-radius: 4px;">PLAN</span>
 </div>
 <div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{comp_badge}</div>
-<div style="font-size: 0.66rem; color: #94A3B8;">📋 {subtasks_cnt} {'Subtasks' if is_en else 'Nhiệm vụ'}</div>
+<div style="font-size: 0.66rem; color: #94A3B8;">📋 {tbl_info} • {subtasks_cnt} {'Steps' if is_en else 'Bước'}</div>
 </div>
 <div style="background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">

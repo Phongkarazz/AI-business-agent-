@@ -103,12 +103,14 @@ class DataEngineerAgent(BaseAgent):
             "guidance": state.plan.guidance if state.plan else ""
         } if state.plan else None
 
+        effective_schema = state.linked_sub_schema or state.schema_context
+
         # Trường hợp 1: Nhận yêu cầu sửa lại từ Data Auditor
         if state.audit_feedback and state.current_sql:
             self.log(state, f"Tiếp nhận phản biện từ Data Auditor (Lần {state.audit_attempts}): Tinh chỉnh SQL...", status="REFINING")
             prompt = build_fix_prompt(
                 user_query=state.user_query,
-                schema_context=state.schema_context,
+                schema_context=effective_schema,
                 bad_sql=state.current_sql,
                 error_message=state.audit_feedback,
                 plan=plan_dict,
@@ -116,18 +118,18 @@ class DataEngineerAgent(BaseAgent):
             )
         else:
             # Trường hợp 2: Sinh mới SQL lần đầu
-            matched_person = match_chocolates_specific_person(state.user_query) if state.schema_context else None
-            matched_product = match_chocolates_specific_product(state.user_query) if state.schema_context else None
+            matched_person = match_chocolates_specific_person(state.user_query) if effective_schema else None
+            matched_product = match_chocolates_specific_product(state.user_query) if effective_schema else None
             
             few_shots = select_dynamic_few_shots(
                 user_query=state.user_query,
-                schema_context=state.schema_context,
+                schema_context=effective_schema,
                 plan=plan_dict
             )
             
             prompt = build_sql_prompt(
                 user_query=state.user_query,
-                schema_context=state.schema_context,
+                schema_context=effective_schema,
                 plan=plan_dict,
                 matched_person=matched_person,
                 matched_product=matched_product,

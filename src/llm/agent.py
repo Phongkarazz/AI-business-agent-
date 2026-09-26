@@ -39,6 +39,7 @@ from .prompts import (
     match_chocolates_specific_person,
 )
 from .few_shot_selector import select_dynamic_few_shots
+from .schema_linker import link_schema_for_query
 
 
 def strip_comments_and_literals(sql: str) -> str:
@@ -7804,13 +7805,39 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         return sql_cur
 
+    # 0.15 TẦNG SCHEMA LINKING & METADATA RAG (Enterprise Schema Pruner & FK Graph Connector)
+    if status_callback:
+        status_callback("🔍 [Schema Linking & Metadata RAG] Phân tích ngữ nghĩa Metadata, đồ thị Foreign Keys & Tinh gọn Sub-Schema...")
+
+    linked_schema_meta = link_schema_for_query(user_query, schema_context)
+    result["agent_trace"]["schema_linking"] = {
+        "selected_tables": linked_schema_meta.get("selected_tables", []),
+        "pruned_tables": linked_schema_meta.get("pruned_tables", []),
+        "join_paths": linked_schema_meta.get("join_paths", []),
+        "is_pruned": linked_schema_meta.get("is_pruned", False),
+        "confidence_score": linked_schema_meta.get("confidence_score", 1.0)
+    }
+    
+    if linked_schema_meta.get("is_pruned"):
+        tbls_str = ", ".join(f"`{t}`" for t in linked_schema_meta.get("selected_tables", []))
+        result["logs"].append(
+            f"🔍 [Schema Linking RAG] Đã lọc {len(linked_schema_meta.get('selected_tables', []))} bảng mục tiêu ({tbls_str}), tinh gọn {len(linked_schema_meta.get('pruned_tables', []))} bảng thừa."
+        )
+    else:
+        tbls_str = ", ".join(f"`{t}`" for t in linked_schema_meta.get("selected_tables", []))
+        result["logs"].append(
+            f"🔍 [Schema Linking RAG] Đã định vị các bảng dữ liệu cốt lõi: {tbls_str}"
+        )
+
+    effective_schema = linked_schema_meta.get("sub_schema", schema_context)
+
     # 0.2 TẦNG 1: ROUTER & TASK PLANNER (Agent 1: Master Supervisor & Orchestrator)
     if status_callback:
         status_callback("🧭 [Agent 1/5 • Master Supervisor] Phân tích ngữ nghĩa, đánh giá độ phức tạp & Lập kế hoạch luồng dữ liệu...")
 
     plan = route_and_plan(
         user_query=user_query,
-        schema_context=schema_context,
+        schema_context=effective_schema,
         dialect=dialect,
         client=client,
         provider=provider,
@@ -7838,7 +7865,7 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
     if status_callback:
         status_callback(f"⚡ [Agent 2/5 • Data Engineer] Kích hoạt In-Context Learning & Sinh truy vấn SQL tối ưu {plan['num_steps']} bước...")
 
-    selected_shots = select_dynamic_few_shots(user_query, schema_context=schema_context, dialect=dialect, top_k=2)
+    selected_shots = select_dynamic_few_shots(user_query, schema_context=effective_schema, dialect=dialect, top_k=2)
     if selected_shots:
         shot_summaries = [f"{s.get('id', 'mẫu')} ({s.get('relevance_score', 0)}pts)" for s in selected_shots]
         result["logs"].append(f"🎯 [In-Context Learning] Đã kích hoạt {len(selected_shots)} mẫu truy vấn tương đồng: {', '.join(shot_summaries)}")
@@ -7847,7 +7874,7 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             for s in selected_shots
         ]
 
-    initial_prompt = build_sql_prompt(schema_context, dialect, user_query, lang=lang)
+    initial_prompt = build_sql_prompt(effective_schema, dialect, user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=2048)
     if sql_query:
         sql_query = clean_sql_query(sql_query)

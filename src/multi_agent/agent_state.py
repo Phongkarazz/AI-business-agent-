@@ -42,6 +42,10 @@ class AgentState:
     schema_context: str = ""
     lang: str = "vi"
     
+    # 0. Schema Linking & Metadata RAG Output
+    schema_linking_meta: Dict[str, Any] = field(default_factory=dict)
+    linked_sub_schema: str = ""
+    
     # 1. Router / Planner Output
     plan: Optional[TaskPlan] = None
     

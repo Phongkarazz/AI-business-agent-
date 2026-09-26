@@ -17,6 +17,7 @@ from .data_engineer_agent import DataEngineerAgent
 from .data_auditor_agent import DataAuditorAgent
 from .anomaly_detective_agent import AnomalyDetectiveAgent
 from .strategy_advisor_agent import StrategyAdvisorAgent
+from src.llm.schema_linker import link_schema_for_query
 from src.llm.router_planner import classify_query_complexity, route_and_plan
 from src.analytics.heuristics import detect_query_language
 
@@ -39,10 +40,22 @@ class SupervisorAgent(BaseAgent):
         """Điều phối toàn trình quy trình Multi-Agent."""
         self.log(state, f"Tiếp nhận yêu cầu: '{state.user_query}' | Khởi tạo quy trình Multi-Agent...")
 
+        # BƯỚC 0: SCHEMA LINKING & METADATA RAG
+        self.log(state, "Kích hoạt Enterprise Schema Linking & Metadata RAG...")
+        linked_meta = link_schema_for_query(state.user_query, state.schema_context)
+        state.schema_linking_meta = linked_meta
+        state.linked_sub_schema = linked_meta.get("sub_schema", state.schema_context)
+        if linked_meta.get("is_pruned"):
+            self.log(
+                state,
+                f"Đã tinh gọn {len(linked_meta.get('pruned_tables', []))} bảng thừa, chọn {len(linked_meta.get('selected_tables', []))} bảng liên quan: {', '.join(linked_meta.get('selected_tables', []))}"
+            )
+
         # BƯỚC 1: ROUTING & TASK PLANNING
         self.log(state, "Phân tích ngữ nghĩa & Lập kế hoạch thực thi (Task Planning)...")
         complexity = classify_query_complexity(state.user_query)
-        plan_data = route_and_plan(state.user_query, state.schema_context)
+        effective_schema = state.linked_sub_schema or state.schema_context
+        plan_data = route_and_plan(state.user_query, effective_schema)
         
         state.plan = TaskPlan(
             complexity=complexity,
@@ -51,8 +64,8 @@ class SupervisorAgent(BaseAgent):
             timeframe=plan_data.get("timeframe"),
             subtasks=plan_data.get("subtasks", []),
             guidance=plan_data.get("guidance", ""),
-            is_chocolates_domain="sales" in (state.schema_context or "").lower() or "products" in (state.schema_context or "").lower(),
-            is_employees_domain="employees" in (state.schema_context or "").lower() or "salaries" in (state.schema_context or "").lower()
+            is_chocolates_domain="sales" in (effective_schema or "").lower() or "products" in (effective_schema or "").lower(),
+            is_employees_domain="employees" in (effective_schema or "").lower() or "salaries" in (effective_schema or "").lower()
         )
         self.log(state, f"Kế hoạch phân rã: Độ phức tạp [{complexity}], Phân nhánh: {len(state.plan.subtasks)} nhiệm vụ con.")
 
