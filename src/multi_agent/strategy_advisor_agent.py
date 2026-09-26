@@ -70,12 +70,24 @@ class StrategyAdvisorAgent(BaseAgent):
             for i, anom in enumerate(state.anomalies[:3]):
                 desc = anom.get("description", "")
                 metric = anom.get("metric", "")
-                if i == 0:
-                    action_matrix["urgent"].append(f"Xử lý dứt điểm dị biệt: {desc} (Ưu tiên kiểm soát biến động {metric}).")
-                elif i == 1:
-                    action_matrix["short_term"].append(f"Tái cấu trúc và tối ưu phân bổ: {desc}.")
+                gap_val = anom.get("gap_pct", None)
+                if gap_val is not None and gap_val < 1.0:
+                    action_matrix["urgent"].append(
+                        f"Ghi nhận hệ thống vận hành tốt, duy trì ổn định: {desc} (Chênh lệch {gap_val:.2f}% thuộc sai số thống kê ngẫu nhiên - không can thiệp tốn kém)."
+                        if not is_en else f"Acknowledge stable operations: {desc} (Variance of {gap_val:.2f}% represents statistical noise - maintain current policies)."
+                    )
+                elif gap_val is not None and gap_val <= 5.0:
+                    action_matrix["short_term"].append(
+                        f"Theo dõi và rà soát nội bộ định kỳ: {desc} (Biến động nhẹ {gap_val:.1f}% trong ngưỡng kiểm soát)."
+                        if not is_en else f"Routine monitoring and internal review: {desc} (Minor variance {gap_val:.1f}% within control threshold)."
+                    )
                 else:
-                    action_matrix["long_term"].append(f"Thiết lập cơ chế giám sát tự động và quy chuẩn hóa: {desc}.")
+                    if i == 0:
+                        action_matrix["urgent"].append(f"Xử lý dứt điểm dị biệt: {desc} (Ưu tiên kiểm soát biến động {metric})." if not is_en else f"Resolve critical disparity: {desc} (Prioritize {metric}).")
+                    elif i == 1:
+                        action_matrix["short_term"].append(f"Tái cấu trúc và tối ưu phân bổ: {desc}." if not is_en else f"Restructure and optimize allocation: {desc}.")
+                    else:
+                        action_matrix["long_term"].append(f"Thiết lập cơ chế giám sát tự động và quy chuẩn hóa: {desc}." if not is_en else f"Establish automated monitoring and governance: {desc}.")
         else:
             action_matrix["short_term"].append("Tối ưu hóa hiệu suất vận hành theo các nhóm dẫn đầu." if not is_en else "Optimize operational performance based on leading segments.")
             action_matrix["long_term"].append("Mở rộng quy mô và nhân rộng mô hình kinh doanh hiệu quả." if not is_en else "Scale up proven successful business models.")

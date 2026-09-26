@@ -2664,9 +2664,18 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 else:
                     is_small_discrete = (top_val <= 5 and float(top_val).is_integer()) or bot_val == 0
                     comp_gap_str = f"{top_name}: {format_metric_value(top_val, val_col)} vs {bot_name}: {format_metric_value(bot_val, val_col)}" if is_small_discrete else f"{top_name}: {format_metric_value(top_val, val_col)} vs {bot_name}: {format_metric_value(bot_val, val_col)}, {gap_vs_top:.1f}% lower than leader"
-                    urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({comp_gap_str}); conduct proactive stay-interviews to curb flight risk among key talent."
-                    medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands against the median baseline of {format_metric_value(median_val, val_col)}; rebalance departmental salary budget pools and structured hiring plans for internal equity."
-                    longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions and employer branding."
+                    if not is_small_discrete and gap_vs_top < 1.0:
+                        urgent = f"• 🟢 **[Maintain Stability / 0-30 Days]**: Acknowledge near-absolute operational parity ({gap_vs_top:.2f}% gap between **{top_name}** and **{bot_name}** represents random statistical noise); continue current policy frameworks, **no costly intervention required**."
+                        medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Maintain regular monitoring during upcoming performance appraisal cycles; benchmark career progression bands against median of {format_metric_value(median_val, val_col)}."
+                        longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Sustain the Total Rewards framework and transparent merit-based promotions to maintain long-term equity."
+                    elif not is_small_discrete and gap_vs_top <= 5.0:
+                        urgent = f"• 🟡 **[Routine Monitoring / 0-30 Days]**: Minor variance detected ({gap_vs_top:.1f}% between **{top_name}** and **{bot_name}**), well within acceptable operational thresholds; no immediate emergency action required."
+                        medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Conduct internal review during the next evaluation cycle; benchmark career progression bands against median baseline of {format_metric_value(median_val, val_col)}."
+                        longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions."
+                    else:
+                        urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Audit compensation parity across roles with the widest disparity ({comp_gap_str}); conduct proactive stay-interviews to curb flight risk among key talent."
+                        medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Benchmark career progression bands against the median baseline of {format_metric_value(median_val, val_col)}; rebalance departmental salary budget pools and structured hiring plans for internal equity."
+                        longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul the Total Rewards framework, combining market-competitive compensation with transparent merit-based promotions and employer branding."
         elif entity_type == "product":
             if is_single_or_tied:
                 urgent = f"• 🔴 **[High Priority - Immediate / 0-30 Days]**: Prioritize supply chain security and safety stock for key product **{top_name}** ({format_metric_value(top_val, val_col)}); control inventory replenishment cycles to meet demand."
@@ -2821,9 +2830,18 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
                 else:
                     is_small_discrete = (top_val <= 5 and float(top_val).is_integer()) or bot_val == 0
                     comp_gap_str = f"{bot_name}: {format_metric_value(bot_val, val_col)} so với {top_name}: {format_metric_value(top_val, val_col)}" if is_small_discrete else f"{bot_name}: {format_metric_value(bot_val, val_col)} so với {top_name}: {format_metric_value(top_val, val_col)}, thấp hơn {gap_vs_top:.1f}% so với vị trí dẫn đầu"
-                    urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách lương thưởng và đãi ngộ tại đơn vị/vị trí ({comp_gap_str}); chủ động đối thoại và lắng nghe nguyện vọng nhân sự để ngăn ngừa rủi ro biến động nhân tài chủ chốt."
-                    medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa lộ trình thăng tiến nghề nghiệp (Career Progression) và định biên tuyển dụng theo nhu cầu thực tế của từng đơn vị quanh mức trung vị {format_metric_value(median_val, val_col)}; tái cân bằng quỹ lương để đảm bảo tính công bằng nội bộ."
-                    longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
+                    if not is_small_discrete and gap_vs_top < 1.0:
+                        urgent = f"• 🟢 **[Duy Trì Ổn Định / 0 - 30 Ngày]**: Ghi nhận hệ thống vận hành xuất sắc và đạt độ bình đẳng/cân bằng gần như tuyệt đối (Chênh lệch chỉ {gap_vs_top:.2f}%, thuộc sai số thống kê ngẫu nhiên giữa **{bot_name}** và **{top_name}**); tiếp tục duy trì chính sách hiện hành, **không phát sinh hành động can thiệp tốn kém chi phí**."
+                        medium = f"• 🟡 **[Trung Hạn - Giám Sát / 1 - 3 Quý Tới]**: Duy trì cơ chế theo dõi định kỳ trong các kỳ đánh giá tiếp theo; tiếp tục chuẩn hóa lộ trình thăng tiến và khung bậc lương quanh mức trung vị {format_metric_value(median_val, val_col)}."
+                        longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Tiếp tục phát huy chính sách đãi ngộ tổng thể (Total Rewards) và cơ chế bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) để duy trì tính bình đẳng lâu dài."
+                    elif not is_small_discrete and gap_vs_top <= 5.0:
+                        urgent = f"• 🟡 **[Theo Dõi Định Kỳ / 0 - 30 Ngày]**: Ghi nhận mức chênh lệch nhẹ ({gap_vs_top:.1f}% giữa **{bot_name}** và **{top_name}**), nằm hoàn toàn trong biên độ kiểm soát cho phép; chưa cần can thiệp khẩn cấp."
+                        medium = f"• 🟡 **[Trung Hạn - Rà Soát Nội Bộ / 1 - 3 Quý Tới]**: Tiến hành rà soát nội bộ trong kỳ đánh giá tiếp theo; chuẩn hóa lộ trình thăng tiến và cân đối lại quỹ lương quanh mức trung vị {format_metric_value(median_val, val_col)}."
+                        longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) để đảm bảo tính cạnh tranh và công bằng bền vững."
+                    else:
+                        urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách lương thưởng và đãi ngộ tại đơn vị/vị trí ({comp_gap_str}); chủ động đối thoại và lắng nghe nguyện vọng nhân sự để ngăn ngừa rủi ro biến động nhân tài chủ chốt."
+                        medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Chuẩn hóa lộ trình thăng tiến nghề nghiệp (Career Progression) và định biên tuyển dụng theo nhu cầu thực tế của từng đơn vị quanh mức trung vị {format_metric_value(median_val, val_col)}; tái cân bằng quỹ lương để đảm bảo tính công bằng nội bộ."
+                        longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ tổng thể (Total Rewards), kết hợp chính sách bổ nhiệm minh bạch dựa trên năng lực (Merit-based Promotion) và xây dựng thương hiệu nhà tuyển dụng để thu hút nhân tài cấp cao."
         elif entity_type == "product":
             if is_single_or_tied:
                 urgent = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Ưu tiên bảo đảm nguồn cung ứng và duy trì mức tồn kho an toàn cho mặt hàng **{top_name}** ({format_metric_value(top_val, val_col)}); kiểm soát chặt chẽ kế hoạch luân chuyển hàng hóa để đáp ứng kịp thời nhu cầu thị trường."
@@ -3202,10 +3220,12 @@ def generate_data_grounded_anomaly(df: pd.DataFrame, user_query: str = "", is_en
                             if bot_name != top_name:
                                 if bot_val == 0 or is_discrete_count:
                                     spread_line = f"• **Distribution by Unit**: {ent_pfx_en} **{bot_name}** records {format_metric_value(bot_val, val_col)} (compared to {format_metric_value(top_val, val_col)} in leader **{top_name}**).\n\n"
-                                elif gap_vs_top >= 0.01:
-                                    spread_line = f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
+                                elif gap_vs_top < 1.0:
+                                    spread_line = f"• **Near-Absolute Parity (Random Noise)**: {ent_pfx_en} **{bot_name}** records {format_metric_value(bot_val, val_col)} (variance of only {gap_vs_top:.2f}% vs {ent_pfx_en.lower()} **{top_name}**: {format_metric_value(top_val, val_col)}, representing balanced parity and statistical random variance).\n\n"
+                                elif gap_vs_top <= 5.0:
+                                    spread_line = f"• **Minor Controlled Fluctuation**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**, well within acceptable variance thresholds).\n\n"
                                 else:
-                                    spread_line = f"• **Metric Parity**: {ent_pfx_en}s maintain consistent and balanced levels across operations.\n\n"
+                                    spread_line = f"• **Distribution Spread**: {ent_pfx_en} **{bot_name}** stands at {format_metric_value(bot_val, val_col)} ({gap_vs_top:.1f}% lower than {ent_pfx_en.lower()} leader **{top_name}**).\n\n"
                                 return (
                                     f"• **Leading Position**: {ent_pfx_en} **{top_name}** achieved the top level ({format_metric_value(top_val, val_col)}), demonstrating primary contribution.\n\n"
                                     f"{spread_line}"
@@ -3221,10 +3241,12 @@ def generate_data_grounded_anomaly(df: pd.DataFrame, user_query: str = "", is_en
                             if bot_name != top_name:
                                 if bot_val == 0 or is_discrete_count:
                                     spread_line = f"• **Phân bổ Theo Đơn vị**: {ent_pfx_vi} **{bot_name}** ghi nhận mức {format_metric_value(bot_val, val_col)} (so với {format_metric_value(top_val, val_col)} tại {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
-                                elif gap_vs_top >= 0.01:
-                                    spread_line = f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
+                                elif gap_vs_top < 1.0:
+                                    spread_line = f"• **Độ Cân Bằng Tuyệt Đối (Sai số ngẫu nhiên)**: {ent_pfx_vi} **{bot_name}** ghi nhận {format_metric_value(bot_val, val_col)} (chênh lệch chỉ {gap_vs_top:.2f}% so với {ent_pfx_vi.lower()} **{top_name}**: {format_metric_value(top_val, val_col)}, phản ánh trạng thái bình đẳng hoàn hảo và sai số thống kê ngẫu nhiên).\n\n"
+                                elif gap_vs_top <= 5.0:
+                                    spread_line = f"• **Biến Động Nhẹ trong Ngưỡng Kiểm Soát**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**, nằm hoàn toàn trong biên độ ổn định).\n\n"
                                 else:
-                                    spread_line = f"• **Độ Đồng đều Chỉ số**: Các {ent_pfx_vi.lower()} duy trì mức độ cân bằng và tương đương chuẩn toàn bảng.\n\n"
+                                    spread_line = f"• **Biên độ Phân hóa**: {ent_pfx_vi} **{bot_name}** ở mức {format_metric_value(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {ent_pfx_vi.lower()} dẫn đầu **{top_name}**).\n\n"
                                 return (
                                     f"• **Dẫn đầu Toàn diện**: {ent_pfx_vi} **{top_name}** đạt mức cao nhất ({format_metric_value(top_val, val_col)}), giữ vai trò đóng góp chủ lực.\n\n"
                                     f"{spread_line}"

@@ -6922,6 +6922,14 @@ STRICT BUSINESS ANALYTICS DISCIPLINE & GUIDELINES:
        - `Percentage` (%): Represents each individual product's distinct share/contribution (e.g. 4.86%). The first product in the list is the #1 TOP-SELLING leader!
        - `CumulativePercent` (%): Represents the RUNNING ACCUMULATED TOTAL of the entire group up to that row (e.g. reaching 82.79% across all 18 products). NEVER misread CumulativePercent as the revenue share of a single individual SKU!
        - When proposing bundles (Combos), pair the #1 top-selling leader (e.g. Almond Choco with 4.86% individual share) with a slower-selling SKU or non-Pareto product. NEVER confuse the last row's cumulative percentage (82.79%) as its individual share.
+6. THREE-TIER THRESHOLD DISCIPLINE FOR DISPARITY & ACTION PROPOSALS (CRITICAL):
+   - When analyzing percentage disparity between groups / genders / categories / units:
+     * IF disparity < 1.0% (e.g. 0.11%): Evaluate as "Near-Absolute Parity / Statistical Random Noise".
+       -> [Immediate Action / 0-30 Days]: Maintain stability, acknowledge excellent operation, NO costly interventions.
+     * IF disparity is 1.0% - 5.0%: Evaluate as "Minor Controlled Fluctuation".
+       -> Action: Routine monitoring, internal review in the next appraisal cycle (Medium term).
+     * IF disparity > 5.0%: Evaluate as "Significant Disparity / Divergence".
+       -> Trigger [Immediate Action]: Comprehensive review, stakeholder dialogue, targeted audit.
 
 REQUIREMENTS:
 Generate an Executive Business Insight Report in English with exact Markdown format:
@@ -7012,6 +7020,14 @@ KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & QUẢN TRỊ CFO (BẮT BUỘC TUÂN THỦ
      * `Percentage` (%): Là tỷ trọng đóng góp cá nhân của từng sản phẩm đơn lẻ (ví dụ: Almond Choco chiếm 4.86%, là sản phẩm BÁN CHẠY NHẤT).
      * `CumulativePercent` (%): Là mốc tích lũy dồn của toàn bộ nhóm Pareto tính đến dòng đó (ví dụ: Peanut Butter Cubes ở dòng cuối đạt mốc 82.79% tích lũy của cả 18 sản phẩm). TUYỆT ĐỐI CẤM đọc nhầm mốc tích lũy 82.79% thành doanh số của một SKU đơn lẻ!
      * Khi đề xuất Combo: Phải ghép sản phẩm bán chạy nhất đầu bảng (ví dụ: Almond Choco 4.86%) với sản phẩm bán chậm hơn ngoài nhóm Pareto.
+8. QUY TẮC CỨNG BẮT BUỘC ĐÁNH GIÁ NGƯỠNG CHÊNH LỆCH % (AGENT 5 STRATEGY THRESHOLDS):
+   - Đọc số liệu % chênh lệch từ kết quả truy vấn và BẮT BUỘC áp dụng quy tắc phân loại 3 tầng cứng sau:
+     * NẾU chênh lệch < 1.0% (Ví dụ: 0.11%): Đánh giá là "Bình đẳng tuyệt đối / Sai số ngẫu nhiên".
+       -> Hành động [Cấp bách / 0-30 ngày]: Ghi nhận hệ thống vận hành tốt, duy trì ổn định, TUYỆT ĐỐI KHÔNG làm gì thêm/không can thiệp để tiết kiệm chi phí.
+     * NẾU chênh lệch từ 1.0% - 5.0%: Đánh giá là "Biến động nhẹ / Trong ngưỡng kiểm soát".
+       -> Hành động: Theo dõi định kỳ, rà soát nội bộ trong kỳ đánh giá tiếp theo (Trung hạn).
+     * NẾU chênh lệch > 5.0%: Đánh giá là "Biến động nghiêm trọng / Phân hóa".
+       -> Kích hoạt hành động [Cấp bách]: Điều tra diện rộng, đối thoại nhân sự, rà soát chính sách.
 
 YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
 
@@ -7033,9 +7049,12 @@ YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
 - TUYỆT ĐỐI CẤM câu văn mẫu sáo rỗng, TUYỆT ĐỐI KHÔNG chèn nhãn [Ưu tiên Cao] vào mục này).
 
 ### 2.3. 🎯 Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)
-(Quy tắc phân loại ngữ cảnh thực thể (Entity Context Rule):
-1. Nếu đối tượng là LÃNH ĐẠO / QUẢN LÝ / GIỚI TÍNH (Leadership & Diversity):
-   - Chiến lược: Quy hoạch cán bộ nguồn (Succession Planning), Chương trình nâng cao năng lực lãnh đạo (Leadership Development), Chuẩn hóa tiêu chí bổ nhiệm dựa trên hiệu suất (Meritocracy & ESG Governance). TUYỆT ĐỐI KHÔNG hoảng loạn dùng từ "khủng hoảng nhân sự", "phỏng vấn thôi việc (stay-interview)" hay "tăng lương giữ chân" cho các chênh lệch số nguyên nhỏ rời rạc!
+(Quy tắc phân loại ngữ cảnh thực thể & Ngưỡng chênh lệch %:
+1. Nếu đối tượng là LÃNH ĐẠO / QUẢN LÝ / GIỚI TÍNH / THÙ LAO (Leadership, Diversity & Compensation):
+   - NẾU chênh lệch < 1.0%: Đánh giá "Bình đẳng tuyệt đối", hành động [Cấp bách] là DUY TRÌ ỔN ĐỊNH, KHÔNG can thiệp tốn kém.
+   - NẾU chênh lệch 1.0% - 5.0%: Biến động nhẹ, theo dõi trong kỳ đánh giá tiếp theo (Trung hạn).
+   - NẾU chênh lệch > 5.0%: Kích hoạt can thiệp cấp bách, rà soát chính sách.
+   - Chiến lược dài hạn: Quy hoạch cán bộ nguồn (Succession Planning), Chương trình nâng cao năng lực lãnh đạo (Leadership Development), Chuẩn hóa tiêu chí bổ nhiệm dựa trên hiệu suất (Meritocracy & ESG Governance). TUYỆT ĐỐI KHÔNG hoảng loạn dùng từ "khủng hoảng nhân sự", "phỏng vấn thôi việc (stay-interview)" hay "tăng lương giữ chân" cho các chênh lệch số nguyên nhỏ rời rạc!
 2. Nếu đối tượng là SẢN PHẨM / SKU / CATEGORY:
    - Chiến lược: Tối ưu danh mục, đóng gói combo, chính sách giá, quản trị hàng tồn kho.
 3. Nếu đối tượng là NHÂN SỰ CÁ NHÂN (pe.Salesperson):
@@ -7047,7 +7066,7 @@ YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
 
 Quy tắc trình bày đề xuất:
 BẮT BUỘC chỉ viết đúng 3 dòng đề xuất tương ứng với 3 cấp độ thời gian, bám sát số liệu cụ thể vừa truy vấn:
-• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: ... (hành động cụ thể bám sát đối tượng)
+• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: ... (hành động cụ thể bám sát đối tượng và ngưỡng chênh lệch)
 • 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: ... (hành động cụ thể bám sát đối tượng)
 • 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: ... (hành động cụ thể bám sát đối tượng)
 TUYỆT ĐỐI KHÔNG DÙNG BẢNG, KHÔNG THÊM GẠCH ĐẦU DÒNG CON).
