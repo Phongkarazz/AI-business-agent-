@@ -1233,8 +1233,8 @@ def _render_layer_overview(engine):
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     with kpi1:
-        badge_kpi1 = "🔥 Peak 264k (1999)" if data["is_all_time"] else (f"Period {period_badge}" if is_en else f"Kỳ {period_badge}")
-        sub_kpi1 = t("kpi_sub_total_employees_all") if data["is_all_time"] else t("kpi_sub_total_employees_period", period=period_badge)
+        badge_kpi1 = ("🔥 Peak 264k (1999)" if is_en else "🔥 Đỉnh 264k (1999)") if data["is_all_time"] else (f"📍 Snapshot {ey}" if is_en else f"📍 Mốc năm {ey}")
+        sub_kpi1 = ("👥 Currently active workforce" if is_en else "👥 Nhân sự đang làm việc (Active Headcount)") if data["is_all_time"] else (f"👥 Active headcount in {ey}" if is_en else f"👥 Nhân sự đang làm việc tại năm {ey}")
         st.markdown(f"""
         <div class="kpi-card-cyan" style="background: linear-gradient(135deg, #00D2FF 0%, #3A7BD5 50%, #6A11CB 100%); box-shadow: 0 10px 32px rgba(0, 210, 255, 0.45); border: 1.8px solid #00F0FF;">
             <div class="kpi-title">
@@ -1264,8 +1264,8 @@ def _render_layer_overview(engine):
         """, unsafe_allow_html=True)
 
     with kpi3:
-        badge_kpi3 = ("⚡ Standard" if is_en else "⚡ Chuẩn Kỳ") if data["is_all_time"] else (f"Period {period_badge}" if is_en else f"Kỳ {period_badge}")
-        sub_kpi3 = t("kpi_sub_avg_salary_all") if data["is_all_time"] else t("kpi_sub_avg_salary_period", period=period_badge)
+        badge_kpi3 = ("⚡ Standard" if is_en else "⚡ Chuẩn Kỳ") if data["is_all_time"] else (f"📍 Snapshot {ey}" if is_en else f"📍 Năm {ey}")
+        sub_kpi3 = t("kpi_sub_avg_salary_all") if data["is_all_time"] else (f"💵 Average salary in {ey}" if is_en else f"💵 Lương bình quân tại năm {ey}")
         st.markdown(f"""
         <div class="kpi-card-emerald">
             <div class="kpi-title">
