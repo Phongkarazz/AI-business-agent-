@@ -576,6 +576,11 @@ def select_primary_insight_columns(df: pd.DataFrame, user_query: str = "") -> tu
             if turnover_c:
                 val_col = turnover_c[0]
 
+        elif any(k in q_low for k in ["thâm niên", "tenure", "service", "gắn bó", "kinh nghiệm", "lâu nhất", "năm công tác"]):
+            tenure_c = [c for c in non_cum_measures if any(k in str(c).lower() for k in ["yearsofservice", "service", "tenure", "thâm_niên", "thâm niên", "years", "năm"])]
+            if tenure_c:
+                val_col = tenure_c[0]
+
         if not val_col:
             spread_candidate = next((c for c in non_cum_measures if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương"])), None)
             if spread_candidate:
@@ -584,7 +589,7 @@ def select_primary_insight_columns(df: pd.DataFrame, user_query: str = "") -> tu
                 # Ưu tiên cột tiền tệ / số lượng trước cột phần trăm
                 money_or_vol = [
                     c for c in non_cum_measures
-                    if any(k in str(c).lower() for k in ["sales", "revenue", "amount", "boxes", "salary", "lương", "cost", "profit", "headcount", "nhân viên", "nhân sự", "count"])
+                    if any(k in str(c).lower() for k in ["sales", "revenue", "amount", "boxes", "salary", "lương", "cost", "profit", "headcount", "nhân viên", "nhân sự", "count", "yearsofservice", "tenure"])
                     and not any(k in str(c).lower() for k in ["pct", "percent", "%", "margin", "rate", "tỷ lệ", "tỉ lệ"])
                 ]
                 if money_or_vol:
@@ -598,11 +603,15 @@ def select_primary_insight_columns(df: pd.DataFrame, user_query: str = "") -> tu
         num_non_cum = [c for c in num_cols if not any(k in str(c).lower() for k in ["cumulative", "tích lũy", "tich_luy", "runningtotal", "running_total"])]
         val_col = num_non_cum[0] if num_non_cum else (num_cols[0] if num_cols else None)
 
-    # 2. Tìm name_col
-    name_candidates = [c for c in cat_cols if c != val_col]
-    if not name_candidates:
-        name_candidates = [c for c in cols if c != val_col and not is_id_like(c)]
-    name_col = name_candidates[0] if name_candidates else (cols[0] if cols else None)
+    # 2. Tìm name_col (Ưu tiên tuyệt đối cột tên thực thể như FullName, Salesperson, Department, Product, Customer trước các cột ID)
+    best_name = get_best_name_column(df, exclude_cols=[val_col] if val_col else None)
+    if best_name:
+        name_col = best_name
+    else:
+        name_candidates = [c for c in cat_cols if c != val_col and not is_id_like(c)]
+        if not name_candidates:
+            name_candidates = [c for c in cols if c != val_col and not is_id_like(c)]
+        name_col = name_candidates[0] if name_candidates else (cols[0] if cols else None)
 
     return val_col, name_col
 
@@ -1941,29 +1950,60 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
     measure_cols, cat_cols, time_col_raw = get_axis_columns(df)
     cols_str = " ".join(str(c).lower() for c in cols)
 
+    # 0.05 BÀI TOÁN THÂM NIÊN LÂU NHẤT / NHÂN SỰ KỲ CỰU (Longest-Tenured Veteran Employees)
+    is_longest_tenure = (
+        any(k in q_low for k in ["lâu nhất", "gắn bó lâu nhất", "thâm niên cao nhất", "thâm niên lớn nhất", "top thâm niên", "longest tenure", "highest tenure", "most tenured", "thâm niên làm việc lâu nhất"])
+        or (
+            any(k in q_low for k in ["thâm niên", "tenure", "gắn bó", "service", "năm"])
+            and any(k in q_low for k in ["top", "cao nhất", "nhiều nhất", "lớn nhất", "dẫn đầu"])
+            and not any(k in q_low for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "mới vào", "mới gia nhập", "low tenure", "under 3", "under 5"])
+            and not any(k in q_low for k in ["lương", "salary", "thu nhập", "tiền"])
+        )
+    ) or (
+        any(k in str(val_col).lower() for k in ["yearsofservice", "service", "tenure", "thâm_niên", "thâm niên"])
+        and not any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
+    )
+    if is_longest_tenure:
+        top_row_t = df.iloc[0] if not df.empty else None
+        top_name_t = format_entity_label(top_row_t[name_col], col_name=name_col, lang="en" if is_en else "vi") if top_row_t is not None else ""
+        top_v_t = float(pd.to_numeric(top_row_t[val_col], errors="coerce") or 0) if top_row_t is not None else 0
+        if is_en:
+            h1 = f"• **Organizational Retention Culture & Workplace Stability**: Exceptional tenure ({top_v_t:.2f} years for **{top_name_t}** and cohort peers) demonstrates strong organizational stability, effective long-term retention policies, and high employee loyalty."
+            h2 = f"• **Preservation of Institutional Knowledge & Core Competencies**: Long-tenured personnel serve as vital anchors for institutional memory, operational standards, and deep enterprise knowledge."
+        else:
+            h1 = f"• **Văn hóa Gắn kết Doanh nghiệp & Môi trường Làm việc Ổn định**: Thâm niên cống hiến vượt bậc ({top_v_t:.2f} năm của nhân sự dẫn đầu **{top_name_t}** cùng toàn nhóm) khẳng định môi trường làm việc bền vững, chính sách giữ chân nhân tài hiệu quả và văn hóa tổ chức có độ gắn kết cao."
+            h2 = f"• **Bảo tồn Tri thức Doanh nghiệp & Năng lực Cốt lõi**: Lực lượng nhân sự kỳ cựu đóng vai trò trụ cột trong việc lưu giữ bí quyết vận hành, chuẩn mực chất lượng và am hiểu sâu sắc quy trình nghiệp vụ nội bộ của tổ chức."
+        return f"{h1}\n\n{h2}"
+
     # 0.1 BÀI TOÁN NHÂN SỰ NGOẠI LỆ: THÂM NIÊN THẤP NHƯNG LƯƠNG TOP % (Low Tenure & Top Percentile Outliers)
+    has_valid_sal = any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
     is_low_tenure_top_sal = (
-        (
-            any(k in q_low for k in ["thâm niên", "gắn bó", "tenure", "năm"])
-            and any(k in q_low for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "under", "less than"])
-            and any(k in q_low for k in ["top", "cao nhất"])
-            and any(k in q_low for k in ["%", "phần trăm", "percent"])
-        ) or (
-            any(any(k in str(c).lower() for k in ["salarypercentile", "percentile", "bách phân vị"]) for c in df.columns)
-            and any(any(k in str(c).lower() for k in ["yearsofservice", "thâm niên", "tenure"]) for c in df.columns)
+        has_valid_sal
+        and not is_longest_tenure
+        and (
+            (
+                any(k in q_low for k in ["thâm niên", "gắn bó", "tenure", "năm"])
+                and any(k in q_low for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "under", "less than", "mới vào", "mới gia nhập"])
+                and any(k in q_low for k in ["top", "cao nhất"])
+                and any(k in q_low for k in ["%", "phần trăm", "percent", "lương", "salary", "thu nhập"])
+            ) or (
+                any(any(k in str(c).lower() for k in ["salarypercentile", "percentile", "bách phân vị"]) for c in df.columns)
+                and any(any(k in str(c).lower() for k in ["yearsofservice", "thâm niên", "tenure"]) for c in df.columns)
+            )
         )
     )
     if is_low_tenure_top_sal:
         top_row_sal = df.iloc[0] if not df.empty else None
         top_name_sal = str(top_row_sal.get(name_col, top_row_sal.get("FullName", top_row_sal.get("Họ và Tên", "Nhân sự dẫn đầu")))) if top_row_sal is not None else ""
         top_v_sal = float(pd.to_numeric(top_row_sal.get(val_col, top_row_sal.get("Salary", 0)), errors="coerce") or 0) if top_row_sal is not None else 0
-        if is_en:
-            h1 = f"• **Lateral Senior Recruitment & High-Impact Talent Attraction**: Exceptional compensation ({format_metric_value(top_v_sal, val_col)}) observed in personnel with low tenure (<3 years) reflects strategic lateral hiring of seasoned industry specialists offering immediate execution power."
-            h2 = f"• **Pay-for-Performance & Direct Commercial Contribution**: Concentration of top-percentile earners in frontline roles demonstrates direct linkage between compensation, quota overachievement, and tangible business output."
-        else:
-            h1 = f"• **Chiến lược Thu hút Nhân tài Cấp cao từ Thị trường (Lateral Senior Hiring)**: Mức thu nhập vượt bậc ({format_metric_value(top_v_sal, val_col)}) của nhóm nhân sự có thâm niên ngắn (<3 năm) phản ánh chính sách tuyển dụng nhân sự cấp cao từ thị trường với gói đãi ngộ cạnh tranh nhằm tạo đột phá nhanh chóng."
-            h2 = f"• **Cơ chế Đãi ngộ Theo Năng lực Thực chiến (Pay-for-Performance)**: Sự hiện diện của nhóm nhân sự lương Top 5% tại khối Kinh doanh chứng minh cơ chế trả lương gắn chặt với hiệu quả đóng góp doanh số và năng lực mang lại giá trị thương mại tức thì."
-        return f"{h1}\n\n{h2}"
+        if top_v_sal > 0:
+            if is_en:
+                h1 = f"• **Lateral Senior Recruitment & High-Impact Talent Attraction**: Exceptional compensation ({format_metric_value(top_v_sal, val_col)}) observed in personnel with low tenure (<3 years) reflects strategic lateral hiring of seasoned industry specialists offering immediate execution power."
+                h2 = f"• **Pay-for-Performance & Direct Commercial Contribution**: Concentration of top-percentile earners in frontline roles demonstrates direct linkage between compensation, quota overachievement, and tangible business output."
+            else:
+                h1 = f"• **Chiến lược Thu hút Nhân tài Cấp cao từ Thị trường (Lateral Senior Hiring)**: Mức thu nhập vượt bậc ({format_metric_value(top_v_sal, val_col)}) của nhóm nhân sự có thâm niên ngắn (<3 năm) phản ánh chính sách tuyển dụng nhân sự cấp cao từ thị trường với gói đãi ngộ cạnh tranh nhằm tạo đột phá nhanh chóng."
+                h2 = f"• **Cơ chế Đãi ngộ Theo Năng lực Thực chiến (Pay-for-Performance)**: Sự hiện diện của nhóm nhân sự lương Top 5% tại khối Kinh doanh chứng minh cơ chế trả lương gắn chặt với hiệu quả đóng góp doanh số và năng lực mang lại giá trị thương mại tức thì."
+            return f"{h1}\n\n{h2}"
 
     # 0.2 BÀI TOÁN TỶ LỆ ÉP LƯƠNG / NÉN LƯƠNG (Wage / Salary Compression)
     is_wage_compression = (
@@ -2188,7 +2228,12 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                 return f"{h1}\n\n{h2}"
 
             # 3C. Phòng ban (Departments)
-            is_dept = any(k in cols_str for k in ["dept", "department", "phòng"]) or any(k in q_low for k in ["phòng ban", "bộ phận", "department"])
+            is_dept = (
+                (any(k in cols_str for k in ["dept_name", "department_name", "phòng ban", "bộ phận"]) or any(k in q_low for k in ["phòng ban", "bộ phận"]))
+                and not any(k in str(name_col).lower() for k in ["fullname", "full_name", "name", "tên", "họ và tên", "salesperson", "emp_no", "first_name", "last_name", "employee", "nhân sự", "nhân viên"])
+                and not any(k in q_low for k in ["nhân viên", "nhân sự", "ai là", "top nhân viên", "thâm niên làm việc", "salesperson", "employee", "người"])
+                and detect_analysis_entity_type(df, user_query=user_query, name_col=name_col) == "department"
+            )
             if is_dept:
                 if len(df) == 1:
                     if is_en:
@@ -2204,6 +2249,29 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                 else:
                     h1 = f"• **Đóng góp Giá trị Cốt lõi & Tính Cạnh tranh Ngành nghề**: Phòng ban **{top_name}** đạt mức cao nhất ({format_metric_value(top_v, val_col)}), thể hiện vị thế đơn vị trọng yếu và tính chất cạnh tranh cao trong việc thu hút nhân lực giỏi trên thị trường lao động."
                     h2 = f"• **Cơ cấu Định biên Cấp bậc & Ngân sách Vận hành**: Mức thấp hơn {gap_vs_top:.1f}% ({format_metric_value(spread_diff, val_col)}) so với đơn vị dẫn đầu (hoặc đơn vị dẫn đầu vượt +{lead_vs_bot:.1f}% so với **{bot_name}** ở mức {format_metric_value(bot_v, val_col)}) phản ánh sự khác biệt về tỷ lệ nhân sự cao cấp (senior) và giới hạn trần ngân sách được phê duyệt giữa các đơn vị."
+                return f"{h1}\n\n{h2}"
+
+            # 3C1. Nhân sự / Nhân viên (Individual Employees / Salespeople)
+            is_employee = (
+                any(k in str(name_col).lower() for k in ["fullname", "full_name", "name", "tên", "họ và tên", "salesperson", "emp_no", "first_name", "last_name", "employee", "nhân sự", "nhân viên"])
+                or any(k in q_low for k in ["nhân viên", "nhân sự", "ai là", "top nhân viên", "thâm niên làm việc", "salesperson", "employee", "người"])
+                or detect_analysis_entity_type(df, user_query=user_query, name_col=name_col) == "employee"
+            )
+            if is_employee:
+                if is_single_or_tied:
+                    if is_en:
+                        h1 = f"• **Individual Performance & Role Specialization**: **{top_name}** leads at {format_metric_value(top_v, val_col)}, reflecting exceptional individual contribution and specialized competence."
+                        h2 = f"• **Merit Alignment & Talent Retention**: Performance outcomes reinforce merit-based recognition and professional advancement."
+                    else:
+                        h1 = f"• **Năng lực Cá nhân & Hiệu quả Cống hiến Vượt bậc**: Nhân sự **{top_name}** dẫn đầu với mức {format_metric_value(top_v, val_col)}, thể hiện năng lực chuyên môn xuất sắc và hiệu quả đóng góp vượt trội."
+                        h2 = f"• **Cơ chế Đãi ngộ Theo Năng lực & Động lực Phát triển**: Kết quả khẳng định chính sách ghi nhận minh bạch và tạo động lực phát triển bền vững cho nhân sự chủ chốt."
+                    return f"{h1}\n\n{h2}"
+                if is_en:
+                    h1 = f"• **Top Performer Leadership & Work Output**: **{top_name}** leads the cohort ({format_metric_value(top_v, val_col)}), reflecting outstanding dedication and specialized execution capability."
+                    h2 = f"• **Cohort Progression & Talent Balance**: The spread of {format_metric_value(spread_diff, val_col)} ({gap_vs_top:.1f}%) against **{bot_name}** ({format_metric_value(bot_v, val_col)}) provides clear performance benchmarks across the organizational cohort."
+                else:
+                    h1 = f"• **Vai trò Dẫn dắt & Đóng góp Của Nhân sự Xuất sắc**: Nhân sự **{top_name}** dẫn đầu toàn nhóm ({format_metric_value(top_v, val_col)}), thể hiện năng lực chuyên môn vững vàng và tinh thần trách nhiệm cao trong công việc."
+                    h2 = f"• **Cân đối Năng lực & Chuẩn mực Đánh giá Nội bộ**: Biên độ chênh lệch {gap_vs_top:.1f}% ({format_metric_value(spread_diff, val_col)}) so với **{bot_name}** ({format_metric_value(bot_v, val_col)}) là cơ sở quan trọng để xây dựng chuẩn mực đánh giá và nhân rộng các điển hình tiên tiến trong tổ chức."
                 return f"{h1}\n\n{h2}"
 
             # 3C2. Phân bổ nhân sự theo Team / Khu vực (Sales Team Headcount Distribution)
@@ -2516,16 +2584,45 @@ def generate_data_grounded_action_plan(df: pd.DataFrame, is_en: bool = False, us
     cols_str = " ".join(str(c).lower() for c in cols)
     q_low = (user_query or "").lower()
 
+    # 0.05 BÀI TOÁN THÂM NIÊN LÂU NHẤT / NHÂN SỰ KỲ CỰU (Longest-Tenured Veteran Employees)
+    is_longest_tenure = (
+        any(k in q_low for k in ["lâu nhất", "gắn bó lâu nhất", "thâm niên cao nhất", "thâm niên lớn nhất", "top thâm niên", "longest tenure", "highest tenure", "most tenured", "thâm niên làm việc lâu nhất"])
+        or (
+            any(k in q_low for k in ["thâm niên", "tenure", "gắn bó", "service", "năm"])
+            and any(k in q_low for k in ["top", "cao nhất", "nhiều nhất", "lớn nhất", "dẫn đầu"])
+            and not any(k in q_low for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "mới vào", "mới gia nhập", "low tenure", "under 3", "under 5"])
+            and not any(k in q_low for k in ["lương", "salary", "thu nhập", "tiền"])
+        )
+    ) or (
+        any(k in str(val_col).lower() for k in ["yearsofservice", "service", "tenure", "thâm_niên", "thâm niên"])
+        and not any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
+    )
+    if is_longest_tenure:
+        if is_en:
+            urgent = f"• 🟢 **[Maintain Stability / 0-30 Days]**: Formally recognize and honor the enduring contribution of veteran personnel (**{top_name}** and cohort peers, spread of only {gap_vs_top:.2f}%); maintain current seniority reward policies without costly interventions."
+            medium = f"• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Establish an Enterprise Mentorship Program to facilitate knowledge transfer from veteran leaders to emerging high-potential talent around median tenure {median_val:.2f} years."
+            longterm = f"• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Institutionalize Long-term Loyalty & Retention frameworks, appointing senior contributors to advisory councils and specialized subject-matter expert roles."
+        else:
+            urgent = f"• 🟢 **[Duy Trì Ổn Định / 0 - 30 Ngày]**: Ghi nhận và tôn vinh sự cống hiến bền bỉ của đội ngũ nhân sự kỳ cựu (**{top_name}** cùng các nhân sự trong nhóm, chênh lệch thâm niên chỉ {gap_vs_top:.2f}%); tiếp tục duy trì chính sách đãi ngộ thâm niên hiện hành, không phát sinh chi phí can thiệp đột biến."
+            medium = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Thiết lập chương trình Cố vấn Doanh nghiệp (Mentorship Program) để lực lượng nhân sự kỳ cựu chuyển giao kiến thức, kỹ năng và kinh nghiệm thực chiến cho thế hệ nhân sự kế cận quanh mức thâm niên trung vị {median_val:.2f} năm."
+            longterm = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách đãi ngộ trọn đời (Long-term Retention & Loyalty Awards), quy hoạch các nhân sự cống hiến lâu năm vào hội đồng chuyên môn hoặc vị trí cố vấn chiến lược cấp cao."
+        return f"{urgent}\n\n{medium}\n\n{longterm}"
+
     # 0.1 BÀI TOÁN NHÂN SỰ NGOẠI LỆ: THÂM NIÊN THẤP NHƯNG LƯƠNG TOP % (Low Tenure & Top Percentile Outliers)
+    has_valid_sal = any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
     is_low_tenure_top_sal = (
-        (
-            any(k in q_low for k in ["thâm niên", "gắn bó", "tenure", "năm"])
-            and any(k in q_low for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "under", "less than"])
-            and any(k in q_low for k in ["top", "cao nhất"])
-            and any(k in q_low for k in ["%", "phần trăm", "percent"])
-        ) or (
-            any(any(k in str(c).lower() for k in ["salarypercentile", "percentile", "bách phân vị"]) for c in df.columns)
-            and any(any(k in str(c).lower() for k in ["yearsofservice", "thâm niên", "tenure"]) for c in df.columns)
+        has_valid_sal
+        and not is_longest_tenure
+        and (
+            (
+                any(k in q_low for k in ["thâm niên", "gắn bó", "tenure", "năm"])
+                and any(k in q_low for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "under", "less than", "mới vào", "mới gia nhập"])
+                and any(k in q_low for k in ["top", "cao nhất"])
+                and any(k in q_low for k in ["%", "phần trăm", "percent", "lương", "salary", "thu nhập"])
+            ) or (
+                any(any(k in str(c).lower() for k in ["salarypercentile", "percentile", "bách phân vị"]) for c in df.columns)
+                and any(any(k in str(c).lower() for k in ["yearsofservice", "thâm niên", "tenure"]) for c in df.columns)
+            )
         )
     )
     if is_low_tenure_top_sal:
@@ -2908,22 +3005,89 @@ def generate_data_grounded_anomaly(df: pd.DataFrame, user_query: str = "", is_en
     q_low = (user_query or "").lower()
     cols_str = " ".join(str(c).lower() for c in df.columns)
 
-    # 1. SPECIALIZED HANDLER: THÂM NIÊN THẤP & LƯƠNG THUỘC TOP CAO (Talent Outliers / Lateral Senior Hiring)
-    is_low_tenure_top_sal = (
-        any(k in q_low for k in ["thâm niên", "tenure", "service", "dưới 3 năm", "< 3", "ít năm", "mới vào"])
-        and any(k in q_low for k in ["top", "5%", "cao nhất", "highest", "lương", "salary", "ngoại lệ", "outlier"])
+    # 0.05 BÀI TOÁN THÂM NIÊN LÂU NHẤT / NHÂN SỰ KỲ CỰU (Longest-Tenured Veteran Employees)
+    is_longest_tenure = (
+        any(k in q_low for k in ["lâu nhất", "gắn bó lâu nhất", "thâm niên cao nhất", "thâm niên lớn nhất", "top thâm niên", "longest tenure", "highest tenure", "most tenured", "thâm niên làm việc lâu nhất"])
+        or (
+            any(k in q_low for k in ["thâm niên", "tenure", "gắn bó", "service", "năm"])
+            and any(k in q_low for k in ["top", "cao nhất", "nhiều nhất", "lớn nhất", "dẫn đầu"])
+            and not any(k in q_low for k in ["dưới", "ít hơn", "nhỏ hơn", "<", "mới vào", "mới gia nhập", "low tenure", "under 3", "under 5"])
+            and not any(k in q_low for k in ["lương", "salary", "thu nhập", "tiền"])
+        )
     ) or (
         any(k in cols_str for k in ["yearsofservice", "tenure", "thâm niên", "service_years"])
-        and any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
-        and not any(k in q_low for k in ["nén lương", "compression", "khoảng cách"])
+        and not any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
+    )
+    if is_longest_tenure:
+        try:
+            tenure_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["yearsofservice", "tenure", "thâm niên", "service_years", "years", "năm"])), None)
+            name_col = get_best_name_column(df, exclude_cols=[tenure_col] if tenure_col else None)
+            if not name_col:
+                name_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "full_name", "name", "tên", "họ và tên", "salesperson"])), df.columns[0])
+
+            df_eval = df.copy()
+            if tenure_col:
+                df_eval[tenure_col] = pd.to_numeric(df_eval[tenure_col], errors="coerce").fillna(0)
+                df_eval = df_eval.sort_values(by=tenure_col, ascending=False)
+
+            n_emps = len(df_eval)
+            top_emp = df_eval.iloc[0]
+            top_name = format_entity_label(top_emp[name_col], col_name=name_col, lang="en" if is_en else "vi")
+            top_tenure_val = float(top_emp[tenure_col]) if tenure_col else 0
+
+            min_tenure_val = float(df_eval[tenure_col].min()) if tenure_col else 0
+            max_tenure_val = float(df_eval[tenure_col].max()) if tenure_col else 0
+            avg_tenure_val = float(df_eval[tenure_col].mean()) if tenure_col else 0
+            tenure_diff = max_tenure_val - min_tenure_val
+            gap_pct = (tenure_diff / max_tenure_val * 100) if max_tenure_val > 0 else 0
+
+            other_names = []
+            for i in range(1, min(len(df_eval), 4)):
+                row_i = df_eval.iloc[i]
+                n_i = format_entity_label(row_i[name_col], col_name=name_col, lang="en" if is_en else "vi")
+                t_i = f"{float(row_i[tenure_col]):.2f} năm" if tenure_col else ""
+                other_names.append(f"**{n_i}** ({t_i})")
+
+            other_str = ", ".join(other_names) if other_names else ""
+            second_line_tail = f", tiếp sau là {other_str}" if other_str else ""
+
+            if is_en:
+                b1 = f"• **Longest-Tenured Workforce Confirmation**: Verified **{n_emps} veteran personnel** with the longest tenure in the enterprise (ranging from {min_tenure_val:.2f} to {max_tenure_val:.2f} years of service)."
+                b2 = f"• **Lead Seniority Contributor**: **{top_name}** holds the longest tenure at **{top_tenure_val:.2f} years**{second_line_tail}."
+                b3 = f"• **Organizational Stability & Loyalty Profile**: The veteran cohort averages **{avg_tenure_val:.2f} years** of service with a tight spread of only {gap_pct:.2f}% across the top cohort, confirming exceptional employee loyalty and workforce continuity."
+            else:
+                b1 = f"• **Xác nhận Top {n_emps} Nhân sự Kỳ cựu & Cống hiến Lâu năm**: Ghi nhận chính xác **{n_emps} nhân sự** có thâm niên công tác lâu nhất tại công ty (từ {min_tenure_val:.2f} đến {max_tenure_val:.2f} năm)."
+                b2 = f"• **Nhân sự Dẫn đầu**: **{top_name}** có thâm niên cống hiến cao nhất đạt **{top_tenure_val:.2f} năm**{second_line_tail}."
+                b3 = f"• **Độ Gắn Kết & Tính Ổn Định Tổ Chức**: Toàn bộ nhóm nhân sự kỳ cựu duy trì mức thâm niên bình quân **{avg_tenure_val:.2f} năm** (biên độ chênh lệch giữa người cao nhất và thấp nhất trong nhóm chỉ {gap_pct:.2f}%), phản ánh độ gắn bó bền chặt và sự ổn định cao của tổ chức."
+            return f"{b1}\n\n{b2}\n\n{b3}"
+        except Exception:
+            pass
+
+    # 1. SPECIALIZED HANDLER: THÂM NIÊN THẤP & LƯƠNG THUỘC TOP CAO (Talent Outliers / Lateral Senior Hiring)
+    has_valid_sal = any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
+    is_low_tenure_top_sal = (
+        has_valid_sal
+        and not is_longest_tenure
+        and (
+            (
+                any(k in q_low for k in ["thâm niên", "tenure", "service", "gắn bó"])
+                and any(k in q_low for k in ["dưới 3 năm", "< 3", "ít năm", "mới vào", "mới gia nhập", "under 3", "under 5", "low tenure"])
+                and any(k in q_low for k in ["top", "5%", "cao nhất", "highest", "lương", "salary", "ngoại lệ", "outlier"])
+            ) or (
+                any(k in cols_str for k in ["yearsofservice", "tenure", "thâm niên", "service_years"])
+                and any(k in cols_str for k in ["salary", "currentsalary", "lương", "annualsalary"])
+                and any(k in q_low for k in ["dưới", "ít hơn", "mới vào", "ngoại lệ"])
+                and not any(k in q_low for k in ["nén lương", "compression", "khoảng cách"])
+            )
+        )
     )
     if is_low_tenure_top_sal:
         try:
             sal_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["salary", "currentsalary", "lương", "annualsalary"])), None)
             tenure_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["yearsofservice", "tenure", "thâm niên", "service_years", "years"])), None)
-            name_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "full_name", "employeename", "name", "tên", "họ và tên"])), None)
+            name_col = get_best_name_column(df, exclude_cols=[sal_col, tenure_col] if sal_col and tenure_col else None)
             if not name_col:
-                name_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["empid", "id", "mã nhân viên"])), df.columns[0])
+                name_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["fullname", "full_name", "employeename", "name", "tên", "họ và tên"])), df.columns[0])
 
             df_eval = df.copy()
             if sal_col:
@@ -2950,27 +3114,28 @@ def generate_data_grounded_anomaly(df: pd.DataFrame, user_query: str = "", is_en
             max_sal_fmt = format_metric_value(max_sal_val, sal_col or "salary")
             avg_sal_fmt = format_metric_value(avg_sal_val, sal_col or "salary")
 
-            # Liệt kê các nhân sự tiếp theo
-            other_names = []
-            for i in range(1, min(len(df_eval), 3)):
-                row_i = df_eval.iloc[i]
-                n_i = format_entity_label(row_i[name_col], col_name=name_col, lang="en" if is_en else "vi")
-                s_i = format_metric_value(float(row_i[sal_col]), sal_col or "salary") if sal_col else ""
-                t_i = f"{float(row_i[tenure_col]):.1f} năm" if tenure_col else ""
-                other_names.append(f"**{n_i}** ({s_i}, thâm niên {t_i})")
+            if top_sal_val > 0:
+                # Liệt kê các nhân sự tiếp theo
+                other_names = []
+                for i in range(1, min(len(df_eval), 3)):
+                    row_i = df_eval.iloc[i]
+                    n_i = format_entity_label(row_i[name_col], col_name=name_col, lang="en" if is_en else "vi")
+                    s_i = format_metric_value(float(row_i[sal_col]), sal_col or "salary") if sal_col else ""
+                    t_i = f"{float(row_i[tenure_col]):.1f} năm" if tenure_col else ""
+                    other_names.append(f"**{n_i}** ({s_i}, thâm niên {t_i})")
 
-            other_str = ", ".join(other_names) if other_names else ""
-            second_line_tail = f", tiếp sau là {other_str}" if other_str else ""
+                other_str = ", ".join(other_names) if other_names else ""
+                second_line_tail = f", tiếp sau là {other_str}" if other_str else ""
 
-            if is_en:
-                b1 = f"• **High-Compensation Talent Outliers**: Formally identified **{n_emps} personnel** with under 3 years of tenure ({min_tenure_val:.1f} - {max_tenure_val:.1f} years) ranking in the company's top 5% compensation bracket ({min_sal_fmt} - {max_sal_fmt})."
-                b2 = f"• **Lead Compensation Outlier**: **{top_name}** commands the highest compensation of **{top_sal_fmt}** with {top_tenure_val:.1f} years of tenure{second_line_tail}."
-                b3 = f"• **Cohort Profile & Total Rewards**: This elite cohort averages {avg_tenure_val:.1f} years of service with an average compensation of **{avg_sal_fmt}**, demonstrating a pay-for-performance and lateral senior hiring model."
-            else:
-                b1 = f"• **Xác nhận {n_emps} Nhân sự Ngoại lệ (High-Compensation Outliers)**: Ghi nhận chính xác **{n_emps} nhân sự** có thâm niên dưới 3 năm ({min_tenure_val:.1f} - {max_tenure_val:.1f} năm) nhưng mức lương nằm trong Top 5% cao nhất toàn công ty ({min_sal_fmt} - {max_sal_fmt})."
-                b2 = f"• **Nhân sự Dẫn đầu**: **{top_name}** đạt thu nhập cao nhất **{top_sal_fmt}** (thâm niên {top_tenure_val:.1f} năm){second_line_tail}."
-                b3 = f"• **Mặt bằng & Cơ cấu Đãi ngộ Toàn Nhóm**: Nhóm nhân sự ngoại lệ có thâm niên bình quân {avg_tenure_val:.1f} năm và mức thu nhập trung bình **{avg_sal_fmt}**, phản ánh chính sách đãi ngộ vượt trội cho nhân sự chất lượng cao và thu hút nhân tài từ thị trường (Lateral Senior Hiring)."
-            return f"{b1}\n\n{b2}\n\n{b3}"
+                if is_en:
+                    b1 = f"• **High-Compensation Talent Outliers**: Formally identified **{n_emps} personnel** with under 3 years of tenure ({min_tenure_val:.1f} - {max_tenure_val:.1f} years) ranking in the company's top 5% compensation bracket ({min_sal_fmt} - {max_sal_fmt})."
+                    b2 = f"• **Lead Compensation Outlier**: **{top_name}** commands the highest compensation of **{top_sal_fmt}** with {top_tenure_val:.1f} years of tenure{second_line_tail}."
+                    b3 = f"• **Cohort Profile & Total Rewards**: This elite cohort averages {avg_tenure_val:.1f} years of service with an average compensation of **{avg_sal_fmt}**, demonstrating a pay-for-performance and lateral senior hiring model."
+                else:
+                    b1 = f"• **Xác nhận {n_emps} Nhân sự Ngoại lệ (High-Compensation Outliers)**: Ghi nhận chính xác **{n_emps} nhân sự** có thâm niên dưới 3 năm ({min_tenure_val:.1f} - {max_tenure_val:.1f} năm) nhưng mức lương nằm trong Top 5% cao nhất toàn công ty ({min_sal_fmt} - {max_sal_fmt})."
+                    b2 = f"• **Nhân sự Dẫn đầu**: **{top_name}** đạt thu nhập cao nhất **{top_sal_fmt}** (thâm niên {top_tenure_val:.1f} năm){second_line_tail}."
+                    b3 = f"• **Mặt bằng & Cơ cấu Đãi ngộ Toàn Nhóm**: Nhóm nhân sự ngoại lệ có thâm niên bình quân {avg_tenure_val:.1f} năm và mức thu nhập trung bình **{avg_sal_fmt}**, phản ánh chính sách đãi ngộ vượt trội cho nhân sự chất lượng cao và thu hút nhân tài từ thị trường (Lateral Senior Hiring)."
+                return f"{b1}\n\n{b2}\n\n{b3}"
         except Exception:
             pass
 
@@ -3483,29 +3648,44 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
             clean_body = clean_body.replace("**", "").strip()
             clean_body = repair_truncated_text(clean_body, is_en=is_en)
 
-            if "ưu tiên cao" in l.lower() or "cấp bách" in l.lower() or "thực hiện ngay" in l.lower():
+            clean_low = l.lower()
+            if "duy trì ổn định" in clean_low or "bình đẳng tuyệt đối" in clean_low or "maintain stability" in clean_low or "tôn vinh" in clean_low or "ổn định" in clean_low and ("0 - 30" in clean_low or "0-30" in clean_low):
+                l = f"• 🟢 **[{'Maintain Stability / 0-30 Days' if is_en else 'Duy Trì Ổn Định / 0 - 30 Ngày'}]**: {clean_body}"
+            elif "theo dõi định kỳ" in clean_low or "theo dõi" in clean_low or "routine monitoring" in clean_low:
+                l = f"• 🟡 **[{'Routine Monitoring / 0-30 Days' if is_en else 'Theo Dõi Định Kỳ / 0 - 30 Ngày'}]**: {clean_body}"
+            elif "ưu tiên cao" in clean_low or "cấp bách" in clean_low or "thực hiện ngay" in clean_low or "can thiệp ngay" in clean_low or "high priority" in clean_low or "immediate" in clean_low:
                 if any(c in clean_body for c in ["🟡", "🟢"]) or len(clean_body) < 15:
-                    clean_body = "Rà soát chính sách đãi ngộ và kiểm soát tức thời các điểm bất thường vận hành."
-                l = f"• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: {clean_body}"
-            elif "ưu tiên trung bình" in l.lower() or "trung hạn" in l.lower() or "quý tiếp theo" in l.lower():
+                    clean_body = "Rà soát chính sách đãi ngộ và kiểm soát tức thời các điểm bất thường vận hành." if not is_en else "Review compensation policy and manage operational anomalies immediately."
+                l = f"• 🔴 **[{'High Priority - Immediate / 0-30 Days' if is_en else 'Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày'}]**: {clean_body}"
+            elif "ưu tiên trung bình" in clean_low or "trung hạn" in clean_low or "quý tiếp theo" in clean_low or "1 - 3 quý" in clean_low or "1-3 quarters" in clean_low or "medium priority" in clean_low or "tactical" in clean_low or "giám sát" in clean_low or "rà soát nội bộ" in clean_low:
                 if any(c in clean_body for c in ["🔴", "🟢"]) or len(clean_body) < 15:
-                    clean_body = "Tối ưu hóa quy trình phân bổ nguồn lực và chuẩn hóa định mức ngân sách theo thực tế."
-                l = f"• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: {clean_body}"
-            elif "ưu tiên thấp" in l.lower() or "dài hạn" in l.lower() or "chiến lược" in l.lower():
+                    clean_body = "Tối ưu hóa quy trình phân bổ nguồn lực và chuẩn hóa định mức ngân sách theo thực tế." if not is_en else "Optimize resource allocation workflows and standardize baseline budgets."
+                l = f"• 🟡 **[{'Medium Priority - Tactical / Next 1-3 Quarters' if is_en else 'Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới'}]**: {clean_body}"
+            elif "ưu tiên thấp" in clean_low or "dài hạn" in clean_low or "chiến lược" in clean_low or "1 - 3 năm" in clean_low or "1-3 years" in clean_low or "low priority" in clean_low or "long-term" in clean_low or "bền vững" in clean_low:
                 if any(c in clean_body for c in ["🔴", "🟡"]) or len(clean_body) < 15:
-                    clean_body = "Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn."
-                l = f"• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: {clean_body}"
+                    clean_body = "Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn." if not is_en else "Overhaul total rewards framework and strengthen long-term competitiveness."
+                l = f"• 🟢 **[{'Low Priority / Long-term Strategy / 1-3 Years' if is_en else 'Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm'}]**: {clean_body}"
+            elif not l.startswith("•"):
+                l = f"• {l}"
 
             # Sửa câu bị cụt lửng ở đuôi
             l = repair_truncated_text(l, is_en=is_en)
             cleaned_23.append(l)
 
-        # Luôn đảm bảo đúng 3 gạch đầu dòng chuẩn mực hoặc fallback sang data-grounded engine
+        # Luôn đảm bảo đúng 3 gạch đầu dòng chuẩn mực theo 3 cấp độ thời gian mà không bị ghi đè lẫn nhau
         if len(cleaned_23) >= 2:
-            high_item = next((l for l in cleaned_23 if "🔴" in l), "• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách đãi ngộ và kiểm soát tức thời các điểm bất thường vận hành.")
-            med_item = next((l for l in cleaned_23 if "🟡" in l), "• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tối ưu hóa quy trình phân bổ nguồn lực và chuẩn hóa định mức ngân sách theo thực tế.")
-            low_item = next((l for l in cleaned_23 if "🟢" in l), "• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn.")
-            part_23 = f"{high_item}\n\n{med_item}\n\n{low_item}"
+            tier1_match = next((l for l in cleaned_23 if any(tag in l for tag in ["0 - 30 Ngày", "0-30 Days", "Cấp Bách", "Duy Trì Ổn Định", "Theo Dõi", "High Priority", "Maintain Stability", "Routine Monitoring"])), None)
+            tier2_match = next((l for l in cleaned_23 if any(tag in l for tag in ["1 - 3 Quý", "1-3 Quarters", "Trung Hạn", "Medium Priority", "Tactical"])), None)
+            tier3_match = next((l for l in cleaned_23 if any(tag in l for tag in ["1 - 3 Năm", "1-3 Years", "Dài Hạn", "Low Priority", "Long-term", "Chiến Lược Bền Vững"])), None)
+
+            def_tier1 = "• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: Rà soát chính sách đãi ngộ và kiểm soát tức thời các điểm bất thường vận hành." if not is_en else "• 🔴 **[High Priority - Immediate / 0-30 Days]**: Review compensation policy and manage operational anomalies immediately."
+            def_tier2 = "• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: Tối ưu hóa quy trình phân bổ nguồn lực và chuẩn hóa định mức ngân sách theo thực tế." if not is_en else "• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: Optimize resource allocation workflows and standardize baseline budgets."
+            def_tier3 = "• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: Hoàn thiện chính sách tổng thể, đẩy mạnh chuyển đổi số và nâng cao năng lực cạnh tranh dài hạn." if not is_en else "• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: Overhaul total rewards framework and strengthen long-term competitiveness."
+
+            tier1 = tier1_match or cleaned_23[0] or def_tier1
+            tier2 = tier2_match or (cleaned_23[1] if len(cleaned_23) > 1 and cleaned_23[1] != tier1 else def_tier2)
+            tier3 = tier3_match or (cleaned_23[2] if len(cleaned_23) > 2 and cleaned_23[2] not in (tier1, tier2) else def_tier3)
+            part_23 = f"{tier1}\n\n{tier2}\n\n{tier3}"
         elif df is not None and not df.empty:
             part_23 = generate_data_grounded_action_plan(df, is_en=is_en, user_query=user_query)
 
@@ -3600,11 +3780,11 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
         # BẮT BUỘC: Mỗi một ý (gạch đầu dòng • hoặc icon 🔴🟡🟢) phải xuống dòng cách đoạn (\n\n) rõ ràng
         text = re.sub(r"(?<=[^\n])\s*•\s*", "\n\n• ", text)
         text = re.sub(r"(?<=[^\n])\s*(?=[🔴🟡🟢])", "\n\n• ", text)
-        # Chuẩn hóa từng dòng, loại bỏ bullet lặp mà tuyệt đối không động chạm đến cú pháp Markdown **, dấu gạch nối ngày tháng hay dấu ngoặc
+        # Chuẩn hóa từng dòng, loại bỏ bullet lặp, chấm thừa hoặc khoảng trắng ở đầu dòng
         raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
         formatted_lines = []
         for l in raw_lines:
-            l = re.sub(r"^[•\s]+", "", l).strip()
+            l = re.sub(r"^[•\.\-\*\s]+", "", l).strip()
             if not l:
                 continue
             l = f"• {l}"
