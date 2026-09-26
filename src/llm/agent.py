@@ -6715,6 +6715,18 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     if is_headcount_q:
         return sql
 
+    # Không can thiệp nếu là câu hỏi phân tích chênh lệch / phân hóa giữa các nhóm (Team spread / disparity / gap)
+    is_team_spread_q = (
+        ("nhóm cao nhất và nhóm thấp nhất" in q_low or "giữa nhóm cao nhất" in q_low or "nhóm thấp nhất" in q_low or "giữa nhóm dẫn đầu" in q_low)
+        or (
+            any(k in q_low for k in ["chênh lệch", "khoảng cách", "phân hóa", "disparity", "spread", "gap", "đối chiếu", "so sánh"])
+            and any(k in q_low for k in ["giữa nhóm", "giữa các nhóm", "nhóm", "team", "đội ngũ", "các đội", "các team"])
+            and not any(k in q_low for k in ["quốc gia", "country", "thị trường", "sản phẩm", "product", "mặt hàng", "nhân sự", "nhân viên", "salesperson", "khách hàng"])
+        )
+    )
+    if is_team_spread_q:
+        return sql
+
     # Không can thiệp nếu là câu hỏi lọc theo điều kiện ngưỡng (đã có auto_fix_chocolates_threshold_query xử lý)
     has_threshold_filter = any(k in q_low for k in ["vượt", "trên", "dưới", "cao hơn", "lớn hơn", "thấp hơn", "nhỏ hơn", "nhiều hơn", "ít hơn", "từ", "ít nhất", "tối thiểu", "tối đa", ">", "<", ">=", "<="]) and any(char.isdigit() for char in q_low)
     if has_threshold_filter:
@@ -6722,7 +6734,7 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     # Không can thiệp nếu là câu hỏi so sánh doanh số và số lượng hộp giữa các Team kinh doanh (đã có auto_fix_chocolates_team_sales_and_boxes_query xử lý)
     if (
-        any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh"])
+        any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "nhóm", "các nhóm", "giữa các nhóm"])
         and not any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "từng người", "từng nhân viên", "thành viên", "ai", "ai bán", "ai có", "riêng team", "team delish", "team yummies", "team jucies", "delish", "yummies", "jucies"])
         and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền"])
         and any(k in q_low for k in ["hộp", "thùng", "boxes", "số lượng"])
@@ -6797,6 +6809,10 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     limit_clause = f"LIMIT {limit}" if limit else ""
 
     # 1. Bảng xếp hạng Nhân viên bán hàng (Salesperson / People)
+    is_asking_team = (
+        any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "nhóm", "giữa nhóm", "các nhóm", "giữa các nhóm"])
+        and not any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai", "thành viên"])
+    )
     is_person = (
         any(k in q_low for k in [
             "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai bán", 
@@ -6804,9 +6820,8 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             "ai có", "người"
         ])
         or any(k in q_low for k in ["yummies", "delish", "jucies"])
-        or any(k in sql_low for k in ["people", "spid", "salesperson", "employeename", "first_name", "last_name", "sales_person"])
+        or (any(k in sql_low for k in ["salesperson", "employeename", "first_name", "last_name", "sales_person"]) and "pe.team" not in sql_low and not is_asking_team)
     )
-    is_asking_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai", "thành viên"])
     if is_person and not is_asking_team and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country", "customer", "customers", "khách hàng"]):
         specific_team = None
         for tm in ["yummies", "delish", "jucies"]:

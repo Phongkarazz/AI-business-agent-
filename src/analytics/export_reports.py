@@ -486,18 +486,37 @@ def export_to_png(fig=None, df: pd.DataFrame = None, user_query: str = "") -> by
 # ---------------------------------------------------------
 # 3. Xuất Báo Cáo Quản Trị Executive PDF Chuẩn McKinsey / BCG
 # ---------------------------------------------------------
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image, HRFlowable
-)
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+try:
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image, HRFlowable
+    )
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    HAS_REPORTLAB = True
+except ImportError:
+    canvas = None
+    A4 = None
+    colors = None
+    getSampleStyleSheet = None
+    ParagraphStyle = None
+    SimpleDocTemplate = None
+    Paragraph = None
+    Spacer = None
+    Table = None
+    TableStyle = None
+    PageBreak = None
+    Image = None
+    HRFlowable = None
+    pdfmetrics = None
+    TTFont = None
+    HAS_REPORTLAB = False
 
 
-class NumberedCanvas(canvas.Canvas):
+class NumberedCanvas(canvas.Canvas if canvas else object):
     """Hai lượt vẽ (two-pass canvas) để tính tổng số trang chính xác cho Báo Cáo Điều Hành (McKinsey / BCG Style).
     Trang 1 (Trang bìa) được giữ hoàn toàn sạch sẽ, không có running header và running footer.
     Từ trang 2 trở đi, hiển thị Header thanh lịch và Footer chứa số trang động dạng 'Trang X / Y'.
