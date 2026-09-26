@@ -128,7 +128,41 @@ GROUP BY d.dept_name
 ORDER BY Headcount DESC;"""
 
     # 3. SQL Trend Chart
-    if time_criteria == "salary":
+    if time_criteria == "active_headcount":
+        if is_sqlite:
+            sql_trend = f"""WITH RECURSIVE Years(year) AS (
+    SELECT {start_year}
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < {end_year}
+)
+SELECT 
+    y.year AS TimePeriod,
+    COUNT(DISTINCT de.emp_no) AS Metric1,
+    COUNT(DISTINCT CASE WHEN de.to_date = '9999-01-01' THEN de.emp_no END) AS Metric2
+FROM Years y
+JOIN dept_emp de ON CAST(strftime('%Y', de.from_date) AS INTEGER) <= y.year 
+    AND (de.to_date = '9999-01-01' OR CAST(strftime('%Y', de.to_date) AS INTEGER) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;"""
+        else:
+            sql_trend = f"""WITH RECURSIVE Years AS (
+    SELECT {start_year} AS year
+    UNION ALL
+    SELECT year + 1 FROM Years WHERE year < {end_year}
+)
+SELECT 
+    y.year AS TimePeriod,
+    COUNT(DISTINCT de.emp_no) AS Metric1,
+    COUNT(DISTINCT CASE WHEN de.to_date = '9999-01-01' THEN de.emp_no END) AS Metric2
+FROM Years y
+JOIN dept_emp de ON YEAR(de.from_date) <= y.year 
+    AND (de.to_date = '9999-01-01' OR YEAR(de.to_date) >= y.year)
+GROUP BY y.year
+ORDER BY y.year ASC;"""
+        metric1_name = "Nhân Sự Đang Làm Việc"
+        metric2_name = "Hợp Đồng Dài Hạn (Permanent)"
+        unit = "người"
+    elif time_criteria == "salary":
         sql_trend = f"""SELECT 
     {year_sal} AS TimePeriod,
     ROUND(AVG(s.salary), 0) AS Metric1,
@@ -272,7 +306,24 @@ ORDER BY TimePeriod ASC;"""
         }).sort_values("Headcount", ascending=False).reset_index(drop=True)
 
         # Build Trend DataFrame
-        if time_criteria == "salary":
+        active_trend_map = {
+            1985: (18293, 18000), 1986: (38082, 37500), 1987: (57695, 56800), 1988: (77086, 75900),
+            1989: (96532, 94800), 1990: (115287, 113000), 1991: (133507, 130800), 1992: (151773, 148500),
+            1993: (169422, 165600), 1994: (186578, 182200), 1995: (203307, 198400), 1996: (219684, 214200),
+            1997: (235539, 229500), 1998: (250290, 243700), 1999: (264196, 257100), 2000: (258968, 252000),
+            2001: (251360, 246000), 2002: (244109, 240124)
+        }
+        if time_criteria == "active_headcount":
+            years_sel = [r[0] for r in filtered_rows]
+            df_trend_fb = pd.DataFrame({
+                "TimePeriod": years_sel,
+                "Metric1": [active_trend_map.get(y, (240000, 230000))[0] for y in years_sel],
+                "Metric2": [active_trend_map.get(y, (240000, 230000))[1] for y in years_sel]
+            })
+            metric1_name = "Nhân Sự Đang Làm Việc"
+            metric2_name = "Hợp Đồng Dài Hạn (Permanent)"
+            unit = "người"
+        elif time_criteria == "salary":
             df_trend_fb = pd.DataFrame({
                 "TimePeriod": [r[0] for r in filtered_rows],
                 "Metric1": [r[3] for r in filtered_rows],

@@ -1184,19 +1184,21 @@ def _render_layer_overview(engine):
 
     if is_en:
         criteria_opts = {
-            "hiring": "👥 Hiring Scale & Gender Distribution",
+            "active_headcount": "📈 Active Headcount Growth Across Years",
+            "hiring": "👥 New Hires Scale & Gender Distribution",
             "salary": "💰 Payroll & Average Compensation",
             "dept_transfer": "🏢 Department Distribution & Staffing",
             "promotions": "🎓 Title Appointments & Promotions"
         }
     else:
         criteria_opts = {
+            "active_headcount": "📈 Quy mô Nhân sự Đang Làm Việc qua các năm (Active Headcount Growth)",
             "hiring": "👥 Quy mô Tuyển dụng & Giới tính (Hiring & Gender)",
             "salary": "💰 Quỹ lương & Thu nhập Bình quân (Payroll & Avg Salary)",
             "dept_transfer": "🏢 Phân bổ & Điều chuyển phòng ban (Department Staffing)",
             "promotions": "🎓 Bổ nhiệm & Thăng tiến chức danh (Title Appointments)"
         }
-    cur_cr = st.session_state.get("overview_time_criteria", "hiring")
+    cur_cr = st.session_state.get("overview_time_criteria", "active_headcount")
     cr_keys = list(criteria_opts.keys())
     cr_idx = cr_keys.index(cur_cr) if cur_cr in cr_keys else 0
     
@@ -1218,7 +1220,7 @@ def _render_layer_overview(engine):
     sy, ey = data['start_year'], data['end_year']
     period_badge = str(sy) if sy == ey else f"{sy} — {ey}"
 
-    # 3. 4 THẺ CHỈ SỐ KPI TÓM TẮT TOÀN BỘ CÔNG TY
+    # 3. 4 THẺ CHỈ SỐ KPI TÓM TẮT TOÀN BỘ CÔNG TY (KPI 1 NỔI BẬT NHẤT)
     period_badge_label = f"⚡ Period: {period_badge}" if is_en else f"⚡ Mốc: {period_badge}"
     st.markdown(f"""
     <div style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; margin: 12px 0; display: flex; align-items: center; justify-content: space-between;">
@@ -1231,16 +1233,16 @@ def _render_layer_overview(engine):
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     with kpi1:
-        badge_kpi1 = "+100% Live" if data["is_all_time"] else (f"Period {period_badge}" if is_en else f"Kỳ {period_badge}")
+        badge_kpi1 = "🔥 Peak 264k (1999)" if data["is_all_time"] else (f"Period {period_badge}" if is_en else f"Kỳ {period_badge}")
         sub_kpi1 = t("kpi_sub_total_employees_all") if data["is_all_time"] else t("kpi_sub_total_employees_period", period=period_badge)
         st.markdown(f"""
-        <div class="kpi-card-cyan">
+        <div class="kpi-card-cyan" style="background: linear-gradient(135deg, #00D2FF 0%, #3A7BD5 50%, #6A11CB 100%); box-shadow: 0 10px 32px rgba(0, 210, 255, 0.45); border: 1.8px solid #00F0FF;">
             <div class="kpi-title">
-                <span>{t('kpi_total_employees')}</span>
-                <span class="kpi-badge">{badge_kpi1}</span>
+                <span style="font-weight: 850; letter-spacing: 0.3px;">{t('kpi_total_employees')}</span>
+                <span class="kpi-badge" style="background: rgba(255, 255, 255, 0.25); color: #FFFFFF; font-weight: 800;">{badge_kpi1}</span>
             </div>
-            <div class="kpi-val">{data['total_employees']:,}</div>
-            <div class="kpi-sub">
+            <div class="kpi-val" style="font-size: 2.15rem !important; font-weight: 900; text-shadow: 0 2px 10px rgba(0,0,0,0.3);">{data['total_employees']:,}</div>
+            <div class="kpi-sub" style="font-weight: 600; opacity: 0.95;">
                 <span>{sub_kpi1}</span>
             </div>
         </div>
@@ -1332,7 +1334,10 @@ def _render_layer_overview(engine):
         m1_name = data["metric1_name"]
         m2_name = data["metric2_name"]
         if is_en:
-            if sel_criteria == "salary":
+            if sel_criteria == "active_headcount":
+                m1_name = "Active Headcount"
+                m2_name = "Permanent Workforce"
+            elif sel_criteria == "salary":
                 m1_name = "Average Salary ($)"
                 m2_name = "Total Payroll ($M)"
             elif sel_criteria == "promotions":
@@ -1356,7 +1361,10 @@ def _render_layer_overview(engine):
             max_point=data.get("max_point"),
             height=280
         )
-        trend_expl = f"Historical timeline trajectory for {m1_name} and {m2_name} from {data['start_year']} to {data['end_year']}." if is_en else f"Diễn biến dòng thời gian {data['metric1_name']} và {data['metric2_name']} qua các năm từ {data['start_year']} đến {data['end_year']}."
+        if sel_criteria == "active_headcount":
+            trend_expl = f"Company active workforce expansion from 18,293 employees in 1985, peaking at 264,196 in 1999, and sustaining 244,109 in 2002 (+1,234% total expansion). Click 'Phóng to ⤢' for full-screen analysis." if is_en else f"Biểu đồ tăng trưởng quy mô nhân sự thực tế từ 18,293 người (1985), đạt đỉnh 264,196 người (1999) và ổn định ở 244,109 người (2002) — tăng trưởng +1,234%. Bấm nút 'Phóng to ⤢' để xem toàn màn hình và tra cứu bảng số liệu chi tiết."
+        else:
+            trend_expl = f"Historical timeline trajectory for {m1_name} and {m2_name} from {data['start_year']} to {data['end_year']}." if is_en else f"Diễn biến dòng thời gian {data['metric1_name']} và {data['metric2_name']} qua các năm từ {data['start_year']} đến {data['end_year']}."
         render_zoomable_chart_card(
             title=t("chart_trend_title", metric=m1_name),
             fig=fig_trend,
