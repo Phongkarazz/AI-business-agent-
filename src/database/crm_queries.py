@@ -108,25 +108,39 @@ def fetch_hr_overview_data(engine, time_range: str = "all", start_year: int = No
     (SELECT ROUND(AVG(s.salary), 0) FROM salaries s WHERE {year_sal} <= {end_year} AND (s.to_date = '9999-01-01' OR {year_sal_to} >= {end_year})) AS avg_salary,
     (SELECT COUNT(DISTINCT t.title) FROM titles t WHERE {year_title} <= {end_year} AND (t.to_date = '9999-01-01' OR {year_t_to} >= {end_year})) AS distinct_titles;"""
 
-    # 2. SQL Phân bổ phòng ban (Theo Active Headcount tại mốc end_year)
+    # 2. SQL Phân bổ phòng ban (Theo Active Headcount tại mốc end_year - mỗi nhân viên thuộc đúng 1 phòng ban duy nhất)
     if is_all_time:
-        sql_dept = """SELECT 
+        sql_dept = """WITH ActiveEmp AS (
+    SELECT 
+        de.emp_no,
+        de.dept_no,
+        ROW_NUMBER() OVER (PARTITION BY de.emp_no ORDER BY de.to_date DESC, de.from_date DESC) AS rn
+    FROM dept_emp de
+    WHERE de.to_date = '9999-01-01'
+)
+SELECT 
     d.dept_name AS Department,
-    COUNT(DISTINCT de.emp_no) AS Headcount,
-    ROUND(COUNT(DISTINCT de.emp_no) * 100.0 / (SELECT COUNT(DISTINCT de2.emp_no) FROM dept_emp de2 WHERE de2.to_date = '9999-01-01'), 2) AS Percentage
+    COUNT(ae.emp_no) AS Headcount,
+    ROUND(COUNT(ae.emp_no) * 100.0 / (SELECT COUNT(*) FROM ActiveEmp WHERE rn = 1), 2) AS Percentage
 FROM departments d
-JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN ActiveEmp ae ON d.dept_no = ae.dept_no AND ae.rn = 1
 GROUP BY d.dept_name
 ORDER BY Headcount DESC;"""
     else:
-        year_de2 = year_de.replace('de.', 'de2.')
-        year_de2_to = year_de_to.replace('de.', 'de2.')
-        sql_dept = f"""SELECT 
+        sql_dept = f"""WITH ActiveEmp AS (
+    SELECT 
+        de.emp_no,
+        de.dept_no,
+        ROW_NUMBER() OVER (PARTITION BY de.emp_no ORDER BY de.to_date DESC, de.from_date DESC) AS rn
+    FROM dept_emp de
+    WHERE {year_de} <= {end_year} AND (de.to_date = '9999-01-01' OR {year_de_to} >= {end_year})
+)
+SELECT 
     d.dept_name AS Department,
-    COUNT(DISTINCT de.emp_no) AS Headcount,
-    ROUND(COUNT(DISTINCT de.emp_no) * 100.0 / NULLIF((SELECT COUNT(DISTINCT de2.emp_no) FROM dept_emp de2 WHERE {year_de2} <= {end_year} AND (de2.to_date = '9999-01-01' OR {year_de2_to} >= {end_year})), 0), 2) AS Percentage
+    COUNT(ae.emp_no) AS Headcount,
+    ROUND(COUNT(ae.emp_no) * 100.0 / (SELECT COUNT(*) FROM ActiveEmp WHERE rn = 1), 2) AS Percentage
 FROM departments d
-JOIN dept_emp de ON d.dept_no = de.dept_no AND {year_de} <= {end_year} AND (de.to_date = '9999-01-01' OR {year_de_to} >= {end_year})
+JOIN ActiveEmp ae ON d.dept_no = ae.dept_no AND ae.rn = 1
 GROUP BY d.dept_name
 ORDER BY Headcount DESC;"""
 
