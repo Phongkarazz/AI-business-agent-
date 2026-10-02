@@ -29,20 +29,35 @@ def tokenize(text: str) -> set[str]:
 
 
 def detect_database_domain(schema_context: str) -> str:
-    """Phân loại CSDL hiện tại: 'employees', 'awesome_chocolates', 'sakila', hoặc 'generic'."""
+    """Phân loại CSDL hiện tại: 'employees', 'awesome_chocolates', 'sakila', 'northwind', hoặc 'generic'."""
     s_low = (schema_context or "").lower()
     
-    is_sakila = any(k in s_low for k in ["film_id", "rental_id", "payment_id", "inventory_id", "actor_id", "customer_id", "staff_id", "`film`", "`rental`", "`payment`", "`actor`", "`inventory`"])
+    # 1. Northwind ERP Domain (order_details, orders, products, customers, suppliers...)
+    is_northwind = any(k in s_low for k in ["order_details", "`order_details`", "orders_status", "inventory_transactions", "purchase_orders"]) or \
+                   (("products" in s_low or "`products`" in s_low) and ("orders" in s_low or "`orders`" in s_low) and not any(k in s_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
+
+    # 2. Sakila Film & Rental Domain
+    is_sakila = (
+        any(k in s_low for k in ["`film`", "`rental`", "film_id", "rental_id", "`actor`", "actor_id", "film_actor", "film_category", "rental_date"])
+        and not is_northwind
+    )
+
+    # 3. Employees Benchmark DB
     is_employees = (
         any(k in s_low for k in ["dept_emp", "dept_manager", "salaries", "titles", "birth_date", "emp_no"])
         and not is_sakila
+        and not is_northwind
     )
+
+    # 4. Awesome Chocolates
     is_choco = (
         any(k in s_low for k in ["spid", "geoid", "boxes", "cost_per_box", "salesperson"])
         or ("`sales`" in s_low and "`products`" in s_low)
-    ) and not is_sakila and not is_employees
+    ) and not is_sakila and not is_employees and not is_northwind
     
-    if is_sakila:
+    if is_northwind:
+        return "northwind"
+    elif is_sakila:
         return "sakila"
     elif is_employees:
         return "employees"
@@ -180,11 +195,11 @@ def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect:
     # 2. Lọc ví dụ tĩnh theo Domain CSDL
     candidate_examples = []
     for ex in FEW_SHOT_EXAMPLES:
-        if target_domain in ("employees", "awesome_chocolates", "sakila"):
+        if target_domain in ("employees", "awesome_chocolates", "sakila", "northwind"):
             if ex.get("domain") == target_domain:
                 candidate_examples.append(ex)
 
-    if not candidate_examples and target_domain not in ("employees", "awesome_chocolates", "sakila"):
+    if not candidate_examples and target_domain not in ("employees", "awesome_chocolates", "sakila", "northwind"):
         candidate_examples = [ex for ex in FEW_SHOT_EXAMPLES if ex.get("domain") == "generic"]
 
     # Chấm điểm và sắp xếp ví dụ tĩnh

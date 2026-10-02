@@ -510,12 +510,9 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.16: Người dùng hỏi Tổng quỹ lương theo phòng ban kèm số lượng nhân sự
+        is_dept_scope = any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng", "department", "dept"]) and not any(k in q_low for k in ["toàn công ty", "toan cong ty", "toàn thể"])
         is_top_dept_payroll_eval = (
-            any(k in q_low for k in ["quỹ lương", "tổng quỹ lương", "tổng chi trả lương", "chi trả quỹ lương", "chi phí lương"])
-            or (
-                any(k in q_low for k in ["tổng lương", "tổng chi lương", "tổng tiền lương"])
-                and any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng", "department"])
-            )
+            is_dept_scope and any(k in q_low for k in ["quỹ lương", "tổng quỹ lương", "tổng chi trả lương", "chi trả quỹ lương", "chi phí lương", "tổng lương", "tổng chi lương", "tổng tiền lương"])
         )
         if is_top_dept_payroll_eval:
             has_sum_salary = "sum(s.salary)" in sql_low or "sum(salary)" in sql_low or "totalpayroll" in sql_low or (df is not None and any("payroll" in str(c).lower() or "sum" in str(c).lower() for c in df.columns))

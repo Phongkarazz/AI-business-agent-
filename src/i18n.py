@@ -229,6 +229,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "sales_kpi_orders": "Tổng Số Giao Dịch",
         "sales_kpi_customers": "Số Chuyên Viên Kinh Doanh",
 
+        # --- Northwind ERP Dashboard ---
+        "northwind_dash_title": "📦 Global Supply Chain & Sales Intelligence Dashboard",
+        "northwind_dash_badge": "CSDL NORTHWIND TRADERS • LIVE SQL",
+        "sidebar_btn_northwind_dashboard": "📦 Dashboard Northwind",
+
         # --- Evolution Dashboard ---
         "evo_dash_title": "🧬 VÒNG LẶP TIẾN HÓA & TỰ HOÀN THIỆN TRI THỨC (SELF-EVOLUTION LOOP)",
         "evo_dash_subtitle": "Hệ thống Tự học, Đánh giá Độc lập & Tích lũy Tri thức Tự động của Veraxus",
@@ -459,6 +464,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "sales_kpi_boxes": "Total Boxes Sold",
         "sales_kpi_orders": "Total Transactions",
         "sales_kpi_customers": "Sales Specialists",
+
+        # --- Northwind ERP Dashboard ---
+        "northwind_dash_title": "📦 Global Supply Chain & Sales Intelligence Dashboard",
+        "northwind_dash_badge": "NORTHWIND TRADERS DB • LIVE SQL",
+        "sidebar_btn_northwind_dashboard": "📦 Northwind Dashboard",
 
         # --- Evolution Dashboard ---
         "evo_dash_title": "🧬 SELF-EVOLUTION & KNOWLEDGE ENHANCEMENT LOOP",

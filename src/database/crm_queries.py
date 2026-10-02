@@ -11,22 +11,42 @@ from sqlalchemy import text, inspect
 
 def detect_dashboard_domain(engine) -> str:
     """Tự động nhận diện nghiệp vụ của CSDL đang kết nối:
-    - 'hr_employees': Quản lý nhân sự, tiền lương (employees, salaries, departments...)
-    - 'sales_commerce': Bán hàng, thương mại (sales, products, geo, people, orders...)
+    - 'northwind_erp': Quản lý chuỗi cung ứng, đơn hàng, khách hàng, sản phẩm (Northwind Traders: order_details, orders, products, customers...)
+    - 'hr_employees': Quản lý nhân sự, tiền lương (Employees benchmark DB: salaries, departments, dept_emp, titles...)
+    - 'sales_commerce': Bán hàng & thương mại (Awesome Chocolates: sales, people, geo, products...)
+    - 'sakila_rental': Phim ảnh & cho thuê (Sakila: film, rental, payment, inventory...)
     - 'crm_support': Chăm sóc khách hàng & Tickets (crm_tickets, tickets...)
-    - 'generic': Cơ sở dữ liệu tổng quát bất kỳ khác.
+    - 'generic': Cơ sở dữ liệu tổng quát bất kỳ khác (tự động phân tích schema và sinh dashboard thích ứng).
     """
     if not engine:
         return "generic"
     try:
         insp = inspect(engine)
         tables = [t.lower() for t in insp.get_table_names()]
-        if any(t in tables for t in ["employees", "salaries", "departments", "dept_emp", "titles"]):
-            return "hr_employees"
-        if any(t in tables for t in ["sales", "products", "orders", "geo", "people"]):
+        
+        # 1. Northwind ERP Domain (order_details, orders, products, customers, suppliers...)
+        if any(t in tables for t in ["order_details", "order_details_status", "purchase_orders", "inventory_transactions"]) or \
+           ("orders" in tables and "products" in tables and ("customers" in tables or "shippers" in tables)):
+            return "northwind_erp"
+
+        # 2. Sakila Film & Rental Domain
+        if "rental" in tables and any(t in tables for t in ["film", "inventory", "actor", "payment"]):
+            return "sakila_rental"
+
+        # 3. Awesome Chocolates / Commercial Sales Domain
+        if "sales" in tables and any(t in tables for t in ["geo", "people", "boxes"]):
             return "sales_commerce"
+
+        # 4. HR & Payroll Benchmark DB (strictly requires departments and salaries or dept_emp or titles)
+        if "departments" in tables and any(t in tables for t in ["salaries", "dept_emp", "dept_manager", "titles"]):
+            return "hr_employees"
+        if "employees" in tables and "salaries" in tables:
+            return "hr_employees"
+
+        # 5. CRM Support Tickets
         if any(t in tables for t in ["crm_tickets", "tickets", "support_tickets"]):
             return "crm_support"
+
         return "generic"
     except Exception:
         return "generic"
@@ -1981,4 +2001,341 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
         }
     except Exception as e:
         return {"df": pd.DataFrame(), "cat_df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
+
+
+# =========================================================================
+# NORTHWIND TRADERS GLOBAL SUPPLY CHAIN & ERP QUERIES
+# =========================================================================
+
+def _get_northwind_year_range(engine) -> tuple:
+    """Tự động xác định khoảng năm của CSDL Northwind."""
+    if not engine:
+        return 2006, 2006
+    is_sqlite = _is_sqlite(engine)
+    try:
+        y_expr = "CAST(substr(order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(order_date)"
+        sql = f"SELECT MIN({y_expr}) AS min_y, MAX({y_expr}) AS max_y FROM orders WHERE order_date IS NOT NULL;"
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql), conn)
+            if not df.empty and pd.notna(df["min_y"].iloc[0]) and pd.notna(df["max_y"].iloc[0]):
+                return int(df["min_y"].iloc[0]), int(df["max_y"].iloc[0])
+    except Exception:
+        pass
+    return 2006, 2006
+
+
+def fetch_northwind_overview_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
+    """Layer 0: Tổng quan Điều hành Chuỗi cung ứng & Doanh số (Northwind Traders Overview)."""
+    start_t = time.time()
+    is_sqlite = _is_sqlite(engine)
+    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
+    m_expr = "substr(o.order_date, 1, 7)" if is_sqlite else "DATE_FORMAT(o.order_date, '%Y-%m')"
+    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+
+    sql_kpis = f"""SELECT 
+    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS total_revenue,
+    COUNT(DISTINCT o.id) AS total_orders,
+    COUNT(DISTINCT od.product_id) AS active_products,
+    COUNT(DISTINCT o.customer_id) AS total_customers,
+    COALESCE(SUM(od.quantity), 0) AS total_quantity
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+{where_c};"""
+
+    sql_trend = f"""SELECT 
+    {m_expr} AS Month,
+    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
+    COUNT(DISTINCT o.id) AS Orders,
+    SUM(od.quantity) AS Quantity
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+{where_c}
+GROUP BY Month
+ORDER BY Month ASC;"""
+
+    sql_cat = f"""SELECT 
+    COALESCE(p.category, 'Other') AS Category,
+    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
+    SUM(od.quantity) AS Quantity,
+    COUNT(DISTINCT o.id) AS Orders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+JOIN products p ON od.product_id = p.id
+{where_c}
+GROUP BY Category
+ORDER BY Revenue DESC;"""
+
+    sql_top_prod = f"""SELECT 
+    p.product_name AS Product,
+    COALESCE(p.category, 'General') AS Category,
+    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
+    SUM(od.quantity) AS Quantity
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+JOIN products p ON od.product_id = p.id
+{where_c}
+GROUP BY p.product_name, p.category
+ORDER BY Revenue DESC
+LIMIT 5;"""
+
+    sql_geo = f"""SELECT 
+    COALESCE(c.country_region, o.ship_country_region, 'Unknown') AS Country,
+    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
+    COUNT(DISTINCT o.id) AS Orders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+{where_c}
+GROUP BY Country
+ORDER BY Revenue DESC
+LIMIT 8;"""
+
+    sql_sample = f"""SELECT 
+    o.id AS OrderID,
+    CONCAT(c.first_name, ' ', c.last_name) AS Customer,
+    p.product_name AS Product,
+    od.quantity AS Qty,
+    od.unit_price AS UnitPrice,
+    ROUND(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0)), 2) AS TotalAmount,
+    o.order_date AS OrderDate
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+JOIN products p ON od.product_id = p.id
+LEFT JOIN customers c ON o.customer_id = c.id
+{where_c}
+ORDER BY o.order_date DESC, o.id DESC
+LIMIT 100;"""
+
+    try:
+        with engine.connect() as conn:
+            kpi_df = pd.read_sql(text(sql_kpis), conn)
+            trend_df = pd.read_sql(text(sql_trend), conn)
+            cat_df = pd.read_sql(text(sql_cat), conn)
+            top_prod_df = pd.read_sql(text(sql_top_prod), conn)
+            geo_df = pd.read_sql(text(sql_geo), conn)
+            sample_df = pd.read_sql(text(sql_sample), conn)
+
+        total_rev = float(kpi_df["total_revenue"].iloc[0]) if not kpi_df.empty else 0.0
+        total_orders = int(kpi_df["total_orders"].iloc[0]) if not kpi_df.empty else 0
+        active_prods = int(kpi_df["active_products"].iloc[0]) if not kpi_df.empty else 0
+        total_custs = int(kpi_df["total_customers"].iloc[0]) if not kpi_df.empty else 0
+        total_qty = int(kpi_df["total_quantity"].iloc[0]) if not kpi_df.empty else 0
+        avg_order = round(total_rev / max(1, total_orders), 2)
+
+        if not cat_df.empty and total_rev > 0:
+            cat_df["SharePct"] = (cat_df["Revenue"] / total_rev * 100).round(1)
+
+        anomalies = []
+        if not top_prod_df.empty:
+            star_prod = top_prod_df.iloc[0]
+            anomalies.append({
+                "title": f"Sản phẩm chủ lực: {star_prod['Product']} đạt doanh số ${star_prod['Revenue']:,.2f}",
+                "severity": "CRITICAL",
+                "metrics_summary": f"Đã xuất bán {star_prod['Quantity']:,} sản phẩm thuộc danh mục {star_prod['Category']}.",
+                "root_cause": "Nhu cầu thị trường cao và chuỗi cung ứng ổn định cho mặt hàng này.",
+                "quantified_impact": f"Chiếm {round(star_prod['Revenue']/max(1, total_rev)*100, 1)}% tổng doanh thu toàn hệ thống."
+            })
+        if not cat_df.empty:
+            top_cat = cat_df.iloc[0]
+            anomalies.append({
+                "title": f"Danh mục dẫn đầu doanh số: {top_cat['Category']} (${top_cat['Revenue']:,.2f})",
+                "severity": "WARNING",
+                "metrics_summary": f"Đóng góp {top_cat['SharePct']}% tổng doanh số qua {top_cat['Orders']} đơn đặt hàng.",
+                "root_cause": "Dòng sản phẩm cốt lõi có vòng quay tồn kho nhanh và biên lợi nhuận tốt.",
+                "quantified_impact": "Đóng vai trò then chốt trong tăng trưởng dòng tiền doanh nghiệp."
+            })
+
+        return {
+            "total_revenue": total_rev,
+            "total_orders": total_orders,
+            "active_products": active_prods,
+            "total_customers": total_custs,
+            "total_quantity": total_qty,
+            "avg_order_value": avg_order,
+            "trend_df": trend_df,
+            "category_df": cat_df,
+            "top_products_df": top_prod_df,
+            "geo_df": geo_df,
+            "sample_df": sample_df,
+            "anomalies": anomalies,
+            "sql": f"{sql_kpis}\n\n{sql_trend}\n\n{sql_cat}\n\n{sql_top_prod}",
+            "exec_time_ms": round((time.time() - start_t) * 1000, 2)
+        }
+    except Exception as e:
+        return {
+            "total_revenue": 0.0,
+            "total_orders": 0,
+            "active_products": 0,
+            "total_customers": 0,
+            "total_quantity": 0,
+            "avg_order_value": 0.0,
+            "trend_df": pd.DataFrame(),
+            "category_df": pd.DataFrame(),
+            "top_products_df": pd.DataFrame(),
+            "geo_df": pd.DataFrame(),
+            "sample_df": pd.DataFrame(),
+            "anomalies": [],
+            "sql": str(e),
+            "exec_time_ms": 0.0
+        }
+
+
+def fetch_northwind_products_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
+    """Layer 1: Phân tích Danh mục & Sản phẩm (Products & Catalog Intelligence)."""
+    start_t = time.time()
+    is_sqlite = _is_sqlite(engine)
+    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
+    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+
+    sql = f"""SELECT 
+    p.id AS ProductID,
+    p.product_code AS Code,
+    p.product_name AS ProductName,
+    COALESCE(p.category, 'General') AS Category,
+    p.standard_cost AS StandardCost,
+    p.list_price AS ListPrice,
+    ROUND(p.list_price - p.standard_cost, 2) AS UnitMargin,
+    ROUND((p.list_price - p.standard_cost) / NULLIF(p.list_price, 0) * 100, 1) AS MarginPct,
+    COALESCE(SUM(od.quantity), 0) AS UnitsSold,
+    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS TotalRevenue
+FROM products p
+LEFT JOIN order_details od ON p.id = od.product_id
+LEFT JOIN orders o ON od.order_id = o.id {('AND ' + y_expr + f' BETWEEN {start_year} AND {end_year}') if start_year and end_year else ''}
+GROUP BY p.id, p.product_code, p.product_name, p.category, p.standard_cost, p.list_price
+ORDER BY TotalRevenue DESC;"""
+
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql), conn)
+        return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
+    except Exception as e:
+        return {"df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
+
+
+def fetch_northwind_orders_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
+    """Layer 2: Phân tích Đơn hàng & Vận chuyển (Orders & Fulfillment Operations)."""
+    start_t = time.time()
+    is_sqlite = _is_sqlite(engine)
+    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
+    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+
+    sql = f"""SELECT 
+    o.id AS OrderID,
+    o.order_date AS OrderDate,
+    o.shipped_date AS ShippedDate,
+    CONCAT(c.first_name, ' ', c.last_name) AS Customer,
+    c.company AS Company,
+    CONCAT(e.first_name, ' ', e.last_name) AS SalesRep,
+    o.ship_city AS ShipCity,
+    o.ship_country_region AS ShipCountry,
+    o.shipping_fee AS ShippingFee,
+    o.payment_type AS PaymentType,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS OrderValue
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+LEFT JOIN employees e ON o.employee_id = e.id
+{where_c}
+GROUP BY o.id, o.order_date, o.shipped_date, c.first_name, c.last_name, c.company, e.first_name, e.last_name, o.ship_city, o.ship_country_region, o.shipping_fee, o.payment_type
+ORDER BY o.order_date DESC
+LIMIT 150;"""
+
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql), conn)
+        return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
+    except Exception as e:
+        return {"df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
+
+
+def fetch_northwind_employees_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
+    """Layer 3: Phân tích Đội ngũ Sales & Đại diện bán hàng (Sales Reps & Team)."""
+    start_t = time.time()
+    is_sqlite = _is_sqlite(engine)
+    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
+    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+
+    sql = f"""SELECT 
+    e.id AS EmployeeID,
+    CONCAT(e.first_name, ' ', e.last_name) AS SalesRep,
+    e.job_title AS JobTitle,
+    e.city AS City,
+    e.country_region AS Country,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS TotalRevenue,
+    ROUND(COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) / NULLIF(COUNT(DISTINCT o.id), 0), 2) AS AvgDealSize
+FROM employees e
+LEFT JOIN orders o ON e.id = o.employee_id {('AND ' + y_expr + f' BETWEEN {start_year} AND {end_year}') if start_year and end_year else ''}
+LEFT JOIN order_details od ON o.id = od.order_id
+GROUP BY e.id, e.first_name, e.last_name, e.job_title, e.city, e.country_region
+ORDER BY TotalRevenue DESC;"""
+
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql), conn)
+        return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
+    except Exception as e:
+        return {"df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
+
+
+def fetch_northwind_customers_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
+    """Layer 4: Phân tích Khách hàng & Thị trường (Global Customers Intelligence)."""
+    start_t = time.time()
+    is_sqlite = _is_sqlite(engine)
+    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
+    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+
+    sql = f"""SELECT 
+    c.id AS CustomerID,
+    c.company AS Company,
+    CONCAT(c.first_name, ' ', c.last_name) AS ContactName,
+    c.job_title AS JobTitle,
+    c.city AS City,
+    c.country_region AS Country,
+    COUNT(DISTINCT o.id) AS OrdersCount,
+    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS TotalSpend
+FROM customers c
+LEFT JOIN orders o ON c.id = o.customer_id {('AND ' + y_expr + f' BETWEEN {start_year} AND {end_year}') if start_year and end_year else ''}
+LEFT JOIN order_details od ON o.id = od.order_id
+GROUP BY c.id, c.company, c.first_name, c.last_name, c.job_title, c.city, c.country_region
+ORDER BY TotalSpend DESC;"""
+
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql), conn)
+        return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
+    except Exception as e:
+        return {"df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
+
+
+def fetch_northwind_suppliers_data(engine) -> dict:
+    """Layer 5: Phân tích Nhà cung ứng & Nhập hàng (Suppliers & Purchasing)."""
+    start_t = time.time()
+    sql = """SELECT 
+    s.id AS SupplierID,
+    s.company AS SupplierCompany,
+    CONCAT(s.first_name, ' ', s.last_name) AS ContactPerson,
+    s.job_title AS JobTitle,
+    s.city AS City,
+    s.country_region AS Country,
+    COUNT(DISTINCT p.id) AS ProductsSupplied
+FROM suppliers s
+LEFT JOIN products p ON s.id = p.supplier_ids
+GROUP BY s.id, s.company, s.first_name, s.last_name, s.job_title, s.city, s.country_region
+ORDER BY ProductsSupplied DESC;"""
+
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql), conn)
+        return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
+    except Exception as e:
+        # Fallback if supplier_ids column is different
+        sql_fallback = "SELECT id AS SupplierID, company AS SupplierCompany, city AS City, country_region AS Country FROM suppliers LIMIT 50;"
+        try:
+            with engine.connect() as conn:
+                df = pd.read_sql(text(sql_fallback), conn)
+            return {"df": df, "anomalies": [], "sql": sql_fallback, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
+        except Exception as e2:
+            return {"df": pd.DataFrame(), "anomalies": [], "sql": str(e2), "exec_time_ms": 0.0}
+
 

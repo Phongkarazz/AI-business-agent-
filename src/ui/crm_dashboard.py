@@ -32,6 +32,13 @@ from src.database.crm_queries import (
     discover_generic_database_schema,
     fetch_generic_overview_data,
     fetch_generic_table_data,
+    _get_northwind_year_range,
+    fetch_northwind_overview_data,
+    fetch_northwind_products_data,
+    fetch_northwind_orders_data,
+    fetch_northwind_employees_data,
+    fetch_northwind_customers_data,
+    fetch_northwind_suppliers_data,
     fetch_crm_kpis,
     fetch_tickets_created_vs_solved,
     fetch_tickets_by_type,
@@ -1036,6 +1043,8 @@ def render_crm_dashboard():
     # Router hiển thị theo domain của CSDL
     if auto_domain == "sales_commerce":
         _render_sales_dashboard(engine)
+    elif auto_domain == "northwind_erp":
+        _render_northwind_dashboard(engine)
     elif auto_domain == "hr_employees":
         _render_hr_dashboard(engine)
     elif auto_domain == "crm_support":
@@ -2784,6 +2793,437 @@ def _render_sales_layer_top_performers(engine):
         end_year=end_year,
         key_prefix="sales_top"
     )
+
+
+# =========================================================================
+# GLOBAL SUPPLY CHAIN & SALES DASHBOARD (NORTHWIND TRADERS)
+# =========================================================================
+
+def _render_northwind_dashboard(engine):
+    """Dashboard Đa Tầng Cấp Cao chuyên sâu cho CSDL Chuỗi Cung Ứng & Bán Hàng (Northwind Traders) - Bilingual."""
+    is_en = (get_current_language() == "en")
+    current_layer = st.session_state.get("northwind_dashboard_layer", "overview")
+    min_year, max_year = _get_northwind_year_range(engine)
+
+    # 1. Header điều hướng
+    c_hdr1, c_hdr2, c_hdr3, c_hdr4 = st.columns([4.0, 2.6, 1.8, 1.6])
+    with c_hdr1:
+        st.markdown(f"""
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+            <div style="font-size: 1.55rem; font-weight: 900; color: #FFFFFF; letter-spacing: -0.02em;">{t('northwind_dash_title')}</div>
+            <span class="crm-badge-neon">{t('northwind_dash_badge')}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c_hdr2:
+        if is_en:
+            layer_names = {
+                "overview": "🏠 Executive Overview",
+                "products": "📦 Products & Inventory",
+                "orders": "🛒 Orders & Fulfillment",
+                "employees": "👥 Sales Representatives",
+                "customers": "🌍 Global Customers",
+                "suppliers": "🏭 Suppliers & Purchasing",
+            }
+        else:
+            layer_names = {
+                "overview": "🏠 Trang chủ Tổng quan (Overview)",
+                "products": "📦 Danh mục & Sản phẩm (Products)",
+                "orders": "🛒 Đơn hàng & Vận chuyển (Orders)",
+                "employees": "👥 Đại diện Bán hàng (Sales Reps)",
+                "customers": "🌍 Khách hàng & Thị trường (Customers)",
+                "suppliers": "🏭 Nhà Cung ứng & Nhập hàng (Suppliers)",
+            }
+        layer_keys = list(layer_names.keys())
+        current_idx = layer_keys.index(current_layer) if current_layer in layer_keys else 0
+
+        selected_l = st.selectbox(
+            "Select Layer" if is_en else "Chọn tầng phân tích",
+            layer_keys,
+            format_func=lambda x: layer_names[x],
+            index=current_idx,
+            key="northwind_layer_selectbox",
+            label_visibility="collapsed"
+        )
+        if selected_l != current_layer:
+            st.session_state["northwind_dashboard_layer"] = selected_l
+            st.rerun()
+        current_layer = st.session_state.get("northwind_dashboard_layer", "overview")
+
+    with c_hdr3:
+        layer_title_curr = layer_names.get(current_layer, "Northwind Overview" if is_en else "Tổng quan Northwind")
+        start_y_curr = st.session_state.get("northwind_timeline_years", (min_year, max_year))[0]
+        end_y_curr = st.session_state.get("northwind_timeline_years", (min_year, max_year))[1]
+        t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
+        ctx_header = {
+            "layer_title": layer_title_curr,
+            "time_label": t_lbl_curr,
+            "anomalies": [],
+            "kpis_summary": f"Viewing {layer_title_curr} during {t_lbl_curr}." if is_en else f"Đang xem {layer_title_curr} giai đoạn {t_lbl_curr}.",
+            "data_summary": f"User opened Copilot from header on {layer_title_curr}." if is_en else f"Người dùng mở Copilot từ thanh Header trên tầng {layer_title_curr}."
+        }
+        if st.button(t("hr_btn_copilot"), type="primary", use_container_width=True, key="btn_northwind_header_copilot", help=t("hr_copilot_help")):
+            show_dashboard_copilot_dialog(ctx_header)
+
+    with c_hdr4:
+        if st.button(t("hr_btn_main_chat"), type="secondary", use_container_width=True, key="btn_northwind_header_chat", help=t("hr_main_chat_help")):
+            st.session_state["view_mode"] = "chat"
+            st.rerun()
+
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+
+    # 2. ROUTING
+    if current_layer == "overview":
+        _render_northwind_layer_overview(engine, min_year, max_year)
+    elif current_layer == "products":
+        _render_northwind_layer_products(engine, min_year, max_year)
+    elif current_layer == "orders":
+        _render_northwind_layer_orders(engine, min_year, max_year)
+    elif current_layer == "employees":
+        _render_northwind_layer_employees(engine, min_year, max_year)
+    elif current_layer == "customers":
+        _render_northwind_layer_customers(engine, min_year, max_year)
+    elif current_layer == "suppliers":
+        _render_northwind_layer_suppliers(engine)
+
+
+def _render_northwind_layer_overview(engine, min_year: int, max_year: int):
+    """Trang chủ Tổng quan Northwind: 6 Thẻ chủ đề, Timeline Slider, 4 KPI Neon, Sóng kép Trend, Donut Category, Bar Top Products, Data Preview & Anomaly Diagnostics."""
+    is_en = (get_current_language() == "en")
+
+    # 1. 6 THẺ CHỦ ĐỀ KHÁM PHÁ THEO LAYER
+    hub_title = "🎯 Select Supply Chain & Sales Domain (Explore by Layer):" if is_en else "🎯 Chọn Chủ Đề Phân Tích Chuỗi Cung Ứng & Bán Hàng (Khám Phá Theo Layer):"
+    st.markdown(f"""
+    <div style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+        <span>🎯</span> <span><b>{hub_title}</b></span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c_c1, c_c2, c_c3 = st.columns(3)
+    with c_c1:
+        if st.button("📦 Products & Catalog ➔\n" + ("Product margins & inventory status" if is_en else "Danh mục sản phẩm, cơ cấu giá và biên lợi nhuận"), key="btn_nw_hub_prod", use_container_width=True):
+            _set_layer("products", domain_key="northwind")
+        st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+        if st.button("👥 Sales Reps & Team ➔\n" + ("Sales representative performance & deal size" if is_en else "Đội ngũ đại diện kinh doanh & doanh số đóng góp"), key="btn_nw_hub_emp", use_container_width=True):
+            _set_layer("employees", domain_key="northwind")
+
+    with c_c2:
+        if st.button("🛒 Orders & Fulfillment ➔\n" + ("Order status, shipping carriers & freight" if is_en else "Quản lý đơn hàng, tiến độ giao vận & phí vận chuyển"), key="btn_nw_hub_ord", use_container_width=True):
+            _set_layer("orders", domain_key="northwind")
+        st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+        if st.button("🌍 Global Customers ➔\n" + ("Corporate clients, countries & purchasing power" if is_en else "Mạng lưới khách hàng doanh nghiệp theo quốc gia"), key="btn_nw_hub_cust", use_container_width=True):
+            _set_layer("customers", domain_key="northwind")
+
+    with c_c3:
+        if st.button("🏭 Suppliers & Purchasing ➔\n" + ("Supplier directory & purchase orders" if is_en else "Nhà cung ứng, đơn nhập hàng & nguồn nguyên liệu"), key="btn_nw_hub_sup", use_container_width=True):
+            _set_layer("suppliers", domain_key="northwind")
+        st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+        if st.button("🤖 AI Supply Chain Copilot ➔\n" + ("Autonomous diagnostic insights & forecasting" if is_en else "Trợ lý AI chẩn đoán nút thắt chuỗi cung ứng"), key="btn_nw_hub_copilot", use_container_width=True):
+            show_dashboard_copilot_dialog({
+                "layer_title": "Northwind Overview",
+                "time_label": f"{min_year} - {max_year}",
+                "anomalies": [],
+                "kpis_summary": "Northwind Supply Chain Executive Intelligence",
+                "data_summary": "Comprehensive overview of orders, products, customers and sales reps."
+            })
+
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+
+    # 2. TIMELINE SLIDER
+    start_year, end_year = _render_timeline_slider("nw_ov", min_year=min_year, max_year=max_year, domain_key="northwind")
+    data = fetch_northwind_overview_data(engine, start_year=start_year, end_year=end_year)
+
+    # 3. 4 NEON METRIC KPI CARDS
+    col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+    with col_k1:
+        st.markdown(f"""
+        <div class="kpi-card-cyan">
+            <div class="kpi-title"><span>{"TOTAL REVENUE" if is_en else "TỔNG DOANH THU"}</span> <span>💰</span></div>
+            <div class="kpi-val">${data['total_revenue']:,.2f}</div>
+            <div class="kpi-sub"><span class="kpi-badge">Net Sales</span> <span>{"After Discounts" if is_en else "Sau chiết khấu"}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_k2:
+        ord_unit = "orders" if is_en else "đơn hàng"
+        st.markdown(f"""
+        <div class="kpi-card-purple">
+            <div class="kpi-title"><span>{"TOTAL ORDERS" if is_en else "TỔNG ĐƠN HÀNG"}</span> <span>🛒</span></div>
+            <div class="kpi-val">{data['total_orders']:,} <span style="font-size:1.1rem;font-weight:700;">{ord_unit}</span></div>
+            <div class="kpi-sub"><span class="kpi-badge">Volume</span> <span>{"Fulfilled Orders" if is_en else "Đơn đã xác nhận"}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_k3:
+        sku_unit = "SKUs" if is_en else "sản phẩm"
+        st.markdown(f"""
+        <div class="kpi-card-emerald">
+            <div class="kpi-title"><span>{"ACTIVE PRODUCTS" if is_en else "SẢN PHẨM PHÁT SINH"}</span> <span>📦</span></div>
+            <div class="kpi-val">{data['active_products']:,} <span style="font-size:1.1rem;font-weight:700;">{sku_unit}</span></div>
+            <div class="kpi-sub"><span class="kpi-badge">Portfolio</span> <span>{"Sold in Period" if is_en else "Phát sinh doanh số"}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_k4:
+        acc_unit = "clients" if is_en else "khách hàng"
+        st.markdown(f"""
+        <div class="kpi-card-amber">
+            <div class="kpi-title"><span>{"GLOBAL CUSTOMERS" if is_en else "KHÁCH HÀNG TOÀN CẦU"}</span> <span>🌍</span></div>
+            <div class="kpi-val">{data['total_customers']:,} <span style="font-size:1.1rem;font-weight:700;">{acc_unit}</span></div>
+            <div class="kpi-sub"><span class="kpi-badge">Accounts</span> <span>{"Active Accounts" if is_en else "Doanh nghiệp mua hàng"}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+    _render_sql_modal("Northwind Overview" if is_en else "Tổng Quan Northwind", data["sql"], data["exec_time_ms"], "nw_ov_sql")
+
+    # 4. BIỂU ĐỒ SÓNG KÉP & DONUT CATEGORY
+    col_c1, col_c2 = st.columns([1.35, 1.0])
+    with col_c1:
+        if not data["trend_df"].empty:
+            fig_tr = build_sales_dual_axis_chart(data["trend_df"], x_col="Month", rev_col="Revenue", box_col="Quantity", height=280)
+            render_zoomable_chart_card(
+                title="📈 Monthly Revenue & Order Quantity Trend" if is_en else "📈 Xu Hướng Doanh Thu & Sản Lượng Theo Tháng",
+                fig=fig_tr,
+                df=data["trend_df"],
+                badge="Dual Wave",
+                explanation="Monthly chronological progression of revenue and item volume." if is_en else "Diễn biến doanh thu và sản lượng xuất bán qua các tháng.",
+                key="nw_trend_chart"
+            )
+        else:
+            st.info("No monthly timeline data found for this period." if is_en else "Không có dữ liệu chuỗi thời gian cho giai đoạn này.")
+
+    with col_c2:
+        if not data["category_df"].empty:
+            fig_cat = build_tickets_by_type_donut(data["category_df"], label_col="Category", val_col="Revenue", height=280)
+            render_zoomable_chart_card(
+                title="🍩 Category Revenue Share" if is_en else "🍩 Cơ Cấu Doanh Thu Theo Danh Mục",
+                fig=fig_cat,
+                df=data["category_df"],
+                badge="Category Share",
+                explanation="Percentage revenue contribution across Northwind categories." if is_en else "Tỷ trọng đóng góp doanh thu của các ngành hàng.",
+                key="nw_cat_chart"
+            )
+        else:
+            st.info("No category data found." if is_en else "Không có dữ liệu phân bổ danh mục.")
+
+    # 5. TOP 5 SẢN PHẨM & PHÂN BỔ QUỐC GIA
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        if not data["top_products_df"].empty:
+            fig_tp = build_horizontal_bar_chart(data["top_products_df"], y_col="Product", x_col="Revenue", name="Revenue ($)" if is_en else "Doanh Thu ($)", height=260)
+            render_zoomable_chart_card(
+                title="🏆 Top 5 Best-Selling Products" if is_en else "🏆 Top 5 Sản Phẩm Doanh Số Cao Nhất",
+                fig=fig_tp,
+                df=data["top_products_df"],
+                badge="Best Sellers",
+                explanation="Highest revenue-generating SKUs in the catalog." if is_en else "Các mã sản phẩm mang lại doanh thu cao nhất.",
+                key="nw_top_prod_chart"
+            )
+
+    with col_b2:
+        if not data["geo_df"].empty:
+            fig_geo = build_horizontal_bar_chart(data["geo_df"], y_col="Country", x_col="Revenue", name="Revenue ($)" if is_en else "Doanh Thu ($)", height=260)
+            render_zoomable_chart_card(
+                title="🌍 Revenue by Customer Country / Region" if is_en else "🌍 Doanh Thu Theo Quốc Gia / Khu Vực",
+                fig=fig_geo,
+                df=data["geo_df"],
+                badge="Geo Markets",
+                explanation="Geographic distribution of sales." if is_en else "Phân bổ doanh thu theo quốc gia của khách hàng.",
+                key="nw_geo_chart"
+            )
+
+    # 6. DỮ LIỆU MẪU ĐƠN HÀNG GẦN ĐÂY
+    if not data["sample_df"].empty:
+        rows_suf = "transactions" if is_en else "giao dịch"
+        st.markdown(f"""
+        <div class="crm-card">
+            <div class="crm-card-title">
+                <span>{"📋 Live Orders & Fulfillment Preview" if is_en else "📋 Danh Sách Đơn Hàng & Giao Vận Trực Tiếp"} ({len(data['sample_df'])} {rows_suf})</span>
+                <span class="crm-badge-neon">Live Data Feed</span>
+            </div>
+        """, unsafe_allow_html=True)
+        st.dataframe(data["sample_df"], hide_index=True, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # 7. SMART ANOMALY PANEL
+    render_smart_analyst_anomaly_panel(
+        layer_id="northwind_overview",
+        data=data,
+        start_year=start_year,
+        end_year=end_year,
+        key_prefix="nw_ov"
+    )
+
+
+def _render_northwind_layer_products(engine, min_year: int, max_year: int):
+    """Layer 1: Phân tích Danh mục & Sản phẩm (Products & Catalog Intelligence)."""
+    is_en = (get_current_language() == "en")
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        bc_home = "Home" if is_en else "Trang Chủ"
+        st.markdown(f"<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>{bc_home}</a> ➔ <b>📦 {'Products & Catalog Intelligence' if is_en else 'Danh mục & Sản phẩm'}</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        back_btn_lbl = "⬅️ Home" if is_en else "⬅️ Trang Chủ"
+        if st.button(back_btn_lbl, key="btn_back_nw_prod", use_container_width=True):
+            _set_layer("overview", domain_key="northwind")
+
+    start_year, end_year = _render_timeline_slider("nw_prod", min_year=min_year, max_year=max_year, domain_key="northwind")
+    data = fetch_northwind_products_data(engine, start_year=start_year, end_year=end_year)
+    df = data["df"]
+
+    st.markdown(f"""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>{"📦 Products Performance & Profit Margin Analysis" if is_en else "📦 Phân Tích Hiệu Suất & Biên Lợi Nhuận Sản Phẩm"}</span>
+            <span class="crm-badge-neon">{len(df)} SKUs</span>
+        </div>
+    """, unsafe_allow_html=True)
+    if not df.empty:
+        st.dataframe(df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No product data available." if is_en else "Không có dữ liệu sản phẩm.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    _render_sql_modal("Products & Catalog" if is_en else "Danh Mục & Sản Phẩm", data["sql"], data["exec_time_ms"], "nw_prod_sql")
+
+
+def _render_northwind_layer_orders(engine, min_year: int, max_year: int):
+    """Layer 2: Phân tích Đơn hàng & Vận chuyển (Orders & Fulfillment Operations)."""
+    is_en = (get_current_language() == "en")
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        bc_home = "Home" if is_en else "Trang Chủ"
+        st.markdown(f"<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>{bc_home}</a> ➔ <b>🛒 {'Orders & Shipping Operations' if is_en else 'Đơn hàng & Giao vận'}</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        back_btn_lbl = "⬅️ Home" if is_en else "⬅️ Trang Chủ"
+        if st.button(back_btn_lbl, key="btn_back_nw_ord", use_container_width=True):
+            _set_layer("overview", domain_key="northwind")
+
+    start_year, end_year = _render_timeline_slider("nw_ord", min_year=min_year, max_year=max_year, domain_key="northwind")
+    data = fetch_northwind_orders_data(engine, start_year=start_year, end_year=end_year)
+    df = data["df"]
+
+    st.markdown(f"""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>{"🛒 Orders & Shipping Operations Log" if is_en else "🛒 Nhật Ký Đơn Hàng & Tiến Độ Giao Vận"}</span>
+            <span class="crm-badge-neon">{len(df)} Orders</span>
+        </div>
+    """, unsafe_allow_html=True)
+    if not df.empty:
+        st.dataframe(df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No orders data available." if is_en else "Không có dữ liệu đơn hàng.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    _render_sql_modal("Orders & Shipping" if is_en else "Đơn Hàng & Vận Chuyển", data["sql"], data["exec_time_ms"], "nw_ord_sql")
+
+
+def _render_northwind_layer_employees(engine, min_year: int, max_year: int):
+    """Layer 3: Phân tích Đội ngũ Sales & Đại diện bán hàng (Sales Reps & Team)."""
+    is_en = (get_current_language() == "en")
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        bc_home = "Home" if is_en else "Trang Chủ"
+        st.markdown(f"<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>{bc_home}</a> ➔ <b>👥 {'Sales Representatives Performance' if is_en else 'Đại diện Bán hàng'}</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        back_btn_lbl = "⬅️ Home" if is_en else "⬅️ Trang Chủ"
+        if st.button(back_btn_lbl, key="btn_back_nw_emp", use_container_width=True):
+            _set_layer("overview", domain_key="northwind")
+
+    start_year, end_year = _render_timeline_slider("nw_emp", min_year=min_year, max_year=max_year, domain_key="northwind")
+    data = fetch_northwind_employees_data(engine, start_year=start_year, end_year=end_year)
+    df = data["df"]
+
+    if not df.empty:
+        fig_emp = build_horizontal_bar_chart(df, y_col="SalesRep", x_col="TotalRevenue", name="Revenue ($)" if is_en else "Doanh Thu ($)", height=260)
+        render_zoomable_chart_card(
+            title="👥 Sales Representatives Revenue Ranking" if is_en else "👥 Xếp Hạng Doanh Số Đại Diện Bán Hàng",
+            fig=fig_emp,
+            df=df,
+            badge="Sales Reps",
+            explanation="Revenue generated by each sales representative." if is_en else "Doanh số do từng chuyên viên bán hàng phụ trách.",
+            key="nw_reps_chart"
+        )
+
+    st.markdown(f"""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>{"👥 Sales Representatives Directory & Stats" if is_en else "👥 Danh Bạ & Hiệu Suất Đại Diện Bán Hàng"}</span>
+            <span class="crm-badge-neon">{len(df)} Representatives</span>
+        </div>
+    """, unsafe_allow_html=True)
+    if not df.empty:
+        st.dataframe(df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No sales representatives data available." if is_en else "Không có dữ liệu đại diện bán hàng.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    _render_sql_modal("Sales Representatives" if is_en else "Đại Diện Bán Hàng", data["sql"], data["exec_time_ms"], "nw_emp_sql")
+
+
+def _render_northwind_layer_customers(engine, min_year: int, max_year: int):
+    """Layer 4: Phân tích Khách hàng & Thị trường (Global Customers Intelligence)."""
+    is_en = (get_current_language() == "en")
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        bc_home = "Home" if is_en else "Trang Chủ"
+        st.markdown(f"<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>{bc_home}</a> ➔ <b>🌍 {'Global Customers & Market Analysis' if is_en else 'Khách hàng & Thị trường'}</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        back_btn_lbl = "⬅️ Home" if is_en else "⬅️ Trang Chủ"
+        if st.button(back_btn_lbl, key="btn_back_nw_cust", use_container_width=True):
+            _set_layer("overview", domain_key="northwind")
+
+    start_year, end_year = _render_timeline_slider("nw_cust", min_year=min_year, max_year=max_year, domain_key="northwind")
+    data = fetch_northwind_customers_data(engine, start_year=start_year, end_year=end_year)
+    df = data["df"]
+
+    st.markdown(f"""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>{"🌍 Top Corporate Customers by Total Spend" if is_en else "🌍 Top Khách Hàng Doanh Nghiệp Theo Doanh Số"}</span>
+            <span class="crm-badge-neon">{len(df)} Accounts</span>
+        </div>
+    """, unsafe_allow_html=True)
+    if not df.empty:
+        st.dataframe(df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No customers data available." if is_en else "Không có dữ liệu khách hàng.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    _render_sql_modal("Customers & Markets" if is_en else "Khách Hàng & Thị Trường", data["sql"], data["exec_time_ms"], "nw_cust_sql")
+
+
+def _render_northwind_layer_suppliers(engine):
+    """Layer 5: Phân tích Nhà cung ứng & Nhập hàng (Suppliers & Purchasing)."""
+    is_en = (get_current_language() == "en")
+    c_bc1, c_bc2 = st.columns([6, 1])
+    with c_bc1:
+        bc_home = "Home" if is_en else "Trang Chủ"
+        st.markdown(f"<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>{bc_home}</a> ➔ <b>🏭 {'Suppliers & Purchasing Portfolio' if is_en else 'Nhà Cung Ứng & Nhập Hàng'}</b></div>", unsafe_allow_html=True)
+    with c_bc2:
+        back_btn_lbl = "⬅️ Home" if is_en else "⬅️ Trang Chủ"
+        if st.button(back_btn_lbl, key="btn_back_nw_sup", use_container_width=True):
+            _set_layer("overview", domain_key="northwind")
+
+    data = fetch_northwind_suppliers_data(engine)
+    df = data["df"]
+
+    st.markdown(f"""
+    <div class="crm-card">
+        <div class="crm-card-title">
+            <span>{"🏭 Suppliers Directory & Sourcing Overview" if is_en else "🏭 Danh Bạ & Nguồn Cung Ứng Hàng Hóa"}</span>
+            <span class="crm-badge-neon">{len(df)} Suppliers</span>
+        </div>
+    """, unsafe_allow_html=True)
+    if not df.empty:
+        st.dataframe(df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No suppliers data available." if is_en else "Không có dữ liệu nhà cung ứng.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    _render_sql_modal("Suppliers & Sourcing" if is_en else "Nhà Cung Ứng", data["sql"], data["exec_time_ms"], "nw_sup_sql")
 
 
 # =========================================================================

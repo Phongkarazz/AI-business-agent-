@@ -32,7 +32,7 @@ from src.ui.crm_dashboard import render_crm_dashboard
 from src.llm.agent import run_agent
 
 # Tự động xóa sạch query cache cũ khi có phiên bản cập nhật code mới
-CACHE_BUILD_ID = "20260926_headcount_100pct_match_v5"
+CACHE_BUILD_ID = "20260930_fix_cte_regex_v71"
 if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
     st.session_state["_cache_build_id"] = CACHE_BUILD_ID
     st.session_state["query_cache"] = {}
@@ -975,10 +975,10 @@ else:
                     with cols[card_idx]:
                         with st.container(border=True):
                             st.markdown(f"""
-                            <div style="font-size: 0.92rem; font-weight: 700; color: #FFFFFF !important; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                            <div style="font-size: 0.92rem; font-weight: 700; color: #FFFFFF !important; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; min-height: 44px;">
                                 <span>{card['icon']}</span> <span>{card['title']}</span>
                             </div>
-                            <div style="font-size: 0.8rem; color: #CBD5E1 !important; min-height: 40px; line-height: 1.4; margin-bottom: 8px;">
+                            <div style="font-size: 0.8rem; color: #CBD5E1 !important; min-height: 72px; line-height: 1.4; margin-bottom: 8px;">
                                 {card['desc']}
                             </div>
                             """, unsafe_allow_html=True)

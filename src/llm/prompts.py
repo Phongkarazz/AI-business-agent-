@@ -70,9 +70,10 @@ def extract_schema_metadata_summary(schema_context: str) -> str:
 def get_db_specific_rules(schema_context: str) -> str:
     """Tự động nhận diện CSDL và sinh quy tắc chi tiết theo từng bảng."""
     schema_low = (schema_context or "").lower()
-    is_sakila_db = any(k in schema_low for k in ["film_id", "rental_id", "payment_id", "inventory_id", "actor_id", "customer_id", "staff_id", "`film`", "`rental`", "`payment`", "`actor`", "`inventory`"])
-    is_employees_db = ("departments" in schema_low or "dept_emp" in schema_low or "hire_date" in schema_low or "salaries" in schema_low) and not is_sakila_db
-    is_chocolates_db = ("people" in schema_low and "products" in schema_low) and not is_sakila_db
+    is_northwind_db = any(k in schema_low for k in ["order_details", "`order_details`", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in schema_low or "`products`" in schema_low) and ("orders" in schema_low or "`orders`" in schema_low) and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
+    is_sakila_db = any(k in schema_low for k in ["`film`", "`rental`", "film_id", "rental_id", "`actor`", "actor_id", "film_actor", "film_category", "rental_date"]) and not is_northwind_db
+    is_employees_db = ("departments" in schema_low or "dept_emp" in schema_low or "hire_date" in schema_low or "salaries" in schema_low) and not is_sakila_db and not is_northwind_db
+    is_chocolates_db = ("people" in schema_low and "products" in schema_low) and not is_sakila_db and not is_northwind_db
 
     if is_employees_db:
         return """   - QUY TẮC CSDL EMPLOYEES:
@@ -784,6 +785,64 @@ def get_db_specific_rules(schema_context: str) -> str:
        ORDER BY TotalSpent DESC
        LIMIT 10;
      + CẢNH BÁO BẮT BUỘC: CSDL Sakila KHÔNG CÓ BẢNG `sales`, `products`, `salaries`, `employees`! TUYỆT ĐỐI KHÔNG DÙNG CÁC BẢNG KHÔNG TỒN TẠI!"""
+    elif is_northwind_db:
+        return """   - QUY TẮC CSDL NORTHWIND TRADERS (ENTERPRISE ERP & SALES):
+     + Bảng `products` (Bí danh bắt buộc: `p`):
+       * Cột: `id` (Khóa chính), `product_name`, `product_code`, `category`, `standard_cost`, `list_price`, `discontinued`.
+       * TUYỆT ĐỐI KHÔNG DÙNG bảng `product` (số ít), BẮT BUỘC là `products` (số nhiều có s)!
+       * Khóa chính là `p.id`, TUYỆT ĐỐI KHÔNG DÙNG `p.product_id`!
+     + Bảng `order_details` (Bí danh bắt buộc: `od`):
+       * Cột: `id`, `order_id`, `product_id`, `quantity`, `unit_price`, `discount`, `status_id`.
+       * TUYỆT ĐỐI KHÔNG DÙNG bảng `order_detail` (số ít), BẮT BUỘC là `order_details`!
+       * Cột đơn giá là `unit_price`, TUYỆT ĐỐI KHÔNG DÙNG `price`!
+       * Doanh thu sản phẩm: `ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue`.
+       * Liên kết với products: `JOIN products p ON od.product_id = p.id`.
+     + Bảng `orders` (Bí danh bắt buộc: `o`):
+       * Cột: `id` (Khóa chính), `employee_id`, `customer_id`, `order_date`, `shipped_date`, `shipper_id`, `ship_country_region`.
+       * TUYỆT ĐỐI KHÔNG DÙNG `order` (từ khóa SQL), BẮT BUỘC là `orders`!
+       * Khóa chính là `o.id`, liên kết: `JOIN order_details od ON o.id = od.order_id`.
+     + Bảng `customers` (Bí danh bắt buộc: `c`):
+       * Cột: `id` (Khóa chính), `company`, `first_name`, `last_name`, `email_address`, `job_title`, `city`, `country_region`.
+       * Cột quốc gia là `c.country_region` (TUYỆT ĐỐI KHÔNG DÙNG `c.country`).
+     + Bảng `employees` (Bí danh bắt buộc: `e`):
+       * Cột: `id` (Khóa chính), `first_name`, `last_name`, `email_address`, `job_title`, `city`.
+       * Họ tên đầy đủ: `CONCAT(e.first_name, ' ', e.last_name) AS EmployeeName`.
+       * Vị trí công việc / Chức danh: `e.job_title` (TUYỆT ĐỐI KHÔNG DÙNG bảng `titles`, `dept_emp`, `departments`, `salaries`!).
+       * Liên kết với hóa đơn (invoices): `employees e JOIN orders o ON e.id = o.employee_id JOIN invoices i ON o.id = i.order_id`.
+     + MẪU CHUẨN TOP N SẢN PHẨM CÓ DOANH THU CAO NHẤT (Top Products by Revenue):
+       SELECT 
+           p.product_name AS Product,
+           ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+       FROM order_details od
+       JOIN products p ON od.product_id = p.id
+       GROUP BY p.id, p.product_name
+       ORDER BY TotalRevenue DESC
+       LIMIT 5;
+     + MẪU CHUẨN DOANH SỐ THEO NHÂN VIÊN (Top Sales by Employee):
+       SELECT 
+           CONCAT(e.first_name, ' ', e.last_name) AS EmployeeName,
+           ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalSales,
+           COUNT(DISTINCT o.id) AS TotalOrders
+       FROM orders o
+       JOIN order_details od ON o.id = od.order_id
+       JOIN employees e ON o.employee_id = e.id
+       GROUP BY e.id, EmployeeName
+       ORDER BY TotalSales DESC
+       LIMIT 5;
+     + MẪU CHUẨN DOANH THU THEO QUỐC GIA (Revenue by Country):
+       SELECT 
+           c.country_region AS Country,
+           COUNT(DISTINCT o.id) AS TotalOrders,
+           ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+       FROM customers c
+       JOIN orders o ON c.id = o.customer_id
+       JOIN order_details od ON o.id = od.order_id
+       GROUP BY c.country_region
+       ORDER BY TotalRevenue DESC;
+     + CẢNH BÁO BẮT BUỘC:
+       1. Tên bảng luôn là số nhiều: `products`, `order_details`, `orders`, `customers`, `employees`!
+       2. Khóa chính của `products`, `orders`, `customers`, `employees` đều là `id`!
+       3. Cột giá là `unit_price`, cột quốc gia là `country_region`!"""
     else:
         schema_summary = extract_schema_metadata_summary(schema_context)
         if schema_summary:
@@ -1033,19 +1092,310 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
     top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
     req_limit = int(top_m.group(1)) if top_m else 10
 
-    # 0. Phân biệt ngữ cảnh CSDL (Sakila vs Employees vs Awesome Chocolates)
-    is_sakila_db = any(k in schema_low for k in ["film_id", "rental_id", "payment_id", "inventory_id", "actor_id", "customer_id", "staff_id", "`film`", "`rental`", "`payment`", "`actor`", "`inventory`"])
+    # 0. Phân biệt ngữ cảnh CSDL (Northwind vs Sakila vs Employees vs Awesome Chocolates)
+    is_northwind_db = any(k in schema_low for k in ["order_details", "`order_details`", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in schema_low or "`products`" in schema_low) and ("orders" in schema_low or "`orders`" in schema_low) and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
+    is_sakila_db = any(k in schema_low for k in ["`film`", "`rental`", "film_id", "rental_id", "`actor`", "actor_id", "film_actor", "film_category", "rental_date"]) and not is_northwind_db
     is_employees_db = (
         ("dept_emp" in schema_low or "dept_manager" in schema_low or "titles" in schema_low or "salaries" in schema_low or "hire_date" in schema_low)
-        and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`sales`", "bảng sales", "bảng `sales`"])
+        and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`sales`", "bảng sales", "bảng `sales`", "order_details"])
         and not is_sakila_db
+        and not is_northwind_db
     )
     is_choco_context = (
         (any(k in schema_low for k in ["geo", "products", "spid", "geoid", "boxes"])
          or ("`sales`" in schema_low or "bảng sales" in schema_low or "table sales" in schema_low))
         and not is_employees_db
         and not is_sakila_db
+        and not is_northwind_db
     )
+
+    if is_northwind_db:
+        # Xu hướng thay đổi của Total Revenue theo thời gian / tháng
+        if (any(k in q_low for k in ["xu hướng", "trend", "thay đổi", "biến động", "theo thời gian", "từng tháng", "mỗi tháng", "qua các tháng", "over time", "monthly"])
+            and any(k in q_low for k in ["doanh thu", "revenue", "doanh số", "sales", "total revenue"])):
+            m_expr = "substr(o.order_date, 1, 7)" if is_sqlite else "DATE_FORMAT(o.order_date, '%Y-%m')"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XU HƯỚNG TOTAL REVENUE THEO THỜI GIAN TRONG NORTHWIND):
+SELECT 
+    {m_expr} AS Month,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalRevenue,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+WHERE o.order_date IS NOT NULL
+GROUP BY Month
+ORDER BY Month ASC;
+(CẢNH BÁO BẮT BUỘC CHO NORTHWIND:
+1. Doanh thu bán hàng bắt buộc tính từ bảng `orders` (cột `order_date`, `id`) JOIN `order_details` (cột `quantity`, `unit_price`, `discount`, `order_id`).
+2. Tuyệt đối KHÔNG DÙNG bảng `inventory_transaction_types`, `inventory_transactions` hay `payment` vì đó không phải bảng doanh thu bán hàng!)
+"""
+
+        # Top N sản phẩm doanh thu cao nhất
+        if any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"]) and any(k in q_low for k in ["doanh thu", "revenue", "bán chạy", "doanh số", "cao nhất", "top"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP {req_limit} SẢN PHẨM DOANH THU CAO NHẤT TRONG NORTHWIND):
+SELECT 
+    p.product_name AS Product,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+FROM order_details od
+JOIN products p ON od.product_id = p.id
+GROUP BY p.id, p.product_name
+ORDER BY TotalRevenue DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC:
+1. Bảng chi tiết đơn hàng là `order_details` (số nhiều) và bảng sản phẩm là `products` (số nhiều)!
+2. Khóa chính bảng products là `p.id` (JOIN od.product_id = p.id).
+3. Doanh thu = SUM(od.quantity * od.unit_price * (1 - od.discount)).)
+"""
+        # Nhân viên bán hàng nhiều nhất
+        if any(k in q_low for k in ["nhân viên", "nhân sự", "người bán", "employee", "salesperson", "staff"]) and any(k in q_low for k in ["doanh thu", "doanh số", "bán hàng", "revenue", "sales", "nhiều nhất", "top"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP NHÂN VIÊN DOANH SỐ CAO NHẤT TRONG NORTHWIND):
+SELECT 
+    CONCAT(e.first_name, ' ', e.last_name) AS EmployeeName,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalSales,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+JOIN employees e ON o.employee_id = e.id
+GROUP BY e.id, EmployeeName
+ORDER BY TotalSales DESC
+LIMIT {req_limit};
+"""
+        # Doanh thu theo quốc gia
+        if any(k in q_low for k in ["quốc gia", "country", "thị trường", "khu vực"]) and any(k in q_low for k in ["doanh thu", "revenue", "đơn hàng", "orders"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO QUỐC GIA KHÁCH HÀNG TRONG NORTHWIND):
+SELECT 
+    c.country_region AS Country,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN order_details od ON o.id = od.order_id
+GROUP BY c.country_region
+ORDER BY TotalRevenue DESC;
+"""
+
+        # Cơ cấu doanh thu theo danh mục
+        if any(k in q_low for k in ["danh mục", "category", "ngành hàng", "nhóm hàng"]) and any(k in q_low for k in ["doanh thu", "revenue", "cơ cấu", "tỷ trọng", "tỉ trọng"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (CƠ CẤU DOANH THU THEO DANH MỤC TRONG NORTHWIND):
+SELECT 
+    COALESCE(p.category, 'Other') AS Category,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalRevenue,
+    SUM(od.quantity) AS TotalQuantity
+FROM products p
+JOIN order_details od ON p.id = od.product_id
+GROUP BY Category
+ORDER BY TotalRevenue DESC;
+"""
+
+        # So sánh amount due / doanh thu trung bình giữa các thành phố hoặc Tỷ lệ đóng góp
+        if (any(k in q_low for k in ["thành phố", "city", "quốc gia", "country"])
+            and any(k in q_low for k in ["amount due", "amount_due", "doanh thu", "revenue", "công nợ", "tiền phải trả", "bán hàng"])):
+            is_contrib = any(k in q_low for k in ["tỷ lệ", "phần trăm", "đóng góp", "tỷ trọng", "tỉ trọng", "tỉ lệ", "cơ cấu", "percentage", "contribution"])
+            if is_contrib:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ ĐÓNG GÓP AMOUNT DUE / DOANH THU THEO THÀNH PHỐ TRONG NORTHWIND):
+WITH CityAmountDue AS (
+    SELECT 
+        COALESCE(o.ship_city, c.city, 'Unknown') AS City,
+        SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS TotalAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    LEFT JOIN customers c ON o.customer_id = c.id
+    WHERE o.ship_city IS NOT NULL OR c.city IS NOT NULL
+    GROUP BY City
+)
+SELECT 
+    City,
+    ROUND(TotalAmountDue, 2) AS TotalAmountDue,
+    ROUND(TotalAmountDue * 100.0 / (SELECT SUM(TotalAmountDue) FROM CityAmountDue), 2) AS ContributionPercentage
+FROM CityAmountDue
+ORDER BY ContributionPercentage DESC;
+(LƯU Ý QUAN TRỌNG CHO NORTHWIND:
+1. Doanh thu/amount due lấy từ `orders` JOIN `order_details` qua `o.id = od.order_id`: `SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0)))`.
+2. Thành phố giao hàng ở bảng `orders` là cột `ship_city` (o.ship_city), hoặc ở bảng `customers` là cột `city` (c.city). Bảng orders KHÔNG CÓ cột `city`!)
+"""
+            else:
+                return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH AMOUNT DUE / DOANH THU TRUNG BÌNH GIỮA CÁC THÀNH PHỐ TRONG NORTHWIND):
+SELECT 
+    COALESCE(o.ship_city, c.city, 'Unknown') AS City,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) / NULLIF(COUNT(DISTINCT o.id), 0), 2) AS AvgAmountDuePerOrder,
+    ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDuePerItem
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE o.ship_city IS NOT NULL OR c.city IS NOT NULL
+GROUP BY City
+ORDER BY AvgAmountDuePerOrder DESC;
+(LƯU Ý QUAN TRỌNG CHO NORTHWIND:
+1. Doanh thu/amount due lấy từ `orders` JOIN `order_details` qua `o.id = od.order_id`: `SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0)))`.
+2. Thành phố giao hàng ở bảng `orders` là cột `ship_city` (o.ship_city), hoặc ở bảng `customers` là cột `city` (c.city). Bảng orders KHÔNG CÓ cột `city`!)
+"""
+
+        # Chênh lệch amount due / doanh số giữa nhóm cao nhất và nhóm thấp nhất
+        if (any(k in q_low for k in ["chênh lệch", "sự chênh lệch", "khoảng cách", "spread", "gap", "difference"])
+            and any(k in q_low for k in ["nhóm cao nhất", "cao nhất và thấp nhất", "nhóm thấp nhất", "cực trị", "extremes"])):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÂN TÍCH CHÊNH LỆCH AMOUNT DUE / DOANH SỐ TRONG NORTHWIND):
+WITH CustomerDueSummary AS (
+    SELECT 
+        COALESCE(c.company, CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')), 'Unknown') AS CustomerGroup,
+        COALESCE(c.country_region, 'Unknown') AS Country,
+        COUNT(DISTINCT o.id) AS TotalOrders,
+        ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+        ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDue,
+        ROUND(MAX(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS MaxAmountDue,
+        ROUND(MIN(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS MinAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    LEFT JOIN customers c ON o.customer_id = c.id
+    GROUP BY c.id, CustomerGroup, c.country_region
+)
+SELECT 
+    CustomerGroup,
+    Country,
+    TotalOrders,
+    TotalAmountDue,
+    AvgAmountDue,
+    MaxAmountDue,
+    MinAmountDue,
+    ROUND(MaxAmountDue - MinAmountDue, 2) AS AmountSpread
+FROM CustomerDueSummary
+ORDER BY TotalAmountDue DESC;
+(LƯU Ý QUAN TRỌNG CHO NORTHWIND:
+1. Dữ liệu giao dịch thực tế nằm ở `orders` JOIN `order_details`: `SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0)))`.
+2. Khóa ngoại: `orders.customer_id = customers.id`. Bảng orders không có cột `amount`, không có bảng `sales` hay `geo`!)
+"""
+
+        # Vị trí công việc có amount due / doanh thu vượt trên mức trung bình
+        if (any(k in q_low for k in ["vị trí công việc", "vị trí", "chức vụ", "chức danh", "job title", "job_title", "role"])
+            and any(k in q_low for k in ["vượt trên", "trung bình", "mức trung bình", "cao hơn trung bình", "above average", "vượt mức", "vượt"])):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (VỊ TRÍ CÔNG VIỆC CÓ AMOUNT DUE / DOANH THU VƯỢT TRÊN MỨC TRUNG BÌNH TRONG NORTHWIND):
+WITH EmployeeRevenue AS (
+    SELECT 
+        COALESCE(e.job_title, 'Unknown') AS JobTitle,
+        e.id AS EmployeeId,
+        SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS TotalRevenue
+    FROM employees e
+    JOIN orders o ON e.id = o.employee_id
+    JOIN order_details od ON o.id = od.order_id
+    GROUP BY e.job_title, e.id
+),
+JobTitleStats AS (
+    SELECT 
+        JobTitle,
+        COUNT(EmployeeId) AS EmployeeCount,
+        ROUND(SUM(TotalRevenue), 2) AS TotalAmountDue,
+        ROUND(AVG(TotalRevenue), 2) AS AvgAmountDue
+    FROM EmployeeRevenue
+    GROUP BY JobTitle
+)
+SELECT 
+    JobTitle,
+    EmployeeCount,
+    TotalAmountDue,
+    AvgAmountDue,
+    (SELECT ROUND(AVG(TotalRevenue), 2) FROM EmployeeRevenue) AS CompanyAvgAmountDue,
+    ROUND(AvgAmountDue - (SELECT AVG(TotalRevenue) FROM EmployeeRevenue), 2) AS AmountSurplus
+FROM JobTitleStats
+WHERE AvgAmountDue > (SELECT AVG(TotalRevenue) FROM EmployeeRevenue)
+ORDER BY AvgAmountDue DESC;
+(CẢNH BÁO BẮT BUỘC CHO CSDL NORTHWIND:
+1. Vị trí công việc nằm ở cột `employees.job_title` (e.job_title). CSDL Northwind TUYỆT ĐỐI KHÔNG CÓ các bảng `titles`, `salaries`, `dept_emp`, `departments`!
+2. Doanh thu/amount due tính từ `orders` JOIN `order_details` (`od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))`).)
+"""
+
+        # So sánh Employee Count giữa các Job Title hàng đầu (Headcount comparison by Job Title)
+        if (any(k in q_low for k in ["chức vụ", "chức danh", "job title", "job_title", "vị trí", "role"])
+            and any(k in q_low for k in ["employee count", "headcount", "số lượng nhân sự", "số lượng nhân viên", "số nhân sự", "số nhân viên", "nhân sự", "nhân viên", "quy mô", "tỷ lệ", "tỉ lệ", "cơ cấu", "phân bố", "so sánh"])
+            and not any(k in q_low for k in ["vượt trên", "mức trung bình", "cao hơn trung bình", "above average", "amount due", "amount_due", "tiền phải trả", "công nợ"])):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH EMPLOYEE COUNT GIỮA CÁC JOB TITLE TRONG CSDL NORTHWIND):
+SELECT 
+    COALESCE(e.job_title, 'Unknown') AS JobTitle,
+    COUNT(DISTINCT e.id) AS EmployeeCount,
+    ROUND(COUNT(DISTINCT e.id) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage
+FROM employees e
+GROUP BY e.job_title
+ORDER BY EmployeeCount DESC;
+(CẢNH BÁO BẮT BUỘC CHO CSDL NORTHWIND:
+1. Bảng nhân viên là `employees` (e), chức danh là `e.job_title`.
+2. Đếm số lượng nhân sự: `COUNT(DISTINCT e.id) AS EmployeeCount`.
+3. TUYỆT ĐỐI KHÔNG JOIN bảng `orders` hay lọc ngày tháng năm (2016-2020) vì đây là câu hỏi thống kê quy mô nhân sự theo chức danh!)
+"""
+
+        # Xu hướng amount due theo Last Name / Khách hàng theo thời gian
+        if (any(k in q_low for k in ["amount due", "amount_due", "công nợ", "tiền phải trả", "hóa đơn", "invoice"])
+            and any(k in q_low for k in ["xu hướng", "trend", "thay đổi", "biến động", "theo thời gian", "từng tháng", "mỗi tháng", "qua các tháng", "over time", "monthly"])):
+            m_expr = "substr(o.order_date, 1, 7)" if is_sqlite else "DATE_FORMAT(o.order_date, '%Y-%m')"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XU HƯỚNG AMOUNT DUE THEO LAST NAME TRONG NORTHWIND):
+SELECT 
+    {m_expr} AS Month,
+    COALESCE(c.last_name, e.last_name, 'Unknown') AS LastName,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+LEFT JOIN employees e ON o.employee_id = e.id
+WHERE o.order_date IS NOT NULL
+GROUP BY Month, LastName
+ORDER BY Month ASC, TotalAmountDue DESC;
+(CẢNH BÁO BẮT BUỘC CHO NORTHWIND:
+1. Dữ liệu bán hàng/amount due nằm ở `orders` JOIN `order_details` (`SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0)))`).
+2. Trích xuất thời gian tháng từ `o.order_date`.
+3. Khách hàng/Nhân sự liên kết qua `orders`: `o.customer_id = c.id` và `o.employee_id = e.id`.)
+"""
+
+        # Khoảng thời gian nào ghi nhận amount due / doanh thu cao nhất và thấp nhất (Peak & Valley Period)
+        if (any(k in q_low for k in ["khoảng thời gian", "thời gian", "tháng nào", "thời điểm", "giai đoạn", "period"])
+            and any(k in q_low for k in ["cao nhất và thấp nhất", "lớn nhất và nhỏ nhất", "đỉnh và đáy", "peak and valley", "cao nhất", "thấp nhất", "đỉnh điểm", "đáy"])
+            and any(k in q_low for k in ["amount due", "amount_due", "doanh thu", "revenue", "công nợ", "tiền", "ghi nhận"])):
+            m_expr = "substr(o.order_date, 1, 7)" if is_sqlite else "DATE_FORMAT(o.order_date, '%Y-%m')"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (KHOẢNG THỜI GIAN GHI NHẬN AMOUNT DUE / DOANH THU CAO NHẤT VÀ THẤP NHẤT TRONG NORTHWIND):
+WITH MonthlyAmountDue AS (
+    SELECT 
+        {m_expr} AS Month,
+        COUNT(DISTINCT o.id) AS TotalOrders,
+        ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    WHERE o.order_date IS NOT NULL
+    GROUP BY Month
+),
+Extremes AS (
+    SELECT 
+        MAX(TotalAmountDue) AS MaxAmountDue,
+        MIN(TotalAmountDue) AS MinAmountDue
+    FROM MonthlyAmountDue
+)
+SELECT 
+    m.Month,
+    m.TotalOrders,
+    m.TotalAmountDue,
+    CASE 
+        WHEN m.TotalAmountDue = e.MaxAmountDue THEN 'Cao nhất (Peak)'
+        WHEN m.TotalAmountDue = e.MinAmountDue THEN 'Thấp nhất (Valley)'
+    END AS PeriodStatus
+FROM MonthlyAmountDue m
+CROSS JOIN Extremes e
+WHERE m.TotalAmountDue = e.MaxAmountDue OR m.TotalAmountDue = e.MinAmountDue
+ORDER BY m.TotalAmountDue DESC;
+(CẢNH BÁO BẮT BUỘC CHO NORTHWIND:
+1. Dữ liệu bán hàng nằm ở `orders` JOIN `order_details`.
+2. Phân rã 2 CTE: CTE MonthlyAmountDue tính theo Tháng, CTE Extremes lấy MAX và MIN, SELECT kết nối lấy đúng điểm đỉnh và đáy.)
+"""
+
+
 
     if is_sakila_db:
         # Tỷ lệ phần trăm đóng góp của từng tháng vào tổng doanh thu (Monthly revenue percentage contribution)
@@ -1171,6 +1521,35 @@ JOIN staff s ON st.store_id = s.store_id
 JOIN payment p ON s.staff_id = p.staff_id
 GROUP BY st.store_id
 ORDER BY st.store_id ASC;
+"""
+
+    if is_employees_db:
+        # Mức lương trung bình của nhân viên theo từng phòng ban
+        if (any(k in q_low for k in ["phòng ban", "phòng", "các phòng", "từng phòng", "department", "departments", "dept"])
+            and any(k in q_low for k in ["lương trung bình", "mức lương", "lương bình quân", "lương tb", "avg salary", "average salary"])
+            and not any(k in q_low for k in [
+                "nam", "nữ", "gender", "giới tính", "quản lý", "trưởng phòng", "manager", "chức danh", "title",
+                "thâm niên", "tenure", "vượt trên", "trên trung bình công ty", "above average",
+                "trên", "dưới", "vượt", "hơn", "cao hơn", "thấp hơn", ">", "<", ">=", "<=",
+                "tăng lương", "raise", "chênh lệch", "gap", "biến động", "growth", "tăng trưởng", "chiếm", "share",
+                "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "quy mô", "headcount", "nhiều nhất", "ít nhất", "top"
+            ])):
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (MỨC LƯƠNG TRUNG BÌNH CỦA NHÂN VIÊN THEO TỪNG PHÒNG BAN TRONG EMPLOYEES):
+SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_no, d.dept_name
+ORDER BY AvgSalary DESC;
+(CẢNH BÁO BẮT BUỘC CHO CSDL EMPLOYEES:
+1. Khi tính lương hiện tại của nhân sự phòng ban, BẮT BUỘC lọc `de.to_date = '9999-01-01'` và `s.to_date = '9999-01-01'`!
+2. Bảng `departments` chỉ có 2 cột: `dept_no`, `dept_name` (TUYỆT ĐỐI KHÔNG CÓ cột to_date).
+3. Bảng `salaries` và `employees` KHÔNG CÓ cột dept_no, BẮT BUỘC JOIN qua `dept_emp de`!
+4. Đây là câu lệnh SELECT chuẩn, TUYỆT ĐỐI KHÔNG dùng CTE/subquery phức tạp gây lỗi cú pháp ngoặc đơn!).
 """
 
     if is_choco_context or (not is_employees_db and not is_sakila_db and any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
@@ -4673,6 +5052,24 @@ GROUP BY d.dept_no, d.dept_name
 ORDER BY SalarySurplus DESC
 {limit_clause};
 """
+        elif any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng", "department"]) and any(k in q_low for k in ["lương trung bình", "mức lương trung bình", "lương bình quân", "mức lương", "avg salary", "average salary"]) and any(k in q_low for k in ["xếp hạng", "thứ tự", "cao nhất", "thấp nhất", "từ cao đến thấp", "từ thấp đến cao", "giảm dần", "tăng dần", "danh sách", "top"]):
+            sort_dir = "ASC" if any(k in q_low for k in ["thấp nhất đến cao nhất", "từ thấp đến cao", "tăng dần", "thấp nhất"]) and not any(k in q_low for k in ["cao nhất đến thấp nhất", "từ cao đến thấp", "giảm dần", "cao nhất"]) else "DESC"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XẾP HẠNG PHÒNG BAN THEO MỨC LƯƠNG TRUNG BÌNH):
+SELECT 
+    d.dept_name AS Department,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_no, d.dept_name
+ORDER BY AvgSalary {sort_dir}
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC:
+1. Nhóm theo d.dept_no, d.dept_name và tính ROUND(AVG(s.salary), 2) AS AvgSalary!
+2. Lọc nhân viên đang làm việc (de.to_date = '9999-01-01' AND s.to_date = '9999-01-01') để tính đúng mức lương thực tế hiện hành!
+3. Sắp xếp ORDER BY AvgSalary {sort_dir}!)
+"""
         elif (any(k in q_low for k in ["lương trung bình", "lương bình quân"]) or (
             any(k in q_low for k in ["top", "cao nhất"]) and any(k in q_low for k in ["lương", "salary"])
         )) and not any(k in q_low for k in ["nhân sự", "nhân viên", "danh sách", "liệt kê", "%", "phần trăm", "chênh lệch", "khoảng cách", "spread", "gap", "thấp nhất"]):
@@ -6629,6 +7026,28 @@ WHERE de.to_date = '9999-01-01'
 GROUP BY d.dept_name
 ORDER BY d.dept_name;
 (BẮT BUỘC XUẤT ĐẦY ĐỦ CẢ HAI CỘT TỶ LỆ: MalePct VÀ FemalePct! GROUP BY d.dept_name!)
+"""
+
+    # 8.04 So sánh biến động mức lương giữa các giới tính qua các mốc thời gian / theo năm (Gender Salary Trend Over Time)
+    elif any(k in q_low for k in ["nam và nữ", "nam nữ", "giới tính", "từng giới tính", "theo giới tính", "gender", "nam", "nữ"]) \
+         and any(k in q_low for k in ["lương", "mức lương", "salary", "thu nhập", "lương bình quân", "lương trung bình"]) \
+         and any(k in q_low for k in ["thời gian", "mốc thời gian", "qua các năm", "qua từng năm", "theo năm", "theo từng năm", "biến động", "xu hướng", "trend", "trajectory", "lịch sử", "timeline", "hàng năm"]):
+        return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (BIẾN ĐỘNG MỨC LƯƠNG GIỮA CÁC GIỚI TÍNH QUA CÁC MỐC THỜI GIAN / NĂM):
+SELECT 
+    YEAR(s.from_date) AS `Năm`,
+    ROUND(AVG(CASE WHEN e.gender = 'M' THEN s.salary END), 2) AS `Lương TB Nam ($)`,
+    ROUND(AVG(CASE WHEN e.gender = 'F' THEN s.salary END), 2) AS `Lương TB Nữ ($)`,
+    ROUND(AVG(CASE WHEN e.gender = 'M' THEN s.salary END) - AVG(CASE WHEN e.gender = 'F' THEN s.salary END), 2) AS `Chênh Lệch Nam - Nữ ($)`
+FROM employees e
+JOIN salaries s ON e.emp_no = s.emp_no
+GROUP BY YEAR(s.from_date)
+ORDER BY `Năm` ASC;
+(CẢNH BÁO BẮT BUỘC:
+1. BẮT BUỘC GROUP BY YEAR(s.from_date) AS `Năm` để thấy rõ biến động qua từng năm! TUYỆT ĐỐI KHÔNG lọc to_date = '9999-01-01' vì sẽ làm mất toàn bộ dữ liệu lịch sử!
+2. BẮT BUỘC Pivot 2 cột `Lương TB Nam ($)` và `Lương TB Nữ ($)` bằng ROUND(AVG(CASE WHEN e.gender = 'M' THEN s.salary END), 2) và ROUND(AVG(CASE WHEN e.gender = 'F' THEN s.salary END), 2).
+3. BẮT BUỘC có cột `Chênh Lệch Nam - Nữ ($)`.
+4. Sắp xếp ORDER BY `Năm` ASC để vẽ biểu đồ đường xu hướng thời gian!)
 """
 
     # 8.05 Tỷ lệ đóng góp mức lương / quỹ lương theo từng giới tính vào tổng số (Gender Salary Contribution Share)

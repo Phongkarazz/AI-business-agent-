@@ -15,23 +15,32 @@ from collections import defaultdict
 # Business synonyms and domain dictionary (Vietnamese <-> English <-> Business Metrics)
 BUSINESS_SYNONYMS: Dict[str, List[str]] = {
     # Finance / Revenue / Sales / Cash
-    "amount": ["tiền", "tiền mặt", "doanh thu", "doanh số", "doanh so", "sales", "revenue", "spend", "spending", "chi tiêu", "thanh toán", "payment", "giá trị"],
+    "amount": ["tiền", "tiền mặt", "doanh thu", "doanh số", "doanh so", "sales", "revenue", "spend", "spending", "chi tiêu", "thanh toán", "payment", "giá trị", "total revenue", "totalrevenue"],
+    "amount_due": ["amount due", "amount_due", "công nợ", "tiền phải trả", "tổng tiền", "hóa đơn", "invoice", "invoices"],
     "salary": ["lương", "tiền lương", "thu nhập", "bảng lương", "payroll", "wage", "compensation", "income"],
     "boxes": ["hộp", "số hộp", "số lượng hộp", "hộp kẹo", "thùng", "pack", "volume", "units", "quantity"],
     "cost": ["chi phí", "giá vốn", "vốn", "giá nhập", "expense", "cogs", "cost_per_box"],
     "price": ["giá", "giá bán", "đơn giá", "unit_price", "rate", "rental_rate"],
     "discount": ["chiết khấu", "giảm giá", "khuyến mãi", "promo"],
+    "order_details": ["order_details", "order_detail", "chi tiết đơn hàng", "quantity", "unit_price", "discount", "doanh thu", "revenue", "total revenue", "totalrevenue", "sales"],
+    "orders": ["orders", "order", "đơn hàng", "order_date", "thời gian", "month", "tháng", "thời điểm"],
+    "invoices": ["invoices", "invoice", "amount_due", "amount due", "tax", "shipping"],
+    "city": ["thành phố", "city", "đô thị", "ship_city", "tỉnh", "thành"],
+    "ship_city": ["thành phố", "city", "ship_city", "thành phố giao hàng"],
 
     # People / Customers / Employees / Actors
     "customer": ["khách hàng", "khách", "người mua", "người dùng", "client", "buyer", "user", "account"],
-    "employee": ["nhân viên", "nhân sự", "người lao động", "staff", "worker", "salesperson", "rep", "nhân viên kinh doanh"],
+    "employee": ["nhân viên", "nhân sự", "người lao động", "staff", "worker", "salesperson", "rep", "nhân viên kinh doanh", "vị trí công việc", "vị trí", "chức vụ", "chức danh", "job_title", "job title"],
+    "last_name": ["last name", "lastname", "last_name", "họ", "tên họ", "họ tên"],
+    "first_name": ["first name", "firstname", "first_name", "tên", "họ tên"],
     "manager": ["quản lý", "trưởng phòng", "giám đốc", "leader", "head", "supervisor"],
     "actor": ["diễn viên", "diễn xuất", "nghệ sĩ", "cast", "star"],
     "salesperson": ["nhân viên bán hàng", "nhân sự kinh doanh", "sales", "sales rep", "người bán"],
 
     # Organization / Departments / Categories / Products
     "department": ["phòng ban", "bộ phận", "phòng", "khối", "dept", "division"],
-    "title": ["chức danh", "chức vụ", "vị trí", "công việc", "role", "job_title", "position"],
+    "title": ["chức danh", "chức vụ", "vị trí", "công việc", "vị trí công việc", "role", "job_title", "job title", "position"],
+    "job_title": ["vị trí công việc", "vị trí", "chức vụ", "chức danh", "role", "job_title", "job title", "position", "nghề nghiệp"],
     "product": ["sản phẩm", "mặt hàng", "hàng hóa", "item", "sku", "kẹo", "socola", "chocolate", "film", "phim"],
     "category": ["danh mục", "nhóm sản phẩm", "phân loại", "thể loại", "loại", "genre", "segment"],
     "geo": ["quốc gia", "thị trường", "khu vực", "địa lý", "quốc tịch", "country", "region", "market", "location"],
@@ -217,12 +226,20 @@ class SchemaLinker:
             for c_a in meta_a.column_names:
                 c_a_low = c_a.lower()
                 if c_a_low.endswith("_id") or c_a_low.endswith("_no") or c_a_low in ("spid", "pid", "geoid"):
-                    # Tìm bảng b có cột tương ứng
+                    # 1. Trùng tên cột chính xác (VD: emp_no <-> emp_no, film_id <-> film_id)
                     for tbl_b_name, meta_b in self.tables_meta.items():
-                        if tbl_a_name != tbl_b_name and c_a_low in meta_b.column_names_lower:
-                            # Tránh thêm trùng
-                            if tbl_b_name not in self.graph.adj.get(tbl_a_name, {}):
-                                self.graph.add_edge(tbl_a_name, tbl_b_name, c_a, c_a)
+                        if tbl_a_name != tbl_b_name:
+                            if c_a_low in meta_b.column_names_lower:
+                                if tbl_b_name not in self.graph.adj.get(tbl_a_name, {}):
+                                    self.graph.add_edge(tbl_a_name, tbl_b_name, c_a, c_a)
+                            # 2. Khóa ngoại dạng <table_singular>_id nối tới PK `id` của bảng cha (VD: order_id -> orders.id, customer_id -> customers.id, product_id -> products.id)
+                            elif "id" in meta_b.column_names_lower:
+                                base_entity = c_a_low[:-3] if c_a_low.endswith("_id") else c_a_low
+                                b_norm = tbl_b_name.rstrip('s')
+                                if base_entity == b_norm or base_entity == tbl_b_name or f"{base_entity}s" == tbl_b_name:
+                                    if tbl_b_name not in self.graph.adj.get(tbl_a_name, {}):
+                                        self.graph.add_edge(tbl_a_name, tbl_b_name, c_a, "id")
+                                        self.graph.add_edge(tbl_b_name, tbl_a_name, "id", c_a)
 
     def score_table_relevance(self, user_query: str, table_meta: TableMetadata) -> float:
         """Tính điểm liên quan của bảng dựa trên BM25/Cosine TF-IDF và từ đồng nghĩa nghiệp vụ."""
@@ -319,6 +336,31 @@ class SchemaLinker:
 
         # 3. Kết nối đồ thị Subgraph (Thêm các bảng cầu nối Foreign Key)
         connected_set = self.graph.connect_subgraph(top_candidates)
+
+        # 3.1 Bổ sung bảng liên quan bắt buộc theo ngữ cảnh nghiệp vụ
+        q_low = user_query.lower()
+        if any(k in q_low for k in ["doanh thu", "revenue", "total revenue", "sales", "tiền", "giá"]):
+            if "orders" in connected_set and "order_details" in self.tables_meta:
+                connected_set.add("order_details")
+        if any(k in q_low for k in ["sản phẩm", "product", "danh mục", "category", "mặt hàng"]):
+            if "order_details" in connected_set and "products" in self.tables_meta:
+                connected_set.add("products")
+        if any(k in q_low for k in ["amount due", "amount_due", "hóa đơn", "invoice", "invoices"]):
+            if "invoices" in self.tables_meta:
+                connected_set.add("invoices")
+            if "orders" in self.tables_meta:
+                connected_set.add("orders")
+        if any(k in q_low for k in ["thành phố", "city", "quốc gia", "country", "khách hàng", "customer"]):
+            if "customers" in self.tables_meta and ("orders" in connected_set or "invoices" in connected_set):
+                connected_set.add("customers")
+        if any(k in q_low for k in ["vị trí", "công việc", "chức danh", "chức vụ", "job title", "job_title", "nhân viên", "nhân sự", "employee", "sales rep"]):
+            if "employees" in self.tables_meta:
+                connected_set.add("employees")
+                if "invoices" in connected_set and "orders" in self.tables_meta:
+                    connected_set.add("orders")
+                elif "order_details" in connected_set and "orders" in self.tables_meta:
+                    connected_set.add("orders")
+
         
         # Đảm bảo giữ đúng tên hoa thường gốc
         selected_tbl_names = []

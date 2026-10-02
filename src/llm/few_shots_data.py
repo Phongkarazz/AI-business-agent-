@@ -16,6 +16,43 @@ FEW_SHOT_EXAMPLES = [
     # NHÓM 1: CSDL EMPLOYEES (NHÂN SỰ & TIỀN LƯƠNG)
     # =========================================================================
     {
+        "id": "emp_department_avg_salary",
+        "domain": "employees",
+        "category": "department_salary",
+        "tags": [
+            "mức lương trung bình của nhân viên theo từng phòng ban",
+            "mức lương trung bình theo từng phòng ban",
+            "mức lương trung bình của nhân viên",
+            "lương trung bình theo phòng ban",
+            "lương trung bình của nhân viên theo phòng ban",
+            "mức lương trung bình",
+            "theo từng phòng ban",
+            "average salary of employees by department",
+            "average salary by department"
+        ],
+        "question": "Mức lương trung bình của nhân viên theo từng phòng ban",
+        "question_en": "Average salary of employees by department",
+        "intent_explanation": "Join departments với dept_emp và salaries (lọc to_date = '9999-01-01' cho cả hai bảng để tính nhân sự và mức lương hiện tại), nhóm theo phòng ban để tính quy mô (Headcount) và mức lương trung bình (AvgSalary), sắp xếp giảm dần theo mức lương trung bình.",
+        "sql_mysql": """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_no, d.dept_name
+ORDER BY AvgSalary DESC;""",
+        "sql_sqlite": """SELECT 
+    d.dept_name AS Department,
+    COUNT(DISTINCT de.emp_no) AS Headcount,
+    ROUND(AVG(s.salary), 2) AS AvgSalary
+FROM departments d
+JOIN dept_emp de ON d.dept_no = de.dept_no AND de.to_date = '9999-01-01'
+JOIN salaries s ON de.emp_no = s.emp_no AND s.to_date = '9999-01-01'
+GROUP BY d.dept_no, d.dept_name
+ORDER BY AvgSalary DESC;"""
+    },
+    {
         "id": "emp_salary_spread_dept",
         "domain": "employees",
         "category": "salary_spread",
@@ -2790,6 +2827,498 @@ FROM categories c
 JOIN items i ON c.id = i.category_id
 GROUP BY c.id, c.name
 ORDER BY ItemCount DESC;"""
+    },
+    # =========================================================================
+    # NHÓM: CSDL NORTHWIND TRADERS (ENTERPRISE ERP & SALES)
+    # =========================================================================
+    {
+        "id": "northwind_top_products_by_revenue",
+        "domain": "northwind",
+        "category": "ranking",
+        "tags": [
+            "sản phẩm", "doanh thu", "bán chạy", "doanh số", "cao nhất", "top", "products", "revenue"
+        ],
+        "question": "Top 5 sản phẩm có doanh thu cao nhất của công ty?",
+        "question_en": "Top 5 products by total revenue in the company?",
+        "intent_explanation": "JOIN bảng order_details và products qua od.product_id = p.id, tính tổng doanh thu ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2), GROUP BY p.id, p.product_name và ORDER BY TotalRevenue DESC LIMIT 5.",
+        "sql_mysql": """SELECT 
+    p.product_name AS Product,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+FROM order_details od
+JOIN products p ON od.product_id = p.id
+GROUP BY p.id, p.product_name
+ORDER BY TotalRevenue DESC
+LIMIT 5;""",
+        "sql_sqlite": """SELECT 
+    p.product_name AS Product,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+FROM order_details od
+JOIN products p ON od.product_id = p.id
+GROUP BY p.id, p.product_name
+ORDER BY TotalRevenue DESC
+LIMIT 5;"""
+    },
+    {
+        "id": "northwind_top_sales_employees",
+        "domain": "northwind",
+        "category": "ranking",
+        "tags": [
+            "nhân viên", "doanh thu", "bán hàng", "doanh số", "nhân sự", "employees", "sales"
+        ],
+        "question": "Nhân viên nào mang lại nhiều doanh thu nhất qua các năm?",
+        "question_en": "Which employees generated the most revenue over the years?",
+        "intent_explanation": "JOIN orders, order_details và employees qua o.id = od.order_id và o.employee_id = e.id, tính tổng doanh số và số lượng đơn hàng, sắp xếp giảm dần.",
+        "sql_mysql": """SELECT 
+    CONCAT(e.first_name, ' ', e.last_name) AS EmployeeName,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalSales,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+JOIN employees e ON o.employee_id = e.id
+GROUP BY e.id, EmployeeName
+ORDER BY TotalSales DESC
+LIMIT 5;""",
+        "sql_sqlite": """SELECT 
+    e.first_name || ' ' || e.last_name AS EmployeeName,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalSales,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+JOIN employees e ON o.employee_id = e.id
+GROUP BY e.id, EmployeeName
+ORDER BY TotalSales DESC
+LIMIT 5;"""
+    },
+    {
+        "id": "northwind_country_orders_revenue",
+        "domain": "northwind",
+        "category": "geo_sales",
+        "tags": [
+            "quốc gia", "country", "thị trường", "doanh thu", "đơn hàng", "orders"
+        ],
+        "question": "Tổng doanh thu và số lượng đơn hàng theo từng quốc gia của khách hàng?",
+        "question_en": "Total revenue and number of orders by customer country?",
+        "intent_explanation": "JOIN customers, orders và order_details, nhóm theo c.country_region, đếm COUNT(DISTINCT o.id) và tính SUM doanh thu.",
+        "sql_mysql": """SELECT 
+    c.country_region AS Country,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN order_details od ON o.id = od.order_id
+GROUP BY c.country_region
+ORDER BY TotalRevenue DESC;""",
+        "sql_sqlite": """SELECT 
+    c.country_region AS Country,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - od.discount)), 2) AS TotalRevenue
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN order_details od ON o.id = od.order_id
+GROUP BY c.country_region
+ORDER BY TotalRevenue DESC;"""
+    },
+    {
+        "id": "northwind_monthly_revenue_trend",
+        "domain": "northwind",
+        "category": "time_series",
+        "tags": [
+            "xu hướng", "trend", "thay đổi", "thời gian", "doanh thu", "revenue", "total revenue", "tháng", "monthly"
+        ],
+        "question": "Xu hướng thay đổi của Total Revenue theo thời gian?",
+        "question_en": "Trend of Total Revenue over time?",
+        "intent_explanation": "JOIN orders và order_details, nhóm theo định dạng tháng của order_date, tính tổng doanh thu và số lượng đơn hàng.",
+        "sql_mysql": """SELECT 
+    DATE_FORMAT(o.order_date, '%Y-%m') AS Month,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalRevenue,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+WHERE o.order_date IS NOT NULL
+GROUP BY Month
+ORDER BY Month ASC;""",
+        "sql_sqlite": """SELECT 
+    substr(o.order_date, 1, 7) AS Month,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalRevenue,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+WHERE o.order_date IS NOT NULL
+GROUP BY Month
+ORDER BY Month ASC;"""
+    },
+    {
+        "id": "northwind_category_revenue_breakdown",
+        "domain": "northwind",
+        "category": "category_breakdown",
+        "tags": [
+            "danh mục", "category", "cơ cấu", "doanh thu", "revenue", "tỷ trọng"
+        ],
+        "question": "Cơ cấu doanh thu theo từng danh mục sản phẩm của Northwind?",
+        "question_en": "Revenue breakdown by product category in Northwind?",
+        "intent_explanation": "JOIN products và order_details, nhóm theo p.category và tính tổng doanh thu cùng sản lượng.",
+        "sql_mysql": """SELECT 
+    COALESCE(p.category, 'Other') AS Category,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalRevenue,
+    SUM(od.quantity) AS TotalQuantity
+FROM products p
+JOIN order_details od ON p.id = od.product_id
+GROUP BY Category
+ORDER BY TotalRevenue DESC;""",
+        "sql_sqlite": """SELECT 
+    COALESCE(p.category, 'Other') AS Category,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalRevenue,
+    SUM(od.quantity) AS TotalQuantity
+FROM products p
+JOIN order_details od ON p.id = od.product_id
+GROUP BY Category
+ORDER BY TotalRevenue DESC;"""
+    },
+    {
+        "id": "northwind_top_customers_by_spend",
+        "domain": "northwind",
+        "category": "ranking",
+        "tags": [
+            "khách hàng", "chi tiêu", "doanh số", "doanh thu", "customers", "spend"
+        ],
+        "question": "Top 5 khách hàng chi tiêu nhiều tiền nhất?",
+        "question_en": "Top 5 customers by total spending?",
+        "intent_explanation": "JOIN customers, orders và order_details, nhóm theo khách hàng và tính tổng chi tiêu.",
+        "sql_mysql": """SELECT 
+    c.company AS Company,
+    CONCAT(c.first_name, ' ', c.last_name) AS CustomerName,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalSpend,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN order_details od ON o.id = od.order_id
+GROUP BY c.id, c.company, CustomerName
+ORDER BY TotalSpend DESC
+LIMIT 5;""",
+        "sql_sqlite": """SELECT 
+    c.company AS Company,
+    c.first_name || ' ' || c.last_name AS CustomerName,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalSpend,
+    COUNT(DISTINCT o.id) AS TotalOrders
+FROM customers c
+JOIN orders o ON c.id = o.customer_id
+JOIN order_details od ON o.id = od.order_id
+GROUP BY c.id, c.company, CustomerName
+ORDER BY TotalSpend DESC
+LIMIT 5;"""
+    },
+    {
+        "id": "northwind_city_amount_due_contribution",
+        "domain": "northwind",
+        "category": "contribution_percentage",
+        "tags": [
+            "tỷ lệ", "đóng góp", "amount due", "amount_due", "thành phố", "city", "tổng số", "tỷ trọng", "phần trăm"
+        ],
+        "question": "Tỷ lệ đóng góp amount due của từng thành phố vào tổng số?",
+        "question_en": "Percentage contribution of amount due by each city to the total?",
+        "intent_explanation": "JOIN orders (o.ship_city) và order_details / customers (c.city), tính tổng amount_due từng thành phố bằng CTE, sau đó tính tỷ lệ % đóng góp trên tổng số toàn công ty.",
+        "sql_mysql": """WITH CityAmountDue AS (
+    SELECT 
+        COALESCE(o.ship_city, c.city, 'Unknown') AS City,
+        SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS TotalAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    LEFT JOIN customers c ON o.customer_id = c.id
+    WHERE o.ship_city IS NOT NULL OR c.city IS NOT NULL
+    GROUP BY City
+)
+SELECT 
+    City,
+    ROUND(TotalAmountDue, 2) AS TotalAmountDue,
+    ROUND(TotalAmountDue * 100.0 / (SELECT SUM(TotalAmountDue) FROM CityAmountDue), 2) AS ContributionPercentage
+FROM CityAmountDue
+ORDER BY ContributionPercentage DESC;""",
+        "sql_sqlite": """WITH CityAmountDue AS (
+    SELECT 
+        COALESCE(o.ship_city, c.city, 'Unknown') AS City,
+        SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS TotalAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    LEFT JOIN customers c ON o.customer_id = c.id
+    WHERE o.ship_city IS NOT NULL OR c.city IS NOT NULL
+    GROUP BY City
+)
+SELECT 
+    City,
+    ROUND(TotalAmountDue, 2) AS TotalAmountDue,
+    ROUND(TotalAmountDue * 100.0 / (SELECT SUM(TotalAmountDue) FROM CityAmountDue), 2) AS ContributionPercentage
+FROM CityAmountDue
+ORDER BY ContributionPercentage DESC;"""
+    },
+    {
+        "id": "northwind_amount_due_extremes_comparison",
+        "domain": "northwind",
+        "category": "extremes",
+        "tags": [
+            "chênh lệch", "sự chênh lệch", "nhóm cao nhất và nhóm thấp nhất", "nhóm cao nhất", "nhóm thấp nhất",
+            "khoảng cách", "amount due", "amount_due", "extremes", "spread", "cực trị"
+        ],
+        "question": "Phân tích sự chênh lệch amount due giữa nhóm cao nhất và nhóm thấp nhất?",
+        "question_en": "Analyze the amount due difference between the highest and lowest groups?",
+        "intent_explanation": "Nhóm theo khách hàng trên bảng orders JOIN order_details và customers, tính tổng, trung bình, lớn nhất, nhỏ nhất và độ chênh lệch (AmountSpread = MaxAmountDue - MinAmountDue), sắp xếp giảm dần theo TotalAmountDue.",
+        "sql_mysql": """WITH CustomerDueSummary AS (
+    SELECT 
+        COALESCE(c.company, CONCAT(c.first_name, ' ', c.last_name), 'Unknown') AS CustomerGroup,
+        COALESCE(c.country_region, 'Unknown') AS Country,
+        COUNT(DISTINCT o.id) AS TotalOrders,
+        ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+        ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDue,
+        ROUND(MAX(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS MaxAmountDue,
+        ROUND(MIN(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS MinAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    LEFT JOIN customers c ON o.customer_id = c.id
+    GROUP BY c.id, CustomerGroup, c.country_region
+)
+SELECT 
+    CustomerGroup,
+    Country,
+    TotalOrders,
+    TotalAmountDue,
+    AvgAmountDue,
+    MaxAmountDue,
+    MinAmountDue,
+    ROUND(MaxAmountDue - MinAmountDue, 2) AS AmountSpread
+FROM CustomerDueSummary
+ORDER BY TotalAmountDue DESC;""",
+        "sql_sqlite": """WITH CustomerDueSummary AS (
+    SELECT 
+        COALESCE(c.company, c.first_name || ' ' || c.last_name, 'Unknown') AS CustomerGroup,
+        COALESCE(c.country_region, 'Unknown') AS Country,
+        COUNT(DISTINCT o.id) AS TotalOrders,
+        ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+        ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDue,
+        ROUND(MAX(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS MaxAmountDue,
+        ROUND(MIN(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS MinAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    LEFT JOIN customers c ON o.customer_id = c.id
+    GROUP BY c.id, CustomerGroup, c.country_region
+)
+SELECT 
+    CustomerGroup,
+    Country,
+    TotalOrders,
+    TotalAmountDue,
+    AvgAmountDue,
+    MaxAmountDue,
+    MinAmountDue,
+    ROUND(MaxAmountDue - MinAmountDue, 2) AS AmountSpread
+FROM CustomerDueSummary
+ORDER BY TotalAmountDue DESC;"""
+    },
+    {
+        "id": "northwind_job_title_amount_due_above_avg",
+        "domain": "northwind",
+        "category": "above_average",
+        "tags": [
+            "vị trí công việc", "vị trí", "chức vụ", "chức danh", "job_title", "job title",
+            "amount due", "amount_due", "vượt trên mức trung bình", "mức trung bình", "trung bình", "above average"
+        ],
+        "question": "Những vị trí công việc nào có amount due vượt trên mức trung bình?",
+        "question_en": "Which job titles have an amount due exceeding the average?",
+        "intent_explanation": "Trong Northwind, chức vụ/vị trí công việc nằm ở cột employees.job_title (e.job_title), tính amount_due từ orders JOIN order_details. Liên kết employees -> orders -> order_details qua e.id = o.employee_id và o.id = od.order_id, gom nhóm theo e.job_title và lọc HAVING AVG(od.quantity * od.unit_price * (1 - od.discount)) > mức trung bình toàn bộ đơn hàng.",
+        "sql_mysql": """SELECT 
+    COALESCE(e.job_title, 'Unknown') AS JobTitle,
+    COUNT(DISTINCT e.id) AS EmployeeCount,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+    ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDue,
+    (SELECT ROUND(AVG(od2.quantity * od2.unit_price * (1 - COALESCE(od2.discount, 0))), 2) FROM order_details od2) AS CompanyAvgAmountDue,
+    ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) - (SELECT AVG(od2.quantity * od2.unit_price * (1 - COALESCE(od2.discount, 0))) FROM order_details od2), 2) AS AmountSurplus
+FROM employees e
+JOIN orders o ON e.id = o.employee_id
+JOIN order_details od ON o.id = od.order_id
+GROUP BY e.job_title
+HAVING AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) > (SELECT AVG(od2.quantity * od2.unit_price * (1 - COALESCE(od2.discount, 0))) FROM order_details od2)
+ORDER BY AvgAmountDue DESC;""",
+        "sql_sqlite": """SELECT 
+    COALESCE(e.job_title, 'Unknown') AS JobTitle,
+    COUNT(DISTINCT e.id) AS EmployeeCount,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+    ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDue,
+    (SELECT ROUND(AVG(od2.quantity * od2.unit_price * (1 - COALESCE(od2.discount, 0))), 2) FROM order_details od2) AS CompanyAvgAmountDue,
+    ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) - (SELECT AVG(od2.quantity * od2.unit_price * (1 - COALESCE(od2.discount, 0))) FROM order_details od2), 2) AS AmountSurplus
+FROM employees e
+JOIN orders o ON e.id = o.employee_id
+JOIN order_details od ON o.id = od.order_id
+GROUP BY e.job_title
+HAVING AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) > (SELECT AVG(od2.quantity * od2.unit_price * (1 - COALESCE(od2.discount, 0))) FROM order_details od2)
+ORDER BY AvgAmountDue DESC;"""
+    },
+    {
+        "id": "northwind_job_title_headcount_comparison",
+        "domain": "northwind",
+        "category": "headcount",
+        "tags": [
+            "so sánh", "employee count", "headcount", "job title", "job_title", "chức danh", "chức vụ",
+            "vị trí", "số lượng nhân sự", "số lượng nhân viên", "nhân sự", "nhân viên", "quy mô"
+        ],
+        "question": "So sánh Employee Count giữa các Job Title hàng đầu?",
+        "question_en": "Compare Employee Count across top Job Titles?",
+        "intent_explanation": "Trong Northwind, chức danh nằm ở employees.job_title, đếm số lượng nhân viên bằng COUNT(DISTINCT e.id), tính tỷ lệ % trên tổng nhân sự toàn công ty và gom nhóm theo e.job_title, sắp xếp giảm dần.",
+        "sql_mysql": """SELECT 
+    COALESCE(e.job_title, 'Unknown') AS JobTitle,
+    COUNT(DISTINCT e.id) AS EmployeeCount,
+    ROUND(COUNT(DISTINCT e.id) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage
+FROM employees e
+GROUP BY e.job_title
+ORDER BY EmployeeCount DESC;""",
+        "sql_sqlite": """SELECT 
+    COALESCE(e.job_title, 'Unknown') AS JobTitle,
+    COUNT(DISTINCT e.id) AS EmployeeCount,
+    ROUND(COUNT(DISTINCT e.id) * 100.0 / (SELECT COUNT(*) FROM employees), 2) AS Percentage
+FROM employees e
+GROUP BY e.job_title
+ORDER BY EmployeeCount DESC;"""
+    },
+    {
+        "id": "northwind_amount_due_trend_by_lastname",
+        "domain": "northwind",
+        "category": "monthly_trend",
+        "tags": [
+            "xu hướng", "amount due", "amount_due", "last name", "lastname", "thay đổi", "theo thời gian", "từng tháng", "hóa đơn", "công nợ"
+        ],
+        "question": "Xu hướng tổng amount due theo từng last name thay đổi như thế nào?",
+        "question_en": "How does the trend of total amount due change across each last name over time?",
+        "intent_explanation": "Trong Northwind, tính amount_due từ bảng orders và order_details (od.quantity * od.unit_price * (1 - od.discount)), last_name nằm ở bảng customers (c.last_name) hoặc employees (e.last_name). Liên kết orders o JOIN order_details od ON o.id = od.order_id LEFT JOIN customers c ON o.customer_id = c.id, trích xuất tháng từ order_date, gom nhóm theo Month và LastName.",
+        "sql_mysql": """SELECT 
+    DATE_FORMAT(o.order_date, '%Y-%m') AS Month,
+    COALESCE(c.last_name, e.last_name, 'Unknown') AS LastName,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+LEFT JOIN employees e ON o.employee_id = e.id
+WHERE o.order_date IS NOT NULL
+GROUP BY Month, LastName
+ORDER BY Month ASC, TotalAmountDue DESC;""",
+        "sql_sqlite": """SELECT 
+    substr(o.order_date, 1, 7) AS Month,
+    COALESCE(c.last_name, e.last_name, 'Unknown') AS LastName,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+LEFT JOIN employees e ON o.employee_id = e.id
+WHERE o.order_date IS NOT NULL
+GROUP BY Month, LastName
+ORDER BY Month ASC, TotalAmountDue DESC;"""
+    },
+    {
+        "id": "northwind_avg_amount_due_by_city_comparison",
+        "domain": "northwind",
+        "category": "comparison",
+        "tags": [
+            "so sánh", "amount due", "amount_due", "trung bình", "thành phố", "city", "giữa các thành phố",
+            "doanh thu", "bình quân", "compare", "average"
+        ],
+        "question": "So sánh amount due trung bình giữa các thành phố",
+        "question_en": "Compare average amount due across cities",
+        "intent_explanation": "Trong CSDL Northwind, tính amount_due từ bảng orders JOIN order_details (od.quantity * od.unit_price * (1 - od.discount)), thành phố lấy từ COALESCE(o.ship_city, c.city, 'Unknown'). Nhóm theo City và tính TotalOrders, TotalAmountDue, AvgAmountDuePerOrder.",
+        "sql_mysql": """SELECT 
+    COALESCE(o.ship_city, c.city, 'Unknown') AS City,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) / NULLIF(COUNT(DISTINCT o.id), 0), 2) AS AvgAmountDuePerOrder,
+    ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDuePerItem
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE o.ship_city IS NOT NULL OR c.city IS NOT NULL
+GROUP BY City
+ORDER BY AvgAmountDuePerOrder DESC;""",
+        "sql_sqlite": """SELECT 
+    COALESCE(o.ship_city, c.city, 'Unknown') AS City,
+    COUNT(DISTINCT o.id) AS TotalOrders,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue,
+    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) / NULLIF(COUNT(DISTINCT o.id), 0), 2) AS AvgAmountDuePerOrder,
+    ROUND(AVG(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS AvgAmountDuePerItem
+FROM orders o
+JOIN order_details od ON o.id = od.order_id
+LEFT JOIN customers c ON o.customer_id = c.id
+WHERE o.ship_city IS NOT NULL OR c.city IS NOT NULL
+GROUP BY City
+ORDER BY AvgAmountDuePerOrder DESC;"""
+    },
+    {
+        "id": "northwind_monthly_amount_due_peak_valley",
+        "domain": "northwind",
+        "category": "extremes",
+        "tags": [
+            "khoảng thời gian", "thời gian", "tháng nào", "thời điểm", "cao nhất và thấp nhất", "đỉnh và đáy",
+            "peak and valley", "amount due", "amount_due", "doanh thu", "ghi nhận"
+        ],
+        "question": "Khoảng thời gian nào ghi nhận amount due cao nhất và thấp nhất?",
+        "question_en": "Which time period recorded the highest and lowest amount due?",
+        "intent_explanation": "Trong CSDL Northwind, tổng hợp amount_due theo từng tháng từ orders JOIN order_details, sau đó dùng CTE Extremes để tìm tháng có doanh thu cao nhất (Peak) và thấp nhất (Valley).",
+        "sql_mysql": """WITH MonthlyAmountDue AS (
+    SELECT 
+        DATE_FORMAT(o.order_date, '%Y-%m') AS Month,
+        COUNT(DISTINCT o.id) AS TotalOrders,
+        ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    WHERE o.order_date IS NOT NULL
+    GROUP BY DATE_FORMAT(o.order_date, '%Y-%m')
+),
+Extremes AS (
+    SELECT 
+        MAX(TotalAmountDue) AS MaxAmountDue,
+        MIN(TotalAmountDue) AS MinAmountDue
+    FROM MonthlyAmountDue
+)
+SELECT 
+    m.Month,
+    m.TotalOrders,
+    m.TotalAmountDue,
+    CASE 
+        WHEN m.TotalAmountDue = e.MaxAmountDue THEN 'Cao nhất (Peak)'
+        WHEN m.TotalAmountDue = e.MinAmountDue THEN 'Thấp nhất (Valley)'
+    END AS PeriodStatus
+FROM MonthlyAmountDue m
+CROSS JOIN Extremes e
+WHERE m.TotalAmountDue = e.MaxAmountDue OR m.TotalAmountDue = e.MinAmountDue
+ORDER BY m.TotalAmountDue DESC;""",
+        "sql_sqlite": """WITH MonthlyAmountDue AS (
+    SELECT 
+        substr(o.order_date, 1, 7) AS Month,
+        COUNT(DISTINCT o.id) AS TotalOrders,
+        ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS TotalAmountDue
+    FROM orders o
+    JOIN order_details od ON o.id = od.order_id
+    WHERE o.order_date IS NOT NULL
+    GROUP BY substr(o.order_date, 1, 7)
+),
+Extremes AS (
+    SELECT 
+        MAX(TotalAmountDue) AS MaxAmountDue,
+        MIN(TotalAmountDue) AS MinAmountDue
+    FROM MonthlyAmountDue
+)
+SELECT 
+    m.Month,
+    m.TotalOrders,
+    m.TotalAmountDue,
+    CASE 
+        WHEN m.TotalAmountDue = e.MaxAmountDue THEN 'Cao nhất (Peak)'
+        WHEN m.TotalAmountDue = e.MinAmountDue THEN 'Thấp nhất (Valley)'
+    END AS PeriodStatus
+FROM MonthlyAmountDue m
+CROSS JOIN Extremes e
+WHERE m.TotalAmountDue = e.MaxAmountDue OR m.TotalAmountDue = e.MinAmountDue
+ORDER BY m.TotalAmountDue DESC;"""
     }
 ]
+
+
+
 

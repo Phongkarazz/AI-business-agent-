@@ -274,10 +274,16 @@ def render_main_sidebar():
         detected_dom = detect_dashboard_domain(engine)
         if detected_dom == "hr_employees":
             dash_btn_label = t("sidebar_btn_hr_dashboard")
+        elif detected_dom == "northwind_erp":
+            dash_btn_label = t("sidebar_btn_northwind_dashboard")
         elif detected_dom == "sales_commerce":
             dash_btn_label = t("sidebar_btn_sales_dashboard")
-        else:
+        elif detected_dom == "sakila_rental":
+            dash_btn_label = "🎬 Dashboard Sakila" if not is_en else "🎬 Sakila Dashboard"
+        elif detected_dom == "crm_support":
             dash_btn_label = t("sidebar_btn_crm_dashboard")
+        else:
+            dash_btn_label = "💎 Dashboard CSDL" if not is_en else "💎 Universal Dashboard"
 
         if current_vmode in ("dashboard", "evolution"):
             if st.button(t("back_to_chat"), use_container_width=True, type="secondary", key="sidebar_btn_toggle_chat"):

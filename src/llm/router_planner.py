@@ -113,8 +113,12 @@ def classify_query_complexity(user_query: str) -> str:
 
     # 1.7 Nhận diện bài toán lịch sử giảm lương / bị hạ lương của nhân viên
     if (
-        any(k in q_low for k in ["giảm lương", "hạ lương", "bị giảm", "bị hạ", "salary reduction", "salary decrease", "pay cut"])
-        or (any(k in q_low for k in ["lương", "salary"]) and any(k in q_low for k in ["giảm", "hạ", "tụt", "thấp hơn lần trước", "thấp hơn kỳ trước", "reduction", "decrease", "cut"]))
+        (
+            any(k in q_low for k in ["giảm lương", "hạ lương", "bị giảm lương", "bị hạ lương", "tụt lương", "bị trừ lương", "salary reduction", "salary decrease", "pay cut"])
+            or (any(k in q_low for k in ["lương", "salary"]) and any(k in q_low for k in ["bị giảm", "bị hạ", "tụt lương", "thấp hơn lần trước", "thấp hơn kỳ trước"]))
+        )
+        and any(k in q_low for k in ["nhân viên", "nhân sự", "ai", "người", "employee", "danh sách", "có ai", "có nhân viên nào"])
+        and not any(k in q_low for k in ["giảm dần", "tăng dần", "thứ tự", "xếp hạng", "cao nhất", "thấp nhất", "trung bình", "bình quân", "trung vị", "theo phòng ban", "từng phòng", "các phòng ban", "department", "order by", "so sánh"])
     ):
         return "MULTI_STEP_ANALYTIC"
 
@@ -1059,8 +1063,12 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
 
     # Mẫu 0.46: Nhân viên từng bị giảm lương trong lịch sử làm việc tại công ty
     is_salary_reduction_query = (
-        any(k in q_low for k in ["giảm lương", "hạ lương", "bị giảm", "bị hạ", "salary reduction", "salary decrease", "pay cut"])
-        or (any(k in q_low for k in ["lương", "salary"]) and any(k in q_low for k in ["giảm", "hạ", "tụt", "thấp hơn lần trước", "thấp hơn kỳ trước", "reduction", "decrease", "cut"]))
+        (
+            any(k in q_low for k in ["giảm lương", "hạ lương", "bị giảm lương", "bị hạ lương", "tụt lương", "bị trừ lương", "salary reduction", "salary decrease", "pay cut"])
+            or (any(k in q_low for k in ["lương", "salary"]) and any(k in q_low for k in ["bị giảm", "bị hạ", "tụt lương", "thấp hơn lần trước", "thấp hơn kỳ trước"]))
+        )
+        and any(k in q_low for k in ["nhân viên", "nhân sự", "ai", "người", "employee", "danh sách", "có ai", "có nhân viên nào"])
+        and not any(k in q_low for k in ["giảm dần", "tăng dần", "thứ tự", "xếp hạng", "cao nhất", "thấp nhất", "trung bình", "bình quân", "trung vị", "theo phòng ban", "từng phòng", "các phòng ban", "department", "order by", "so sánh"])
     )
     if is_salary_reduction_query:
         m_lim = re.search(r"\b(?:top|đầu)\s*(\d+)\b", q_low)

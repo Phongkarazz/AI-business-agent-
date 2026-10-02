@@ -54,11 +54,15 @@ def clean_text_for_pdf(text: str) -> str:
     # 5. Xóa các ký tự markdown header #### dư thừa trong dòng
     text = re.sub(r"#+\s*", "", text)
 
+    # 5.5. Tự động phục hồi hoặc làm sạch dấu ** bị mồ côi (orphaned)
+    text = re.sub(r"^(•\s*|&bull;\s*|\-\s*)?(?!\*\*)([^\n\*:]+)\*\*\s*:", r"\1**\2**:", text)
+
     # 6. Chuyển đổi cú pháp markdown sang thẻ định dạng ReportLab
     text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"<i>\1</i>", text)
     text = re.sub(r"`(.*?)`", r"<b>\1</b>", text)
-    text = text.replace("\\$", "$")
+    # Xóa sạch toàn bộ ký hiệu ** thừa còn sót lại để xuất PDF luôn sạch đẹp
+    text = text.replace("**", "").replace("\\$", "$")
 
     # 7. Bảo vệ các thẻ XML hợp lệ của ReportLab (kể cả thẻ đã bị escape trước đó)
     text = re.sub(r"&lt;(\/?[biu]|font[^&]*|\/font|br\s*\/?)&gt;", r"<\1>", text, flags=re.IGNORECASE)
@@ -1012,9 +1016,11 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             story.append(Paragraph(f"<b>{sec_num}.1. Phát hiện Bất thường &amp; Xu hướng Cốt lõi</b>", sub_section_style))
             if p21:
                 for line in p21.split("\n"):
-                    l_clean = clean_text_for_pdf(line.strip())
+                    l_str = re.sub(r"^[•\-\*]\s*", "", line.strip()).strip()
+                    if not l_str:
+                        continue
+                    l_clean = clean_text_for_pdf(l_str)
                     if l_clean:
-                        l_clean = re.sub(r"^[•\-\*]\s*", "", l_clean)
                         story.append(Paragraph(f"&bull; {l_clean}", bullet_style))
             else:
                 story.append(Paragraph("&bull; Dữ liệu vận hành ổn định trong biên độ chuẩn.", bullet_style))
@@ -1024,9 +1030,11 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
             story.append(Paragraph(f"<b>{sec_num}.2. Giả thuyết &amp; Nguyên nhân Tiềm năng</b>", sub_section_style))
             if p22:
                 for line in p22.split("\n"):
-                    l_clean = clean_text_for_pdf(line.strip())
+                    l_str = re.sub(r"^[•\-\*]\s*", "", line.strip()).strip()
+                    if not l_str:
+                        continue
+                    l_clean = clean_text_for_pdf(l_str)
                     if l_clean:
-                        l_clean = re.sub(r"^[•\-\*]\s*", "", l_clean)
                         story.append(Paragraph(f"&bull; {l_clean}", bullet_style))
             else:
                 story.append(Paragraph("&bull; Cơ cấu doanh thu và sản lượng phản ánh đúng nhu cầu thị trường.", bullet_style))
