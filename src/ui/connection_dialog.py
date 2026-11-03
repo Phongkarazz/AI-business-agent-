@@ -70,10 +70,11 @@ def show_connecting_dialog(
         client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
 
         # Bước 2: Database Engine
-        db_desc = "SQLite In-Memory Demo" if use_demo else f"MySQL ({db_host}:{db_port})"
+        demo_type = "yen_sao" if "yen" in (db_name or "").lower() else "chocolate"
+        db_desc = ("SQLite Yến Sào Demo" if demo_type == "yen_sao" else "SQLite In-Memory Demo") if use_demo else f"MySQL ({db_host}:{db_port})"
         progress_bar.progress(70, text=f"2/3: Đang kết nối Cơ sở dữ liệu: {db_desc}...")
         if use_demo:
-            engine = build_demo_engine()
+            engine = build_demo_engine(demo_type=demo_type)
         else:
             engine = try_connect(
                 db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local

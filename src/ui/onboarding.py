@@ -128,16 +128,43 @@ def render_onboarding():
 
             with tab_mysql:
                 saved_mode_idx = saved.get("data_mode_index", 0)
+                saved_db_name = (saved.get("db_name", "") or "").lower()
+                options = [
+                    "📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)",
+                    "🕊️ Dữ liệu Mẫu Yến Sào Khánh Hòa (SQLite Cục Bộ)",
+                    "🖥️ MySQL Máy tính này (Localhost)",
+                    "☁️ MySQL Máy chủ / Cloud (Từ xa)"
+                ]
+                if saved_mode_idx == 0:
+                    default_idx = 1 if "yen" in saved_db_name else 0
+                elif saved.get("run_local", True):
+                    default_idx = 2
+                else:
+                    default_idx = 3
+
                 db_source = st.radio(
                     "Chọn Nguồn Cơ sở Dữ liệu",
-                    ["📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)", "🖥️ MySQL Máy tính này (Localhost)", "☁️ MySQL Máy chủ / Cloud (Từ xa)"],
-                    index=0 if saved_mode_idx == 0 else (1 if saved.get("run_local", True) else 2),
+                    options,
+                    index=default_idx,
                     key="onboarding_db_source"
                 )
-                use_demo_db = (db_source == "📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)")
+                use_demo_db = (db_source in ("📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)", "🕊️ Dữ liệu Mẫu Yến Sào Khánh Hòa (SQLite Cục Bộ)"))
+                is_yen_demo = (db_source == "🕊️ Dữ liệu Mẫu Yến Sào Khánh Hòa (SQLite Cục Bộ)")
                 run_local = (db_source == "🖥️ MySQL Máy tính này (Localhost)")
 
-                if use_demo_db:
+                if is_yen_demo:
+                    db_host = ""
+                    db_user = ""
+                    db_pass = ""
+                    db_name = "yen_sao_db"
+                    db_port = "3306"
+                    use_ssl = False
+                    st.markdown("""
+                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
+                        🕊️ <b>CSDL Yến Sào Khánh Hòa (SQLite Cục Bộ):</b> Gồm 4 bảng <code>san_pham</code>, <code>khach_hang</code>, <code>don_hang</code>, <code>chi_tiet_don_hang</code>. Phân tích doanh số, công nợ, lợi nhuận yến sào ngay lập tức mà không cần cài MySQL!
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif use_demo_db:
                     db_host = ""
                     db_user = ""
                     db_pass = ""
@@ -440,7 +467,7 @@ def render_onboarding():
                         "db_port": db_port if not use_demo_db else "3306",
                         "db_user": db_user if not use_demo_db else "",
                         "db_pass": db_pass if not use_demo_db else "",
-                        "db_name": db_name if not use_demo_db else "",
+                        "db_name": db_name,
                         "use_ssl": use_ssl if not use_demo_db else False,
                         "provider": effective_provider,
                         "model_name": model_used,
@@ -478,7 +505,7 @@ def render_onboarding():
                 db_port=db_port if not use_demo_db else "3306",
                 db_user=db_user if not use_demo_db else "",
                 db_pass=db_pass if not use_demo_db else "",
-                db_name=db_name if not use_demo_db else "",
+                db_name=db_name,
                 use_ssl=use_ssl if not use_demo_db else False,
                 run_local=run_local if not use_demo_db else False,
                 effective_provider=effective_provider,

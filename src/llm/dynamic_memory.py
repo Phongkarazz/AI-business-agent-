@@ -295,13 +295,21 @@ def fetch_matching_dynamic_few_shots(
         conn = _get_db_connection()
         cursor = conn.cursor()
 
-        # Ưu tiên đúng domain hoặc generic, rating > 0
-        cursor.execute("""
-            SELECT id, user_query, sql_query, intent_explanation, dialect, domain, tags, evaluator_score
-            FROM dynamic_few_shots
-            WHERE rating > 0 AND (domain = ? OR domain = 'generic' OR ? = 'generic')
-            ORDER BY id DESC LIMIT 50;
-        """, (domain, domain))
+        # Ưu tiên đúng domain hoặc generic, rating > 0 (tuyệt đối không leak domain khác vào generic)
+        if domain == "generic":
+            cursor.execute("""
+                SELECT id, user_query, sql_query, intent_explanation, dialect, domain, tags, evaluator_score
+                FROM dynamic_few_shots
+                WHERE rating > 0 AND domain = 'generic'
+                ORDER BY id DESC LIMIT 50;
+            """)
+        else:
+            cursor.execute("""
+                SELECT id, user_query, sql_query, intent_explanation, dialect, domain, tags, evaluator_score
+                FROM dynamic_few_shots
+                WHERE rating > 0 AND (domain = ? OR domain = 'generic')
+                ORDER BY id DESC LIMIT 50;
+            """, (domain,))
 
         rows = cursor.fetchall()
         conn.close()
@@ -325,6 +333,38 @@ def fetch_matching_dynamic_few_shots(
                 "domain": r["domain"],
                 "is_dynamic": True
             }
+            # Lọc chống xung đột thực thể (Entity Alignment Guardrail)
+            q_low = user_query.lower()
+            ex_q_low = ex["question"].lower()
+            ex_sql_low = ex["sql_mysql"].lower()
+
+            q_is_geo = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"])
+            q_is_prod = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
+            q_is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán"])
+            q_is_team = any(k in q_low for k in ["team", "đội ngũ", "yummies", "delish", "jucies"])
+
+            ex_is_geo = any(k in ex_q_low for k in ["quốc gia", "country", "thị trường", "geo"]) or "geo" in ex_sql_low
+            ex_is_prod = any(k in ex_q_low for k in ["sản phẩm", "product", "mặt hàng"]) or "products" in ex_sql_low or "pid" in ex_sql_low
+            ex_is_person = any(k in ex_q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán"]) or "people" in ex_sql_low
+            ex_is_team = any(k in ex_q_low for k in ["team", "đội ngũ", "yummies", "delish", "jucies"])
+
+            # Nếu câu hỏi hỏi riêng một thực thể nhưng ca mẫu thuộc thực thể khác hoàn toàn -> loại bỏ
+            if q_is_geo and not q_is_prod and not q_is_person and not q_is_team:
+                if not ex_is_geo and (ex_is_prod or ex_is_person or ex_is_team):
+                    continue
+            if q_is_prod and not q_is_geo and not q_is_person and not q_is_team:
+                if not ex_is_prod and (ex_is_geo or ex_is_person or ex_is_team):
+                    continue
+            if q_is_person and not q_is_geo and not q_is_prod and not q_is_team:
+                if not ex_is_person and (ex_is_geo or ex_is_prod or ex_is_team):
+                    continue
+
+            # Lọc chống xung đột ý định (Intent Alignment Guardrail: Xu hướng theo thời gian vs Biên độ cực trị)
+            q_is_trend = any(k in q_low for k in ["như thế nào", "xu hướng", "diễn biến"]) and not any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "mạnh nhất", "biên độ", "volatility", "spread"])
+            ex_is_spread = "monthlyspread" in ex_sql_low or "biên độ thay đổi" in ex_sql_low or any(k in ex_q_low for k in ["lớn nhất", "biên độ"])
+            if q_is_trend and ex_is_spread:
+                continue
+
             s = score_few_shot_relevance(user_query, ex)
             if s > 15.0:  # Ngưỡng liên quan tối thiểu
                 scored_cases.append((s, ex))

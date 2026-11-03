@@ -41,3 +41,6 @@ env/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Scratch / Temp artifacts
+scratch/

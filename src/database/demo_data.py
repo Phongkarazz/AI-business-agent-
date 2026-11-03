@@ -9,11 +9,24 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 
+import os
+
 @st.cache_resource(show_spinner=False)
-def build_demo_engine():
-    """Tạo 1 SQLite in-memory với dữ liệu mẫu kinh doanh chocolate 2021-2023 đầy đủ,
-    để bất kỳ ai cũng test được ngay các câu hỏi Top 10, phân tích theo thị trường (India, USA...),
-    team (Yummies, Delish, Jucies), dòng sản phẩm mà không cần MySQL riêng."""
+def build_demo_engine(demo_type: str = "chocolate"):
+    """Tạo SQLite engine cho dữ liệu mẫu.
+    Hỗ trợ demo_type='chocolate' (CSDL Awesome Chocolates) hoặc demo_type='yen_sao' (CSDL Yến Sào Nha Trang).
+    """
+    if str(demo_type).lower() in ("yen_sao", "yen", "yen_sao_db", "yensao"):
+        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "yen_sao.db")
+        if not os.path.exists(db_path):
+            from create_yen_sao_sqlite import init_db
+            init_db()
+        return create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool
+        )
+
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -83,7 +96,9 @@ def build_demo_engine():
 
     dates = pd.date_range("2021-01-01", "2023-12-31", freq="D")
     n = len(dates) * 3  # ~3,285 transactions
+    cust_id_pool = [f"CUST-{i:03d}" for i in range(101, 181)] # 80 khách hàng doanh nghiệp quen thuộc
     sales_df = pd.DataFrame({
+        "CustomerID": rng.choice(cust_id_pool, n),
         "SPID": rng.choice(people_df["SPID"], n),
         "GeoID": rng.choice(geo_df["GeoID"], n),
         "PID": rng.choice(products_df["PID"], n),
@@ -96,6 +111,9 @@ def build_demo_engine():
     # Điểm bất thường có chủ đích (tháng 6/2021 và tháng 11/2022) để test tính năng outlier / anomaly detection
     sales_df.loc[(sales_df["SaleDate"].dt.year == 2021) & (sales_df["SaleDate"].dt.month == 6), "Amount"] *= 2
     sales_df.loc[(sales_df["SaleDate"].dt.year == 2022) & (sales_df["SaleDate"].dt.month == 11), "Amount"] *= 2
+
+    # Định dạng SaleDate chuẩn ISO Date (YYYY-MM-DD) loại bỏ triệt để đuôi 00:00:00.000000 trong SQLite
+    sales_df["SaleDate"] = sales_df["SaleDate"].dt.strftime("%Y-%m-%d")
 
     # Tạo bảng CRM Tickets mô phỏng hệ thống hỗ trợ & chăm sóc khách hàng doanh nghiệp
     num_tickets = 1200

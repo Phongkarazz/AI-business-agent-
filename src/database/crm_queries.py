@@ -1335,7 +1335,23 @@ def _get_sales_year_filter(is_sqlite: bool, start_year: int = None, end_year: in
     return f"WHERE {year_expr} BETWEEN {start_year} AND {end_year}"
 
 
-def fetch_sales_overview_data(engine, start_year: int = 2021, end_year: int = 2023) -> dict:
+def _get_sales_year_range(engine) -> tuple:
+    """Truy vấn khoảng năm thực tế (Min/Max) từ bảng sales (SaleDate)."""
+    is_sqlite = _is_sqlite(engine)
+    year_expr = "CAST(substr(SaleDate, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(SaleDate)"
+    try:
+        df_y, _ = execute_query(
+            engine,
+            f"SELECT MIN({year_expr}) AS min_y, MAX({year_expr}) AS max_y FROM sales WHERE SaleDate IS NOT NULL"
+        )
+        if not df_y.empty and df_y.iloc[0]["min_y"] is not None and df_y.iloc[0]["max_y"] is not None:
+            return int(df_y.iloc[0]["min_y"]), int(df_y.iloc[0]["max_y"])
+    except Exception:
+        pass
+    return 2021, 2022
+
+
+def fetch_sales_overview_data(engine, start_year: int = 2021, end_year: int = 2022) -> dict:
     """Truy vấn các chỉ số tổng quan Doanh số, Sản lượng, Khách hàng và Xu hướng theo mốc thời gian."""
     start_t = time.time()
     is_sqlite = _is_sqlite(engine)
@@ -1787,7 +1803,7 @@ def discover_generic_database_schema(engine) -> dict:
     - Cột phân loại (Categorical: Name, Category, Status, Dept...)
     """
     if not engine:
-        return {"tables": [], "date_col": None, "min_year": 2020, "max_year": 2024, "meta": {}}
+        return {"tables": [], "date_col": None, "date_table": None, "min_year": 2020, "max_year": 2024, "meta": {}}
 
     meta = {}
     date_col_candidate = None
@@ -1813,11 +1829,8 @@ def discover_generic_database_schema(engine) -> dict:
                 c_name_low = c_name.lower()
 
                 # Nhận diện cột Date/Time
-                if any(dt in c_type_str for dt in ["date", "time", "timestamp"]) or any(kw in c_name_low for kw in ["date", "time", "created_at", "from_date", "hire_date", "saledate"]):
+                if any(dt in c_type_str for dt in ["date", "time", "timestamp"]) or any(kw in c_name_low for kw in ["date", "time", "created_at", "from_date", "hire_date", "saledate", "orderdate", "payment_date", "rental_date"]):
                     d_cols.append(c_name)
-                    if not date_col_candidate:
-                        date_col_candidate = c_name
-                        date_table_candidate = t_name
 
                 # Nhận diện cột Numeric
                 elif any(nt in c_type_str for nt in ["int", "float", "numeric", "decimal", "double", "real"]):
@@ -1845,6 +1858,56 @@ def discover_generic_database_schema(engine) -> dict:
                 "row_count": row_count
             }
 
+        # Chọn cặp (date_table, date_col) tối ưu nhất theo điểm số nghiệp vụ
+        date_candidates = []
+        for t_n, t_info in meta.items():
+            t_low = t_n.lower()
+            r_cnt = t_info.get("row_count", 0)
+            n_cols = t_info.get("numeric_columns", [])
+            for d_c in t_info.get("date_columns", []):
+                d_low = d_c.lower()
+                cand_score = 0
+
+                # Điểm theo số lượng bản ghi
+                if r_cnt > 1000:
+                    cand_score += 40
+                elif r_cnt > 100:
+                    cand_score += 20
+                elif r_cnt > 0:
+                    cand_score += 10
+                else:
+                    cand_score -= 20
+
+                # Điểm theo ngữ nghĩa tên cột thời gian
+                if any(kw in d_low for kw in ["payment_date", "rental_date", "order_date", "sale_date", "invoice_date", "trans_date", "transaction_date", "orderdate", "saledate", "booking_date"]):
+                    cand_score += 60
+                elif any(kw in d_low for kw in ["created_at", "created_date", "open_date", "start_date", "hire_date", "entry_date"]):
+                    cand_score += 30
+                elif "date" in d_low:
+                    cand_score += 20
+
+                # Trừ điểm audit timestamp kỹ thuật
+                if any(kw in d_low for kw in ["last_update", "updated_at", "modified_at", "update_time", "sys_"]):
+                    cand_score -= 30
+
+                # Điểm theo bảng giao dịch và cột đo lường
+                if n_cols:
+                    cand_score += 30
+                    if any(any(mkw in nc.lower() for mkw in ["amount", "total", "price", "cost", "revenue", "qty", "quantity", "val", "fee"]) for nc in n_cols):
+                        cand_score += 30
+
+                if any(kw in t_low for kw in ["payment", "rental", "order", "sale", "trans", "invoice", "booking", "fact"]):
+                    cand_score += 40
+                elif any(kw in t_low for kw in ["log", "audit", "history", "sys_", "meta"]):
+                    cand_score -= 30
+
+                date_candidates.append((cand_score, t_n, d_c))
+
+        if date_candidates:
+            date_candidates.sort(key=lambda x: x[0], reverse=True)
+            date_table_candidate = date_candidates[0][1]
+            date_col_candidate = date_candidates[0][2]
+
         # Truy vấn khoảng năm Min/Max nếu tìm thấy cột thời gian
         if date_table_candidate and date_col_candidate:
             try:
@@ -1853,12 +1916,15 @@ def discover_generic_database_schema(engine) -> dict:
     MIN({y_expr}) AS min_y, 
     MAX({y_expr}) AS max_y 
 FROM `{date_table_candidate}` 
-WHERE {y_expr} > 1900 AND {y_expr} < 2100;"""
+WHERE {date_col_candidate} IS NOT NULL AND {y_expr} > 1900 AND {y_expr} < 2100;"""
                 with engine.connect() as conn:
                     mm_df = pd.read_sql(text(sql_min_max), conn)
                     if not mm_df.empty and pd.notna(mm_df["min_y"].iloc[0]) and pd.notna(mm_df["max_y"].iloc[0]):
-                        min_year = int(mm_df["min_y"].iloc[0])
-                        max_year = int(mm_df["max_y"].iloc[0])
+                        min_y = int(mm_df["min_y"].iloc[0])
+                        max_y = int(mm_df["max_y"].iloc[0])
+                        if min_y <= max_y and 1900 < min_y < 2100 and 1900 < max_y < 2100:
+                            min_year = min_y
+                            max_year = max_y
             except Exception:
                 pass
 
@@ -1871,7 +1937,7 @@ WHERE {y_expr} > 1900 AND {y_expr} < 2100;"""
             "meta": meta
         }
     except Exception:
-        return {"tables": [], "date_col": None, "min_year": 2020, "max_year": 2024, "meta": {}}
+        return {"tables": [], "date_col": None, "date_table": None, "min_year": 2020, "max_year": 2024, "meta": {}}
 
 
 def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = None, end_year: int = None) -> dict:
@@ -1886,15 +1952,39 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
     total_tables = len(tables)
     total_records = sum(m.get("row_count", 0) for m in meta.values())
 
-    # Chọn bảng chính có nhiều dòng nhất
-    main_table = date_table or (sorted(tables, key=lambda t: meta.get(t, {}).get("row_count", 0), reverse=True)[0] if tables else None)
-    main_num_col = meta.get(main_table, {}).get("numeric_columns", [None])[0] if main_table else None
-    main_cat_col = meta.get(main_table, {}).get("categorical_columns", [None])[0] if main_table else None
+    # Chọn bảng chính: ưu tiên date_table (thường là bảng transaction nghiệp vụ cốt lõi),
+    # hoặc bảng có nhiều dòng nhất mà có numeric_columns, hoặc bảng có nhiều dòng nhất.
+    main_table = None
+    if date_table and date_table in meta and meta[date_table].get("row_count", 0) > 0:
+        main_table = date_table
+    elif tables:
+        sorted_tables = sorted(
+            tables,
+            key=lambda t: (
+                1 if meta.get(t, {}).get("numeric_columns") else 0,
+                meta.get(t, {}).get("row_count", 0)
+            ),
+            reverse=True
+        )
+        main_table = sorted_tables[0]
 
-    # Lọc thời gian nếu có
+    # Truy xuất an toàn danh sách cột (chống triệt để IndexError: list index out of range)
+    main_meta = meta.get(main_table, {}) if main_table else {}
+    main_cols = main_meta.get("columns", [])
+
+    main_num_cols = main_meta.get("numeric_columns", [])
+    main_num_col = main_num_cols[0] if main_num_cols else None
+
+    main_cat_cols = main_meta.get("categorical_columns", [])
+    main_cat_col = main_cat_cols[0] if main_cat_cols else None
+
+    main_date_cols = main_meta.get("date_columns", [])
+    active_date_col = date_col if (date_col and date_col in main_cols) else (main_date_cols[0] if main_date_cols else None)
+
+    # Lọc thời gian chỉ khi main_table thực sự có active_date_col
     where_clause = ""
-    if date_col and start_year and end_year and main_table:
-        y_expr = f"CAST(substr({date_col}, 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({date_col})"
+    if active_date_col and start_year and end_year and main_table:
+        y_expr = f"CAST(substr({active_date_col}, 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({active_date_col})"
         where_clause = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}"
 
     # Lấy mẫu dữ liệu bảng chính
@@ -1910,6 +2000,11 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
                 sql_sample = f"SELECT * FROM `{main_table}` {where_clause} LIMIT 100;"
                 main_df = pd.read_sql(text(sql_sample), conn)
 
+                # Fallback nếu lọc theo khoảng năm không ra dòng nào
+                if main_df.empty and where_clause:
+                    sql_sample_fb = f"SELECT * FROM `{main_table}` LIMIT 100;"
+                    main_df = pd.read_sql(text(sql_sample_fb), conn)
+
                 # 2. Main Numeric sum
                 if main_num_col:
                     sql_sum = f"SELECT SUM({main_num_col}) AS total_metric, AVG({main_num_col}) AS avg_metric FROM `{main_table}` {where_clause};"
@@ -1920,13 +2015,26 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
                 # 3. Categorical distribution
                 if main_cat_col:
                     sql_cat = f"SELECT `{main_cat_col}` AS Category, COUNT(*) AS Count FROM `{main_table}` {where_clause} GROUP BY `{main_cat_col}` ORDER BY Count DESC LIMIT 10;"
-                    cat_dist_df = pd.read_sql(text(sql_cat), conn)
+                    try:
+                        cat_dist_df = pd.read_sql(text(sql_cat), conn)
+                    except Exception:
+                        sql_cat_fb = f"SELECT `{main_cat_col}` AS Category, COUNT(*) AS Count FROM `{main_table}` GROUP BY `{main_cat_col}` ORDER BY Count DESC LIMIT 10;"
+                        cat_dist_df = pd.read_sql(text(sql_cat_fb), conn)
 
-                # 4. Trend over time
-                if date_col:
-                    m_expr = f"substr({date_col}, 1, 7)" if is_sqlite else f"DATE_FORMAT({date_col}, '%Y-%m')"
-                    sql_trend = f"SELECT {m_expr} AS TimePeriod, COUNT(*) AS Count FROM `{main_table}` {where_clause} GROUP BY TimePeriod ORDER BY TimePeriod ASC;"
-                    trend_df = pd.read_sql(text(sql_trend), conn)
+                # 4. Trend over time (ưu tiên active_date_col trên main_table, hoặc date_col trên date_table)
+                trend_tbl = main_table if active_date_col else (date_table if (date_table and date_col) else None)
+                trend_col = active_date_col if active_date_col else date_col
+                if trend_tbl and trend_col:
+                    t_where = ""
+                    if start_year and end_year:
+                        t_y_expr = f"CAST(substr({trend_col}, 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({trend_col})"
+                        t_where = f"WHERE {t_y_expr} BETWEEN {start_year} AND {end_year}"
+                    m_expr = f"substr({trend_col}, 1, 7)" if is_sqlite else f"DATE_FORMAT({trend_col}, '%Y-%m')"
+                    sql_trend = f"SELECT {m_expr} AS TimePeriod, COUNT(*) AS Count FROM `{trend_tbl}` {t_where} GROUP BY TimePeriod ORDER BY TimePeriod ASC;"
+                    try:
+                        trend_df = pd.read_sql(text(sql_trend), conn)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -1960,7 +2068,8 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
     """Tự động truy vấn dữ liệu chi tiết cho 1 bảng cụ thể của CSDL mới."""
     start_t = time.time()
     meta = schema_meta.get("meta", {}).get(table_name, {})
-    date_col = meta.get("date_columns", [None])[0] if meta.get("date_columns") else None
+    d_cols = meta.get("date_columns", [])
+    date_col = d_cols[0] if d_cols else None
     num_cols = meta.get("numeric_columns", [])
     cat_cols = meta.get("categorical_columns", [])
     is_sqlite = _is_sqlite(engine)
@@ -1977,10 +2086,19 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
     try:
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
+            # Fallback nếu lọc theo thời gian không ra dòng nào
+            if df.empty and where_clause:
+                fb_sql = f"SELECT * FROM `{table_name}` LIMIT 200;"
+                df = pd.read_sql(text(fb_sql), conn)
+
             if cat_cols:
                 main_cat = cat_cols[0]
                 sql_cat = f"SELECT `{main_cat}` AS Category, COUNT(*) AS Count FROM `{table_name}` {where_clause} GROUP BY `{main_cat}` ORDER BY Count DESC LIMIT 10;"
-                cat_df = pd.read_sql(text(sql_cat), conn)
+                try:
+                    cat_df = pd.read_sql(text(sql_cat), conn)
+                except Exception:
+                    sql_cat_fb = f"SELECT `{main_cat}` AS Category, COUNT(*) AS Count FROM `{table_name}` GROUP BY `{main_cat}` ORDER BY Count DESC LIMIT 10;"
+                    cat_df = pd.read_sql(text(sql_cat_fb), conn)
 
         anomalies = []
         if not df.empty:

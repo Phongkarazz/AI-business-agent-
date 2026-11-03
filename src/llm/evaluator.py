@@ -35,7 +35,11 @@ def evaluate_execution(
     schema_low = (schema_context or "").lower()
     is_employees_db = (
         any(k in schema_low for k in ["dept_emp", "dept_manager", "departments", "employees", "titles", "salaries", "hire_date"])
-        or any(k in sql_low for k in ["dept_emp", "dept_manager", "departments", "employees", "salaries", "titles"])
+        and not any(k in schema_low for k in ["san_pham", "khach_hang", "don_hang", "chi_tiet_don_hang", "film_id", "rental_id", "boxes", "cost_per_box"])
+    )
+    is_choco_db = (
+        any(k in schema_low for k in ["spid", "geoid", "cost_per_box", "salesperson", "boxes"])
+        and not any(k in schema_low for k in ["san_pham", "khach_hang", "don_hang", "chi_tiet_don_hang"])
     )
 
     criteria = {
@@ -119,7 +123,7 @@ def evaluate_execution(
             )
 
         # Kiểm tra 2.2: Người dùng hỏi tốc độ tăng trưởng lương nhưng chỉ trả về mức lương tĩnh
-        asked_growth = any(k in q_low for k in ["tăng trưởng", "tốc độ", "mỗi năm", "growth rate", "annual growth"]) and any(k in q_low for k in ["lương", "salary"])
+        asked_growth = is_employees_db and any(k in q_low for k in ["tăng trưởng", "tốc độ", "mỗi năm", "growth rate", "annual growth"]) and any(k in q_low for k in ["lương", "salary"])
         has_growth_col = any(any(k in c for k in ["growth", "tăng trưởng", "annual", "rate", "tốc độ"]) for c in cols_low)
         if asked_growth and not has_growth_col:
             criteria["semantic_alignment"]["passed"] = False
@@ -132,7 +136,7 @@ def evaluate_execution(
             )
 
         # Kiểm tra 2.3: Người dùng hỏi nhân viên qua ít nhất 2 phòng ban nhưng thiếu cột số phòng ban
-        asked_multi_dept = any(k in q_low for k in ["nhiều phòng ban", "ít nhất 2 phòng", "từ 2 phòng", "qua 2 phòng", "nhiều hơn 1 phòng"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "employee"])
+        asked_multi_dept = is_employees_db and any(k in q_low for k in ["nhiều phòng ban", "ít nhất 2 phòng", "từ 2 phòng", "qua 2 phòng", "nhiều hơn 1 phòng"]) and any(k in q_low for k in ["nhân viên", "nhân sự", "người", "employee"])
         has_dept_count = any(any(k in c for k in ["departmentcount", "dept_count", "department_count", "số phòng ban", "phòng ban", "count", "dept"]) for c in cols_low)
         if asked_multi_dept and not has_dept_count:
             criteria["semantic_alignment"]["passed"] = False
@@ -145,7 +149,7 @@ def evaluate_execution(
             )
 
         # Kiểm tra 2.4: Người dùng yêu cầu số lần tăng lương ít hơn N lần nhưng kết quả trả về có >= N lần
-        m_less_raises = re.search(r"(?:ít hơn|dưới|nhỏ hơn|chưa quá|không quá|tối đa)\s*(\d+)\s*lần", q_low)
+        m_less_raises = re.search(r"(?:ít hơn|dưới|nhỏ hơn|chưa quá|không quá|tối đa)\s*(\d+)\s*lần", q_low) if is_employees_db else None
         if m_less_raises:
             max_allowed = int(m_less_raises.group(1))
             raise_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["raisecount", "raise_count", "lần tăng", "số lần"])), None)
@@ -386,7 +390,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.13: Người dùng hỏi mức chênh lệch lương giữa người cao nhất và thấp nhất theo chức danh hoặc phòng ban
-        is_salary_spread_eval = (
+        is_salary_spread_eval = is_employees_db and (
             any(k in q_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa", "difference", "disparity"])
             and any(k in q_low for k in ["lương", "salary", "thu nhập", "income"])
             and (
@@ -419,7 +423,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.13b: Người dùng hỏi Tỷ lệ ép lương / Nén lương (Wage / Salary Compression)
-        is_salary_comp_eval = (
+        is_salary_comp_eval = is_employees_db and (
             any(k in q_low for k in ["ép lương", "áp lương", "nén lương", "compression", "wage compression", "salary compression", "pay compression"])
             or (any(k in q_low for k in ["tỷ lệ ép", "tỉ lệ ép", "tỷ lệ nén", "tỉ lệ nén"]))
         )
@@ -442,7 +446,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.14: Người dùng hỏi phân loại toàn bộ nhân sự thành 3 nhóm lương (Dưới 50k, 50k-80k, Trên 80k)
-        is_tier_eval = (
+        is_tier_eval = is_employees_db and (
             (
                 any(k in q_low for k in ["nhóm lương", "bậc lương", "khoảng lương", "3 nhóm lương", "thu nhập thấp", "thu nhập trung bình", "thu nhập cao"])
                 or (
@@ -479,7 +483,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.15: Người dùng hỏi mức phân tán lương (độ lệch chuẩn - STDDEV) hoặc tỷ lệ biến động lương theo phòng ban
-        is_fluct_eval = (
+        is_fluct_eval = is_employees_db and (
             any(k in q_low for k in ["biến động lương", "tỷ lệ biến động lương", "độ biến động lương", "dao động lương", "độ lệch chuẩn", "stddev", "độ phân tán"])
             or (
                 any(k in q_low for k in ["biến động", "fluctuation", "dao động", "phân tán", "độ lệch chuẩn", "stddev"])
@@ -511,7 +515,7 @@ def evaluate_execution(
 
         # Kiểm tra 2.6.16: Người dùng hỏi Tổng quỹ lương theo phòng ban kèm số lượng nhân sự
         is_dept_scope = any(k in q_low for k in ["phòng ban", "các phòng", "từng phòng", "department", "dept"]) and not any(k in q_low for k in ["toàn công ty", "toan cong ty", "toàn thể"])
-        is_top_dept_payroll_eval = (
+        is_top_dept_payroll_eval = is_employees_db and (
             is_dept_scope and any(k in q_low for k in ["quỹ lương", "tổng quỹ lương", "tổng chi trả lương", "chi trả quỹ lương", "chi phí lương", "tổng lương", "tổng chi lương", "tổng tiền lương"])
         )
         if is_top_dept_payroll_eval:
@@ -536,7 +540,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.17: Người dùng hỏi có bao nhiêu nhân viên từng thay đổi phòng ban ít nhất 1 lần
-        is_dept_transfer_count_eval = (
+        is_dept_transfer_count_eval = is_employees_db and (
             (
                 any(k in q_low for k in ["thay đổi phòng ban", "thay đổi phòng", "đổi phòng ban", "đổi phòng", "chuyển phòng ban", "chuyển phòng", "luân chuyển phòng ban", "luân chuyển phòng", "luân chuyển bộ phận"])
                 or (any(k in q_low for k in ["thay đổi", "đổi", "chuyển", "luân chuyển"]) and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"]))
@@ -565,7 +569,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.17b: Người dùng hỏi phòng ban có nhiều nhân viên chuyển đến / chuyển đi nhất
-        is_dept_transfer_breakdown_eval = (
+        is_dept_transfer_breakdown_eval = is_employees_db and (
             any(k in q_low for k in ["chuyển đến", "chuyển tới", "chuyển sang", "chuyển đi", "rời khỏi", "luân chuyển đến", "luân chuyển đi"])
             and any(k in q_low for k in ["phòng ban", "phòng", "bộ phận", "department"])
         )
@@ -590,7 +594,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.18: Người dùng hỏi tốc độ tăng trưởng quy mô nhân sự các phòng ban trong N năm đầu hoạt động
-        is_dept_headcount_growth_eval = (
+        is_dept_headcount_growth_eval = is_employees_db and (
             any(k in q_low for k in ["tăng trưởng", "phát triển", "mở rộng quy mô"])
             and any(k in q_low for k in ["quy mô", "nhân sự", "nhân viên", "headcount", "số lượng"])
             and any(k in q_low for k in ["phòng ban", "phòng", "các phòng", "từng phòng", "department"])
@@ -619,7 +623,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.19: Người dùng hỏi nhân viên làm việc tại ít nhất 2 phòng ban nhưng lương hiện tại thấp hơn / cao hơn lương TB phòng ban đầu tiên
-        is_multi_dept_sal_first_eval = (
+        is_multi_dept_sal_first_eval = is_employees_db and (
             any(k in q_low for k in ["nhiều phòng", "ít nhất 2 phòng", "từ 2 phòng", "qua 2 phòng", "2 phòng ban", "chuyển phòng", "luân chuyển"])
             and any(k in q_low for k in ["phòng ban đầu tiên", "phòng đầu tiên", "đầu tiên họ từng", "phòng ban khởi điểm", "first department", "first dept"])
             and any(k in q_low for k in ["lương", "salary", "thu nhập"])
@@ -646,7 +650,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.20: Người dùng hỏi top nhân viên được tăng lương nhiều lần nhất nhưng mức lương hiện tại vẫn dưới ngưỡng
-        is_top_raises_low_sal_eval = (
+        is_top_raises_low_sal_eval = is_employees_db and (
             any(k in q_low for k in ["tăng lương", "lần tăng", "được tăng"])
             and any(k in q_low for k in ["nhiều lần nhất", "nhiều nhất", "nhiều lần", "most raises"])
             and any(k in q_low for k in ["dưới", "thấp hơn", "chưa tới", "không quá", "<"])
@@ -686,7 +690,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.21: Top nhân viên có tỷ lệ tăng lương ấn tượng nhất so sánh lương đầu tiên và hiện tại
-        is_employee_growth_eval = (
+        is_employee_growth_eval = is_employees_db and (
             any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "employee"])
             and any(k in q_low for k in ["tỷ lệ tăng lương", "tỉ lệ tăng lương", "tăng lương ấn tượng", "tốc độ tăng lương", "tăng trưởng lương", "mức tăng lương", "salary growth", "highest raise rate", "salary increase"])
             and (
@@ -716,7 +720,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.22: Nhân viên hiện đang nhận lương cao hơn mức lương trung bình của toàn bộ nhân viên có cùng chức danh (Title)
-        is_employee_title_avg_eval = (
+        is_employee_title_avg_eval = is_employees_db and (
             any(k in q_low for k in ["nhân viên", "nhân sự", "người", "ai", "employee"])
             and any(k in q_low for k in ["chức danh", "title", "vị trí", "cùng chức danh", "same title"])
             and any(k in q_low for k in ["cao hơn", "vượt", "higher than", "above average", "lớn hơn"])
@@ -747,7 +751,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.6.23: Nhân viên từng bị giảm lương trong lịch sử làm việc tại công ty
-        is_salary_reduction_eval = (
+        is_salary_reduction_eval = is_employees_db and (
             (
                 any(k in q_low for k in ["giảm lương", "hạ lương", "bị giảm lương", "bị hạ lương", "tụt lương", "bị trừ lương", "salary reduction", "salary decrease", "pay cut"])
                 or (any(k in q_low for k in ["lương", "salary"]) and any(k in q_low for k in ["bị giảm", "bị hạ", "tụt", "thấp hơn lần trước", "thấp hơn kỳ trước"]))
@@ -799,7 +803,7 @@ def evaluate_execution(
             if v not in depts_in_q:
                 depts_in_q.append(v)
 
-        if len(depts_in_q) == 2 and any(k in q_low for k in ["lương", "thu nhập", "salary"]) and any(k in q_low for k in ["so sánh", "đối chiếu", "chênh lệch", "vs", "compare"]):
+        if is_employees_db and len(depts_in_q) == 2 and any(k in q_low for k in ["lương", "thu nhập", "salary"]) and any(k in q_low for k in ["so sánh", "đối chiếu", "chênh lệch", "vs", "compare"]):
             d1_sub, d2_sub = depts_in_q[0], depts_in_q[1]
             has_both_depts = (d1_sub in sql_low) and (d2_sub in sql_low)
             has_avg_in_sql = "avg(" in sql_low or "avgsalary" in sql_low
@@ -822,7 +826,7 @@ def evaluate_execution(
 
         # Kiểm tra 2.8: Người dùng hỏi tỷ trọng chi phí lương / ngân sách của một phòng ban cụ thể trong tổng chi phí toàn công ty
         known_depts_share = ["sales", "development", "research", "marketing", "finance", "production", "customer service", "quality management", "human resources", "sản xuất", "kinh doanh", "tiếp thị", "phát triển", "nghiên cứu", "tài chính", "nhân sự"]
-        is_dept_share_eval = (
+        is_dept_share_eval = is_employees_db and (
             any(k in q_low for k in ["chiếm bao nhiêu", "chiếm tỉ lệ", "chiếm tỷ lệ", "chiếm phần trăm", "tỷ trọng", "tỉ trọng", "phần trăm trong tổng", "tỷ lệ trong tổng", "đóng góp bao nhiêu"])
             and any(k in q_low for k in ["tổng chi phí", "tổng quỹ lương", "tổng lương", "toàn công ty", "trong tổng"])
             and any(k in q_low for k in known_depts_share)
@@ -879,7 +883,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.86: Người dùng hỏi SO SÁNH doanh số và số lượng hộp bán ra GIỮA CÁC Team kinh doanh (không phải riêng 1 team cụ thể)
-        is_team_sales_boxes_eval = (
+        is_team_sales_boxes_eval = is_choco_db and (
             any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh"])
             and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền"])
             and any(k in q_low for k in ["hộp", "thùng", "boxes"])
@@ -914,7 +918,7 @@ def evaluate_execution(
                 )
 
         # Kiểm tra 2.9: Người dùng hỏi danh sách phòng ban có mức lương trung bình trên/dưới một ngưỡng (VD: trên $70,000)
-        is_dept_avg_thresh_eval = (
+        is_dept_avg_thresh_eval = is_employees_db and (
             any(k in q_low for k in ["phòng ban", "phòng", "các phòng", "department"])
             and any(k in q_low for k in ["lương trung bình", "mức lương trung bình", "lương tb", "avg salary", "average salary"])
             and any(k in q_low for k in ["trên", "dưới", "vượt", "hơn", "cao hơn", "thấp hơn", "lớn hơn", "nhỏ hơn", ">", "<", "above", "below", "over"])
@@ -970,17 +974,184 @@ def evaluate_execution(
                     f"MUST use HAVING AvgSalary {'<' if is_less else '>'} {thresh_val} and project ROUND(AVG(s.salary), 2) AS AvgSalary!"
                 )
 
+        # Kiểm tra 2.10: Phát hiện ảo giác so sánh cùng kỳ giả mạo (Fake YoY Hallucination)
+        is_trend_query = any(k in q_low for k in ["xu hướng", "trend", "biến động theo thời gian", "theo thời gian", "qua thời gian", "qua các tháng", "theo tháng", "theo ngày"])
+        asked_explicit_yoy = any(k in q_low for k in ["so sánh cùng kỳ", "cùng kỳ năm trước", "yoy", "mom", "so với năm trước", "so với cùng kỳ", "tăng trưởng cùng kỳ"])
+        has_yoy_columns = any(any(k in c for k in ["last_year", "lastyear", "current_year", "currentyear", "change_in_sales", "changeinsales", "percentage_change", "percentagechange"]) for c in cols_low)
+
+        has_identical_yoy = False
+        if has_yoy_columns:
+            ly_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["last_year", "lastyear"])]
+            cy_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["current_year", "currentyear"])]
+            chg_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["change_in_sales", "changeinsales", "chenh_lech", "do_chenh_lech"])]
+            if ly_cols and cy_cols:
+                try:
+                    s_ly = pd.to_numeric(df[ly_cols[0]], errors="coerce")
+                    s_cy = pd.to_numeric(df[cy_cols[0]], errors="coerce")
+                    if (s_ly == s_cy).all() or (s_ly.fillna(0) == s_cy.fillna(0)).all():
+                        has_identical_yoy = True
+                except Exception:
+                    pass
+            if chg_cols:
+                try:
+                    s_chg = pd.to_numeric(df[chg_cols[0]], errors="coerce")
+                    if (s_chg == 0).all():
+                        has_identical_yoy = True
+                except Exception:
+                    pass
+
+        if (is_trend_query and not asked_explicit_yoy and has_yoy_columns) or has_identical_yoy:
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Phát hiện ảo giác so sánh cùng kỳ (Fake YoY Hallucination): Dữ liệu chứa các cột so sánh giả mạo (Last Year Sales, Current Year Sales, Change In Sales) với giá trị trùng khít nhau hoặc câu hỏi chỉ yêu cầu xem xu hướng đơn thuần mà AI lại tự ý bịa ra các cột so sánh cùng kỳ."
+                if not is_en else
+                "Detected fake YoY comparison hallucination: Query produced mock comparison columns (Last Year, Current Year, Change) with identical values or split simple time-series into fake YoY."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "Người dùng chỉ yêu cầu xem xu hướng theo thời gian: BẮT BUỘC chỉ SELECT [Cột Ngày/Tháng], SUM([Chỉ số]), COUNT(*), GROUP BY [Cột Ngày/Tháng] và ORDER BY [Cột Ngày/Tháng] ASC! TUYỆT ĐỐI KHÔNG tự bịa ra các cột 'Last Year Sales', 'Current Year Sales', 'Change In Sales'!"
+                if not is_en else
+                "User requested simple time-series trend: MUST SELECT [Date], SUM([Metric]), COUNT(*) GROUP BY [Date] ORDER BY [Date] ASC! Do NOT fabricate 'Last Year Sales', 'Current Year Sales', 'Change In Sales'!"
+            )
+
+        # Kiểm tra 2.11: Người dùng hỏi tỷ lệ phần trăm đóng góp / tỷ trọng nhưng kết quả thiếu cột tỷ lệ %
+        asked_ratio_contrib = (
+            any(k in q_low for k in ["tỷ lệ phần trăm đóng góp", "tỷ lệ đóng góp", "phần trăm đóng góp", "tỷ trọng", "tỉ trọng", "chiếm bao nhiêu phần trăm", "cơ cấu đóng góp"])
+            or (any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm"]) and any(k in q_low for k in ["đóng góp", "vào tổng", "trong tổng", "từng nhóm", "mỗi nhóm"]))
+        )
+        if asked_ratio_contrib:
+            has_ratio_metric = any(any(k in c for k in ["percent", "percentage", "pct", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "share", "ratio", "tyle", "%"]) for c in cols_low)
+            if not has_ratio_metric:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Người dùng yêu cầu phân tích tỷ lệ phần trăm đóng góp, nhưng kết quả truy vấn hoàn toàn thiếu cột tỷ lệ phần trăm (TyLePhanTram / Percentage)."
+                    if not is_en else
+                    "User requested percentage contribution breakdown, but query result completely missed the percentage column (TyLePhanTram / Percentage)."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC tính cột tỷ lệ phần trăm đóng góp: ROUND(TongGiaTri * 100.0 / (SELECT SUM(TongGiaTri) FROM GroupStats), 2) AS TyLePhanTram!"
+                    if not is_en else
+                    "MUST compute percentage contribution column: ROUND(TongGiaTri * 100.0 / (SELECT SUM(TongGiaTri) FROM GroupStats), 2) AS TyLePhanTram!"
+                )
+        # Kiểm tra 2.12: Người dùng yêu cầu phân tích chuỗi tăng trưởng liên tiếp (Consecutive Growth Streaks) nhưng trả về truy vấn phẳng GROUP BY Month, Product
+        asked_consecutive_streaks = (
+            any(k in q_low for k in ["tăng liên tiếp", "tăng liên tục", "tăng trưởng liên tiếp", "tăng trưởng liên tục", "chuỗi tăng", "chuỗi tháng tăng", "consecutive growth", "consecutive streak"])
+            or (any(k in q_low for k in ["liên tiếp", "liên tục"]) and any(k in q_low for k in ["tháng", "month", "chuỗi"]))
+        )
+        is_flat_monthly = "group by month, product" in sql_low or "group by month, pr.product" in sql_low or "group by pr.product, month" in sql_low
+        if asked_consecutive_streaks:
+            has_streak_metric = any(any(k in c for k in ["chuỗi", "streak", "liên tiếp", "liên tục", "tăng trưởng chuỗi", "consecutive"]) for c in cols_low)
+            if not has_streak_metric or is_flat_monthly:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Người dùng yêu cầu xác định sản phẩm có doanh số tăng liên tục các tháng liên tiếp (Consecutive Growth Streaks), nhưng truy vấn trả về dạng phẳng gom nhóm đơn thuần theo Tháng và Sản phẩm thay vì tính toán các chuỗi tháng tăng trưởng thực sự."
+                    if not is_en else
+                    "User requested consecutive monthly growth streaks, but query returned a flat GROUP BY Month, Product without computing consecutive growth streaks."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC dùng CTE 2 bước (MonthlySales và Streak3) kết nối m1, m2, m3 liên tiếp (m2.TotalSales > m1.TotalSales AND m3.TotalSales > m2.TotalSales) và tính tỷ lệ tăng trưởng từng tháng và tổng tăng trưởng chuỗi!"
+                    if not is_en else
+                    "MUST use 2-step CTE with self-joins or window functions to identify products with consecutive monthly growth and calculate growth rates!"
+                )
+
+        # Kiểm tra 2.13: Người dùng yêu cầu biên độ thay đổi / dao động doanh thu lớn nhất nhưng kết quả trả về truy vấn phẳng
+        asked_spread_volatility = (
+            any(k in q_low for k in ["thay đổi", "biến động", "dao động", "chênh lệch", "biên độ", "volatility", "spread"])
+            and any(k in q_low for k in ["lớn nhất", "nhiều nhất", "mạnh nhất", "cao nhất", "rộng nhất", "largest", "highest", "most"])
+            and any(k in q_low for k in ["tháng", "month", "các tháng", "từng tháng"])
+            and not (any(k in q_low for k in ["như thế nào", "xu hướng", "diễn biến"]) and not any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "mạnh nhất", "biên độ"]))
+        )
+        if asked_spread_volatility:
+            has_spread_metric = any(any(k in c for k in ["biên độ", "spread", "thay đổi", "biến động", "chênh lệch"]) for c in cols_low)
+            if not has_spread_metric or is_flat_monthly:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Người dùng yêu cầu tìm đối tượng có sự thay đổi / biến động doanh thu lớn nhất qua các tháng, nhưng truy vấn không tính Biên độ thay đổi (MAX - MIN) mà trả về bảng chi tiết từng tháng."
+                    if not is_en else
+                    "User requested largest monthly revenue volatility/spread, but query did not compute MAX - MIN spread."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC dùng CTE 2 bước (MonthlySales và MonthlySpread) tính MAX(MonthlyMetric) - MIN(MonthlyMetric) AS `Biên Độ Thay Đổi ($)` và ORDER BY `Biên Độ Thay Đổi ($)` DESC!"
+                    if not is_en else
+                    "MUST compute MAX - MIN as `Biên Độ Thay Đổi ($)` and ORDER BY spread DESC!"
+                )
+
+        # Kiểm tra 2.14: Người dùng yêu cầu phân tích theo Quốc gia (Country / Geo) nhưng kết quả lại trả về Sản phẩm hoặc thiếu trường Quốc gia
+        asked_geo = is_choco_db and any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and not any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "nhân viên", "salesperson", "team"])
+        has_geo_col = any(any(k in c for k in ["country", "geo", "quốc gia", "thị trường", "market"]) for c in cols_low)
+        has_product_col_only = any(any(k in c for k in ["product", "sản phẩm"]) for c in cols_low) and not has_geo_col
+        if asked_geo and (not has_geo_col or has_product_col_only or "products" in sql_low):
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Người dùng yêu cầu phân tích theo Quốc gia (Country / Thị trường), nhưng kết quả truy vấn bị nhầm lẫn sang Sản phẩm (Product) hoặc hoàn toàn thiếu trường Quốc gia."
+                if not is_en else
+                "User requested analysis by Country/Market, but query returned Product entities or lacked Country field."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "BẮT BUỘC: JOIN sales s với geo g ON s.GeoID = g.GeoID và nhóm theo g.Geo AS Country! TUYỆT ĐỐI KHÔNG JOIN bảng products hay nhóm theo pr.Product!"
+                if not is_en else
+                "MUST JOIN sales s with geo g ON s.GeoID = g.GeoID and GROUP BY g.Geo AS Country! DO NOT group by Product!"
+            )
+
+        # Kiểm tra 2.15: Người dùng yêu cầu xu hướng theo thời gian ("như thế nào") nhưng bị nhầm thành tính biên độ (MonthlySpread)
+        asked_trend_time = (
+            any(k in q_low for k in ["như thế nào", "xu hướng", "diễn biến"])
+            and any(k in q_low for k in ["tháng", "month", "các tháng", "từng tháng", "theo tháng", "qua các tháng"])
+            and not any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "mạnh nhất", "biên độ", "volatility", "spread"])
+        )
+        has_spread_cols = any(any(k in c for k in ["biên độ thay đổi", "tháng cao nhất", "tháng thấp nhất", "tỷ lệ biến động"]) for c in cols_low)
+        if asked_trend_time and (has_spread_cols or "monthlyspread" in sql_low):
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Người dùng yêu cầu xem xu hướng thay đổi qua các tháng ('như thế nào'), nhưng truy vấn lại tính toán bảng xếp hạng Biên độ dao động (MonthlySpread / MAX - MIN) thay vì dữ liệu chuỗi thời gian liên tục."
+                if not is_en else
+                "User requested monthly trend over time, but query computed a MonthlySpread volatility ranking table instead of time series data."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "BẮT BUỘC SELECT trực tiếp Month, [Entity nếu có], SUM(s.Amount) AS TotalSales, GROUP BY Month (và Entity nếu có) và ORDER BY Month ASC để vẽ biểu đồ đường Line chart theo dõi xu hướng!"
+                if not is_en else
+                "MUST SELECT Month, [Entity], SUM(s.Amount) AS TotalSales, GROUP BY Month, [Entity] ORDER BY Month ASC for multi-line trend chart!"
+            )
+
     # -------------------------------------------------------------
     # PILLAR 3: COMPARATIVE SUFFICIENCY (ĐỘ ĐẦY ĐỦ CÁC VẾ SO SÁNH & CỰC TRỊ)
     # -------------------------------------------------------------
     if df is not None and not df.empty:
-        # Kiểm tra 3.1: Người dùng hỏi CẢ LỚN NHẤT VÀ NHỎ NHẤT nhưng chỉ trả về 1 dòng
-        # Bỏ qua cụm từ so sánh nội bộ "giữa cao nhất và thấp nhất" của bài toán salary spread
+        # Kiểm tra 3.1: Người dùng hỏi CẢ LỚN NHẤT (Top N) VÀ NHỎ NHẤT (Bottom M) nhưng chỉ trả về 1 phía
+        from src.llm.prompts import parse_top_bottom_extremes
+        is_dual_eval, top_n_eval, bot_n_eval = parse_top_bottom_extremes(user_query)
         pattern_spread_phrase = r"(?:giữa|between)\s+(?:người|nhân viên|mức)?\s*(?:nhận\s+lương|hưởng\s+lương|có\s+lương)?\s*(?:cao nhất|thấp nhất|highest|lowest)\s+(?:và|and)\s+(?:người|nhân viên|mức)?\s*(?:nhận\s+lương|hưởng\s+lương|có\s+lương)?\s*(?:thấp nhất|cao nhất|lowest|highest)"
         q_cleaned_extremes = re.sub(pattern_spread_phrase, "", q_low)
         has_largest = any(k in q_cleaned_extremes for k in ["lớn nhất", "cao nhất", "nhiều nhất", "highest", "largest"])
         has_smallest = any(k in q_cleaned_extremes for k in ["nhỏ nhất", "thấp nhất", "lowest", "smallest"]) or bool(re.search(r"\bít nhất\b(?!\s*\d+)", q_cleaned_extremes))
-        if has_largest and has_smallest and len(df) < 2:
+        if is_dual_eval and (top_n_eval + bot_n_eval) >= 2:
+            has_both_sides_sql = any(k in sql_low for k in ["rn_low", "union"]) or ("desc" in sql_low and "asc" in sql_low)
+            if len(df) < (top_n_eval + bot_n_eval) and not has_both_sides_sql:
+                criteria["comparative_sufficiency"]["passed"] = False
+                msg = (
+                    f"Người dùng yêu cầu lấy cả {top_n_eval} đối tượng cao nhất VÀ {bot_n_eval} đối tượng thấp nhất (tổng {top_n_eval + bot_n_eval} dòng), nhưng kết quả chỉ trả về {len(df)} dòng của một phía."
+                    if not is_en else
+                    f"User requested both top {top_n_eval} highest AND bottom {bot_n_eval} lowest ({top_n_eval + bot_n_eval} rows), but query only returned {len(df)} rows from one side."
+                )
+                criteria["comparative_sufficiency"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    f"BẮT BUỘC dùng CTE 2 bước (BaseStats và RankedStats với ROW_NUMBER() OVER (ORDER BY metric DESC) AS rn_high, ROW_NUMBER() OVER (ORDER BY metric ASC) AS rn_low) và lọc WHERE rn_high <= {top_n_eval} OR rn_low <= {bot_n_eval} để lấy đủ cả {top_n_eval + bot_n_eval} đối tượng!"
+                    if not is_en else
+                    f"MUST use 2-step CTE (BaseStats and RankedStats with rn_high and rn_low) and filter WHERE rn_high <= {top_n_eval} OR rn_low <= {bot_n_eval} to return all {top_n_eval + bot_n_eval} records!"
+                )
+        elif has_largest and has_smallest and len(df) < 2:
             criteria["comparative_sufficiency"]["passed"] = False
             msg = f"Người dùng hỏi cả cực trị lớn nhất VÀ nhỏ nhất nhưng kết quả chỉ có {len(df)} dòng." if not is_en else f"User requested both largest AND smallest extremes, but only {len(df)} row returned."
             criteria["comparative_sufficiency"]["detail"] = msg
@@ -991,7 +1162,7 @@ def evaluate_execution(
             )
 
         # Kiểm tra 3.2: So sánh Quản lý vs Cấp dưới có lương cao hơn nhưng thiếu cấp dưới
-        asked_mgr_sub = any(k in q_low for k in ["manager", "quản lý", "trưởng phòng"]) and any(k in q_low for k in ["cấp dưới", "dưới quyền", "nhân viên"]) and any(k in q_low for k in ["thấp hơn", "cao hơn", "vượt", "chênh lệch"])
+        asked_mgr_sub = is_employees_db and any(k in q_low for k in ["manager", "quản lý", "trưởng phòng"]) and any(k in q_low for k in ["cấp dưới", "dưới quyền", "nhân viên"]) and any(k in q_low for k in ["thấp hơn", "cao hơn", "vượt", "chênh lệch"])
         if asked_mgr_sub:
             has_sub_salary = any(any(k in c for k in ["subordinate", "cấp dưới", "gap", "difference", "chênh lệch"]) for c in cols_low)
             if not has_sub_salary and len(df) <= 1:

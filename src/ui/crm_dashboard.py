@@ -29,6 +29,7 @@ from src.database.crm_queries import (
     fetch_sales_products_data,
     fetch_sales_trends_data,
     fetch_sales_top_performers_data,
+    _get_sales_year_range,
     discover_generic_database_schema,
     fetch_generic_overview_data,
     fetch_generic_table_data,
@@ -247,7 +248,10 @@ def show_executive_resolution_dialog(
 """
 
     with c_btn1:
-        pdf_bytes = export_resolution_to_pdf(full_resolution_md, doc_code=f"NQ-BDH-{time_label.replace(' ', '')}")
+        try:
+            pdf_bytes = export_resolution_to_pdf(res, layer_id=layer_id, time_label=time_label, doc_code=f"NQ-BĐH/{time_label.replace(' ', '')}")
+        except Exception:
+            pdf_bytes = b""
         if pdf_bytes:
             st.download_button(
                 label=t("resolution_btn_export"),
@@ -762,6 +766,7 @@ def _render_timeline_slider(layer_key: str = "global", min_year: int = 1985, max
     """Thanh trượt thời gian 2 điểm linh hoạt đồng bộ trên toàn bộ dashboard (Bilingual)."""
     is_en = (get_current_language() == "en")
     state_key = f"{domain_key}_timeline_years"
+    slider_key = f"slider_timeline_{domain_key}_{layer_key}"
     if state_key not in st.session_state:
         st.session_state[state_key] = (min_year, max_year)
     
@@ -769,7 +774,17 @@ def _render_timeline_slider(layer_key: str = "global", min_year: int = 1985, max
     if not isinstance(default_val, (tuple, list)) or len(default_val) != 2:
         default_val = (min_year, max_year)
     else:
-        default_val = (max(min_year, min(max_year, int(default_val[0]))), max(min_year, min(max_year, int(default_val[1]))))
+        y0, y1 = int(default_val[0]), int(default_val[1])
+        if y0 < min_year or y1 > max_year or y0 > max_year or y1 < min_year or y0 > y1:
+            default_val = (min_year, max_year)
+            st.session_state[state_key] = default_val
+        else:
+            default_val = (y0, y1)
+
+    if slider_key in st.session_state:
+        sl_val = st.session_state.get(slider_key)
+        if not isinstance(sl_val, (tuple, list)) or len(sl_val) != 2 or int(sl_val[0]) < min_year or int(sl_val[1]) > max_year or int(sl_val[0]) > max_year:
+            st.session_state[slider_key] = default_val
 
     slider_title = t("timeline_slider_title")
     st.markdown(f"""
@@ -796,7 +811,7 @@ def _render_timeline_slider(layer_key: str = "global", min_year: int = 1985, max
             max_value=max_year,
             value=default_val,
             step=1,
-            key=f"slider_timeline_{domain_key}_{layer_key}",
+            key=slider_key,
             label_visibility="collapsed"
         )
     with col_rst:
@@ -804,6 +819,7 @@ def _render_timeline_slider(layer_key: str = "global", min_year: int = 1985, max
         reset_help = f"Reset to full period {min_year} - {max_year}" if is_en else f"Đặt lại toàn bộ mốc {min_year} - {max_year}"
         if st.button(reset_label, key=f"btn_reset_slider_{domain_key}_{layer_key}", use_container_width=True, help=reset_help):
             st.session_state[state_key] = (min_year, max_year)
+            st.session_state[slider_key] = (min_year, max_year)
             st.rerun()
 
     start_year, end_year = selected_years[0], selected_years[1]
@@ -2173,6 +2189,7 @@ def _render_sales_dashboard(engine):
     """Dashboard Đa Tầng Cấp Cao chuyên sâu cho CSDL Bán hàng & Thương mại (Awesome Chocolates) - Bilingual."""
     is_en = (get_current_language() == "en")
     current_layer = st.session_state.get("sales_dashboard_layer", "overview")
+    min_y, max_y = _get_sales_year_range(engine)
 
     # 1. Điều hướng Header
     c_hdr1, c_hdr2, c_hdr3, c_hdr4 = st.columns([4.0, 2.6, 1.8, 1.6])
@@ -2221,8 +2238,8 @@ def _render_sales_dashboard(engine):
 
     with c_hdr3:
         layer_title_curr = layer_names.get(current_layer, "Sales Overview" if is_en else "Tổng quan Doanh số")
-        start_y_curr = st.session_state.get("sales_timeline_years", (2021, 2023))[0]
-        end_y_curr = st.session_state.get("sales_timeline_years", (2021, 2023))[1]
+        start_y_curr = st.session_state.get("sales_timeline_years", (min_y, max_y))[0]
+        end_y_curr = st.session_state.get("sales_timeline_years", (min_y, max_y))[1]
         t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
         ctx_header = {
             "layer_title": layer_title_curr,
@@ -2243,20 +2260,20 @@ def _render_sales_dashboard(engine):
 
     # 2. ROUTING TỚI CÁC LAYER BÁN HÀNG CHUYÊN BIỆT
     if current_layer == "overview":
-        _render_sales_layer_overview(engine)
+        _render_sales_layer_overview(engine, min_y, max_y)
     elif current_layer == "geo":
-        _render_sales_layer_geo(engine)
+        _render_sales_layer_geo(engine, min_y, max_y)
     elif current_layer == "people":
-        _render_sales_layer_people(engine)
+        _render_sales_layer_people(engine, min_y, max_y)
     elif current_layer == "products":
-        _render_sales_layer_products(engine)
+        _render_sales_layer_products(engine, min_y, max_y)
     elif current_layer == "trends":
-        _render_sales_layer_trends(engine)
+        _render_sales_layer_trends(engine, min_y, max_y)
     elif current_layer == "top_performers":
-        _render_sales_layer_top_performers(engine)
+        _render_sales_layer_top_performers(engine, min_y, max_y)
 
 
-def _render_sales_layer_overview(engine):
+def _render_sales_layer_overview(engine, min_y: int = 2021, max_y: int = 2022):
     """Trang chủ Doanh số & Thương mại: 6 Thẻ chủ đề, 4 KPI Neon, Sóng kép Doanh số & Số hộp, Donut Category, Bar Quốc gia (Bilingual)."""
     is_en = (get_current_language() == "en")
 
@@ -2342,7 +2359,7 @@ def _render_sales_layer_overview(engine):
             if st.button(btn6_l, key="btn_nav_s_copilot", type="primary", use_container_width=True):
                 ctx_quick = {
                     "layer_title": "Sales & Commercial Overview" if is_en else "Tổng quan Doanh số & Thương mại",
-                    "time_label": "2021 — 2023",
+                    "time_label": f"{min_y} — {max_y}",
                     "anomalies": [],
                     "kpis_summary": "Analyzing commercial data from Awesome Chocolates DB." if is_en else "Đang phân tích tổng quan doanh số CSDL Awesome Chocolates.",
                     "data_summary": "User opened Copilot from Sales Overview hub." if is_en else "Người dùng mở Copilot từ Thẻ điều hành Trang chủ."
@@ -2352,7 +2369,7 @@ def _render_sales_layer_overview(engine):
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
     # 2. THANH TRƯỢT THỜI GIAN
-    start_year, end_year = _render_timeline_slider("sales_overview", min_year=2021, max_year=2023, domain_key="sales")
+    start_year, end_year = _render_timeline_slider("sales_overview", min_year=min_y, max_year=max_y, domain_key="sales")
     data = fetch_sales_overview_data(engine, start_year=start_year, end_year=end_year)
 
     # 3. 4 THẺ CHỈ SỐ ĐIỀU HÀNH
@@ -2449,7 +2466,7 @@ def _render_sales_layer_overview(engine):
     )
 
 
-def _render_sales_layer_geo(engine):
+def _render_sales_layer_geo(engine, min_y: int = 2021, max_y: int = 2022):
     """Layer 1: Phân tích Thị trường & Địa lý (Bilingual)."""
     is_en = (get_current_language() == "en")
     c_bc1, c_bc2 = st.columns([6, 1])
@@ -2461,7 +2478,7 @@ def _render_sales_layer_geo(engine):
         if st.button(back_btn_lbl, key="btn_back_s_1", use_container_width=True):
             _set_layer("overview", domain_key="sales")
 
-    start_year, end_year = _render_timeline_slider("sales_geo", min_year=2021, max_year=2023, domain_key="sales")
+    start_year, end_year = _render_timeline_slider("sales_geo", min_year=min_y, max_year=max_y, domain_key="sales")
     data = fetch_sales_geo_data(engine, start_year=start_year, end_year=end_year)
     df = data["df"]
     period_str = str(start_year) if start_year == end_year else f"{start_year} — {end_year}"
@@ -2476,22 +2493,26 @@ def _render_sales_layer_geo(engine):
     """, unsafe_allow_html=True)
 
     disp_df = df.copy()
-    box_suf = "boxes" if is_en else "hộp"
-    disp_df["Revenue ($)"] = disp_df["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
-    disp_df["Boxes"] = disp_df["TotalBoxes"].apply(lambda x: f"{x:,} {box_suf}")
-    disp_df["Customers"] = disp_df["TotalCustomers"].apply(lambda x: f"{x:,}")
-    disp_df["Market Share (%)"] = disp_df["MarketSharePct"].apply(lambda x: f"{x:.1f}%")
-    disp_df["Avg Order ($)"] = disp_df["AvgAmountPerOrder"].apply(lambda x: f"${x:,.0f}")
+    if not disp_df.empty:
+        box_suf = "boxes" if is_en else "hộp"
+        disp_df["Revenue ($)"] = disp_df["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
+        disp_df["Boxes"] = disp_df["TotalBoxes"].apply(lambda x: f"{x:,} {box_suf}")
+        disp_df["Customers"] = disp_df["TotalCustomers"].apply(lambda x: f"{x:,}")
+        disp_df["Market Share (%)"] = disp_df["MarketSharePct"].apply(lambda x: f"{x:.1f}%")
+        disp_df["Avg Order ($)"] = disp_df["AvgAmountPerOrder"].apply(lambda x: f"${x:,.0f}")
 
-    show_cols = ["Geo", "Region", "Revenue ($)", "Boxes", "Customers", "Market Share (%)", "Avg Order ($)"]
-    st.dataframe(disp_df[show_cols], hide_index=True, use_container_width=True)
+        show_cols = ["Geo", "Region", "Revenue ($)", "Boxes", "Customers", "Market Share (%)", "Avg Order ($)"]
+        st.dataframe(disp_df[show_cols], hide_index=True, use_container_width=True)
+    else:
+        st.info("No geographic data available for the selected period." if is_en else "Không có dữ liệu thị trường trong khoảng thời gian đã chọn.")
     st.markdown("</div>", unsafe_allow_html=True)
 
     _render_sql_modal("Geographic Markets" if is_en else "Thị Trường & Địa Lý", data["sql"], data["exec_time_ms"], "sales_geo_sql")
 
     col_g1, col_g2 = st.columns(2)
     with col_g1:
-        fig_g = build_weekday_bar_chart(pd.DataFrame({"WeekDay": df["Geo"], "Total": df["TotalRevenue"]}), height=260)
+        g_bar_df = pd.DataFrame({"WeekDay": df["Geo"], "Total": df["TotalRevenue"]}) if not df.empty and "Geo" in df.columns and "TotalRevenue" in df.columns else pd.DataFrame()
+        fig_g = build_weekday_bar_chart(g_bar_df, height=260)
         render_zoomable_chart_card(
             title="💰 Country Revenue Breakdown ($)" if is_en else "💰 Doanh Số Theo Từng Quốc Gia ($)",
             fig=fig_g,
@@ -2521,7 +2542,7 @@ def _render_sales_layer_geo(engine):
     )
 
 
-def _render_sales_layer_people(engine):
+def _render_sales_layer_people(engine, min_y: int = 2021, max_y: int = 2022):
     """Layer 2: Phân tích Đội ngũ Sales & Team kinh doanh (Bilingual)."""
     is_en = (get_current_language() == "en")
     c_bc1, c_bc2 = st.columns([6, 1])
@@ -2533,7 +2554,7 @@ def _render_sales_layer_people(engine):
         if st.button(back_btn_lbl, key="btn_back_s_2", use_container_width=True):
             _set_layer("overview", domain_key="sales")
 
-    start_year, end_year = _render_timeline_slider("sales_people", min_year=2021, max_year=2023, domain_key="sales")
+    start_year, end_year = _render_timeline_slider("sales_people", min_year=min_y, max_year=max_y, domain_key="sales")
     data = fetch_sales_people_data(engine, start_year=start_year, end_year=end_year)
     df = data["df"]
     team_df = data["team_df"]
@@ -2549,21 +2570,25 @@ def _render_sales_layer_people(engine):
     """, unsafe_allow_html=True)
 
     disp_df = df.copy()
-    box_suf = "boxes" if is_en else "hộp"
-    disp_df["Revenue ($)"] = disp_df["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
-    disp_df["Boxes"] = disp_df["TotalBoxes"].apply(lambda x: f"{x:,} {box_suf}")
-    disp_df["Customers"] = disp_df["TotalCustomers"].apply(lambda x: f"{x:,}")
-    disp_df["Avg Order ($)"] = disp_df["AvgOrderValue"].apply(lambda x: f"${x:,.0f}")
+    if not disp_df.empty:
+        box_suf = "boxes" if is_en else "hộp"
+        disp_df["Revenue ($)"] = disp_df["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
+        disp_df["Boxes"] = disp_df["TotalBoxes"].apply(lambda x: f"{x:,} {box_suf}")
+        disp_df["Customers"] = disp_df["TotalCustomers"].apply(lambda x: f"{x:,}")
+        disp_df["Avg Order ($)"] = disp_df["AvgOrderValue"].apply(lambda x: f"${x:,.0f}")
 
-    show_cols = ["Salesperson", "Team", "Location", "Revenue ($)", "Boxes", "Customers", "Avg Order ($)"]
-    st.dataframe(disp_df[show_cols], hide_index=True, use_container_width=True)
+        show_cols = ["Salesperson", "Team", "Location", "Revenue ($)", "Boxes", "Customers", "Avg Order ($)"]
+        st.dataframe(disp_df[show_cols], hide_index=True, use_container_width=True)
+    else:
+        st.info("No sales representative data available for the selected period." if is_en else "Không có dữ liệu đội ngũ kinh doanh trong khoảng thời gian đã chọn.")
     st.markdown("</div>", unsafe_allow_html=True)
 
     _render_sql_modal("Sales Teams" if is_en else "Đội Ngũ & Team Sales", data["sql"], data["exec_time_ms"], "sales_ppl_sql")
 
     col_p1, col_p2 = st.columns(2)
     with col_p1:
-        fig_team_rev = build_weekday_bar_chart(pd.DataFrame({"WeekDay": team_df["Team"], "Total": team_df["TotalRevenue"]}), height=260)
+        t_rev_df = pd.DataFrame({"WeekDay": team_df["Team"], "Total": team_df["TotalRevenue"]}) if not team_df.empty and "Team" in team_df.columns and "TotalRevenue" in team_df.columns else pd.DataFrame()
+        fig_team_rev = build_weekday_bar_chart(t_rev_df, height=260)
         render_zoomable_chart_card(
             title="🏢 Team Revenue Comparison ($)" if is_en else "🏢 So Sánh Tổng Doanh Số Giữa Các Team ($)",
             fig=fig_team_rev,
@@ -2574,7 +2599,8 @@ def _render_sales_layer_people(engine):
         )
 
     with col_p2:
-        fig_team_avg = build_weekday_bar_chart(pd.DataFrame({"WeekDay": team_df["Team"], "Total": team_df["AvgRevenuePerRep"]}), height=260)
+        t_avg_df = pd.DataFrame({"WeekDay": team_df["Team"], "Total": team_df["AvgRevenuePerRep"]}) if not team_df.empty and "Team" in team_df.columns and "AvgRevenuePerRep" in team_df.columns else pd.DataFrame()
+        fig_team_avg = build_weekday_bar_chart(t_avg_df, height=260)
         render_zoomable_chart_card(
             title="⚡ Average Revenue Productivity per Rep ($/person)" if is_en else "⚡ Năng Suất Doanh Thu Bình Quân Mỗi Nhân Sự ($/người)",
             fig=fig_team_avg,
@@ -2593,7 +2619,7 @@ def _render_sales_layer_people(engine):
     )
 
 
-def _render_sales_layer_products(engine):
+def _render_sales_layer_products(engine, min_y: int = 2021, max_y: int = 2022):
     """Layer 3: Phân tích Danh mục Sản phẩm & Biên lợi nhuận (Bilingual)."""
     is_en = (get_current_language() == "en")
     c_bc1, c_bc2 = st.columns([6, 1])
@@ -2605,7 +2631,7 @@ def _render_sales_layer_products(engine):
         if st.button(back_btn_lbl, key="btn_back_s_3", use_container_width=True):
             _set_layer("overview", domain_key="sales")
 
-    start_year, end_year = _render_timeline_slider("sales_products", min_year=2021, max_year=2023, domain_key="sales")
+    start_year, end_year = _render_timeline_slider("sales_products", min_year=min_y, max_year=max_y, domain_key="sales")
     data = fetch_sales_products_data(engine, start_year=start_year, end_year=end_year)
     df = data["df"]
     period_str = str(start_year) if start_year == end_year else f"{start_year} — {end_year}"
@@ -2674,7 +2700,7 @@ def _render_sales_layer_products(engine):
     )
 
 
-def _render_sales_layer_trends(engine):
+def _render_sales_layer_trends(engine, min_y: int = 2021, max_y: int = 2022):
     """Layer 4: Xu hướng Doanh thu & Mùa vụ (Bilingual)."""
     is_en = (get_current_language() == "en")
     c_bc1, c_bc2 = st.columns([6, 1])
@@ -2686,7 +2712,7 @@ def _render_sales_layer_trends(engine):
         if st.button(back_btn_lbl, key="btn_back_s_4", use_container_width=True):
             _set_layer("overview", domain_key="sales")
 
-    start_year, end_year = _render_timeline_slider("sales_trends", min_year=2021, max_year=2023, domain_key="sales")
+    start_year, end_year = _render_timeline_slider("sales_trends", min_year=min_y, max_year=max_y, domain_key="sales")
     data = fetch_sales_trends_data(engine, start_year=start_year, end_year=end_year)
     df = data["df"]
 
@@ -2714,7 +2740,7 @@ def _render_sales_layer_trends(engine):
     )
 
 
-def _render_sales_layer_top_performers(engine):
+def _render_sales_layer_top_performers(engine, min_y: int = 2021, max_y: int = 2022):
     """Layer 5: Top Hiệu suất Bán hàng & Khách hàng (Bilingual)."""
     is_en = (get_current_language() == "en")
     c_bc1, c_bc2 = st.columns([6, 1])
@@ -2726,7 +2752,7 @@ def _render_sales_layer_top_performers(engine):
         if st.button(back_btn_lbl, key="btn_back_s_5", use_container_width=True):
             _set_layer("overview", domain_key="sales")
 
-    start_year, end_year = _render_timeline_slider("sales_top", min_year=2021, max_year=2023, domain_key="sales")
+    start_year, end_year = _render_timeline_slider("sales_top", min_year=min_y, max_year=max_y, domain_key="sales")
     data = fetch_sales_top_performers_data(engine, start_year=start_year, end_year=end_year)
     reps_df = data["df"]
     skus_df = data["top_skus_df"]
@@ -2743,10 +2769,13 @@ def _render_sales_layer_top_performers(engine):
             </div>
         """, unsafe_allow_html=True)
         disp_reps = reps_df.copy()
-        disp_reps["Revenue ($)"] = disp_reps["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
-        disp_reps["Boxes"] = disp_reps["TotalBoxes"].apply(lambda x: f"{x:,}")
-        disp_reps["Customers"] = disp_reps["TotalCustomers"].apply(lambda x: f"{x:,}")
-        st.dataframe(disp_reps[["Salesperson", "Team", "Location", "Revenue ($)", "Boxes", "Customers"]], hide_index=True, use_container_width=True)
+        if not disp_reps.empty:
+            disp_reps["Revenue ($)"] = disp_reps["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
+            disp_reps["Boxes"] = disp_reps["TotalBoxes"].apply(lambda x: f"{x:,}")
+            disp_reps["Customers"] = disp_reps["TotalCustomers"].apply(lambda x: f"{x:,}")
+            st.dataframe(disp_reps[["Salesperson", "Team", "Location", "Revenue ($)", "Boxes", "Customers"]], hide_index=True, use_container_width=True)
+        else:
+            st.info("No top sales rep data available for the selected period." if is_en else "Không có dữ liệu Top Sales Reps trong khoảng thời gian đã chọn.")
         st.markdown("</div>", unsafe_allow_html=True)
 
         fig_reps = build_horizontal_bar_chart(reps_df, y_col="Salesperson", x_col="TotalRevenue", name="Revenue ($)" if is_en else "Doanh số ($)", height=260)
@@ -2769,9 +2798,12 @@ def _render_sales_layer_top_performers(engine):
             </div>
         """, unsafe_allow_html=True)
         disp_skus = skus_df.copy()
-        disp_skus["Revenue ($)"] = disp_skus["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
-        disp_skus["Boxes"] = disp_skus["TotalBoxes"].apply(lambda x: f"{x:,}")
-        st.dataframe(disp_skus[["Product", "Category", "Revenue ($)", "Boxes"]], hide_index=True, use_container_width=True)
+        if not disp_skus.empty:
+            disp_skus["Revenue ($)"] = disp_skus["TotalRevenue"].apply(lambda x: f"${x:,.0f}")
+            disp_skus["Boxes"] = disp_skus["TotalBoxes"].apply(lambda x: f"{x:,}")
+            st.dataframe(disp_skus[["Product", "Category", "Revenue ($)", "Boxes"]], hide_index=True, use_container_width=True)
+        else:
+            st.info("No top product data available for the selected period." if is_en else "Không có dữ liệu Top sản phẩm trong khoảng thời gian đã chọn.")
         st.markdown("</div>", unsafe_allow_html=True)
 
         fig_skus = build_horizontal_bar_chart(skus_df, y_col="Product", x_col="TotalRevenue", name="Revenue ($)" if is_en else "Doanh số ($)", height=260)
@@ -3319,8 +3351,9 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
     </div>
     """, unsafe_allow_html=True)
 
-    if tables:
-        t_chunks = [tables[i:i+3] for i in range(0, min(len(tables), 6), 3)]
+    sorted_hub_tables = sorted(tables, key=lambda t: schema_meta.get("meta", {}).get(t, {}).get("row_count", 0), reverse=True)
+    if sorted_hub_tables:
+        t_chunks = [sorted_hub_tables[i:i+3] for i in range(0, min(len(sorted_hub_tables), 6), 3)]
         for chunk_idx, chunk in enumerate(t_chunks):
             cols = st.columns(len(chunk))
             for c_idx, t_name in enumerate(chunk):
@@ -3387,31 +3420,55 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
     _render_sql_modal("Database Overview" if is_en else "Tổng Quan CSDL", data["sql"], data["exec_time_ms"], "generic_ov_sql")
 
     # Biểu đồ tự động nếu có
-    if not data["cat_dist_df"].empty or not data["trend_df"].empty:
+    has_cat = not data["cat_dist_df"].empty
+    has_trend = not data["trend_df"].empty
+
+    if has_cat and has_trend:
         col_gc1, col_gc2 = st.columns(2)
         with col_gc1:
-            if not data["cat_dist_df"].empty:
-                fig_cat = build_horizontal_bar_chart(data["cat_dist_df"], y_col="Category", x_col="Count", name="Count" if is_en else "Số lượng", height=260)
-                cat_chart_title = f"📊 Category Distribution ({data['main_cat_col']})" if is_en else f"📊 Phân Bổ Theo Danh Mục ({data['main_cat_col']})"
-                render_zoomable_chart_card(
-                    title=cat_chart_title,
-                    fig=fig_cat,
-                    df=data["cat_dist_df"],
-                    badge="Distribution",
-                    explanation=f"Frequency counts by field {data['main_cat_col']}." if is_en else f"Tần suất xuất hiện theo trường {data['main_cat_col']}.",
-                    key="gen_cat_chart"
-                )
+            fig_cat = build_horizontal_bar_chart(data["cat_dist_df"], y_col="Category", x_col="Count", name="Count" if is_en else "Số lượng", height=260)
+            cat_col_name = data.get("main_cat_col") or ("Category" if is_en else "Danh mục")
+            cat_chart_title = f"📊 Category Distribution ({cat_col_name})" if is_en else f"📊 Phân Bổ Theo Danh Mục ({cat_col_name})"
+            render_zoomable_chart_card(
+                title=cat_chart_title,
+                fig=fig_cat,
+                df=data["cat_dist_df"],
+                badge="Distribution",
+                explanation=f"Frequency counts by field {cat_col_name}." if is_en else f"Tần suất xuất hiện theo trường {cat_col_name}.",
+                key="gen_cat_chart"
+            )
         with col_gc2:
-            if not data["trend_df"].empty:
-                fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": data["trend_df"]["TimePeriod"], "Total": data["trend_df"]["Count"]}), height=260)
-                render_zoomable_chart_card(
-                    title="📈 Historical Record Volume Over Time" if is_en else "📈 Xu Hướng Bản Ghi Theo Thời Gian",
-                    fig=fig_tr,
-                    df=data["trend_df"],
-                    badge="Time Series",
-                    explanation="Volume of data generated across chronological periods." if is_en else "Khối lượng dữ liệu phát sinh theo từng mốc thời gian.",
-                    key="gen_trend_chart"
-                )
+            fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": data["trend_df"]["TimePeriod"], "Total": data["trend_df"]["Count"]}), height=260)
+            render_zoomable_chart_card(
+                title="📈 Historical Record Volume Over Time" if is_en else "📈 Xu Hướng Bản Ghi Theo Thời Gian",
+                fig=fig_tr,
+                df=data["trend_df"],
+                badge="Time Series",
+                explanation="Volume of data generated across chronological periods." if is_en else "Khối lượng dữ liệu phát sinh theo từng mốc thời gian.",
+                key="gen_trend_chart"
+            )
+    elif has_cat:
+        fig_cat = build_horizontal_bar_chart(data["cat_dist_df"], y_col="Category", x_col="Count", name="Count" if is_en else "Số lượng", height=260)
+        cat_col_name = data.get("main_cat_col") or ("Category" if is_en else "Danh mục")
+        cat_chart_title = f"📊 Category Distribution ({cat_col_name})" if is_en else f"📊 Phân Bổ Theo Danh Mục ({cat_col_name})"
+        render_zoomable_chart_card(
+            title=cat_chart_title,
+            fig=fig_cat,
+            df=data["cat_dist_df"],
+            badge="Distribution",
+            explanation=f"Frequency counts by field {cat_col_name}." if is_en else f"Tần suất xuất hiện theo trường {cat_col_name}.",
+            key="gen_cat_chart"
+        )
+    elif has_trend:
+        fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": data["trend_df"]["TimePeriod"], "Total": data["trend_df"]["Count"]}), height=260)
+        render_zoomable_chart_card(
+            title="📈 Historical Record Volume Over Time" if is_en else "📈 Xu Hướng Bản Ghi Theo Thời Gian",
+            fig=fig_tr,
+            df=data["trend_df"],
+            badge="Time Series",
+            explanation="Volume of data generated across chronological periods." if is_en else "Khối lượng dữ liệu phát sinh theo từng mốc thời gian.",
+            key="gen_trend_chart"
+        )
 
     # Hiển thị mẫu dữ liệu bảng chính
     if not data["df"].empty:

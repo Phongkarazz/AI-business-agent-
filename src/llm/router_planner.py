@@ -165,10 +165,15 @@ def classify_query_complexity(user_query: str) -> str:
     return "DIRECT_SQL"
 
 
-def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> List[Dict[str, Any]]:
+def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi", schema_context: str = "") -> List[Dict[str, Any]]:
     """Phân rã câu hỏi thành chuỗi các nhiệm vụ con (Sub-tasks Decomposition) theo nguyên lý Chia để trị."""
     q_low = (user_query or "").lower()
     is_en = (lang == "en")
+    s_low = (schema_context or "").lower()
+    is_employees_ctx = (
+        any(k in s_low for k in ["dept_emp", "dept_manager", "salaries", "titles"])
+        and not any(k in s_low for k in ["san_pham", "khach_hang", "don_hang", "chi_tiet_don_hang", "film_id", "rental_id", "boxes", "cost_per_box"])
+    ) if s_low else False
 
     # Mẫu 0.05: So sánh mức lương trung bình giữa 2 phòng ban cụ thể (VD: Sales vs Marketing, Sales vs Development)
     known_depts_map = {
@@ -193,7 +198,7 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
         if v not in depts_in_q:
             depts_in_q.append(v)
 
-    if len(depts_in_q) == 2 and any(k in q_low for k in ["lương", "thu nhập", "salary"]) and any(k in q_low for k in ["so sánh", "đối chiếu", "chênh lệch", "khác nhau", "vs", "compare"]):
+    if is_employees_ctx and len(depts_in_q) == 2 and any(k in q_low for k in ["lương", "thu nhập", "salary"]) and any(k in q_low for k in ["so sánh", "đối chiếu", "chênh lệch", "khác nhau", "vs", "compare"]):
         d1 = depts_in_q[0]
         d2 = depts_in_q[1]
         return [
@@ -224,7 +229,7 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
         ]
 
     # Mẫu 0.06: Tỷ trọng chi phí lương / ngân sách của một phòng ban cụ thể trong tổng chi phí toàn công ty
-    is_dept_share_query = (
+    is_dept_share_query = is_employees_ctx and (
         any(k in q_low for k in ["chiếm bao nhiêu", "chiếm tỉ lệ", "chiếm tỷ lệ", "chiếm phần trăm", "tỷ trọng", "tỉ trọng", "phần trăm trong tổng", "tỷ lệ trong tổng", "đóng góp bao nhiêu"])
         and any(k in q_low for k in ["tổng chi phí", "tổng quỹ lương", "tổng lương", "toàn công ty", "trong tổng"])
         and any(k in q_low for k in ["production", "sales", "development", "marketing", "research", "finance", "customer service", "quality management", "human resources", "sản xuất", "kinh doanh", "phát triển", "tiếp thị", "nghiên cứu", "tài chính", "nhân sự"])
@@ -471,7 +476,7 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
         ]
 
     # Mẫu 0.095: Mức chênh lệch lương giữa người cao nhất và thấp nhất theo chức danh hoặc phòng ban (Salary Spread)
-    is_salary_spread_plan = (
+    is_salary_spread_plan = is_employees_ctx and (
         any(k in q_low for k in ["chênh lệch", "khoảng cách", "spread", "gap", "phân hóa", "difference", "disparity"])
         and any(k in q_low for k in ["lương", "thu nhập", "salary", "income"])
         and (
@@ -515,7 +520,7 @@ def decompose_subtasks(user_query: str, complexity: str, lang: str = "vi") -> Li
         ]
 
     # Mẫu 0.096: Phân loại toàn bộ nhân sự hiện tại thành 3 nhóm lương (Salary Tier Distribution)
-    is_salary_tier_plan = (
+    is_salary_tier_plan = is_employees_ctx and (
         any(k in q_low for k in ["nhóm lương", "bậc lương", "khoảng lương", "3 nhóm lương", "thu nhập thấp", "thu nhập trung bình", "thu nhập cao", "phân loại toàn bộ", "3 nhóm", "các nhóm lương", "phân loại theo lương"])
         or (
             any(k in q_low for k in ["phân loại", "chia thành", "tier", "bracket"])
@@ -1482,24 +1487,40 @@ def route_and_plan(
     complexity = classify_query_complexity(user_query)
 
     # 2. Phân rã nhiệm vụ con (Sub-tasks)
-    sub_tasks = decompose_subtasks(user_query, complexity, lang=lang)
+    sub_tasks = decompose_subtasks(user_query, complexity, lang=lang, schema_context=schema_context)
 
     # 3. Trích xuất thực thể và thước đo mục tiêu
+    s_low = (schema_context or "").lower()
+    is_employees_ctx = (
+        any(k in s_low for k in ["dept_emp", "dept_manager", "salaries", "titles"])
+        and not any(k in s_low for k in ["san_pham", "khach_hang", "don_hang", "chi_tiet_don_hang", "film_id", "rental_id", "boxes", "cost_per_box"])
+    ) if s_low else False
+
     entities = []
-    if any(k in q_low for k in ["nhân viên", "nhân sự", "người", "employee"]):
-        entities.append("employees")
-    if any(k in q_low for k in ["phòng ban", "phòng", "department"]):
-        entities.append("departments")
-    if any(k in q_low for k in ["lương", "thu nhập", "salary", "bảng lương", "tiền", "kiếm tiền"]):
-        entities.append("salaries")
-    if any(k in q_low for k in ["chức danh", "vị trí", "title"]):
-        entities.append("titles")
-    if any(k in q_low for k in ["quản lý", "trưởng phòng", "manager"]):
-        entities.append("dept_manager")
-    if any(k in q_low for k in ["sản phẩm", "product", "kẹo", "hộp"]):
-        entities.append("products")
-    if any(k in q_low for k in ["bán hàng", "doanh số", "sales"]):
-        entities.append("sales")
+    if is_employees_ctx:
+        if any(k in q_low for k in ["nhân viên", "nhân sự", "người", "employee"]):
+            entities.append("employees")
+        if any(k in q_low for k in ["phòng ban", "phòng", "department"]):
+            entities.append("departments")
+        if any(k in q_low for k in ["lương", "thu nhập", "salary", "bảng lương", "tiền", "kiếm tiền"]):
+            entities.append("salaries")
+        if any(k in q_low for k in ["chức danh", "vị trí", "title"]):
+            entities.append("titles")
+        if any(k in q_low for k in ["quản lý", "trưởng phòng", "manager"]):
+            entities.append("dept_manager")
+    else:
+        for tbl in ["san_pham", "khach_hang", "don_hang", "chi_tiet_don_hang", "products", "orders", "customers", "order_details", "sales", "category", "categories"]:
+            if tbl in s_low:
+                entities.append(tbl)
+    if any(k in q_low for k in ["sản phẩm", "product", "kẹo", "hộp"]) and "products" not in entities and "san_pham" not in entities:
+        entities.append("products" if "products" in s_low else "san_pham")
+    if any(k in q_low for k in ["bán hàng", "doanh số", "sales", "đơn hàng", "orders"]):
+        if "sales" in s_low:
+            entities.append("sales")
+        elif "don_hang" in s_low:
+            entities.append("don_hang")
+        elif "orders" in s_low:
+            entities.append("orders")
 
     metrics = []
     if (

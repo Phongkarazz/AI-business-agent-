@@ -36,7 +36,8 @@ def perform_connection(
     """Thực hiện kết nối tới Database và AI Provider, trích xuất schema và cập nhật session state."""
     try:
         if use_demo:
-            engine = build_demo_engine()
+            demo_type = "yen_sao" if "yen" in (db_name or "").lower() else "chocolate"
+            engine = build_demo_engine(demo_type=demo_type)
         else:
             engine = try_connect(
                 db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
@@ -216,29 +217,41 @@ def render_main_sidebar():
 
         st.markdown(textwrap.dedent(f"""
         <div style="padding: 4px 4px 10px 4px;">
-            <div style="font-size: 1.35rem; font-weight: 900; color: #FFFFFF; display: flex; align-items: center; gap: 9px;">
-                <svg width="26" height="26" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 8px rgba(0, 240, 255, 0.5)); flex-shrink: 0;">
+            <div style="font-size: 1.35rem; font-weight: 900; color: #FFFFFF; display: flex; align-items: center; gap: 10px;">
+                <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 12px rgba(0, 104, 255, 0.45)); flex-shrink: 0;">
                     <defs>
                         <linearGradient id="sbFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
-                            <stop offset="0%" stop-color="#00F0FF"/>
+                            <stop offset="0%" stop-color="#38BDF8"/>
                             <stop offset="60%" stop-color="#0068FF"/>
                             <stop offset="100%" stop-color="#0047BA"/>
                         </linearGradient>
+                        <linearGradient id="sbFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#BAE6FD"/>
+                            <stop offset="100%" stop-color="#38BDF8"/>
+                        </linearGradient>
                         <linearGradient id="sbFacetRightFront" x1="80%" y1="10%" x2="50%" y2="90%">
-                            <stop offset="0%" stop-color="#7928CA"/>
-                            <stop offset="50%" stop-color="#FF0080"/>
+                            <stop offset="0%" stop-color="#00A3FF"/>
+                            <stop offset="50%" stop-color="#0052CC"/>
                             <stop offset="100%" stop-color="#02388A"/>
+                        </linearGradient>
+                        <linearGradient id="sbFacetRightTop" x1="100%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#E0F2FE"/>
+                            <stop offset="100%" stop-color="#7DD3FC"/>
+                        </linearGradient>
+                        <linearGradient id="sbFacetCenterGlow" x1="50%" y1="40%" x2="50%" y2="92%">
+                            <stop offset="0%" stop-color="#67E8F9"/>
+                            <stop offset="100%" stop-color="#0068FF"/>
                         </linearGradient>
                     </defs>
                     <polygon points="18,22 36,12 50,88 34,74" fill="url(#sbFacetLeftFront)"/>
-                    <polygon points="18,22 36,12 48,22 30,32" fill="#38BDF8"/>
+                    <polygon points="18,22 36,12 48,22 30,32" fill="url(#sbFacetLeftTop)"/>
                     <polygon points="82,22 64,12 50,88 66,74" fill="url(#sbFacetRightFront)"/>
-                    <polygon points="82,22 64,12 52,22 70,32" fill="#E0F2FE"/>
+                    <polygon points="82,22 64,12 52,22 70,32" fill="url(#sbFacetRightTop)"/>
                     <polygon points="30,32 48,22 50,54 38,58" fill="#0052CC"/>
                     <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
-                    <polygon points="38,58 50,54 62,58 50,88" fill="#00F0FF"/>
+                    <polygon points="38,58 50,54 62,58 50,88" fill="url(#sbFacetCenterGlow)"/>
                 </svg>
-                <span style="background: linear-gradient(90deg, #FFFFFF, #00F0FF); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -0.02em; font-weight: 900;">VERAXUS</span>
+                <span style="color: #FFFFFF !important; letter-spacing: -0.025em; font-weight: 900;">VERAXUS</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-left: 2px;">
                 <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00DF8F; box-shadow: 0 0 8px rgba(0, 223, 143, 0.7);"></span>

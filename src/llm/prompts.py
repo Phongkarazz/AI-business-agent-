@@ -4,6 +4,7 @@ automatic business insights with Executive Priority Tagging, and intelligent bil
 Strictly grounded in provided database schema with relative historical time-handling to prevent 0-row results.
 """
 
+from __future__ import annotations
 import re
 from src.llm.few_shot_selector import select_dynamic_few_shots, format_few_shots_for_prompt
 
@@ -717,7 +718,41 @@ def get_db_specific_rules(schema_context: str) -> str:
           JOIN geo g ON s.GeoID = g.GeoID
           WHERE YEAR(s.SaleDate) = 2021
           GROUP BY `Tháng`, `Quý`, `Quốc Gia`
-          ORDER BY `Tháng` ASC, `Lợi Nhuận ($)` DESC;"""
+          ORDER BY `Tháng` ASC, `Lợi Nhuận ($)` DESC;
+       + MẪU CHUẨN TỶ TRỌNG ĐƠN HÀNG SO VỚI MỨC TRUNG BÌNH (ORDER BENCHMARK SHARE):
+         * Khi hỏi 'Tỷ trọng các đơn hàng có doanh số lớn hơn doanh số trung bình năm 2021', 'tỷ lệ đơn hàng vượt mức trung bình':
+           LƯU Ý CỐT LÕI: CSDL KHÔNG CÓ BẢNG orders! Đơn hàng là từng dòng giao dịch trong bảng `sales`!
+           BẮT BUỘC DÙNG CTE ĐỂ TÍNH TRUNG BÌNH VÀ PHÂN LOẠI THÀNH 2 NHÓM (TRÊN vs DƯỚI/BẰNG TB):
+           WITH OrderBenchmark AS (
+               SELECT 
+                   ROUND(AVG(s.Amount), 2) AS AvgBenchmark,
+                   COUNT(*) AS TotalOrdersCount,
+                   SUM(s.Amount) AS TotalRevenue
+               FROM sales s
+               WHERE YEAR(s.SaleDate) = 2021
+           ),
+           ClassifiedOrders AS (
+               SELECT 
+                   CASE 
+                       WHEN s.Amount > b.AvgBenchmark THEN 'Đơn hàng trên mức trung bình'
+                       ELSE 'Đơn hàng dưới hoặc bằng trung bình'
+                   END AS `Nhóm Đơn Hàng`,
+                   s.Amount
+               FROM sales s
+               CROSS JOIN OrderBenchmark b
+               WHERE YEAR(s.SaleDate) = 2021
+           )
+           SELECT 
+               co.`Nhóm Đơn Hàng`,
+               COUNT(*) AS `Số Lượng Đơn`,
+               ROUND(COUNT(*) * 100.0 / b.TotalOrdersCount, 2) AS `Tỷ Trọng Số Đơn (%)`,
+               SUM(co.Amount) AS `Tổng Doanh Số ($)`,
+               ROUND(SUM(co.Amount) * 100.0 / NULLIF(b.TotalRevenue, 0), 2) AS `Tỷ Trọng Doanh Số (%)`,
+               b.AvgBenchmark AS `Mức TB Chuẩn ($)`
+           FROM ClassifiedOrders co
+           CROSS JOIN OrderBenchmark b
+           GROUP BY co.`Nhóm Đơn Hàng`, b.TotalOrdersCount, b.TotalRevenue, b.AvgBenchmark
+           ORDER BY CASE WHEN co.`Nhóm Đơn Hàng` = 'Đơn hàng trên mức trung bình' THEN 0 ELSE 1 END;"""
     elif is_sakila_db:
         return """   - QUY TẮC CSDL SAKILA (DVD RENTAL STORE):
      + Bảng `payment` (Bí danh bắt buộc: `p`):
@@ -743,6 +778,25 @@ def get_db_specific_rules(schema_context: str) -> str:
        * Cột: `store_id`, `manager_staff_id`, `address_id`.
      + Bảng `staff` (Bí danh bắt buộc: `s`):
        * Cột: `staff_id`, `first_name`, `last_name`, `store_id`.
+     + Bảng `address` (Bí danh bắt buộc: `addr`):
+       * Cột: `address_id`, `address`, `district`, `city_id`, `postal_code`, `phone`.
+     + Bảng `city` (Bí danh bắt buộc: `ct`):
+       * Cột: `city_id`, `city`, `country_id`.
+     + Bảng `country` (Bí danh bắt buộc: `co`):
+       * Cột: `country_id`, `country`.
+     + MẪU CHUẨN SO SÁNH DOANH THU / SỐ TIỀN TRUNG BÌNH THEO THÀNH PHỐ:
+       SELECT 
+           ct.city AS City,
+           COUNT(DISTINCT p.payment_id) AS TotalPayments,
+           ROUND(SUM(p.amount), 2) AS TotalAmount,
+           ROUND(AVG(p.amount), 2) AS AvgAmount
+       FROM city ct
+       JOIN address addr ON ct.city_id = addr.city_id
+       JOIN customer cu ON addr.address_id = cu.address_id
+       JOIN payment p ON cu.customer_id = p.customer_id
+       GROUP BY ct.city_id, ct.city
+       ORDER BY AvgAmount DESC
+       LIMIT 10;
      + MẪU CHUẨN DOANH THU VÀ SỐ LƯỢT THUÊ THEO THÁNG:
        SELECT 
            DATE_FORMAT(p.payment_date, '%Y-%m') AS Month,
@@ -938,6 +992,249 @@ def match_chocolates_specific_team(text: str):
     return None
 
 
+def parse_top_bottom_extremes(user_query: str) -> tuple[bool, int, int]:
+    """Nhận diện câu hỏi yêu cầu đồng thời cả nhóm Cao Nhất (Top N) VÀ nhóm Thấp Nhất (Bottom M)
+    trên ngôn ngữ tự nhiên (Tiếng Việt & Tiếng Anh).
+    Trả về: (is_dual_extreme, top_n, bottom_n)
+    """
+    if not user_query:
+        return False, 0, 0
+    q_low = user_query.lower().strip()
+
+    # 1. Loại trừ các câu hỏi giao thoa đơn tập (nhưng/mà lại), bách phân vị (top 10%), hoặc biến động qua các tháng
+    if any(k in q_low for k in ["nhưng", "mà lại", "tuy nhiên", "trong nhóm", "trong số", "bách phân vị", "percentile"]):
+        return False, 0, 0
+    if re.search(r"\btop\s*\d+\s*(?:%|phần\s*trăm|percent)", q_low):
+        return False, 0, 0
+    if any(k in q_low for k in ["sự thay đổi", "biến động", "dao động", "biên độ", "volatility", "fluctuation"]) and any(k in q_low for k in ["trong các tháng", "qua các tháng", "giữa các tháng", "theo tháng"]):
+        return False, 0, 0
+
+    # Nếu câu hỏi hỏi về khoảng cách/chênh lệch chung (spread) mà không yêu cầu lấy N thực thể cụ thể
+    if any(k in q_low for k in ["chênh lệch", "khoảng cách", "biên độ", "phân hóa", "disparity", "spread", "gap"]):
+        if not re.search(r"\b(?:top\s*\d+|bottom\s*\d+|\d+\s+(?:sản phẩm|nhân viên|nhân sự|khách hàng|quốc gia|thị trường|phòng ban|chức danh|bộ phim|mặt hàng))\b", q_low):
+            return False, 0, 0
+
+    # 2. Kiểm tra sự xuất hiện đồng thời của tính từ cực đại (High) và tính từ cực tiểu (Low)
+    high_regex = r"\b(cao nhất|lớn nhất|nhiều nhất|tốt nhất|bán chạy nhất|nhiều hộp nhất|nhiều đơn nhất|đắt nhất|hiệu quả nhất|lâu năm nhất|lâu nhất|dẫn đầu|đứng đầu|lãi nhất|highest|largest|most|best|top\s+selling)\b"
+    low_regex = r"\b(thấp nhất|nhỏ nhất|kém nhất|bán chậm nhất|ít hộp nhất|ít đơn nhất|rẻ nhất|tệ nhất|ngắn nhất|cuối bảng|đội sổ|lowest|smallest|least|worst|bottom)\b|\bít nhất\b(?!\s*\d+)"
+
+    m_high = re.search(high_regex, q_low)
+    m_low = re.search(low_regex, q_low)
+    has_top_bottom_pair = bool(re.search(r"\btop\b", q_low) and re.search(r"\bbottom\b", q_low))
+
+    if not ((m_high and m_low) or has_top_bottom_pair):
+        return False, 0, 0
+
+    # 3. Yêu cầu có từ nối liên kết hai vế
+    if not re.search(r"\b(và|cùng|với|hoặc|hay|vs|and)\b|[,;&]", q_low):
+        return False, 0, 0
+
+    # 4. Trích xuất số lượng N (cao nhất) và M (thấp nhất), loại bỏ năm/quý/tháng/%
+    q_num = re.sub(r"\b(?:19\d{2}|20\d{2})\b", " ", q_low)
+    q_num = re.sub(r"\b(?:năm|year)\s*\d+\b", " ", q_num)
+    q_num = re.sub(r"\b(?:quý|quarter|q)\s*[1-4]\b", " ", q_num)
+    q_num = re.sub(r"\b(?:tháng|month)\s*(?:1[0-2]|[1-9])\b", " ", q_num)
+    q_num = re.sub(r"\b\d+(?:[.,]\d+)?\s*(?:%|phần\s*trăm|percent|usd|\$|đô)\b", " ", q_num)
+
+    nums = [int(x) for x in re.findall(r"\b(\d+)\b", q_num) if 1 <= int(x) <= 100]
+
+    high_pos = m_high.start() if m_high else (re.search(r"\btop\b", q_low).start() if re.search(r"\btop\b", q_low) else 0)
+    low_pos = m_low.start() if m_low else (re.search(r"\bbottom\b", q_low).start() if re.search(r"\bbottom\b", q_low) else 9999)
+    high_first = high_pos <= low_pos
+
+    if len(nums) >= 2:
+        top_n, bottom_n = (nums[0], nums[1]) if high_first else (nums[1], nums[0])
+    elif len(nums) == 1:
+        top_n = bottom_n = nums[0]
+    else:
+        top_n = bottom_n = 1
+
+    return True, top_n, bottom_n
+
+
+def build_chocolates_dual_extreme_sql(user_query: str, dialect: str = "MySQL") -> str | None:
+    """Sinh câu truy vấn SQL chuẩn mực lấy đồng thời Top N Cao Nhất và Bottom M Thấp Nhất
+    trên CSDL Awesome Chocolates cho mọi chiều (Sản phẩm, Nhân viên, Quốc gia, Đội ngũ, Danh mục)
+    và mọi chỉ số (Lợi nhuận/P&L, Tỷ suất LN, Chi phí, Doanh thu, Số hộp, Đơn giá TB, Giá trị đơn TB)."""
+    is_dual, top_n, bottom_n = parse_top_bottom_extremes(user_query)
+    if not is_dual:
+        return None
+
+    q_low = user_query.lower()
+    is_sqlite = "sqlite" in (dialect or "").lower()
+
+    # 1. Bộ lọc thời gian (Năm, Quý, Tháng) và Thực thể phụ
+    where_conds = []
+    yr_match = re.search(r"\b(20\d{2})\b", q_low)
+    if yr_match:
+        yr_val = yr_match.group(1)
+        where_conds.append(f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}")
+
+    qtr_match = re.search(r"\b(?:quý|quarter|q)\s*([1-4])\b", q_low)
+    if qtr_match:
+        q_val = qtr_match.group(1)
+        where_conds.append(f"((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = {q_val}" if is_sqlite else f"QUARTER(s.SaleDate) = {q_val}")
+
+    m_match = re.search(r"\b(?:tháng|month)\s*(1[0-2]|[1-9])\b", q_low)
+    if m_match:
+        m_val = m_match.group(1)
+        where_conds.append(f"CAST(strftime('%m', s.SaleDate) AS INTEGER) = {m_val}" if is_sqlite else f"MONTH(s.SaleDate) = {m_val}")
+
+    spec_team = match_chocolates_specific_team(q_low)
+    spec_country = match_chocolates_specific_country(q_low)
+
+    # 2. Xác định thực thể gom nhóm chính (Target Dimension)
+    is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "sales rep", "thành viên"])
+    is_country = any(k in q_low for k in ["quốc gia", "thị trường", "country", "geo", "nước"]) and not is_person
+    is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh"]) and not is_person
+    is_category = any(k in q_low for k in ["danh mục", "category", "nhóm sản phẩm", "nhóm hàng"]) and not any(k in q_low for k in ["sản phẩm", "product"])
+
+    joins = []
+    if is_person:
+        joins.append("JOIN people pe ON s.SPID = pe.SPID")
+        dim_select = "        pe.Salesperson AS `Nhân Viên`,\n        COALESCE(NULLIF(pe.Team, ''), 'Chưa phân nhóm') AS `Đội Ngũ`,"
+        group_by = "pe.SPID, pe.Salesperson, pe.Team"
+        outer_dims = ["`Nhân Viên`", "`Đội Ngũ`"]
+        if spec_team:
+            where_conds.append(f"pe.Team = '{spec_team}'")
+    elif is_country:
+        joins.append("JOIN geo g ON s.GeoID = g.GeoID")
+        dim_select = "        g.Geo AS `Quốc Gia`,\n        g.Region AS `Khu Vực`,"
+        group_by = "g.GeoID, g.Geo, g.Region"
+        outer_dims = ["`Quốc Gia`", "`Khu Vực`"]
+    elif is_team:
+        joins.append("JOIN people pe ON s.SPID = pe.SPID")
+        where_conds.append("pe.Team IS NOT NULL AND pe.Team != ''")
+        dim_select = "        pe.Team AS `Đội Ngũ`,"
+        group_by = "pe.Team"
+        outer_dims = ["`Đội Ngũ`"]
+    elif is_category:
+        joins.append("JOIN products pr ON s.PID = pr.PID")
+        dim_select = "        pr.Category AS `Danh Mục`,"
+        group_by = "pr.Category"
+        outer_dims = ["`Danh Mục`"]
+    else:
+        # Mặc định: Sản phẩm (Product)
+        joins.append("JOIN products pr ON s.PID = pr.PID")
+        dim_select = "        pr.Product AS `Sản Phẩm`,\n        pr.Category AS `Danh Mục`,"
+        group_by = "pr.PID, pr.Product, pr.Category"
+        outer_dims = ["`Sản Phẩm`", "`Danh Mục`"]
+
+    if spec_country and not is_country:
+        if "JOIN geo g ON s.GeoID = g.GeoID" not in joins:
+            joins.append("JOIN geo g ON s.GeoID = g.GeoID")
+        where_conds.append(f"g.Geo = '{spec_country}'")
+    if spec_team and not is_person and not is_team:
+        if "JOIN people pe ON s.SPID = pe.SPID" not in joins:
+            joins.append("JOIN people pe ON s.SPID = pe.SPID")
+        where_conds.append(f"pe.Team = '{spec_team}'")
+
+    # 3. Xác định chỉ số đo lường & cột xếp hạng mục tiêu (Target Metric)
+    is_pnl = any(k in q_low for k in [
+        "lợi nhuận", "lãi", "lỗ", "profit", "chi phí", "giá vốn", "cost", "cogs",
+        "tỷ suất", "tỉ suất", "biên lợi nhuận", "margin", "p&l", "pnl", "kết quả kinh doanh"
+    ])
+    is_profit_per_box = any(k in q_low for k in ["lợi nhuận trên mỗi hộp", "lợi nhuận mỗi hộp", "profit per box"])
+    is_price_per_box = any(k in q_low for k in ["đơn giá trung bình", "giá trung bình mỗi hộp", "revenue per box", "avg price per box", "giá mỗi hộp"]) and not is_profit_per_box
+    is_aov = any(k in q_low for k in ["giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình mỗi đơn", "aov", "avg order value"])
+    is_boxes = any(k in q_low for k in ["số hộp", "số lượng hộp", "nhiều hộp", "ít hộp", "hộp", "thùng", "boxes", "sản lượng"]) and not is_pnl and not is_price_per_box
+    is_orders = any(k in q_low for k in ["số đơn hàng", "số giao dịch", "nhiều đơn", "ít đơn", "orders", "transactions"]) and not is_aov
+
+    if is_pnl or is_profit_per_box:
+        if "JOIN products pr ON s.PID = pr.PID" not in joins:
+            joins.append("JOIN products pr ON s.PID = pr.PID")
+        profit_alias = "Lợi Nhuận Ròng ($)" if any(k in q_low for k in ["ròng", "net"]) else "Lợi Nhuận ($)"
+        if is_profit_per_box:
+            metrics_select = f"""        ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS `Lợi Nhuận/Hộp ($)`,
+        ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `{profit_alias}`,
+        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        SUM(s.Boxes) AS `Tổng Số Hộp`"""
+            outer_metrics = ["`Lợi Nhuận/Hộp ($)`", f"`{profit_alias}`", "`Tổng Doanh Thu ($)`", "`Tổng Số Hộp`"]
+            rank_col = "`Lợi Nhuận/Hộp ($)`"
+        else:
+            metrics_select = f"""        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+        ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `{profit_alias}`,
+        ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / NULLIF(SUM(s.Amount), 0), 2) AS `Tỷ Suất Lợi Nhuận (%)`"""
+            outer_metrics = ["`Tổng Doanh Thu ($)`", "`Tổng Chi Phí ($)`", f"`{profit_alias}`", "`Tỷ Suất Lợi Nhuận (%)`"]
+            if any(k in q_low for k in ["tỷ suất", "tỉ suất", "biên lợi nhuận", "margin"]):
+                rank_col = "`Tỷ Suất Lợi Nhuận (%)`"
+            elif any(k in q_low for k in ["chi phí", "giá vốn", "cost", "cogs"]) and not any(k in q_low for k in ["lợi nhuận", "lãi", "profit"]):
+                rank_col = "`Tổng Chi Phí ($)`"
+            else:
+                rank_col = f"`{profit_alias}`"
+    elif is_price_per_box:
+        metrics_select = """        ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS `Đơn Giá TB/Hộp ($)`,
+        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        SUM(s.Boxes) AS `Tổng Số Hộp`"""
+        outer_metrics = ["`Đơn Giá TB/Hộp ($)`", "`Tổng Doanh Thu ($)`", "`Tổng Số Hộp`"]
+        rank_col = "`Đơn Giá TB/Hộp ($)`"
+    elif is_aov:
+        metrics_select = """        ROUND(AVG(s.Amount), 2) AS `Giá Trị Đơn TB ($)`,
+        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        COUNT(*) AS `Số Đơn Hàng`"""
+        outer_metrics = ["`Giá Trị Đơn TB ($)`", "`Tổng Doanh Thu ($)`", "`Số Đơn Hàng`"]
+        rank_col = "`Giá Trị Đơn TB ($)`"
+    elif is_boxes:
+        metrics_select = """        SUM(s.Boxes) AS `Tổng Số Hộp`,
+        SUM(s.Amount) AS `Tổng Doanh Thu ($)`"""
+        outer_metrics = ["`Tổng Số Hộp`", "`Tổng Doanh Thu ($)`"]
+        rank_col = "`Tổng Số Hộp`"
+    elif is_orders:
+        metrics_select = """        COUNT(*) AS `Số Đơn Hàng`,
+        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        SUM(s.Boxes) AS `Tổng Số Hộp`"""
+        outer_metrics = ["`Số Đơn Hàng`", "`Tổng Doanh Thu ($)`", "`Tổng Số Hộp`"]
+        rank_col = "`Số Đơn Hàng`"
+    else:
+        metrics_select = """        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        SUM(s.Boxes) AS `Tổng Số Hộp`,
+        ROUND(AVG(s.Amount), 2) AS `Giá Trị Đơn TB ($)`"""
+        outer_metrics = ["`Tổng Doanh Thu ($)`", "`Tổng Số Hộp`", "`Giá Trị Đơn TB ($)`"]
+        rank_col = "`Tổng Doanh Thu ($)`"
+
+    joins_str = "\n    ".join(joins)
+    where_str = f"\n    WHERE {' AND '.join(where_conds)}" if where_conds else ""
+
+    top_label = f"Top {top_n} Cao Nhất" if top_n > 1 else "Cao Nhất (#1)"
+    bottom_label = f"Top {bottom_n} Thấp Nhất" if bottom_n > 1 else "Thấp Nhất (#1)"
+
+    first_dim = outer_dims[0]
+    rest_dims = outer_dims[1:]
+    select_outer_lines = [
+        f"    {first_dim},",
+        f"    CASE WHEN rn_high <= {top_n} THEN '{top_label}' ELSE '{bottom_label}' END AS `Nhóm Xếp Hạng`,"
+    ]
+    for d_col in rest_dims:
+        select_outer_lines.append(f"    {d_col},")
+    for idx_m, m_col in enumerate(outer_metrics):
+        comma = "," if idx_m < len(outer_metrics) - 1 else ""
+        select_outer_lines.append(f"    {m_col}{comma}")
+    select_outer_str = "\n".join(select_outer_lines)
+
+    return f"""WITH BaseStats AS (
+    SELECT 
+{dim_select}
+{metrics_select}
+    FROM sales s
+    {joins_str}{where_str}
+    GROUP BY {group_by}
+),
+RankedStats AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY {rank_col} DESC) AS rn_high,
+        ROW_NUMBER() OVER (ORDER BY {rank_col} ASC) AS rn_low
+    FROM BaseStats
+)
+SELECT 
+{select_outer_str}
+FROM RankedStats
+WHERE rn_high <= {top_n} OR rn_low <= {bottom_n}
+ORDER BY {rank_col} DESC;"""
+
+
+
 def parse_threshold_query_info(q_low: str):
     """Trích xuất thông tin điều kiện lọc theo ngưỡng (Threshold Query) cho CSDL Awesome Chocolates."""
     if not q_low:
@@ -1081,7 +1378,7 @@ def parse_threshold_query_info(q_low: str):
     }
 
 
-def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = "") -> str:
+def _compute_targeted_hint_raw(user_query: str, schema_context: str = "", dialect: str = "") -> str:
     """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) cho câu hỏi cụ thể, áp dụng cho cả prompt gốc và prompt sửa lỗi."""
     q_low = (user_query or "").lower()
     schema_low = (schema_context or "").lower()
@@ -1090,7 +1387,27 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
 
     # Trích xuất số lượng N linh hoạt từ câu hỏi (VD: Top 10, top 5, 10 nhân viên, danh sách 10...)
     top_m = re.search(r"(?:top\s*|danh\s+sách\s*|lấy\s*|cho\s+tôi\s*)(\d+)", q_low)
-    req_limit = int(top_m.group(1)) if top_m else 10
+    # Nhận diện câu hỏi cực trị số ít (Singular Top 1 / Quán quân):
+    is_asking_single_entity = any(k in q_low for k in [
+        "ai là", "ai bán", "ai có", "người nào", "nhân viên nào", "sản phẩm nào", 
+        "mặt hàng nào", "quốc gia nào", "nước nào", "khách hàng nào", "đội nào", 
+        "team nào", "tháng nào", "năm nào", "quý nào", "đâu là", "ai đứng đầu",
+        "ai dẫn đầu", "ai đạt", "nhân viên xuất sắc nhất", "sản phẩm bán chạy nhất", "quán quân"
+    ])
+    has_superlative = any(k in q_low for k in [
+        "nhất", "xuất sắc nhất", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất",
+        "bán chạy nhất", "lớn nhất", "nhỏ nhất", "đỉnh nhất", "giỏi nhất",
+        "dẫn đầu", "quán quân", "vô địch", "top 1"
+    ])
+    is_multi_req = any(k in q_low for k in ["từng", "mỗi", "các", "tất cả", "danh sách", "top ", "và thấp nhất", "và ít nhất"])
+    if top_m:
+        req_limit = int(top_m.group(1))
+    elif (is_asking_single_entity and has_superlative) and not is_multi_req:
+        req_limit = 1
+    elif any(k in q_low for k in ["nhân viên xuất sắc nhất", "người xuất sắc nhất", "sản phẩm bán chạy nhất", "quán quân doanh số", "best seller", "top 1"]) and not is_multi_req:
+        req_limit = 1
+    else:
+        req_limit = 10
 
     # 0. Phân biệt ngữ cảnh CSDL (Northwind vs Sakila vs Employees vs Awesome Chocolates)
     is_northwind_db = any(k in schema_low for k in ["order_details", "`order_details`", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in schema_low or "`products`" in schema_low) and ("orders" in schema_low or "`orders`" in schema_low) and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
@@ -1439,8 +1756,12 @@ ORDER BY Month ASC;
 (CẢNH BÁO BẮT BUỘC: Bảng thanh toán doanh thu là `payment` (cột `amount`, `payment_date`), TUYỆT ĐỐI KHÔNG CÓ CỘT `to_date`, KHÔNG DÙNG BẢNG `sales`!)
 """
 
-        # Biến động doanh thu theo tháng / số lượt thuê
-        if any(k in q_low for k in ["theo tháng", "từng tháng", "hàng tháng", "qua các tháng", "biến động", "xu hướng", "monthly"]) and any(k in q_low for k in ["doanh thu", "doanh số", "thuê", "rentals", "payment", "tiền", "revenue"]):
+        # Biến động doanh thu theo tháng / số lượt thuê / xu hướng theo thời gian / tổng giá trị
+        if (
+            (any(k in q_low for k in ["theo tháng", "từng tháng", "hàng tháng", "qua các tháng", "biến động", "xu hướng", "monthly", "theo thời gian", "qua thời gian", "thời gian", "diễn biến"])
+             and any(k in q_low for k in ["doanh thu", "doanh số", "thuê", "rentals", "payment", "tiền", "revenue", "giá trị", "tổng giá trị", "total value", "amount", "giao dịch", "chi tiêu", "thanh toán"]))
+            or any(k in q_low for k in ["xu hướng tổng giá trị", "xu hướng giá trị", "tổng giá trị theo thời gian", "giá trị theo thời gian"])
+        ):
             if is_sqlite:
                 return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU & SỐ LƯỢT THUÊ THEO THÁNG TRONG CSDL SAKILA):
@@ -1478,6 +1799,21 @@ JOIN inventory i ON f.film_id = i.film_id
 JOIN rental r ON i.inventory_id = r.inventory_id
 JOIN payment p ON r.rental_id = p.rental_id
 GROUP BY c.name
+ORDER BY TotalRevenue DESC
+LIMIT {req_limit};
+"""
+        elif any(k in q_low for k in ["phim", "film", "bộ phim", "tựa đề", "tên phim", "movie"]) and any(k in q_low for k in ["doanh thu", "cao nhất", "nhiều nhất", "top", "thuê nhiều", "tiền"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP BỘ PHIM CÓ DOANH THU CAO NHẤT TRONG SAKILA):
+SELECT 
+    f.title AS FilmTitle,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(r.rental_id) AS RentalCount
+FROM film f
+JOIN inventory i ON f.film_id = i.film_id
+JOIN rental r ON i.inventory_id = r.inventory_id
+JOIN payment p ON r.rental_id = p.rental_id
+GROUP BY f.film_id, f.title
 ORDER BY TotalRevenue DESC
 LIMIT {req_limit};
 """
@@ -1522,6 +1858,75 @@ JOIN payment p ON s.staff_id = p.staff_id
 GROUP BY st.store_id
 ORDER BY st.store_id ASC;
 """
+        # Tỷ lệ phần trăm đóng góp của từng City vào tổng thanh toán / doanh thu trong Sakila
+        elif any(k in q_low for k in ["thành phố", "city"]) and any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "percentage", "contribution", "đóng góp", "tỷ trọng", "tỉ trọng", "cơ cấu"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHẦN TRĂM ĐÓNG GÓP THEO THÀNH PHỐ TRONG CSDL SAKILA):
+WITH CityRevenue AS (
+    SELECT 
+        ct.city_id,
+        ct.city AS City,
+        COUNT(DISTINCT p.payment_id) AS TotalPayments,
+        ROUND(SUM(p.amount), 2) AS TotalAmount
+    FROM city ct
+    JOIN address addr ON ct.city_id = addr.city_id
+    JOIN customer cu ON addr.address_id = cu.address_id
+    JOIN payment p ON cu.customer_id = p.customer_id
+    GROUP BY ct.city_id, ct.city
+)
+SELECT 
+    City,
+    TotalAmount,
+    TotalPayments,
+    ROUND(TotalAmount * 100.0 / (SELECT SUM(TotalAmount) FROM CityRevenue), 2) AS ContributionPercentage
+FROM CityRevenue
+ORDER BY TotalAmount DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC CHO SAKILA:
+1. Dùng CTE `CityRevenue` tính `TotalAmount` và `TotalPayments` cho từng City.
+2. Cột Tỷ lệ đóng góp: `ROUND(TotalAmount * 100.0 / (SELECT SUM(TotalAmount) FROM CityRevenue), 2) AS ContributionPercentage`.
+3. BẮT BUỘC sắp xếp theo `TotalAmount DESC` hoặc `ContributionPercentage DESC` để City có đóng góp cao nhất đứng đầu!)
+"""
+        # So sánh số tiền / doanh thu trung bình giữa các thành phố trong Sakila
+        elif any(k in q_low for k in ["thành phố", "city"]) and any(k in q_low for k in ["trung bình", "bình quân", "avg", "average"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH SỐ TIỀN TRUNG BÌNH GIỮA CÁC THÀNH PHỐ TRONG CSDL SAKILA):
+SELECT 
+    ct.city AS City,
+    COUNT(DISTINCT p.payment_id) AS TotalPayments,
+    ROUND(SUM(p.amount), 2) AS TotalAmount,
+    ROUND(AVG(p.amount), 2) AS AvgAmount
+FROM city ct
+JOIN address addr ON ct.city_id = addr.city_id
+JOIN customer cu ON addr.address_id = cu.address_id
+JOIN payment p ON cu.customer_id = p.customer_id
+GROUP BY ct.city_id, ct.city
+ORDER BY AvgAmount DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC CHO SAKILA:
+1. Thành phố là bảng `city` (ct.city_id, ct.city).
+2. Nối tới khách hàng thanh toán qua: `city ct JOIN address addr ON ct.city_id = addr.city_id JOIN customer cu ON addr.address_id = cu.address_id JOIN payment p ON cu.customer_id = p.customer_id`.
+3. Số tiền trung bình: `ROUND(AVG(p.amount), 2) AS AvgAmount`.)
+"""
+        # Top thành phố theo tổng thanh toán / doanh số
+        elif any(k in q_low for k in ["thành phố", "city"]) and any(k in q_low for k in ["tổng", "doanh thu", "doanh số", "thanh toán", "payment", "tiền", "số tiền", "cao nhất", "nhiều nhất", "lớn nhất", "top", "so sánh"]):
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP THÀNH PHỐ CÓ TỔNG THANH TOÁN / DOANH THU CAO NHẤT TRONG SAKILA):
+SELECT 
+    ct.city AS City,
+    COUNT(DISTINCT p.payment_id) AS TotalPayments,
+    ROUND(SUM(p.amount), 2) AS TotalAmount,
+    ROUND(AVG(p.amount), 2) AS AvgAmount
+FROM city ct
+JOIN address addr ON ct.city_id = addr.city_id
+JOIN customer cu ON addr.address_id = cu.address_id
+JOIN payment p ON cu.customer_id = p.customer_id
+GROUP BY ct.city_id, ct.city
+ORDER BY TotalAmount DESC
+LIMIT {req_limit};
+(CẢNH BÁO BẮT BUỘC: Khi hỏi về tổng thanh toán / doanh số, BẮT BUỘC `ORDER BY TotalAmount DESC`!)
+"""
+
 
     if is_employees_db:
         # Mức lương trung bình của nhân viên theo từng phòng ban
@@ -1552,7 +1957,7 @@ ORDER BY AvgSalary DESC;
 4. Đây là câu lệnh SELECT chuẩn, TUYỆT ĐỐI KHÔNG dùng CTE/subquery phức tạp gây lỗi cú pháp ngoặc đơn!).
 """
 
-    if is_choco_context or (not is_employees_db and not is_sakila_db and any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"]) and any(k in q_low for k in ["tháng", "month"])):
+    if is_choco_context or (not is_employees_db and not is_sakila_db and not is_northwind_db):
         # 0.0000 Dominant Market (> X% Global Revenue) & Best-Selling Product (Thị trường chiếm trên X% doanh số toàn cầu & Sản phẩm bán chạy nhất)
         # Ví dụ: "Thị trường nào đang chiếm trên 30% tổng doanh số toàn cầu của công ty và sản phẩm bán chạy nhất tại thị trường đó là gì?"
         is_dominant_market_top_prod = (
@@ -1622,6 +2027,20 @@ ORDER BY MarketRevenue DESC;
             yr_m = re.search(r'\b(20\d{2})\b', q_low)
             yr_cond = f"WHERE strftime('%Y', s.SaleDate) = '{yr_m.group(1)}'\n" if (yr_m and is_sqlite) else (f"WHERE YEAR(s.SaleDate) = {yr_m.group(1)}\n" if yr_m else "")
             lim_val = req_limit or 10
+            is_cust_id_req = any(k in q_low for k in ["customer id", "customer_id", "mã khách hàng", "ma khach hang", "mã customer", "customerid"])
+            if is_cust_id_req:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP CUSTOMER ID CÓ TỔNG SỐ TIỀN CAO NHẤT TRONG AWESOME CHOCOLATES):
+SELECT 
+    s.CustomerID,
+    SUM(s.Amount) AS `Tổng Số Tiền`,
+    COUNT(s.SaleDate) AS `Số Giao Dịch`
+FROM sales s
+{yr_cond}GROUP BY s.CustomerID
+ORDER BY `Tổng Số Tiền` DESC
+LIMIT {lim_val};
+(LƯU Ý CSDL AWESOME CHOCOLATES: Bảng `sales` lưu cột `CustomerID` đại diện cho mã định danh khách hàng và `Amount` là giá trị tiền của giao dịch).
+"""
             return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP GIAO DỊCH / KHÁCH HÀNG CÓ SỐ TIỀN MẶT LỚN NHẤT TRONG AWESOME CHOCOLATES):
 SELECT 
@@ -1629,13 +2048,13 @@ SELECT
     pe.Salesperson AS `Nhân Viên`,
     pr.Product AS `Sản Phẩm`,
     g.Geo AS `Thị Trường`,
-    s.Customers AS `Số Khách Hàng`,
-    s.Amount AS `Số Tiền Mặt`
+    s.Amount AS `Số Tiền Mặt`,
+    s.Customers AS `Số Khách Hàng`
 FROM sales s
 JOIN people pe ON s.SPID = pe.SPID
 JOIN products pr ON s.PID = pr.PID
 JOIN geo g ON s.GeoID = g.GeoID
-{yr_cond}ORDER BY s.Amount DESC, s.Customers DESC
+{yr_cond}ORDER BY s.Amount DESC
 LIMIT {lim_val};
 (LƯU Ý CSDL AWESOME CHOCOLATES: Bảng `sales` lưu thông tin từng giao dịch gồm `Amount` (số tiền mặt), `Customers` (số lượng khách hàng), liên kết với `people`, `products`, `geo`).
 """
@@ -1706,6 +2125,387 @@ LIMIT {limit_val};
 3. BẮT BUỘC JOIN các bảng liên quan để lấy đúng các trường chi tiết: ngày bán (s.SaleDate), nhân viên (pe.Salesperson), sản phẩm (pr.Product), số tiền (s.Amount){geo_warn}!
 4. Sắp xếp ORDER BY {order_col} DESC LIMIT {limit_val}!)
 """
+
+        # 0.00000 Phân tích tỷ trọng / số lượng đơn hàng so với mức trung bình (Order Benchmark Share Analysis)
+        # Ví dụ: "Tỷ trọng các đơn hàng có doanh số lớn hơn doanh số trung bình năm 2021"
+        is_order_benchmark = (
+            any(k in q_low for k in ["đơn hàng", "giao dịch", "mỗi đơn", "các đơn", "orders", "transactions", "đơn"])
+            and any(k in q_low for k in ["trung bình", "bình quân", "avg", "average", "ngưỡng trung bình", "mức tb"])
+            and (
+                any(k in q_low for k in ["lớn hơn", "lướn hơn", "lơn hơn", "lon hon", "cao hơn", "vượt", "trên", "nhiều hơn", ">", ">=", "nhỏ hơn", "nho hon", "thấp hơn", "thap hon", "ít hơn", "dưới", "<", "<=", "vượt mức", "vượt trên"])
+                or any(k in q_low for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "phần trăm", "percentage", "share", "bao nhiêu", "số lượng"])
+            )
+        )
+        if is_order_benchmark:
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_match.group(1) if yr_match else None
+            
+            is_boxes = any(k in q_low for k in ["hộp", "boxes", "thùng"]) and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền", "số tiền", "amount", "giá trị"])
+            metric_col = "s.Boxes" if is_boxes else "s.Amount"
+            metric_title = "Số Hộp" if is_boxes else "Doanh Số"
+            
+            tx_geo = match_chocolates_specific_country(q_low)
+            tx_team = match_chocolates_specific_team(q_low)
+            
+            joins = []
+            if tx_geo:
+                joins.append("JOIN geo g ON s.GeoID = g.GeoID")
+            if tx_team:
+                joins.append("JOIN people pe ON s.SPID = pe.SPID")
+            joins_str = ("\n" + "\n".join(joins)) if joins else ""
+            
+            where_conds = []
+            if yr_val:
+                where_conds.append(f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}")
+            if tx_geo:
+                where_conds.append(f"g.Geo = '{tx_geo}'")
+            if tx_team:
+                where_conds.append(f"pe.Team = '{tx_team}'")
+            where_str = ("\n    WHERE " + " AND ".join(where_conds)) if where_conds else ""
+            
+            yr_label = f" NĂM {yr_val}" if yr_val else ""
+            geo_label = f" TẠI {tx_geo.upper()}" if tx_geo else ""
+            
+            is_less = any(k in q_low for k in ["nhỏ hơn", "nho hon", "thấp hơn", "thap hon", "ít hơn", "dưới", "<", "<="]) and not any(k in q_low for k in ["lớn hơn", "lướn hơn", "lơn hơn", "lon hon", "cao hơn", "vượt", "trên", ">", ">="])
+            comp_op = "<" if is_less else ">"
+            target_label = "Đơn hàng dưới mức trung bình" if is_less else "Đơn hàng trên mức trung bình"
+            other_label = "Đơn hàng từ trung bình trở lên" if is_less else "Đơn hàng dưới hoặc bằng trung bình"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ TRỌNG ĐƠN HÀNG SO VỚI MỨC TRUNG BÌNH{yr_label}{geo_label}):
+WITH OrderBenchmark AS (
+    SELECT 
+        ROUND(AVG({metric_col}), 2) AS AvgBenchmark,
+        COUNT(*) AS TotalOrdersCount,
+        SUM({metric_col}) AS TotalRevenue
+    FROM sales s{joins_str}{where_str}
+),
+ClassifiedOrders AS (
+    SELECT 
+        CASE 
+            WHEN {metric_col} {comp_op} b.AvgBenchmark THEN '{target_label}'
+            ELSE '{other_label}'
+        END AS `Nhóm Đơn Hàng`,
+        {metric_col} AS MetricVal
+    FROM sales s{joins_str}
+    CROSS JOIN OrderBenchmark b{where_str}
+)
+SELECT 
+    co.`Nhóm Đơn Hàng`,
+    COUNT(*) AS `Số Lượng Đơn`,
+    ROUND(COUNT(*) * 100.0 / b.TotalOrdersCount, 2) AS `Tỷ Trọng Số Đơn (%)`,
+    SUM(co.MetricVal) AS `Tổng {metric_title} ($)`,
+    ROUND(SUM(co.MetricVal) * 100.0 / NULLIF(b.TotalRevenue, 0), 2) AS `Tỷ Trọng {metric_title} (%)`,
+    b.AvgBenchmark AS `Mức TB Chuẩn ($)`
+FROM ClassifiedOrders co
+CROSS JOIN OrderBenchmark b
+GROUP BY co.`Nhóm Đơn Hàng`, b.TotalOrdersCount, b.TotalRevenue, b.AvgBenchmark
+ORDER BY CASE WHEN co.`Nhóm Đơn Hàng` = '{target_label}' THEN 0 ELSE 1 END;
+(CẢNH BÁO BẮT BUỘC:
+1. ĐÂY LÀ BÀI TOÁN PHÂN TÍCH TỶ TRỌNG ĐƠN HÀNG SO VỚI MỨC TRUNG BÌNH (ORDER BENCHMARK SHARE ANALYSIS).
+2. TRONG CSDL AWESOME CHOCOLATES: Mỗi dòng trong bảng `sales` là một đơn hàng/giao dịch. TUYỆT ĐỐI KHÔNG CÓ BẢNG `orders`!
+3. BẮT BUỘC DÙNG CTE ĐỂ TÍNH MỨC TRUNG BÌNH TRƯỚC (TUYỆT ĐỐI KHÔNG DÙNG AVG({metric_col}) TRỰC TIẾP TRONG MỆNH ĐỀ WHERE VÌ SẼ BỊ LỖI MySQL 1111: Invalid use of group function)!
+4. BẮT BUỘC PHÂN LOẠI THÀNH 2 NHÓM BẰNG CASE WHEN ĐỂ TRẢ VỀ CẢ 2 NHÓM ({target_label} VÀ {other_label}) GIÚP VẼ BIỂU ĐỒ DONUT TỔNG 100% VÀ TÍNH TỶ TRỌNG CHUẨN XÁC!
+5. CUNG CẤP ĐẦY ĐỦ: `Nhóm Đơn Hàng`, `Số Lượng Đơn`, `Tỷ Trọng Số Đơn (%)`, `Tổng {metric_title} ($)`, `Tỷ Trọng {metric_title} (%)`, `Mức TB Chuẩn ($)`!)
+"""
+
+        # 0.00000b Phân tích tỷ trọng đóng góp / so sánh nhân viên với mặt bằng chung trung bình (Salesperson Benchmark Share / Contribution Comparison)
+        # Ví dụ: "Tỷ trọng đóng góp của từng nhân viên trong năm 2021 so với mặt bằng chung trung bình"
+        is_person_benchmark = (
+            any(k in q_low for k in ["nhân viên", "nhân sự", "người bán", "salesperson", "sales person", "sales rep", "rep", "từng nhân viên", "mỗi nhân viên"])
+            and not any(k in q_low for k in [
+                "sản phẩm", "product", "mặt hàng", "kẹo", "socola", "đơn hàng", "giao dịch",
+                "6 tháng đầu", "6 tháng cuối", "nửa đầu", "nửa cuối", "trung bình tháng",
+                "trung bình mỗi tháng", "bình quân tháng", "tỷ lệ cải thiện", "tỉ lệ cải thiện",
+                "liên tiếp", "liên tục", "tháng cao nhất", "tháng thấp nhất"
+            ])
+            and (
+                (any(k in q_low for k in ["mặt bằng chung", "trung bình", "bình quân", "avg", "average", "benchmark"])
+                 and any(k in q_low for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "đóng góp", "phần trăm", "percentage", "share", "so với", "đối chiếu", "chênh lệch", "vượt", "cao hơn", "lớn hơn"]))
+                or (any(k in q_low for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "phần trăm", "đóng góp"])
+                    and any(k in q_low for k in ["từng nhân viên", "mỗi nhân viên", "các nhân viên", "tất cả nhân viên"]))
+            )
+        )
+        if is_person_benchmark:
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_match.group(1) if yr_match else None
+            
+            is_boxes = any(k in q_low for k in ["hộp", "boxes", "thùng"]) and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền", "số tiền", "amount", "giá trị"])
+            metric_col = "s.Boxes" if is_boxes else "s.Amount"
+            metric_title = "Số Hộp" if is_boxes else "Doanh Số"
+            
+            tx_team = match_chocolates_specific_team(q_low)
+            tx_geo = match_chocolates_specific_country(q_low)
+            
+            joins = []
+            if tx_geo:
+                joins.append("JOIN geo g ON s.GeoID = g.GeoID")
+            joins_str = ("\n    " + "\n    ".join(joins)) if joins else ""
+            
+            where_conds = []
+            if yr_val:
+                where_conds.append(f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}")
+            if tx_team:
+                where_conds.append(f"pe.Team = '{tx_team}'")
+            if tx_geo:
+                where_conds.append(f"g.Geo = '{tx_geo}'")
+            where_str = ("\n    WHERE " + " AND ".join(where_conds)) if where_conds else ""
+            
+            yr_label = f" NĂM {yr_val}" if yr_val else ""
+            team_label = f" TEAM {tx_team.upper()}" if tx_team else ""
+            geo_label = f" TẠI {tx_geo.upper()}" if tx_geo else ""
+            
+            limit_val = req_limit if req_limit and req_limit != 10 else None
+            limit_str = f"\nLIMIT {limit_val}" if limit_val else ""
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ TRỌNG ĐÓNG GÓP & SO SÁNH NHÂN VIÊN VỚI MẶT BẰNG CHUNG{yr_label}{team_label}{geo_label}):
+WITH PersonSales AS (
+    SELECT 
+        pe.Salesperson AS Salesperson,
+        SUM({metric_col}) AS TotalMetric,
+        SUM(s.Boxes) AS TotalBoxesSold
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID{joins_str}{where_str}
+    GROUP BY pe.SPID, pe.Salesperson
+),
+CompanyStats AS (
+    SELECT 
+        SUM(TotalMetric) AS GrandTotal,
+        ROUND(AVG(TotalMetric), 2) AS BenchmarkAvg
+    FROM PersonSales
+)
+SELECT 
+    ps.Salesperson,
+    ps.TotalMetric AS `Tổng {metric_title} ($)`,
+    ROUND(ps.TotalMetric * 100.0 / cs.GrandTotal, 2) AS `Tỷ Trọng (%)`,
+    cs.BenchmarkAvg AS `Mặt Bằng Chung TB ($)`,
+    ROUND(ps.TotalMetric - cs.BenchmarkAvg, 2) AS `Chênh Lệch So Với TB ($)`,
+    ROUND(((ps.TotalMetric - cs.BenchmarkAvg) * 100.0 / cs.BenchmarkAvg), 2) AS `Tỷ Lệ So Với TB (%)`,
+    ps.TotalBoxesSold AS `Số Hộp`
+FROM PersonSales ps
+CROSS JOIN CompanyStats cs
+ORDER BY ps.TotalMetric DESC{limit_str};
+(CẢNH BÁO BẮT BUỘC:
+1. ĐÂY LÀ BÀI TOÁN PHÂN TÍCH TỶ TRỌNG ĐÓNG GÓP VÀ SO SÁNH TỪNG NHÂN VIÊN VỚI MẶT BẰNG CHUNG TRUNG BÌNH (SALESPERSON BENCHMARK SHARE).
+2. BẮT BUỘC JOIN sales s VỚI people pe ON s.SPID = pe.SPID VÀ GROUP BY pe.SPID, pe.Salesperson!
+3. DÙNG CTE 2 BƯỚC ĐỂ TÍNH:
+   - Tỷ Trọng (%) = ps.TotalMetric * 100.0 / cs.GrandTotal (Tổng = 100%)
+   - Mặt Bằng Chung TB ($) = cs.BenchmarkAvg (Mức trung bình doanh số mỗi nhân sự)
+   - Chênh Lệch So Với TB ($) = ps.TotalMetric - cs.BenchmarkAvg
+   - Tỷ Lệ So Với TB (%) = (ps.TotalMetric - cs.BenchmarkAvg) * 100.0 / cs.BenchmarkAvg!
+4. SẮP XẾP ORDER BY ps.TotalMetric DESC!)
+"""
+
+        # 0.00000c So sánh doanh số trung bình tháng của từng nhân viên giữa 6 tháng đầu năm (H1) và 6 tháng cuối năm (H2) & Xác định tỷ lệ cải thiện
+        is_half_year_comp = (
+            (any(k in q_low for k in ["6 tháng đầu", "sáu tháng đầu", "nửa đầu năm", "h1"])
+             and any(k in q_low for k in ["6 tháng cuối", "sáu tháng cuối", "nửa cuối năm", "h2"]))
+            or (any(k in q_low for k in ["6 tháng đầu", "6 tháng cuối", "nửa đầu năm", "nửa cuối năm"])
+                and any(k in q_low for k in ["tỷ lệ cải thiện", "tỉ lệ cải thiện", "cải thiện doanh số", "trung bình tháng", "bình quân tháng"]))
+        )
+        if is_half_year_comp:
+            yr_m = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_m.group(1) if yr_m else "2021"
+            yr_cond = f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}"
+            m_expr = "CAST(strftime('%m', s.SaleDate) AS INTEGER)" if is_sqlite else "MONTH(s.SaleDate)"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH DOANH SỐ TRUNG BÌNH THÁNG GIỮA 6 THÁNG ĐẦU NĂM VÀ 6 THÁNG CUỐI NĂM {yr_val} & TỶ LỆ CẢI THIỆN):
+WITH HalfYearStats AS (
+    SELECT 
+        pe.Salesperson AS Salesperson,
+        COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS Team,
+        ROUND(SUM(CASE WHEN {m_expr} BETWEEN 1 AND 6 THEN s.Amount ELSE 0 END) / 6.0, 2) AS H1_MonthlyAvg,
+        ROUND(SUM(CASE WHEN {m_expr} BETWEEN 7 AND 12 THEN s.Amount ELSE 0 END) / 6.0, 2) AS H2_MonthlyAvg,
+        SUM(CASE WHEN {m_expr} BETWEEN 1 AND 6 THEN s.Amount ELSE 0 END) AS H1_TotalSales,
+        SUM(CASE WHEN {m_expr} BETWEEN 7 AND 12 THEN s.Amount ELSE 0 END) AS H2_TotalSales
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    WHERE {yr_cond}
+    GROUP BY pe.SPID, pe.Salesperson, pe.Team
+)
+SELECT 
+    Salesperson AS `Nhân Viên Kinh Doanh`,
+    Team AS `Đội Ngũ`,
+    H1_MonthlyAvg AS `TB Tháng 6T Đầu Năm ($)`,
+    H2_MonthlyAvg AS `TB Tháng 6T Cuối Năm ($)`,
+    ROUND(H2_MonthlyAvg - H1_MonthlyAvg, 2) AS `Chênh Lệch TB Tháng ($)`,
+    ROUND(((H2_MonthlyAvg - H1_MonthlyAvg) * 100.0 / NULLIF(H1_MonthlyAvg, 0)), 2) AS `Tỷ Lệ Cải Thiện (%)`,
+    H1_TotalSales AS `Tổng Doanh Số 6T Đầu ($)`,
+    H2_TotalSales AS `Tổng Doanh Số 6T Cuối ($)`
+FROM HalfYearStats
+ORDER BY `Tỷ Lệ Cải Thiện (%)` DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. ĐÂY LÀ BÀI TOÁN SO SÁNH DOANH SỐ TRUNG BÌNH THÁNG GIỮA 6 THÁNG ĐẦU NĂM (H1) VÀ 6 THÁNG CUỐI NĂM (H2) CỦA TỪNG NHÂN VIÊN!
+2. TUYỆT ĐỐI KHÔNG TÍNH ĐƠN GIÁ TRUNG BÌNH MỖI HỘP (AvgPricePerBox) VÀ TUYỆT ĐỐI KHÔNG DÙNG LIMIT 1!
+3. BẮT BUỘC xuất đầy đủ danh sách 25 nhân viên sắp xếp theo `Tỷ Lệ Cải Thiện (%)` DESC để thấy người dẫn đầu (Gigi Bohling +68.25%) ở dòng 1 đồng thời đối chiếu toàn bộ đội ngũ!)
+"""
+
+        # 0.00000d Chuỗi tháng tăng trưởng doanh số liên tiếp của nhân viên (Consecutive Monthly Growth Streak)
+        is_growth_streak = (
+            any(k in q_low for k in ["tăng liên tục", "tăng trưởng liên tục", "tăng liên tiếp", "tăng trưởng liên tiếp", "liên tiếp", "liên tục", "consecutive"])
+            and any(k in q_low for k in ["tháng", "month", "months"])
+            and any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "người bán", "chuyên viên"])
+        )
+        if is_growth_streak:
+            yr_m = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_m.group(1) if yr_m else "2021"
+            yr_cond = f"strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr_val}"
+            m_num_expr = "CAST(strftime('%m', s.SaleDate) AS INTEGER)" if is_sqlite else "MONTH(s.SaleDate)"
+            m_str_expr = "strftime('%Y-%m', s.SaleDate)" if is_sqlite else "DATE_FORMAT(s.SaleDate, '%Y-%m')"
+            period_concat = "StartMonth || ' -> ' || EndMonth" if is_sqlite else "CONCAT(StartMonth, ' -> ', EndMonth)"
+            status_case = (
+                "CASE WHEN rs.ConsecutiveMonths >= 3 THEN 'Đạt chuẩn (>= 3 tháng)' ELSE 'Tối đa ' || rs.ConsecutiveMonths || ' tháng (Chưa đạt 3 tháng)' END"
+                if is_sqlite else
+                "CASE WHEN rs.ConsecutiveMonths >= 3 THEN 'Đạt chuẩn (>= 3 tháng)' ELSE CONCAT('Tối đa ', rs.ConsecutiveMonths, ' tháng (Chưa đạt 3 tháng)') END"
+            )
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÂN TÍCH CHUỖI THÁNG TĂNG TRƯỞNG DOANH SỐ LIÊN TIẾP NĂM {yr_val}):
+WITH MonthlySales AS (
+    SELECT 
+        pe.SPID,
+        pe.Salesperson,
+        COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS Team,
+        {m_num_expr} AS MonthNum,
+        {m_str_expr} AS MonthStr,
+        SUM(s.Amount) AS MonthlyRevenue
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    WHERE {yr_cond}
+    GROUP BY pe.SPID, pe.Salesperson, pe.Team, {m_num_expr}, {m_str_expr}
+),
+LaggedSales AS (
+    SELECT 
+        SPID,
+        Salesperson,
+        Team,
+        MonthNum,
+        MonthStr,
+        MonthlyRevenue,
+        LAG(MonthlyRevenue) OVER (PARTITION BY SPID ORDER BY MonthNum) AS PrevRevenue,
+        LAG(MonthNum) OVER (PARTITION BY SPID ORDER BY MonthNum) AS PrevMonthNum,
+        CASE 
+            WHEN MonthlyRevenue > LAG(MonthlyRevenue) OVER (PARTITION BY SPID ORDER BY MonthNum)
+                 AND MonthNum = LAG(MonthNum) OVER (PARTITION BY SPID ORDER BY MonthNum) + 1
+            THEN 1 ELSE 0 
+        END AS IsGrowth
+    FROM MonthlySales
+),
+StreakGroups AS (
+    SELECT 
+        SPID,
+        Salesperson,
+        Team,
+        MonthNum,
+        MonthStr,
+        MonthlyRevenue,
+        IsGrowth,
+        SUM(CASE WHEN IsGrowth = 0 THEN 1 ELSE 0 END) OVER (PARTITION BY SPID ORDER BY MonthNum) AS StreakGroup
+    FROM LaggedSales
+),
+StreakLengths AS (
+    SELECT 
+        SPID,
+        Salesperson,
+        Team,
+        StreakGroup,
+        COUNT(*) AS ConsecutiveMonths,
+        MIN(MonthStr) AS StartMonth,
+        MAX(MonthStr) AS EndMonth,
+        MIN(MonthlyRevenue) AS StartRevenue,
+        MAX(MonthlyRevenue) AS PeakRevenue
+    FROM StreakGroups
+    GROUP BY SPID, Salesperson, Team, StreakGroup
+),
+RankedStreaks AS (
+    SELECT 
+        SPID,
+        Salesperson,
+        Team,
+        ConsecutiveMonths,
+        {period_concat} AS PeakStreakPeriod,
+        StartRevenue,
+        PeakRevenue,
+        ROUND((PeakRevenue - StartRevenue) * 100.0 / NULLIF(StartRevenue, 0), 2) AS StreakGrowthPct,
+        ROW_NUMBER() OVER (PARTITION BY SPID ORDER BY ConsecutiveMonths DESC, (PeakRevenue - StartRevenue) DESC) AS rn
+    FROM StreakLengths
+)
+SELECT 
+    rs.Salesperson AS `Nhân Viên Kinh Doanh`,
+    rs.Team AS `Đội Ngũ`,
+    rs.ConsecutiveMonths AS `Chuỗi Tháng Tăng Liên Tiếp Tối Đa`,
+    rs.PeakStreakPeriod AS `Giai Đoạn Tăng Liên Tiếp Dài Nhất`,
+    rs.StartRevenue AS `Doanh Số Đầu Chuỗi ($)`,
+    rs.PeakRevenue AS `Doanh Số Đỉnh Chuỗi ($)`,
+    rs.StreakGrowthPct AS `Tăng Trưởng Trong Chuỗi (%)`,
+    {status_case} AS `Trạng Thái Chuẩn 3 Tháng`
+FROM RankedStreaks rs
+WHERE rs.rn = 1
+ORDER BY rs.ConsecutiveMonths DESC, rs.StreakGrowthPct DESC;
+"""
+
+        # 0.00000e Kiểm toán danh mục sản phẩm mới trong quý X năm Y (New Product Launch Audit)
+        is_new_prod_audit = (
+            any(k in q_low for k in ["sản phẩm mới", "mặt hàng mới", "sku mới", "new product", "new products", "mới ra mắt", "mới của quý", "mới trong quý"])
+            and any(k in q_low for k in ["quý", "quarter", "q1", "q2", "q3", "q4", "năm", "2021", "2022"])
+        )
+        if is_new_prod_audit:
+            yr_m = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_m.group(1) if yr_m else "2021"
+            qtr_m = re.search(r'(?:quý|quarter|q)\s*([1-4])', q_low)
+            qtr_val = int(qtr_m.group(1)) if qtr_m else 4
+            if is_sqlite:
+                qtr_num_expr = "((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3)"
+                yr_num_expr = "CAST(strftime('%Y', s.SaleDate) AS INTEGER)"
+                min_date_expr = "MIN(DATE(s.SaleDate))"
+                launch_qtr_expr = "((CAST(strftime('%m', MIN(s.SaleDate)) AS INTEGER) + 2) / 3)"
+                launch_yr_expr = "CAST(strftime('%Y', MIN(s.SaleDate)) AS INTEGER)"
+                launch_period_label = "'Q' || ((CAST(strftime('%m', MIN(s.SaleDate)) AS INTEGER) + 2) / 3) || '/' || strftime('%Y', MIN(s.SaleDate))"
+                status_expr = f"CASE WHEN LaunchYr = {yr_val} AND LaunchQtr = {qtr_val} THEN 'Sản phẩm mới ra mắt Q{qtr_val}/{yr_val}' ELSE 'Đã mở bán từ ' || `Kỳ Mở Bán Đầu Tiên` || ' (0 SP mới trong Q{qtr_val}/{yr_val})' END"
+            else:
+                qtr_num_expr = "QUARTER(s.SaleDate)"
+                yr_num_expr = "YEAR(s.SaleDate)"
+                min_date_expr = "MIN(DATE(s.SaleDate))"
+                launch_qtr_expr = "QUARTER(MIN(s.SaleDate))"
+                launch_yr_expr = "YEAR(MIN(s.SaleDate))"
+                launch_period_label = "CONCAT('Q', QUARTER(MIN(s.SaleDate)), '/', YEAR(MIN(s.SaleDate)))"
+                status_expr = f"CASE WHEN LaunchYr = {yr_val} AND LaunchQtr = {qtr_val} THEN 'Sản phẩm mới ra mắt Q{qtr_val}/{yr_val}' ELSE CONCAT('Đã mở bán từ ', `Kỳ Mở Bán Đầu Tiên`, ' (0 SP mới trong Q{qtr_val}/{yr_val})') END"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (KIỂM TOÁN SẢN PHẨM MỚI & DOANH SỐ QUÝ {qtr_val} NĂM {yr_val}):
+WITH ProductLaunchAudit AS (
+    SELECT 
+        pr.Product AS `Sản Phẩm`,
+        pr.Category AS `Danh Mục`,
+        {min_date_expr} AS `Ngày Mở Bán Đầu Tiên`,
+        {launch_period_label} AS `Kỳ Mở Bán Đầu Tiên`,
+        {launch_qtr_expr} AS LaunchQtr,
+        {launch_yr_expr} AS LaunchYr,
+        SUM(CASE WHEN {yr_num_expr} = {yr_val} AND {qtr_num_expr} = {qtr_val} THEN s.Amount ELSE 0 END) AS TargetPeriodSales,
+        SUM(CASE WHEN {yr_num_expr} = {yr_val} THEN s.Amount ELSE 0 END) AS AnnualSales,
+        SUM(CASE WHEN {yr_num_expr} = {yr_val} AND {qtr_num_expr} = {qtr_val} THEN s.Boxes ELSE 0 END) AS TargetPeriodBoxes
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    GROUP BY pr.PID, pr.Product, pr.Category
+)
+SELECT 
+    `Sản Phẩm`,
+    `Danh Mục`,
+    `Ngày Mở Bán Đầu Tiên`,
+    `Kỳ Mở Bán Đầu Tiên`,
+    {status_expr} AS `Trạng Thái Ra Mắt`,
+    TargetPeriodSales AS `Doanh Số Q{qtr_val}/{yr_val} ($)`,
+    AnnualSales AS `Doanh Số Năm {yr_val} ($)`,
+    ROUND((TargetPeriodSales * 100.0) / NULLIF(AnnualSales, 0), 2) AS `Tỷ Trọng Q{qtr_val}/{yr_val}/Cả Năm (%)`,
+    TargetPeriodBoxes AS `Số Hộp Q{qtr_val}/{yr_val}`
+FROM ProductLaunchAudit
+WHERE (LaunchYr = {yr_val} AND LaunchQtr = {qtr_val})
+   OR NOT EXISTS (
+       SELECT 1 FROM ProductLaunchAudit p2 WHERE p2.LaunchYr = {yr_val} AND p2.LaunchQtr = {qtr_val}
+   )
+ORDER BY TargetPeriodSales DESC;
+"""
+
+
 
         # 0.0000a Thống kê đơn hàng quy mô lớn theo Phân khúc / Danh mục / Thị trường (Segmented Large Orders: Category + Market + Order Threshold)
         # Ví dụ: "Thống kê tổng doanh thu và số lượng đơn hàng có quy mô từ 500 hộp trở lên đối với các sản phẩm thuộc danh mục 'Bites' tại hai thị trường USA và Canada."
@@ -2296,6 +3096,19 @@ ORDER BY `Số Lượng Nhân Viên` DESC;
 1. TUYỆT ĐỐI KHÔNG TRUY VẤN BẢNG sales! TUYỆT ĐỐI KHÔNG TÍNH SUM(Boxes) HAY SUM(Amount)!
 2. BẮT BUỘC TRUY VẤN TỪ BẢNG people BẰNG HÀM COUNT(DISTINCT pe.SPID) AS `Số Lượng Nhân Viên`!
 3. Nhóm theo Team, lọc bỏ các dòng rỗng, tính đầy đủ số lượng và tỷ lệ, ORDER BY `Số Lượng Nhân Viên` DESC!)
+"""
+
+        # 0.002 Truy vấn Kép 2 Đầu Cực Trị (Top N Cao Nhất VÀ Bottom M Thấp Nhất)
+        dual_ext_sql = build_chocolates_dual_extreme_sql(user_query, dialect=dialect)
+        if dual_ext_sql:
+            _, _top_n_ext, _bot_n_ext = parse_top_bottom_extremes(user_query)
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TRUY VẤN KÉP 2 ĐẦU CỰC TRỊ: TOP {_top_n_ext} CAO NHẤT VÀ TOP {_bot_n_ext} THẤP NHẤT):
+{dual_ext_sql}
+(CẢNH BÁO BẮT BUỘC:
+1. Người dùng yêu cầu lấy ĐỒNG THỜI cả {_top_n_ext} đối tượng CAO NHẤT VÀ {_bot_n_ext} đối tượng THẤP NHẤT (tổng cộng {_top_n_ext + _bot_n_ext} dòng)!
+2. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ dùng `ORDER BY ... DESC LIMIT {_top_n_ext}` làm mất nhóm thấp nhất!
+3. BẮT BUỘC dùng CTE 2 bước (`BaseStats` và `RankedStats` với `ROW_NUMBER() OVER (ORDER BY ... DESC) AS rn_high` và `ROW_NUMBER() OVER (ORDER BY ... ASC) AS rn_low`), sau đó lọc `WHERE rn_high <= {_top_n_ext} OR rn_low <= {_bot_n_ext}` và gắn nhãn `Nhóm Xếp Hạng`!)
 """
 
         # 0.005 Báo cáo kết quả kinh doanh / Lãi, Lỗ (P&L - Profit & Loss)
@@ -3188,8 +4001,200 @@ ORDER BY Month ASC;
 (CẢNH BÁO BẮT BUỘC: Lọc đúng nhân viên bằng pe.Salesperson = '{escaped_pers}'! BẮT BUỘC CHỈ GROUP BY Month, TUYỆT ĐỐI KHÔNG GROUP BY Salesperson! ORDER BY Month ASC để trả về đúng 12 tháng liên tục của nhân viên này và vẽ biểu đồ đường Line chart!)
 """
 
+        # 0.19 Sản phẩm / Nhân viên / Thị trường / Đội ngũ có sự thay đổi / biến động / dao động doanh thu lớn nhất qua các tháng (Monthly Volatility / Spread Analysis)
+        # Ví dụ: "Sản phẩm có sự thay đổi doanh thu lớn nhất trong các tháng đối với năm 2021"
+        is_monthly_spread_q = (
+            any(k in q_low for k in ["tháng", "month", "các tháng", "từng tháng", "giữa các tháng"])
+            and any(k in q_low for k in ["thay đổi", "biến động", "dao động", "chênh lệch", "biên độ", "volatility", "spread", "fluctuation"])
+            and any(k in q_low for k in ["lớn nhất", "nhiều nhất", "mạnh nhất", "cao nhất", "rộng nhất", "largest", "highest", "most"])
+            and not (any(k in q_low for k in ["như thế nào", "xu hướng", "diễn biến"]) and not any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "mạnh nhất", "biên độ"]))
+        )
+        if is_monthly_spread_q:
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_match.group(1) if yr_match else None
+            yr_filter = (f"\n    WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"\n    WHERE YEAR(s.SaleDate) = {yr_val}") if yr_val else ""
+            yr_label = f" NĂM {yr_val}" if yr_val else ""
+
+            is_boxes = any(k in q_low for k in ["hộp", "boxes", "thùng"]) and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền", "số tiền", "amount", "giá trị"])
+            metric_col = "s.Boxes" if is_boxes else "s.Amount"
+            metric_title = "Số Hộp" if is_boxes else "Doanh Thu"
+
+            is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "người bán", "salesperson", "rep"])
+            is_geo = any(k in q_low for k in ["quốc gia", "thị trường", "country", "geo"])
+            is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"]) and not is_person
+
+            limit_val = req_limit if req_limit and req_limit != 10 else None
+            limit_str = f"\nLIMIT {limit_val}" if limit_val else ""
+
+            if is_person:
+                ent_col = "pe.Salesperson AS Salesperson"
+                ent_name = "Salesperson"
+                ent_grp = "pe.SPID, pe.Salesperson"
+                joins = "JOIN people pe ON s.SPID = pe.SPID"
+                ent_title = "NHÂN VIÊN"
+            elif is_geo:
+                ent_col = "g.Geo AS Market"
+                ent_name = "Market"
+                ent_grp = "g.GeoID, g.Geo"
+                joins = "JOIN geo g ON s.GeoID = g.GeoID"
+                ent_title = "THỊ TRƯỜNG"
+            elif is_team:
+                ent_col = "pe.Team AS Team"
+                ent_name = "Team"
+                ent_grp = "pe.Team"
+                joins = "JOIN people pe ON s.SPID = pe.SPID"
+                yr_w = f" AND {yr_filter.replace('WHERE ', '').strip()}" if yr_filter else ""
+                yr_filter = f"\n    WHERE pe.Team != '' AND pe.Team IS NOT NULL{yr_w}"
+                ent_title = "ĐỘI NGŨ"
+            else:
+                ent_col = "pr.Product AS Product"
+                ent_name = "Product"
+                ent_grp = "pr.PID, pr.Product"
+                joins = "JOIN products pr ON s.PID = pr.PID"
+                ent_title = "SẢN PHẨM"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI ({ent_title} CÓ SỰ THAY ĐỔI / BIẾN ĐỘNG DOANH THU LỚN NHẤT QUA CÁC THÁNG{yr_label}):
+WITH MonthlySales AS (
+    SELECT 
+        {ent_col},
+        {date_expr} AS Month,
+        SUM({metric_col}) AS MonthlyMetric
+    FROM sales s
+    {joins}{yr_filter}
+    GROUP BY {ent_grp}, Month
+),
+MonthlySpread AS (
+    SELECT 
+        {ent_name},
+        MAX(MonthlyMetric) AS `Tháng Cao Nhất ($)`,
+        MIN(MonthlyMetric) AS `Tháng Thấp Nhất ($)`,
+        ROUND(MAX(MonthlyMetric) - MIN(MonthlyMetric), 2) AS `Biên Độ Thay Đổi ($)`,
+        ROUND(AVG(MonthlyMetric), 2) AS `Doanh Thu TB/Tháng ($)`,
+        ROUND(((MAX(MonthlyMetric) - MIN(MonthlyMetric)) / NULLIF(MIN(MonthlyMetric), 0)) * 100.0, 2) AS `Tỷ Lệ Biến Động (%)`
+    FROM MonthlySales
+    GROUP BY {ent_name}
+)
+SELECT 
+    {ent_name},
+    `Biên Độ Thay Đổi ($)`,
+    `Tháng Cao Nhất ($)`,
+    `Tháng Thấp Nhất ($)`,
+    `Doanh Thu TB/Tháng ($)`,
+    `Tỷ Lệ Biến Động (%)`
+FROM MonthlySpread
+ORDER BY `Biên Độ Thay Đổi ($)` DESC{limit_str};
+(CẢNH BÁO BẮT BUỘC:
+1. ĐÂY LÀ BÀI TOÁN TÍNH BIÊN ĐỘ THAY ĐỔI / BIẾN ĐỘNG DOANH THU QUA CÁC THÁNG, TUYỆT ĐỐI CẤM DÙNG SELECT ĐƠN GROUP BY Month, Product!
+2. BẮT BUỘC DÙNG CTE 2 BƯỚC:
+   - Bước 1 (MonthlySales): Tính tổng doanh thu theo từng tháng của từng đối tượng ({ent_name}).
+   - Bước 2 (MonthlySpread): Tính MAX(MonthlyMetric), MIN(MonthlyMetric), và (MAX - MIN) làm `Biên Độ Thay Đổi ($)`!
+3. SẮP XẾP ORDER BY `Biên Độ Thay Đổi ($)` DESC ĐỂ ĐỐI TƯỢNG CÓ SỰ THAY ĐỔI LỚN NHẤT NẰM Ở HÀNG ĐẦU TIÊN!)
+"""
+
+        # 0.19B Chuỗi tăng trưởng doanh số liên tục ít nhất N tháng (Consecutive Monthly Growth Streaks)
+        # Ví dụ: "Xác định các sản phẩm có doanh số tăng liên tục ít nhất 3 tháng liên tiếp trong năm 2021"
+        is_streak_q = (
+            any(k in q_low for k in ["tăng liên tiếp", "tăng liên tục", "tăng trưởng liên tiếp", "tăng trưởng liên tục", "chuỗi tăng", "chuỗi tháng tăng", "consecutive growth", "consecutive streak"])
+            or (any(k in q_low for k in ["liên tiếp", "liên tục"]) and any(k in q_low for k in ["tháng", "month", "chuỗi"]))
+        )
+        if is_streak_q:
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_match.group(1) if yr_match else None
+            yr_filter = (f"\n    WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"\n    WHERE YEAR(s.SaleDate) = {yr_val}") if yr_val else ""
+            yr_label = f" NĂM {yr_val}" if yr_val else ""
+
+            if is_sqlite:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SẢN PHẨM CÓ DOANH SỐ TĂNG LIÊN TỤC ÍT NHẤT 3 THÁNG LIÊN TIẾP{yr_label}):
+WITH MonthlySales AS (
+    SELECT 
+        pr.Product AS Product,
+        strftime('%Y-%m', s.SaleDate) AS Month,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID{yr_filter}
+    GROUP BY pr.PID, pr.Product, strftime('%Y-%m', s.SaleDate)
+),
+Streak3 AS (
+    SELECT 
+        m1.Product AS `Sản Phẩm`,
+        m1.Month || ' -> ' || m2.Month || ' -> ' || m3.Month AS `Các Tháng Tăng Liên Tục`,
+        m2.Month || ': +' || ROUND(((m2.TotalSales - m1.TotalSales) * 100.0 / m1.TotalSales), 2) || '%, ' ||
+        m3.Month || ': +' || ROUND(((m3.TotalSales - m2.TotalSales) * 100.0 / m2.TotalSales), 2) || '%' AS `Tỷ Lệ Tăng Trưởng Từng Tháng`,
+        ROUND(((m3.TotalSales - m1.TotalSales) * 100.0 / m1.TotalSales), 2) AS `Tổng Tăng Trưởng Chuỗi (%)`,
+        3 AS `Số Tháng Tăng Liên Tiếp`
+    FROM MonthlySales m1
+    JOIN MonthlySales m2 ON m1.Product = m2.Product 
+        AND m2.Month = strftime('%Y-%m', datetime(m1.Month || '-01', '+1 month'))
+    JOIN MonthlySales m3 ON m2.Product = m3.Product 
+        AND m3.Month = strftime('%Y-%m', datetime(m2.Month || '-01', '+1 month'))
+    WHERE m2.TotalSales > m1.TotalSales 
+      AND m3.TotalSales > m2.TotalSales
+)
+SELECT 
+    `Sản Phẩm`,
+    `Các Tháng Tăng Liên Tục`,
+    `Tỷ Lệ Tăng Trưởng Từng Tháng`,
+    `Tổng Tăng Trưởng Chuỗi (%)`,
+    `Số Tháng Tăng Liên Tiếp`
+FROM Streak3
+ORDER BY `Tổng Tăng Trưởng Chuỗi (%)` DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. ĐÂY LÀ BÀI TOÁN XÁC ĐỊNH CHUỖI TĂNG TRƯỞNG LIÊN TIẾP (STREAKS), TUYỆT ĐỐI CẤM DÙNG TRUY VẤN PHẲNG GROUP BY Month, Product!
+2. BẮT BUỘC DÙNG CTE:
+   - Bước 1 (MonthlySales): Tính tổng doanh số theo từng tháng của từng sản phẩm.
+   - Bước 2 (Streak3): Kết nối m1, m2, m3 với tháng liền kề và điều kiện tăng trưởng m2.TotalSales > m1.TotalSales VÀ m3.TotalSales > m2.TotalSales.
+   - Xuất đầy đủ: Sản Phẩm, Các Tháng Tăng Liên Tục, Tỷ Lệ Tăng Trưởng Từng Tháng, Tổng Tăng Trưởng Chuỗi (%), Số Tháng Tăng Liên Tiếp!)
+"""
+            else:
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SẢN PHẨM CÓ DOANH SỐ TĂNG LIÊN TỤC ÍT NHẤT 3 THÁNG LIÊN TIẾP{yr_label}):
+WITH MonthlySales AS (
+    SELECT 
+        pr.Product AS Product,
+        DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID{yr_filter}
+    GROUP BY pr.PID, pr.Product, Month
+),
+Streak3 AS (
+    SELECT 
+        m1.Product AS `Sản Phẩm`,
+        CONCAT(m1.Month, ' -> ', m2.Month, ' -> ', m3.Month) AS `Các Tháng Tăng Liên Tục`,
+        CONCAT(
+            m2.Month, ': +', ROUND(((m2.TotalSales - m1.TotalSales) / m1.TotalSales) * 100.0, 2), '%, ',
+            m3.Month, ': +', ROUND(((m3.TotalSales - m2.TotalSales) / m2.TotalSales) * 100.0, 2), '%'
+        ) AS `Tỷ Lệ Tăng Trưởng Từng Tháng`,
+        ROUND(((m3.TotalSales - m1.TotalSales) / m1.TotalSales) * 100.0, 2) AS `Tổng Tăng Trưởng Chuỗi (%)`,
+        3 AS `Số Tháng Tăng Liên Tiếp`
+    FROM MonthlySales m1
+    JOIN MonthlySales m2 ON m1.Product = m2.Product 
+        AND m2.Month = DATE_FORMAT(DATE_ADD(STR_TO_DATE(CONCAT(m1.Month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')
+    JOIN MonthlySales m3 ON m2.Product = m3.Product 
+        AND m3.Month = DATE_FORMAT(DATE_ADD(STR_TO_DATE(CONCAT(m2.Month, '-01'), '%Y-%m-%d'), INTERVAL 1 MONTH), '%Y-%m')
+    WHERE m2.TotalSales > m1.TotalSales 
+      AND m3.TotalSales > m2.TotalSales
+)
+SELECT 
+    `Sản Phẩm`,
+    `Các Tháng Tăng Liên Tục`,
+    `Tỷ Lệ Tăng Trưởng Từng Tháng`,
+    `Tổng Tăng Trưởng Chuỗi (%)`,
+    `Số Tháng Tăng Liên Tiếp`
+FROM Streak3
+ORDER BY `Tổng Tăng Trưởng Chuỗi (%)` DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. ĐÂY LÀ BÀI TOÁN XÁC ĐỊNH CHUỖI TĂNG TRƯỞNG LIÊN TIẾP (STREAKS), TUYỆT ĐỐI CẤM DÙNG TRUY VẤN PHẲNG GROUP BY Month, Product!
+2. BẮT BUỘC DÙNG CTE:
+   - Bước 1 (MonthlySales): Tính tổng doanh số theo từng tháng của từng sản phẩm.
+   - Bước 2 (Streak3): Kết nối m1, m2, m3 với DATE_ADD INTERVAL 1 MONTH và điều kiện tăng trưởng m2.TotalSales > m1.TotalSales VÀ m3.TotalSales > m2.TotalSales.
+   - Xuất đầy đủ: Sản Phẩm, Các Tháng Tăng Liên Tục, Tỷ Lệ Tăng Trưởng Từng Tháng, Tổng Tăng Trưởng Chuỗi (%), Số Tháng Tăng Liên Tiếp!)
+"""
+
         # 0.2 Doanh thu theo từng sản phẩm qua các tháng
-        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thay đổi", "xu hướng", "biến động", "thời gian"]):
+        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "loại kẹo", "socola"]) and any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian"]) and not any(k in q_low for k in ["lớn nhất", "nhiều nhất", "mạnh nhất", "thay đổi lớn nhất", "biến động lớn nhất", "liên tiếp", "liên tục", "streak", "chuỗi tăng", "ít nhất"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_label = ""
@@ -4971,8 +5976,12 @@ GROUP BY t.title
 ORDER BY SalarySpread DESC;
 (CẢNH BÁO: Lấy đầy đủ các chức danh để so sánh khoảng cách phân hóa lương, sắp xếp theo SalarySpread DESC!)
 """
-        # 1.0.4 Top N chức danh có tổng mức lương / quỹ lương cao nhất (Total Salary by Title)
-        elif any(k in q_low for k in ["tổng mức lương", "tổng lương", "tổng quỹ lương", "tổng thu nhập", "total salary", "total payroll", "quỹ lương"]) and any(k in q_low for k in ["chức danh", "title", "vị trí"]):
+        # 1.0.4 Top N chức danh có tổng mức lương / quỹ lương / tổng số tiền cao nhất (Total Salary by Title)
+        elif any(k in q_low for k in [
+            "tổng mức lương", "tổng lương", "tổng quỹ lương", "tổng thu nhập", "total salary", "total payroll", "quỹ lương",
+            "tổng số tiền", "tổng tiền", "số tiền cao nhất", "tiền cao nhất", "nhiều tiền nhất", "lương cao nhất", "mức lương cao nhất",
+            "tổng chi phí lương", "thu nhập cao nhất", "số tiền"
+        ]) and any(k in q_low for k in ["chức danh", "title", "vị trí", "chức vụ"]):
             return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TOP CHỨC DANH CÓ TỔNG MỨC LƯƠNG / QUỸ LƯƠNG CAO NHẤT):
 SELECT 
@@ -6634,7 +7643,7 @@ GROUP BY d.dept_name{order_hint};
 """
 
     # 8. So sánh mức lương trung bình của một phòng ban cụ thể so với các phòng ban khác (hoặc so sánh lương giữa các phòng)
-    elif any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung", "công ty"]):
+    elif is_employees_db and any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"]) and any(k in q_low for k in ["lương trung bình", "mức lương", "thu nhập", "lương", "salary"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung", "công ty"]):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH MỨC LƯƠNG TRUNG BÌNH GIỮA CÁC PHÒNG BAN):
 SELECT 
@@ -6649,7 +7658,7 @@ ORDER BY AvgSalary DESC;
 """
 
     # 8b. So sánh quy mô/số lượng nhân sự của một phòng ban cụ thể so với các phòng ban khác
-    elif any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"]) and any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "nhân viên"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung"]):
+    elif is_employees_db and any(k in q_low for k in ["so sánh", "so voi", "so với", "đối chiếu"]) and any(k in q_low for k in ["quy mô", "nhân sự", "số lượng", "headcount", "nhân viên"]) and any(k in q_low for k in ["phòng ban khác", "các phòng ban", "các phòng khác", "các phòng", "phòng khác", "toàn công ty", "mặt bằng chung"]):
         return """
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (SO SÁNH QUY MÔ NHÂN SỰ GIỮA CÁC PHÒNG BAN):
 SELECT 
@@ -7136,7 +8145,189 @@ ORDER BY MaleAvgSalary DESC;
 (CẢNH BÁO ĐẶC BIỆT: BẮT BUỘC dùng Pivot 2 cột MaleAvgSalary và FemaleAvgSalary trên 7 chức danh! TUYỆT ĐỐI KHÔNG dùng CONCAT(title, gender) thành 14 dòng xé lẻ!)
 """
 
+    # 11. XỬ LÝ PHỔ QUÁT CHO CÂU HỎI XU HƯỚNG / BIẾN ĐỘNG THEO THỜI GIAN (UNIVERSAL TIME-SERIES TREND HINT)
+    # Áp dụng cho mọi CSDL khi người dùng hỏi "Xu hướng ... theo thời gian", "biến động ... theo thời gian", v.v.
+    elif (
+        any(k in q_low for k in ["xu hướng", "trend", "biến động theo thời gian", "theo thời gian", "qua thời gian", "theo ngày", "theo tháng", "qua các tháng", "qua từng tháng", "theo năm", "qua các năm"])
+    ) and not any(k in q_low for k in ["so sánh cùng kỳ", "yoy", "mom", "so với năm trước", "so với tháng trước", "cùng kỳ năm trước"]):
+        tbl_matches = re.findall(r"-\s*Bảng\s+`?([a-zA-Z0-9_]+)`?:\s*([^\n]+)", schema_context, re.IGNORECASE)
+        time_tbl = None
+        time_col = None
+        metric_col = None
+
+        for t_name, c_str in tbl_matches:
+            c_list = [re.sub(r"[`'\"]", "", c.strip()) for c in c_str.split(",") if c.strip()]
+            date_matches = [c for c in c_list if any(k in c.lower() for k in ["date", "ngay", "time", "created_at"])]
+            met_matches = [c for c in c_list if any(k in c.lower() for k in ["tong_tien", "amount", "total", "gia_tri", "doanh_thu", "revenue", "gia_ban", "salary", "tien", "so_tien"])]
+            if date_matches and met_matches:
+                time_tbl = t_name
+                time_col = date_matches[0]
+                metric_col = met_matches[0]
+                break
+            elif date_matches and not time_tbl:
+                time_tbl = t_name
+                time_col = date_matches[0]
+
+        if time_tbl and time_col:
+            m_col_final = metric_col or "tong_tien"
+            m_expr_final = f"ROUND(SUM(`{m_col_final}`), 2) AS TongGiaTri" if metric_col else "COUNT(*) AS SoLuongGiaoDich"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XU HƯỚNG THEO THỜI GIAN):
+SELECT 
+    `{time_col}` AS Ngay,
+    {m_expr_final},
+    COUNT(*) AS SoLuongGiaoDich
+FROM `{time_tbl}`
+WHERE `{time_col}` IS NOT NULL
+GROUP BY `{time_col}`
+ORDER BY `{time_col}` ASC;
+(CẢNH BÁO ĐẶC BIỆT CHỐNG ẢO GIÁC:
+1. Người dùng chỉ hỏi xu hướng theo thời gian đơn thuần: BẮT BUỘC GROUP BY `{time_col}` và ORDER BY `{time_col}` ASC!
+2. TUYỆT ĐỐI KHÔNG tự bịa ra các cột so sánh 'Last Year Sales', 'Current Year Sales', 'Change In Sales', 'Percentage Change' hay YoY/MoM!
+3. TUYỆT ĐỐI KHÔNG gán cả Last Year và Current Year bằng cùng một giá trị làm mức chênh lệch bằng 0!
+4. BẮT BUỘC ORDER BY theo thời gian ASC và TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10 để chuỗi thời gian hiển thị liên tục!)
+"""
+        else:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (XU HƯỚNG BIẾN ĐỘNG THEO THỜI GIAN):
+- BẮT BUỘC: Nhóm theo cột thời gian (Ngày/Tháng) và tính tổng/trung bình chỉ số đo lường:
+  SELECT 
+      [Cột Ngày / Tháng] AS ThoiGian,
+      ROUND(SUM([Cột Tiền / Giá Trị]), 2) AS TongGiaTri,
+      COUNT(*) AS SoGiaoDich
+  FROM [Bảng Dữ Liệu]
+  WHERE [Cột Ngày / Tháng] IS NOT NULL
+  GROUP BY ThoiGian
+  ORDER BY ThoiGian ASC;
+(CẢNH BÁO ĐẶC BIỆT CHỐNG ẢO GIÁC:
+1. TUYỆT ĐỐI KHÔNG tự bịa ra các cột so sánh 'Last Year Sales', 'Current Year Sales', 'Change In Sales', 'Percentage Change'!
+2. TUYỆT ĐỐI KHÔNG gán Last Year và Current Year bằng cùng một giá trị làm mức chênh lệch bằng $0 và 0.00%!
+3. BẮT BUỘC ORDER BY theo thời gian ASC và TUYỆT ĐỐI KHÔNG DÙNG LIMIT 10!)
+"""
+
+    # 12. XỬ LÝ PHỔ QUÁT CHO CÂU HỎI TỶ LỆ PHẦN TRĂM ĐÓNG GÓP / TỶ TRỌNG / CƠ CẤU (UNIVERSAL PERCENTAGE CONTRIBUTION HINT)
+    elif (
+        any(k in q_low for k in ["tỷ lệ phần trăm đóng góp", "tỷ lệ đóng góp", "phần trăm đóng góp", "tỷ trọng", "tỉ trọng", "chiếm bao nhiêu phần trăm", "cơ cấu đóng góp"])
+        or (any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "tỷ trọng", "tỉ trọng"]) and any(k in q_low for k in ["đóng góp", "vào tổng", "trong tổng", "từng nhóm", "mỗi nhóm", "từng sản phẩm", "mỗi sản phẩm"]))
+    ):
+        tbl_matches = re.findall(r"-\s*Bảng\s+`?([a-zA-Z0-9_]+)`?:\s*([^\n]+)", schema_context, re.IGNORECASE)
+        target_tbl = None
+        grp_col = None
+        metric_col = None
+
+        sorted_tbl_list = sorted(
+            tbl_matches,
+            key=lambda x: 0 if any(k in x[0].lower() for k in ["san_pham", "product", "item"]) else (
+                1 if any(k in x[0].lower() for k in ["don_hang", "order", "sales", "trans"]) else 2
+            )
+        )
+        for t_name, c_str in sorted_tbl_list:
+            c_list = [re.sub(r"[`'\"]", "", c.strip()) for c in c_str.split(",") if c.strip()]
+            g_matches = [c for c in c_list if any(k in c.lower() for k in ["danh_muc", "category", "loai", "nhom", "group", "ten", "name", "title"])]
+            m_matches = [c for c in c_list if any(k in c.lower() for k in ["gia_von", "gia_ban", "tong_tien", "amount", "total", "gia_tri", "doanh_thu", "revenue", "salary", "price"])]
+            if g_matches and m_matches:
+                target_tbl = t_name
+                grp_col = g_matches[0]
+                metric_col = m_matches[0]
+                break
+
+        if target_tbl and grp_col and metric_col:
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHẦN TRĂM ĐÓNG GÓP):
+WITH GroupStats AS (
+    SELECT 
+        `{grp_col}` AS Nhom,
+        ROUND(SUM(`{metric_col}`), 2) AS TongGiaTri,
+        COUNT(*) AS SoLuong
+    FROM `{target_tbl}`
+    GROUP BY `{grp_col}`
+)
+SELECT 
+    Nhom,
+    TongGiaTri,
+    ROUND(TongGiaTri * 100.0 / (SELECT SUM(TongGiaTri) FROM GroupStats), 2) AS TyLePhanTram,
+    SoLuong
+FROM GroupStats
+ORDER BY TongGiaTri DESC;
+(CẢNH BÁO BẮT BUỘC:
+1. MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CÓ CỘT TỶ LỆ PHẦN TRĂM: ROUND(TongGiaTri * 100.0 / (SELECT SUM(TongGiaTri) FROM GroupStats), 2) AS TyLePhanTram!
+2. TUYỆT ĐỐI KHÔNG ĐƯỢC THIẾU CỘT TyLePhanTram vì câu hỏi yêu cầu rõ tỷ lệ phần trăm đóng góp!)
+"""
+        else:
+            return """
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỶ LỆ PHẦN TRĂM ĐÓNG GÓP):
+- BẮT BUỘC dùng CTE 2 bước hoặc subquery để tính tổng toàn cục và tỷ lệ phần trăm từng nhóm:
+WITH GroupStats AS (
+    SELECT 
+        [Cột Phân Nhóm] AS Nhom,
+        ROUND(SUM([Cột Chỉ Số Đo]), 2) AS TongGiaTri,
+        COUNT(*) AS SoLuong
+    FROM [Bảng Dữ Liệu]
+    GROUP BY [Cột Phân Nhóm]
+)
+SELECT 
+    Nhom,
+    TongGiaTri,
+    ROUND(TongGiaTri * 100.0 / (SELECT SUM(TongGiaTri) FROM GroupStats), 2) AS TyLePhanTram,
+    SoLuong
+FROM GroupStats
+ORDER BY TongGiaTri DESC;
+(CẢNH BÁO BẮT BUỘC: Mệnh đề SELECT BẮT BUỘC phải có cột TyLePhanTram tính tỷ lệ % đóng góp!)
+"""
+
     return ""
+
+
+def extract_tables_from_schema(schema_context: str) -> set[str]:
+    """Trích xuất tập hợp tất cả tên bảng hợp lệ từ schema_context."""
+    valid_tables = set()
+    if not schema_context:
+        return valid_tables
+
+    # 1. Định dạng Veraxus: - Bảng `table_name`: col1, col2...
+    for m in re.finditer(r"(?:Bảng|Table)\s*[`'\"]?([a-zA-Z0-9_]+)[`'\"]?", schema_context, re.IGNORECASE):
+        valid_tables.add(m.group(1).lower())
+    # 2. Định dạng CREATE TABLE [IF NOT EXISTS] `table_name`
+    for m in re.finditer(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`'\"]?([a-zA-Z0-9_]+)[`'\"]?", schema_context, re.IGNORECASE):
+        valid_tables.add(m.group(1).lower())
+    # 3. Dấu backtick bất kỳ trước dấu hai chấm: `table_name`:
+    for m in re.finditer(r"[`'\"]([a-zA-Z0-9_]+)[`'\"]\s*:", schema_context):
+        valid_tables.add(m.group(1).lower())
+    return valid_tables
+
+
+def validate_hint_against_schema(hint: str, schema_context: str) -> str:
+    """Kiểm tra và ngăn chặn triệt để rò rỉ bảng không tồn tại từ hint mẫu sang CSDL khác."""
+    if not hint or not schema_context:
+        return hint or ""
+
+    valid_tables = extract_tables_from_schema(schema_context)
+    if not valid_tables:
+        return hint
+
+    # Trích xuất các tên CTE được định nghĩa trong WITH ... AS (lower-case để khớp chuẩn xác)
+    cte_names = {c.lower() for c in re.findall(r"\b([a-zA-Z0-9_]+)\s+AS\s*\(", hint, re.IGNORECASE)}
+
+    # Tìm các bảng sau FROM và JOIN trong hint
+    referenced_tables = set()
+    for m in re.finditer(r"\b(?:FROM|JOIN)\s+[`'\"]?([a-zA-Z0-9_]+)[`'\"]?", hint, re.IGNORECASE):
+        tbl = m.group(1).lower()
+        if tbl not in cte_names and tbl not in ("select", "where", "group", "order", "limit", "with", "as", "on", "using", "left", "right", "inner", "outer"):
+            referenced_tables.add(tbl)
+
+    # Nếu hint yêu cầu bất kỳ bảng nào mà không tồn tại trong CSDL hiện tại:
+    for req_tbl in referenced_tables:
+        if req_tbl not in valid_tables:
+            # Hint này thuộc về CSDL khác! Hủy bỏ ngay để không làm hỏng câu truy vấn.
+            return ""
+
+    return hint
+
+
+def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = "") -> str:
+    """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) và lọc triệt để bảng không thuộc CSDL hiện tại."""
+    raw_hint = _compute_targeted_hint_raw(user_query, schema_context, dialect)
+    return validate_hint_against_schema(raw_hint, schema_context)
 
 
 def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: str = "vi") -> str:
@@ -7163,9 +8354,10 @@ BUSINESS QUERY DECOMPOSITION RULES (MANDATORY COMPLIANCE):
 3. MULTI-STEP CTE WORKFLOW: If the problem requires 2 or more logical steps (e.g., finding the first department/value then comparing with the average, ranking/percentiles), USE 'WITH ... AS' (CTE) syntax to decompose each calculation step cleanly, transparently, and accurately.
 
 STRICT RULES:
-1. PURE SCHEMA GROUNDING:
-   - ONLY use tables, views, and columns that appear in the SCHEMA above.
-   - NEVER invent or assume table/column names.
+1. PURE SCHEMA GROUNDING & DYNAMIC ADAPTATION:
+   - ONLY use tables, views, and columns that appear in the SCHEMA above. NEVER invent or assume table/column names from other domains (e.g. departments, salaries, sales, film).
+   - If the user asks about an entity/metric not in the schema (e.g. asking for 'salary' in a sales/product database):
+     SMARTLY ADAPT: Query the closest numerical business metric (e.g. unit price, revenue, total amount, quantity) across the corresponding entity groups (category, customer type, region, product group) so that the generated SQL executes 100% cleanly on the actual schema!
 {db_specific_rules}
 2. HISTORICAL DATES:
    - Anchor relative dates to `(SELECT MAX(date_col) FROM table_name)`.
@@ -7197,9 +8389,11 @@ QUY TẮC PHÂN RÃ TRUY VẤN NGHIỆP VỤ (BẮT BUỘC TUÂN THỦ):
 3. NẾU BÀI TOÁN CẦN TỪ 2 BƯỚC LOGIC TRỞ LÊN (ví dụ: tìm giá trị đầu tiên/phòng ban đầu tiên rồi so sánh với trung bình, phân vị/cohorts): HÃY DÙNG CÚ PHÁP 'WITH ... AS' (CTE) để chia nhỏ từng bước tính toán một cách tường minh, rõ ràng và chuẩn xác.
 
 QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
-1. TUÂN THỦ SCHEMA TUYỆT ĐỐI (PURE SCHEMA GROUNDING):
-   - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA ở trên.
-   - Tuyệt đối KHÔNG tự ý bịa đặt hoặc sử dụng bất kỳ bảng/cột nào không có trong Schema.
+1. TUÂN THỦ SCHEMA TUYỆT ĐỐI & THÍCH ỨNG NGHIỆP VỤ (PURE SCHEMA GROUNDING & ADAPTATION):
+   - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ở trên.
+   - Tuyệt đối KHÔNG tự ý bịa đặt hoặc gọi các bảng từ CSDL khác (như departments, salaries, employees, sales, film...).
+   - NẾU CÂU HỎI ĐỀ CẬP ĐẾN CHỈ SỐ KHÔNG CÓ TRỰC TIẾP TRONG CSDL (ví dụ hỏi 'mức lương' trong CSDL bán hàng/sản phẩm):
+     HÃY THÍCH ỨNG NGHIỆP VỤ THÔNG MINH (SMART ADAPTATION): Phân tích chỉ số tài chính/giá trị tương đương gần nhất của CSDL này (ví dụ: giá bán lẻ `gia_ban_le`, doanh thu `tong_tien`/`thanh_tien`, đơn giá, số lượng) theo nhóm thực thể tương ứng (`danh_muc`, `loai_khach`, nhóm sản phẩm) để luôn trả về câu lệnh SQL hợp lệ, có dữ liệu thực tế và giải quyết trọn vẹn bài toán so sánh/chênh lệch cho người dùng!
    - Với câu hỏi đơn giản: dùng SELECT đơn trực tiếp. Với bài toán đa bước: dùng CTE (`WITH ... AS`) theo Quy tắc Phân rã Nghiệp vụ ở trên!
 {db_specific_rules}
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
@@ -7225,12 +8419,16 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
     - VỚI CÂU HỎI THEO THỜI GIAN / THEO THÁNG / THEO QUÝ / XU HƯỚNG:
          + TUYỆT ĐỐI CẤM DÙNG `LIMIT 10` (Bởi vì 1 năm có đủ 12 tháng, nếu dùng LIMIT 10 sẽ bị cắt mất tháng 6 hoặc tháng 12!).
          + BẮT BUỘC `ORDER BY ... ASC` để biểu đồ đường vẽ liền mạch, chuẩn xác theo đúng trình tự thời gian!
+         + TUYỆT ĐỐI KHÔNG tự bịa ra các cột so sánh cùng kỳ (như 'Last Year Sales', 'Current Year Sales', 'Change In Sales', 'Percentage Change') trừ khi câu hỏi yêu cầu rõ ràng so sánh cùng kỳ năm trước (YoY/MoM)! Khi hỏi xu hướng đơn thuần, CHỈ SELECT [Cột Ngày/Tháng], SUM([Chỉ số]), COUNT(*)!
+         + TUYỆT ĐỐI KHÔNG gán Last Year và Current Year bằng cùng một biểu thức làm chênh lệch bằng $0 và 0.00%!
       + Khi người dùng hỏi dạng danh sách số nhiều thực thể đối tượng ('Danh sách...', 'Top N...', 'Những nhân viên/sản phẩm...', 'Các khách hàng/quốc gia...'): BẮT BUỘC tuân thủ đúng số N trong câu hỏi (Ví dụ: 'Top 10' -> BẮT BUỘC `LIMIT 10`, 'Top 5' -> `LIMIT 5`). Nếu không ghi rõ số N, mặc định dùng `LIMIT 10`. TUYỆT ĐỐI KHÔNG dùng `LIMIT 1` hoặc tự ý giảm số lượng xuống 5 khi người dùng yêu cầu Top 10!
       + TUYỆT ĐỐI KHÔNG áp dụng `LIMIT 10` cho câu hỏi thời gian, chuỗi xu hướng qua các tháng/năm ('qua các tháng', 'theo tháng', 'biến động theo thời gian') vì 1 năm phải có đủ 12 tháng!
      + Luôn ưu tiên `JOIN` theo các cột khóa chính/khóa ngoại để câu truy vấn chạy siêu tốc trong chớp mắt (< 0.1s).
      + Với các bảng chứa lịch sử nhiều bản ghi cho 1 thực thể (ví dụ: bảng lương `salaries` có nhiều dòng cho cùng một nhân viên): BẮT BUỘC dùng `MAX(salary)` và `GROUP BY` theo nhân viên (hoặc lọc ngày gần nhất `to_date = '9999-01-01'`) để KHÔNG bị lặp lại 1 người nhiều lần và giúp MySQL chạy siêu tốc!
-      + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP (ví dụ: 'Tỷ lệ doanh thu của X so với tất cả sản phẩm'):
-        Nên trả về bảng so sánh gồm tên đối tượng, doanh thu và tỷ lệ phần trăm (ví dụ: phân nhóm Đối tượng X vs 'Các sản phẩm khác') để có thể vẽ biểu đồ tròn Donut trực quan sinh động cho người dùng.
+      + VỚI CÂU HỎI VỀ TỶ LỆ / PHẦN TRĂM ĐÓNG GÓP / TỶ TRỌNG (ví dụ: 'Tỷ lệ phần trăm đóng góp của từng nhóm vào tổng...', 'Tỷ trọng đóng góp...'):
+        MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CÓ CỘT TỶ LỆ PHẦN TRĂM: `ROUND(TongGiaTri * 100.0 / (SELECT SUM(TongGiaTri) FROM ...), 2) AS TyLePhanTram` (hoặc Percentage)!
+        TUYỆT ĐỐI CẤM chỉ SELECT tên nhóm và tổng tiền mà bỏ quên cột tỷ lệ phần trăm đóng góp!
+        Bảng kết quả phải gồm tên đối tượng, tổng giá trị và tỷ lệ phần trăm đóng góp để hiển thị trực quan và vẽ biểu đồ tròn Donut cho người dùng.
       + CẢNH BÁO BẮT BUỘC VỀ CHỈ SỐ ĐO LƯỜNG TRONG MỆNH ĐỀ SELECT (CHỐNG LỖI MẤT BIỂU ĐỒ):
         Khi câu hỏi có điều kiện lọc theo chỉ số (ví dụ: 'vượt mức X', 'trên X', 'dưới X', 'đạt từ X trở lên', 'có hơn X...') hoặc dùng mệnh đề HAVING:
         MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CHỨA CẢ CỘT ĐỊNH DANH (Tên nhân viên, Tên sản phẩm, Quốc gia, Đội ngũ...) VÀ CỘT CHỈ SỐ ĐO LƯỜNG ĐƯỢC TÍNH TOÁN (`SUM(s.Amount) AS TotalSales`, `SUM(s.Boxes) AS TotalBoxesSold`, `COUNT(...)`)!
@@ -7526,6 +8724,13 @@ KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & QUẢN TRỊ CFO (BẮT BUỘC TUÂN THỦ
        -> Hành động: Theo dõi định kỳ, rà soát nội bộ trong kỳ đánh giá tiếp theo (Trung hạn).
      * NẾU chênh lệch > 5.0%: Đánh giá là "Biến động nghiêm trọng / Phân hóa".
        -> Kích hoạt hành động [Cấp bách]: Điều tra diện rộng, đối thoại nhân sự, rà soát chính sách.
+9. QUY TẮC PHÂN ĐỊNH MIỀN KINH DOANH THƯƠNG MẠI VS NHÂN SỰ & CHỐNG ẢO GIÁC TRUNG VỊ:
+   - Khi bảng dữ liệu hoặc câu hỏi liên quan đến SẢN PHẨM / DOANH SỐ / HỘP / BIÊN ĐỘ THAY ĐỔI / THÁNG CAO NHẤT / THÁNG THẤP NHẤT / CHUỖI TĂNG TRƯỞNG (`Product`, `Category`, `Amount`, `Sales`, `Boxes`, `Biên độ thay đổi ($)`, `Tháng Cao Nhất ($)`...):
+     * Thực thể phân tích BẮT BUỘC LÀ SẢN PHẨM / MÃ HÀNG THƯƠNG MẠI (SKU). Đơn vị tiền tệ là USD ($).
+     * TUYỆT ĐỐI CẤM suy diễn sang Nhân sự, Chính sách giữ chân nhân tài, Môi trường làm việc hấp dẫn, hay Thâm niên cống hiến (năm)!
+     * Mức trung vị (`Median`, ví dụ $122,704.50) là Mức trung vị của Biên độ dao động doanh thu ($), TUYỆT ĐỐI CẤM đọc thành "122,704.5 năm thâm niên"!
+     * Nếu là bài toán Biên độ dao động: Nhận định về tính phụ thuộc mùa vụ và độ ổn định dòng tiền thương mại của SKU.
+     * Nếu là bài toán Chuỗi tăng trưởng liên tiếp (Streaks): Nhận định về động lượng tăng trưởng thực tế, chuỗi các tháng bứt phá liên tục.
 
 YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
 
@@ -7626,8 +8831,11 @@ QUY TẮC BẮT BUỘC KHI ĐỀ XUẤT CÂU HỎI TIẾP NỐI:
    - Dạng Phân bổ: "Doanh thu theo từng quốc gia của sản phẩm Drinking Coco"
    - TUYỆT ĐỐI KHÔNG đề xuất các câu hỏi cấu trúc kỳ lạ, mơ hồ, phi thực tế như 'ở đầu tháng và cuối tháng', 'doanh thu của mỗi sản phẩm tại...'.
    - CHỈ đề xuất các quốc gia có trong CSDL: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand' (TUYỆT ĐỐI KHÔNG bịa ra 'Việt Nam' hay 'Japan').
-5. CHÍNH TẢ & NGÔN NGỮ THUẦN VIỆT:
-   - Viết 100% tiếng Việt chuẩn xác, TUYỆT ĐỐI KHÔNG dùng ký tự lạ hay chữ tiếng Hàn/Trung (như '각'). Dùng từ 'từng khu vực' hoặc 'các khu vực'.
+5. CHÍNH TẢ & NGÔN NGỮ THUẦN VIỆT (BẮT BUỘC 100% CÓ DẤU THANH):
+   - BẮT BUỘC viết 100% tiếng Việt có đầy đủ dấu thanh (sắc, huyền, hỏi, ngã, nặng).
+   - TUYỆT ĐỐI CẤM viết tiếng Việt không dấu (như 'Gia Tri Trung Binh', 'Nhom', 'Do Chenh Lech', 'Gia Tri Cao Nhat').
+   - BẮT BUỘC viết chuẩn mực tiếng Việt có dấu: 'Giá Trị Trung Bình', 'Nhóm', 'Độ Chênh Lệch', 'Giá Trị Cao Nhất', 'Số Lượng', 'Tổng Giá Trị'.
+   - TUYỆT ĐỐI KHÔNG dùng ký tự lạ hay chữ tiếng Hàn/Trung (như '각'). Dùng từ 'từng khu vực' hoặc 'các khu vực'.
    - Luôn tách từ rõ ràng, có dấu cách giữa tiếng Việt và tiếng Anh (ví dụ: viết 'danh mục Bars', TUYỆT ĐỐI KHÔNG viết 'danh mụcBars').
 
 Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:

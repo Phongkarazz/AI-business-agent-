@@ -501,6 +501,37 @@ HAVING AVG(s.salary) > (SELECT AVG(salary) FROM salaries WHERE to_date = '9999-0
 ORDER BY TitleAvgSalary DESC;"""
     },
     {
+        "id": "emp_top_titles_by_total_salary",
+        "domain": "employees",
+        "category": "ranking",
+        "tags": ["top 10", "chức danh", "tổng số tiền", "tổng lương", "tổng mức lương", "tổng quỹ lương", "quỹ lương", "title", "total salary", "cao nhất", "nhiều tiền nhất"],
+        "question": "Top 10 chức danh có tổng số tiền cao nhất",
+        "question_en": "Top 10 job titles with highest total salary amount",
+        "intent_explanation": "Tính tổng mức lương/quỹ lương SUM(s.salary) cho từng chức danh hiện tại (s.to_date = '9999-01-01' và t.to_date = '9999-01-01'), kèm theo mức lương trung bình và số lượng nhân viên, sắp xếp giảm dần theo tổng tiền.",
+        "sql_mysql": """SELECT 
+    t.title AS Title, 
+    SUM(s.salary) AS TotalSalary,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    COUNT(DISTINCT t.emp_no) AS EmployeeCount
+FROM salaries s
+JOIN titles t ON s.emp_no = t.emp_no
+WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY TotalSalary DESC
+LIMIT 10;""",
+        "sql_sqlite": """SELECT 
+    t.title AS Title, 
+    SUM(s.salary) AS TotalSalary,
+    ROUND(AVG(s.salary), 2) AS AvgSalary,
+    COUNT(DISTINCT t.emp_no) AS EmployeeCount
+FROM salaries s
+JOIN titles t ON s.emp_no = t.emp_no
+WHERE s.to_date = '9999-01-01' AND t.to_date = '9999-01-01'
+GROUP BY t.title
+ORDER BY TotalSalary DESC
+LIMIT 10;"""
+    },
+    {
         "id": "emp_title_progression",
         "domain": "employees",
         "category": "progression",
@@ -1514,6 +1545,158 @@ GROUP BY Team
 ORDER BY SalespersonCount DESC;"""
     },
     {
+        "id": "choco_product_monthly_spread_2021",
+        "domain": "awesome_chocolates",
+        "category": "monthly_spread_volatility",
+        "tags": [
+            "thay đổi doanh thu lớn nhất", "biến động doanh thu lớn nhất", "dao động mạnh nhất",
+            "biên độ thay đổi", "chênh lệch tháng lớn nhất", "monthly spread", "revenue volatility",
+            "sản phẩm", "sản phẩm có sự thay đổi doanh thu lớn nhất"
+        ],
+        "question": "Sản phẩm có sự thay đổi doanh thu lớn nhất trong các tháng đối với năm 2021",
+        "question_en": "Product with the largest monthly revenue change/spread in 2021",
+        "intent_explanation": "Tính doanh thu từng tháng cho mỗi sản phẩm bằng CTE MonthlySales, sau đó dùng MAX(MonthlyRevenue) - MIN(MonthlyRevenue) ở CTE MonthlySpread để xác định biên độ thay đổi doanh thu qua các tháng trong năm 2021, sắp xếp theo biên độ thay đổi giảm dần.",
+        "sql_mysql": """WITH MonthlySales AS (
+    SELECT 
+        pr.Product AS Product,
+        DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month,
+        SUM(s.Amount) AS MonthlyRevenue
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    WHERE YEAR(s.SaleDate) = 2021
+    GROUP BY pr.PID, pr.Product, DATE_FORMAT(s.SaleDate, '%Y-%m')
+),
+MonthlySpread AS (
+    SELECT 
+        Product,
+        MAX(MonthlyRevenue) AS `Tháng Cao Nhất ($)`,
+        MIN(MonthlyRevenue) AS `Tháng Thấp Nhất ($)`,
+        ROUND(MAX(MonthlyRevenue) - MIN(MonthlyRevenue), 2) AS `Biên Độ Thay Đổi ($)`,
+        ROUND(AVG(MonthlyRevenue), 2) AS `Doanh Thu TB/Tháng ($)`,
+        ROUND(((MAX(MonthlyRevenue) - MIN(MonthlyRevenue)) / NULLIF(MIN(MonthlyRevenue), 0)) * 100.0, 2) AS `Tỷ Lệ Biến Động (%)`
+    FROM MonthlySales
+    GROUP BY Product
+)
+SELECT 
+    Product,
+    `Biên Độ Thay Đổi ($)`,
+    `Tháng Cao Nhất ($)`,
+    `Tháng Thấp Nhất ($)`,
+    `Doanh Thu TB/Tháng ($)`,
+    `Tỷ Lệ Biến Động (%)`
+FROM MonthlySpread
+ORDER BY `Biên Độ Thay Đổi ($)` DESC;""",
+        "sql_sqlite": """WITH MonthlySales AS (
+    SELECT 
+        pr.Product AS Product,
+        strftime('%Y-%m', s.SaleDate) AS Month,
+        SUM(s.Amount) AS MonthlyRevenue
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    WHERE strftime('%Y', s.SaleDate) = '2021'
+    GROUP BY pr.PID, pr.Product, strftime('%Y-%m', s.SaleDate)
+),
+MonthlySpread AS (
+    SELECT 
+        Product,
+        MAX(MonthlyRevenue) AS `Tháng Cao Nhất ($)`,
+        MIN(MonthlyRevenue) AS `Tháng Thấp Nhất ($)`,
+        ROUND(MAX(MonthlyRevenue) - MIN(MonthlyRevenue), 2) AS `Biên Độ Thay Đổi ($)`,
+        ROUND(AVG(MonthlyRevenue), 2) AS `Doanh Thu TB/Tháng ($)`,
+        ROUND(((MAX(MonthlyRevenue) - MIN(MonthlyRevenue)) / NULLIF(MIN(MonthlyRevenue), 0)) * 100.0, 2) AS `Tỷ Lệ Biến Động (%)`
+    FROM MonthlySales
+    GROUP BY Product
+)
+SELECT 
+    Product,
+    `Biên Độ Thay Đổi ($)`,
+    `Tháng Cao Nhất ($)`,
+    `Tháng Thấp Nhất ($)`,
+    `Doanh Thu TB/Tháng ($)`,
+    `Tỷ Lệ Biến Động (%)`
+FROM MonthlySpread
+ORDER BY `Biên Độ Thay Đổi ($)` DESC;"""
+    },
+    {
+        "id": "choco_product_top5_bottom5_profit_2021",
+        "domain": "awesome_chocolates",
+        "category": "window_function",
+        "tags": ["top 5 cao nhất và 5 thấp nhất", "lợi nhuận cao nhất và thấp nhất", "top and bottom", "cực trị", "lợi nhuận", "profit", "2021"],
+        "question": "Top 5 sản phẩm có lợi nhuận cao nhất và 5 sản phẩm có lợi nhuận thấp nhất trong năm 2021",
+        "question_en": "Top 5 highest profit products and 5 lowest profit products in 2021",
+        "intent_explanation": "Truy vấn kép 2 đầu cực trị (Top 5 Cao Nhất VÀ Bottom 5 Thấp Nhất): dùng CTE BaseStats tính Lợi Nhuận ($) = SUM(s.Amount) - SUM(s.Boxes * pr.Cost_per_box), sau đó dùng ROW_NUMBER() OVER (ORDER BY `Lợi Nhuận ($)` DESC) AS rn_desc và ROW_NUMBER() OVER (ORDER BY `Lợi Nhuận ($)` ASC) AS rn_asc để lọc WHERE rn_desc <= 5 OR rn_asc <= 5 (trả về đủ 10 sản phẩm).",
+        "sql_mysql": """WITH BaseStats AS (
+    SELECT 
+        pr.Product AS `Sản Phẩm`,
+        pr.Category AS `Danh Mục`,
+        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+        ROUND(SUM(s.Amount) - SUM(s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+        ROUND(((SUM(s.Amount) - SUM(s.Boxes * pr.Cost_per_box)) * 100.0) / NULLIF(SUM(s.Amount), 0), 2) AS `Tỷ Suất Lợi Nhuận (%)`,
+        SUM(s.Boxes) AS `Tổng Số Hộp`,
+        COUNT(*) AS `Số Đơn Hàng`
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    WHERE YEAR(s.SaleDate) = 2021
+    GROUP BY pr.PID, pr.Product, pr.Category
+),
+RankedStats AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY `Lợi Nhuận ($)` DESC, `Tổng Doanh Thu ($)` DESC) AS rn_desc,
+        ROW_NUMBER() OVER (ORDER BY `Lợi Nhuận ($)` ASC, `Tổng Doanh Thu ($)` ASC) AS rn_asc
+    FROM BaseStats
+)
+SELECT 
+    `Sản Phẩm`,
+    CASE WHEN rn_desc <= 5 THEN 'Top 5 Cao Nhất' ELSE 'Top 5 Thấp Nhất' END AS `Nhóm Xếp Hạng`,
+    `Danh Mục`,
+    `Lợi Nhuận ($)`,
+    `Tỷ Suất Lợi Nhuận (%)`,
+    `Tổng Doanh Thu ($)`,
+    `Tổng Chi Phí ($)`,
+    `Tổng Số Hộp`,
+    `Số Đơn Hàng`
+FROM RankedStats
+WHERE rn_desc <= 5 OR rn_asc <= 5
+ORDER BY `Lợi Nhuận ($)` DESC;""",
+        "sql_sqlite": """WITH BaseStats AS (
+    SELECT 
+        pr.Product AS `Sản Phẩm`,
+        pr.Category AS `Danh Mục`,
+        SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+        ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+        ROUND(SUM(s.Amount) - SUM(s.Boxes * pr.Cost_per_box), 2) AS `Lợi Nhuận ($)`,
+        ROUND(((SUM(s.Amount) - SUM(s.Boxes * pr.Cost_per_box)) * 100.0) / NULLIF(SUM(s.Amount), 0), 2) AS `Tỷ Suất Lợi Nhuận (%)`,
+        SUM(s.Boxes) AS `Tổng Số Hộp`,
+        COUNT(*) AS `Số Đơn Hàng`
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    WHERE strftime('%Y', s.SaleDate) = '2021'
+    GROUP BY pr.PID, pr.Product, pr.Category
+),
+RankedStats AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (ORDER BY `Lợi Nhuận ($)` DESC, `Tổng Doanh Thu ($)` DESC) AS rn_desc,
+        ROW_NUMBER() OVER (ORDER BY `Lợi Nhuận ($)` ASC, `Tổng Doanh Thu ($)` ASC) AS rn_asc
+    FROM BaseStats
+)
+SELECT 
+    `Sản Phẩm`,
+    CASE WHEN rn_desc <= 5 THEN 'Top 5 Cao Nhất' ELSE 'Top 5 Thấp Nhất' END AS `Nhóm Xếp Hạng`,
+    `Danh Mục`,
+    `Lợi Nhuận ($)`,
+    `Tỷ Suất Lợi Nhuận (%)`,
+    `Tổng Doanh Thu ($)`,
+    `Tổng Chi Phí ($)`,
+    `Tổng Số Hộp`,
+    `Số Đơn Hàng`
+FROM RankedStats
+WHERE rn_desc <= 5 OR rn_asc <= 5
+ORDER BY `Lợi Nhuận ($)` DESC;"""
+    },
+    {
         "id": "choco_top_rep_per_team",
         "domain": "awesome_chocolates",
         "category": "window_function",
@@ -2520,6 +2703,175 @@ WHERE pe.Team = 'Yummies' AND strftime('%Y', s.SaleDate) = '2021'
 GROUP BY Month
 ORDER BY Month ASC;"""
     },
+    {
+        "id": "choco_country_monthly_revenue_trend_2021",
+        "domain": "awesome_chocolates",
+        "category": "monthly_trend",
+        "tags": [
+            "quốc gia", "country", "thị trường", "doanh thu theo từng quốc gia",
+            "qua các tháng", "năm 2021", "thay đổi như thế nào", "xu hướng theo tháng", "geo"
+        ],
+        "question": "Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng năm 2021?",
+        "question_en": "How did revenue change by country across months in 2021?",
+        "intent_explanation": "Truy vấn xu hướng doanh thu theo từng tháng và từng quốc gia trong năm 2021. BẮT BUỘC dùng SELECT trực tiếp JOIN sales s với geo g ON s.GeoID = g.GeoID, lọc YEAR(s.SaleDate) = 2021, nhóm GROUP BY Month, Country và ORDER BY Month ASC, TotalSales DESC để vẽ biểu đồ đa đường (Multi-line chart) theo dõi xu hướng.",
+        "sql_mysql": """SELECT 
+    DATE_FORMAT(s.SaleDate, '%Y-%m') AS Month,
+    g.Geo AS Country,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+WHERE YEAR(s.SaleDate) = 2021
+GROUP BY Month, Country
+ORDER BY Month ASC, TotalSales DESC;""",
+        "sql_sqlite": """SELECT 
+    strftime('%Y-%m', s.SaleDate) AS Month,
+    g.Geo AS Country,
+    SUM(s.Amount) AS TotalSales
+FROM sales s
+JOIN geo g ON s.GeoID = g.GeoID
+WHERE strftime('%Y', s.SaleDate) = '2021'
+GROUP BY Month, Country
+ORDER BY Month ASC, TotalSales DESC;"""
+    },
+    {
+        "id": "choco_order_benchmark_above_avg_share_2021",
+        "domain": "awesome_chocolates",
+        "category": "order_benchmark_share",
+        "tags": [
+            "tỷ trọng các đơn hàng", "doanh số lớn hơn doanh số trung bình", "năm 2021",
+            "đơn hàng lớn hơn trung bình", "vượt mức trung bình", "tỷ lệ đơn hàng",
+            "đơn hàng", "orders", "trung bình", "benchmark", "tỷ trọng", "phần trăm"
+        ],
+        "question": "Tỷ trọng các đơn hàng có doanh số lớn hơn doanh số trung bình năm 2021",
+        "question_en": "Share of orders with sales greater than average order sales in 2021",
+        "intent_explanation": "Phân tích tỷ trọng và số lượng đơn hàng có doanh số lớn hơn mức trung bình năm 2021. Trong CSDL Awesome Chocolates, đơn hàng là từng dòng giao dịch trong bảng sales (không có bảng orders). Dùng CTE OrderBenchmark tính ngưỡng doanh số trung bình (AvgBenchmark) và tổng số đơn (TotalOrdersCount) năm 2021, dùng CTE ClassifiedOrders phân loại đơn hàng thành 2 nhóm ('Đơn hàng trên mức trung bình' vs 'Đơn hàng dưới hoặc bằng trung bình'), sau đó tính Số Lượng Đơn, Tỷ Trọng Số Đơn (%), Tổng Doanh Số ($) và Tỷ Trọng Doanh Số (%) để vẽ biểu đồ cơ cấu Donut chuẩn 100%.",
+        "sql_mysql": """WITH OrderBenchmark AS (
+    SELECT 
+        ROUND(AVG(s.Amount), 2) AS AvgBenchmark,
+        COUNT(*) AS TotalOrdersCount,
+        SUM(s.Amount) AS TotalRevenue
+    FROM sales s
+    WHERE YEAR(s.SaleDate) = 2021
+),
+ClassifiedOrders AS (
+    SELECT 
+        CASE 
+            WHEN s.Amount > b.AvgBenchmark THEN 'Đơn hàng trên mức trung bình'
+            ELSE 'Đơn hàng dưới hoặc bằng trung bình'
+        END AS `Nhóm Đơn Hàng`,
+        s.Amount
+    FROM sales s
+    CROSS JOIN OrderBenchmark b
+    WHERE YEAR(s.SaleDate) = 2021
+)
+SELECT 
+    co.`Nhóm Đơn Hàng`,
+    COUNT(*) AS `Số Lượng Đơn`,
+    ROUND(COUNT(*) * 100.0 / b.TotalOrdersCount, 2) AS `Tỷ Trọng Số Đơn (%)`,
+    SUM(co.Amount) AS `Tổng Doanh Số ($)`,
+    ROUND(SUM(co.Amount) * 100.0 / NULLIF(b.TotalRevenue, 0), 2) AS `Tỷ Trọng Doanh Số (%)`,
+    b.AvgBenchmark AS `Mức TB Chuẩn ($)`
+FROM ClassifiedOrders co
+CROSS JOIN OrderBenchmark b
+GROUP BY co.`Nhóm Đơn Hàng`, b.TotalOrdersCount, b.TotalRevenue, b.AvgBenchmark
+ORDER BY CASE WHEN co.`Nhóm Đơn Hàng` = 'Đơn hàng trên mức trung bình' THEN 0 ELSE 1 END;""",
+        "sql_sqlite": """WITH OrderBenchmark AS (
+    SELECT 
+        ROUND(AVG(s.Amount), 2) AS AvgBenchmark,
+        COUNT(*) AS TotalOrdersCount,
+        SUM(s.Amount) AS TotalRevenue
+    FROM sales s
+    WHERE strftime('%Y', s.SaleDate) = '2021'
+),
+ClassifiedOrders AS (
+    SELECT 
+        CASE 
+            WHEN s.Amount > b.AvgBenchmark THEN 'Đơn hàng trên mức trung bình'
+            ELSE 'Đơn hàng dưới hoặc bằng trung bình'
+        END AS `Nhóm Đơn Hàng`,
+        s.Amount
+    FROM sales s
+    CROSS JOIN OrderBenchmark b
+    WHERE strftime('%Y', s.SaleDate) = '2021'
+)
+SELECT 
+    co.`Nhóm Đơn Hàng`,
+    COUNT(*) AS `Số Lượng Đơn`,
+    ROUND(COUNT(*) * 100.0 / b.TotalOrdersCount, 2) AS `Tỷ Trọng Số Đơn (%)`,
+    SUM(co.Amount) AS `Tổng Doanh Số ($)`,
+    ROUND(SUM(co.Amount) * 100.0 / NULLIF(b.TotalRevenue, 0), 2) AS `Tỷ Trọng Doanh Số (%)`,
+    b.AvgBenchmark AS `Mức TB Chuẩn ($)`
+FROM ClassifiedOrders co
+CROSS JOIN OrderBenchmark b
+GROUP BY co.`Nhóm Đơn Hàng`, b.TotalOrdersCount, b.TotalRevenue, b.AvgBenchmark
+ORDER BY CASE WHEN co.`Nhóm Đơn Hàng` = 'Đơn hàng trên mức trung bình' THEN 0 ELSE 1 END;"""
+    },
+    {
+        "id": "choco_salesperson_benchmark_share_2021",
+        "domain": "awesome_chocolates",
+        "category": "benchmark_comparison",
+        "tags": [
+            "tỷ trọng đóng góp của từng nhân viên", "năm 2021", "mặt bằng chung", "trung bình",
+            "nhân viên", "salesperson", "đóng góp", "tỷ trọng", "so với mặt bằng chung trung bình"
+        ],
+        "question": "Tỷ trọng đóng góp của từng nhân viên trong năm 2021 so với mặt bằng chung trung bình",
+        "question_en": "Contribution share of each salesperson in 2021 compared to the benchmark average",
+        "intent_explanation": "Phân tích tỷ trọng đóng góp và so sánh hiệu quả bán hàng của từng nhân viên kinh doanh so với mức trung bình của toàn công ty trong năm 2021. Liên kết sales s với people pe ON s.SPID = pe.SPID, lọc năm 2021, dùng CTE PersonSales tính doanh số từng người, CTE CompanyStats tính tổng doanh thu toàn bộ và mức trung bình chuẩn, sau đó tính Tỷ Trọng (%), Mặt Bằng Chung TB ($), Chênh Lệch So Với TB ($) và Tỷ Lệ So Với TB (%).",
+        "sql_mysql": """WITH PersonSales AS (
+    SELECT 
+        pe.Salesperson AS Salesperson,
+        SUM(s.Amount) AS TotalSales,
+        SUM(s.Boxes) AS TotalBoxesSold
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    WHERE YEAR(s.SaleDate) = 2021
+    GROUP BY pe.SPID, pe.Salesperson
+),
+CompanyStats AS (
+    SELECT 
+        SUM(TotalSales) AS GrandTotal,
+        ROUND(AVG(TotalSales), 2) AS BenchmarkAvg
+    FROM PersonSales
+)
+SELECT 
+    ps.Salesperson,
+    ps.TotalSales AS `Tổng Doanh Số ($)`,
+    ROUND(ps.TotalSales * 100.0 / cs.GrandTotal, 2) AS `Tỷ Trọng (%)`,
+    cs.BenchmarkAvg AS `Mặt Bằng Chung TB ($)`,
+    ROUND(ps.TotalSales - cs.BenchmarkAvg, 2) AS `Chênh Lệch So Với TB ($)`,
+    ROUND(((ps.TotalSales - cs.BenchmarkAvg) * 100.0 / cs.BenchmarkAvg), 2) AS `Tỷ Lệ So Với TB (%)`,
+    ps.TotalBoxesSold AS `Số Hộp`
+FROM PersonSales ps
+CROSS JOIN CompanyStats cs
+ORDER BY ps.TotalSales DESC;""",
+        "sql_sqlite": """WITH PersonSales AS (
+    SELECT 
+        pe.Salesperson AS Salesperson,
+        SUM(s.Amount) AS TotalSales,
+        SUM(s.Boxes) AS TotalBoxesSold
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    WHERE strftime('%Y', s.SaleDate) = '2021'
+    GROUP BY pe.SPID, pe.Salesperson
+),
+CompanyStats AS (
+    SELECT 
+        SUM(TotalSales) AS GrandTotal,
+        ROUND(AVG(TotalSales), 2) AS BenchmarkAvg
+    FROM PersonSales
+)
+SELECT 
+    ps.Salesperson,
+    ps.TotalSales AS `Tổng Doanh Số ($)`,
+    ROUND(ps.TotalSales * 100.0 / cs.GrandTotal, 2) AS `Tỷ Trọng (%)`,
+    cs.BenchmarkAvg AS `Mặt Bằng Chung TB ($)`,
+    ROUND(ps.TotalSales - cs.BenchmarkAvg, 2) AS `Chênh Lệch So Với TB ($)`,
+    ROUND(((ps.TotalSales - cs.BenchmarkAvg) * 100.0 / cs.BenchmarkAvg), 2) AS `Tỷ Lệ So Với TB (%)`,
+    ps.TotalBoxesSold AS `Số Hộp`
+FROM PersonSales ps
+CROSS JOIN CompanyStats cs
+ORDER BY ps.TotalSales DESC;"""
+    },
     # =========================================================================
     # NHÓM 3: CSDL SAKILA (DVD RENTAL STORE)
     # =========================================================================
@@ -2567,7 +2919,8 @@ ORDER BY Month ASC;"""
         "category": "monthly_trend",
         "tags": [
             "biến động", "doanh thu", "từng tháng", "qua các tháng", "theo tháng",
-            "số lượt thuê", "thuê phim", "payment", "rental", "sakila"
+            "số lượt thuê", "thuê phim", "payment", "rental", "sakila", "xu hướng",
+            "tổng giá trị", "giá trị", "theo thời gian", "thời gian", "total value"
         ],
         "question": "Biến động tổng doanh thu theo từng tháng trong năm (kèm số lượt thuê phim)",
         "question_en": "Monthly total revenue and rental count trend over time",
@@ -2621,6 +2974,39 @@ JOIN payment p ON r.rental_id = p.rental_id
 GROUP BY c.name
 ORDER BY TotalRevenue DESC
 LIMIT 5;"""
+    },
+    {
+        "id": "sakila_top_films_by_revenue",
+        "domain": "sakila",
+        "category": "film_ranking",
+        "tags": [
+            "phim", "bộ phim", "film", "tựa đề", "doanh thu", "tổng số tiền", "tiền cao nhất", "top 10", "sakila"
+        ],
+        "question": "Top 10 bộ phim có doanh thu cao nhất",
+        "question_en": "Top 10 films with the highest total revenue",
+        "intent_explanation": "JOIN film f -> inventory i -> rental r -> payment p, tính SUM(p.amount) AS TotalRevenue và COUNT(r.rental_id) AS RentalCount theo từng f.title, sắp xếp giảm dần theo doanh thu LIMIT 10.",
+        "sql_mysql": """SELECT 
+    f.title AS FilmTitle,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(r.rental_id) AS RentalCount
+FROM film f
+JOIN inventory i ON f.film_id = i.film_id
+JOIN rental r ON i.inventory_id = r.inventory_id
+JOIN payment p ON r.rental_id = p.rental_id
+GROUP BY f.film_id, f.title
+ORDER BY TotalRevenue DESC
+LIMIT 10;""",
+        "sql_sqlite": """SELECT 
+    f.title AS FilmTitle,
+    SUM(p.amount) AS TotalRevenue,
+    COUNT(r.rental_id) AS RentalCount
+FROM film f
+JOIN inventory i ON f.film_id = i.film_id
+JOIN rental r ON i.inventory_id = r.inventory_id
+JOIN payment p ON r.rental_id = p.rental_id
+GROUP BY f.film_id, f.title
+ORDER BY TotalRevenue DESC
+LIMIT 10;"""
     },
     {
         "id": "sakila_top_actors_by_films",
@@ -2708,6 +3094,93 @@ JOIN staff s ON st.store_id = s.store_id
 JOIN payment p ON s.staff_id = p.staff_id
 GROUP BY st.store_id
 ORDER BY st.store_id ASC;"""
+    },
+    {
+        "id": "sakila_city_amount_comparison",
+        "domain": "sakila",
+        "category": "city_comparison",
+        "tags": [
+            "so sánh", "số tiền", "tiền", "trung bình", "thành phố", "city", "giữa các thành phố", "sakila"
+        ],
+        "question": "So sánh số tiền trung bình giữa các thành phố",
+        "question_en": "Compare average payment amount across cities",
+        "intent_explanation": "Trong CSDL Sakila, thành phố là bảng city, liên kết qua address -> customer -> payment. Nhóm theo city và tính TotalPayments, TotalAmount, AvgAmount, sắp xếp theo AvgAmount giảm dần LIMIT 10.",
+        "sql_mysql": """SELECT 
+    ct.city AS City,
+    COUNT(DISTINCT p.payment_id) AS TotalPayments,
+    ROUND(SUM(p.amount), 2) AS TotalAmount,
+    ROUND(AVG(p.amount), 2) AS AvgAmount
+FROM city ct
+JOIN address addr ON ct.city_id = addr.city_id
+JOIN customer cu ON addr.address_id = cu.address_id
+JOIN payment p ON cu.customer_id = p.customer_id
+GROUP BY ct.city_id, ct.city
+ORDER BY AvgAmount DESC
+LIMIT 10;""",
+        "sql_sqlite": """SELECT 
+    ct.city AS City,
+    COUNT(DISTINCT p.payment_id) AS TotalPayments,
+    ROUND(SUM(p.amount), 2) AS TotalAmount,
+    ROUND(AVG(p.amount), 2) AS AvgAmount
+FROM city ct
+JOIN address addr ON ct.city_id = addr.city_id
+JOIN customer cu ON addr.address_id = cu.address_id
+JOIN payment p ON cu.customer_id = p.customer_id
+GROUP BY ct.city_id, ct.city
+ORDER BY AvgAmount DESC
+LIMIT 10;"""
+    },
+    {
+        "id": "sakila_city_contribution_percentage",
+        "domain": "sakila",
+        "category": "percentage_contribution",
+        "tags": [
+            "thành phố", "city", "tỷ lệ", "tỉ lệ", "phần trăm", "đóng góp", "tỷ trọng", "tỉ trọng",
+            "thanh toán", "payment", "doanh thu", "cao nhất", "nào có", "sakila"
+        ],
+        "question": "City nào có tỷ lệ phần trăm đóng góp cao nhất vào tổng thanh toán?",
+        "question_en": "Which city has the highest percentage contribution to total payments?",
+        "intent_explanation": "Trong CSDL Sakila, liên kết city -> address -> customer -> payment. Dùng CTE CityRevenue để tính TotalAmount và TotalPayments cho từng City, sau đó tính ContributionPercentage = ROUND(TotalAmount * 100.0 / (SELECT SUM(TotalAmount) FROM CityRevenue), 2). Sắp xếp theo TotalAmount DESC hoặc ContributionPercentage DESC để lấy Top thành phố đóng góp nhiều nhất.",
+        "sql_mysql": """WITH CityRevenue AS (
+    SELECT 
+        ct.city_id,
+        ct.city AS City,
+        COUNT(DISTINCT p.payment_id) AS TotalPayments,
+        ROUND(SUM(p.amount), 2) AS TotalAmount
+    FROM city ct
+    JOIN address addr ON ct.city_id = addr.city_id
+    JOIN customer cu ON addr.address_id = cu.address_id
+    JOIN payment p ON cu.customer_id = p.customer_id
+    GROUP BY ct.city_id, ct.city
+)
+SELECT 
+    City,
+    TotalPayments,
+    TotalAmount,
+    ROUND(TotalAmount * 100.0 / (SELECT SUM(TotalAmount) FROM CityRevenue), 2) AS ContributionPercentage
+FROM CityRevenue
+ORDER BY TotalAmount DESC
+LIMIT 10;""",
+        "sql_sqlite": """WITH CityRevenue AS (
+    SELECT 
+        ct.city_id,
+        ct.city AS City,
+        COUNT(DISTINCT p.payment_id) AS TotalPayments,
+        ROUND(SUM(p.amount), 2) AS TotalAmount
+    FROM city ct
+    JOIN address addr ON ct.city_id = addr.city_id
+    JOIN customer cu ON addr.address_id = cu.address_id
+    JOIN payment p ON cu.customer_id = p.customer_id
+    GROUP BY ct.city_id, ct.city
+)
+SELECT 
+    City,
+    TotalPayments,
+    TotalAmount,
+    ROUND(TotalAmount * 100.0 / (SELECT SUM(TotalAmount) FROM CityRevenue), 2) AS ContributionPercentage
+FROM CityRevenue
+ORDER BY TotalAmount DESC
+LIMIT 10;"""
     },
     # =========================================================================
     # NHÓM 4: CSDL TỔNG QUÁT / TÙY Ý (GENERIC / ARBITRARY DATABASE PATTERNS)

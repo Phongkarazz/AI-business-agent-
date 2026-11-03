@@ -9,6 +9,32 @@ import pandas as pd
 from src.i18n import get_current_language
 
 
+def _build_empty_dark_figure(height: int = 250) -> go.Figure:
+    """Trả về khung biểu đồ Dark Mode sạch sẽ (ẩn trục tọa độ -1..6) khi không có dữ liệu."""
+    is_en = (get_current_language() == "en")
+    msg = "No data available for the selected period" if is_en else "Không có dữ liệu trong giai đoạn này"
+    fig = go.Figure()
+    fig.add_annotation(
+        text=f"<b>{msg}</b>",
+        x=0.5,
+        y=0.5,
+        xref="paper",
+        yref="paper",
+        showarrow=False,
+        font=dict(size=12, color="#64748B", family="Inter")
+    )
+    fig.update_layout(
+        paper_bgcolor="#13172B",
+        plot_bgcolor="#13172B",
+        margin=dict(l=15, r=15, t=15, b=15),
+        height=height,
+        showlegend=False,
+        xaxis=dict(visible=False, showgrid=False, zeroline=False),
+        yaxis=dict(visible=False, showgrid=False, zeroline=False)
+    )
+    return fig
+
+
 def build_latency_wave_chart(
     df: pd.DataFrame,
     name_1: str = "First Reply (h)",
@@ -17,6 +43,8 @@ def build_latency_wave_chart(
 ) -> go.Figure:
     """Biểu đồ sóng kép (Top Right Wave Chart) hỗ trợ đa lĩnh vực."""
     is_en = (get_current_language() == "en")
+    if df is None or df.empty:
+        return _build_empty_dark_figure(180)
     fig = go.Figure()
     x_vals = df["DayLabel"].tolist() if "DayLabel" in df else [f"D{i+1}" for i in range(len(df))]
     
@@ -113,6 +141,8 @@ def build_created_vs_solved_chart(
 ) -> go.Figure:
     """Biểu đồ chính Wave Line & Area với Peak Max annotation."""
     is_en = (get_current_language() == "en")
+    if df is None or df.empty:
+        return _build_empty_dark_figure(240)
     fig = go.Figure()
     x_vals = df["MonthName"].tolist() if "MonthName" in df else df.iloc[:, 0].tolist()
     
@@ -222,9 +252,9 @@ def build_hr_trend_chart(
 ) -> go.Figure:
     """Biểu đồ Trend đa đường Neon Spline/Wave đồng bộ trực tiếp với Time Filter."""
     is_en = (get_current_language() == "en")
-    fig = go.Figure()
     if df is None or df.empty:
-        return fig
+        return _build_empty_dark_figure(height)
+    fig = go.Figure()
 
     xc = x_col if x_col in df.columns else df.columns[0]
     x_vals = [str(x) for x in df[xc].tolist()]
@@ -356,7 +386,7 @@ def build_tickets_by_type_donut(df: pd.DataFrame, label_col: str = "Department",
     """Biểu đồ Donut phân loại theo danh mục phòng ban hoặc type với bảng màu Neon siêu nét."""
     is_en = (get_current_language() == "en")
     if df is None or df.empty:
-        return go.Figure()
+        return _build_empty_dark_figure(height)
 
     lbl_c = label_col if label_col in df.columns else ("Type" if "Type" in df.columns else df.columns[0])
     val_c = val_col if val_col in df.columns else ("Headcount" if "Headcount" in df.columns else ("Total" if "Total" in df.columns else df.columns[1]))
@@ -447,7 +477,7 @@ def build_new_vs_returned_donut(
     """Biểu đồ Concentric Donut: Cơ cấu Giới tính hoặc Khách hàng Mới/Quay lại."""
     is_en = (get_current_language() == "en")
     if df is None or df.empty:
-        return go.Figure()
+        return _build_empty_dark_figure(height)
 
     lbl_col = "CustomerType" if "CustomerType" in df.columns else df.columns[0]
     val_col = "Total" if "Total" in df.columns else df.columns[1]
@@ -516,7 +546,7 @@ def build_weekday_bar_chart(df: pd.DataFrame, height: int = 240, **kwargs) -> go
     """Biểu đồ Cột Gradient: Phân bổ số lượng theo danh mục với độ tương phản cao."""
     is_en = (get_current_language() == "en")
     if df is None or df.empty:
-        return go.Figure()
+        return _build_empty_dark_figure(height)
 
     days = df["WeekDay"].tolist() if "WeekDay" in df.columns else df.iloc[:, 0].tolist()
     totals = df["Total"].tolist() if "Total" in df.columns else df.iloc[:, 1].tolist()
@@ -588,7 +618,7 @@ def build_horizontal_bar_chart(
 ) -> go.Figure:
     """Biểu đồ Thanh Ngang (Horizontal Bar Chart) tối ưu cho Top phòng ban/sản phẩm/địa lý với độ sắc nét tuyệt đối."""
     if df is None or df.empty:
-        return go.Figure()
+        return _build_empty_dark_figure(height)
 
     df_sorted = df.sort_values(x_col, ascending=True) if x_col in df.columns else df
     y_vals = df_sorted[y_col].tolist() if y_col in df_sorted.columns else df_sorted.iloc[:, 0].tolist()
@@ -652,9 +682,9 @@ def build_multi_bar_chart(
     height: int = 260
 ) -> go.Figure:
     """Biểu đồ Cột Nhóm Đa Chỉ Số (Grouped Bar Chart) so sánh Min/Avg/Max hoặc nhiều chỉ tiêu."""
-    fig = go.Figure()
     if df is None or df.empty:
-        return fig
+        return _build_empty_dark_figure(height)
+    fig = go.Figure()
 
     default_colors = ["#38BDF8", "#00F0FF", "#E879F9", "#F59E0B"]
     bar_colors = colors or default_colors
@@ -711,9 +741,9 @@ def build_multi_line_chart(
     height: int = 260
 ) -> go.Figure:
     """Biểu đồ đa đường Neon Spline hiển thị nhiều chuỗi dữ liệu (ví dụ: tăng trưởng theo phòng ban)."""
-    fig = go.Figure()
     if df is None or df.empty:
-        return fig
+        return _build_empty_dark_figure(height)
+    fig = go.Figure()
 
     palette = ["#00F0FF", "#E879F9", "#38BDF8", "#F59E0B", "#10B981", "#A855F7", "#EC4899", "#3B82F6", "#F97316"]
     x_vals = [str(x) for x in df[x_col].tolist()]
@@ -770,9 +800,9 @@ def build_donut_chart(
 ) -> go.Figure:
     """Biểu đồ Donut phát sáng phân tích tỷ trọng theo danh mục/thị phần."""
     is_en = (get_current_language() == "en")
-    fig = go.Figure()
     if df is None or df.empty:
-        return fig
+        return _build_empty_dark_figure(height)
+    fig = go.Figure()
 
     default_colors = ["#00F0FF", "#38BDF8", "#E879F9", "#F59E0B", "#10B981", "#A855F7", "#EC4899", "#F97316"]
     slice_colors = colors or default_colors
@@ -815,9 +845,9 @@ def build_sales_dual_axis_chart(
 ) -> go.Figure:
     """Biểu đồ sóng kép phối hợp Cột (Doanh số $) và Đường Spline (Số lượng hộp)."""
     is_en = (get_current_language() == "en")
-    fig = go.Figure()
     if df is None or df.empty:
-        return fig
+        return _build_empty_dark_figure(height)
+    fig = go.Figure()
 
     x_vals = df[x_col].tolist()
     rev_name = "Revenue ($)" if is_en else "Doanh Số ($)"

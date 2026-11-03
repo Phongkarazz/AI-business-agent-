@@ -35,13 +35,13 @@ ID_LIKE_REGEX = re.compile(r'(^|_)(id|no|code|key|num|sn)$', re.IGNORECASE)
 
 # Business name-like column pattern (prioritized for X-axis labels)
 NAME_LIKE_REGEX = re.compile(
-    r'(salesperson|employee|rep|nhan_vien|nhan vien|nhan_su|nhan su|person|customer|khach_hang|khach hang|name|ten|title|category|product|team|region|department|dept|quoc_gia|quoc gia|country|geo|khu_vuc|khu vuc|tinh|thanh_pho|thanh pho|city)',
+    r'(salesperson|employee|rep|nhan_vien|nhan vien|nhân viên|nhân_viên|nhan_su|nhan su|nhân sự|nhân_sự|person|customer|customer_id|customerid|khach_hang|khach hang|khách hàng|khách_hàng|name|ten|tên|title|chức danh|chuc_danh|category|danh mục|product|san_pham|sản phẩm|sản_phẩm|team|đội|đội ngũ|region|khu vực|department|dept|phòng ban|phong_ban|quoc_gia|quoc gia|quốc gia|quốc_gia|country|geo|thị trường|thi_truong|khu_vuc|khu vuc|tinh|thanh_pho|thanh pho|thành phố|thành_phố|city|gender|giới tính|gioi_tinh|sex)',
     re.IGNORECASE
 )
 
 # Specific individual entity pattern (highest priority for X-axis labels over group categories)
 INDIVIDUAL_ENTITY_REGEX = re.compile(
-    r'(salesperson|employee|rep|nhan_vien|nhan vien|nhan_su|nhan su|person|customer|khach_hang|khach hang|product|san_pham|item|first_name|last_name|full_name|fullname|manager|leader|truong_phong|quan_ly)',
+    r'(salesperson|employee|rep|nhan_vien|nhan vien|nhân viên|nhân_viên|nhan_su|nhan su|nhân sự|nhân_sự|person|customer|customer_id|customerid|khach_hang|khach hang|khách hàng|khách_hàng|product|san_pham|sản phẩm|sản_phẩm|item|first_name|last_name|full_name|fullname|họ và tên|ho_va_ten|manager|leader|truong_phong|trưởng phòng|trưởng_phòng|quan_ly|quản lý|quản_lý)',
     re.IGNORECASE
 )
 

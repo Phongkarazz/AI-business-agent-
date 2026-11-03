@@ -12,12 +12,16 @@ from .heuristics import get_axis_columns, pick_label_column
 
 def format_anomaly_label(val, col_name: str = "") -> str:
     """Chuyển đổi nhãn thời gian hoặc thực thể sang định dạng tự nhiên thân thiện kinh doanh:
-    - Loại bỏ đuôi .0
-    - Định dạng Tháng 1..12, Quý 1..4, Năm YYYY
+    - Loại bỏ triệt để đuôi .0, microsecond timestamps .000000, và 00:00:00
+    - Định dạng Tháng 1..12, Quý 1..4, Năm YYYY, hoặc ngày DD/MM/YYYY
     """
     if val is None or (hasattr(pd, "isna") and pd.isna(val) is True):
         return "N/A"
     s = str(val).strip()
+    # Loại bỏ triệt để microsecond timestamps và 00:00:00
+    s = re.sub(r"\s+00:00:00(?:\.0+)?$", "", s)
+    s = re.sub(r"\.000000$", "", s)
+    s = re.sub(r"\.0+$", "", s)
     if re.match(r"^-?\d+\.0+$", s):
         s = s.split(".")[0]
     c_low = str(col_name).lower() if col_name else ""
@@ -39,6 +43,9 @@ def format_anomaly_label(val, col_name: str = "") -> str:
     m_ym = re.match(r"^(\d{4})-(\d{1,2})$", s)
     if m_ym:
         return f"Tháng {int(m_ym.group(2))}/{m_ym.group(1)}"
+    m_ymd = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", s)
+    if m_ymd:
+        return f"{int(m_ymd.group(3)):02d}/{int(m_ymd.group(2)):02d}/{m_ymd.group(1)}"
     return s
 
 

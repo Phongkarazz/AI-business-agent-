@@ -665,9 +665,9 @@ Tạo bảng Markdown gồm 4 cột phân tích đúng 3 mốc:
 Tạo bảng Markdown gồm 4 cột cụ thể:
 | Loại Rủi ro | Mức độ Tác động | Dấu hiệu Cảnh báo Sớm | Biện pháp Dự phòng & Ứng phó |
 | :--- | :--- | :--- | :--- |
-| **Rủi ro Vận hành** | 🔴 Nghiêm trọng | Điểm nghẽn tăng cao, tiến độ chậm $\ge 15\%$ | Kích hoạt đội phản ứng nhanh, điều chuyển nhân sự hỗ trợ |
+| **Rủi ro Vận hành** | 🔴 Nghiêm trọng | Điểm nghẽn tăng cao, tiến độ chậm $\\ge 15\\%$ | Kích hoạt đội phản ứng nhanh, điều chuyển nhân sự hỗ trợ |
 | **Rủi ro Nhân sự** | 🟡 Trung bình | Tỷ lệ nghỉ việc tăng, quá tải công việc | Áp dụng chính sách đãi ngộ linh hoạt, kèm cặp 1-1 |
-| **Rủi ro Tài chính** | 🟡 Trung bình | Chi phí phát sinh vượt dự toán $\ge 10\%$ | Tái cơ cấu ngân sách khẩn cấp, cắt giảm chi phí trung gian |
+| **Rủi ro Tài chính** | 🟡 Trung bình | Chi phí phát sinh vượt dự toán $\\ge 10\\%$ | Tái cơ cấu ngân sách khẩn cấp, cắt giảm chi phí trung gian |
 
 > 💡 **Khuyến nghị Trọng tâm cho Ban Điều Hành:** [1 câu quyết sách kiểm soát rủi ro và kích hoạt phương án dự phòng]."""
 
@@ -687,9 +687,9 @@ Tạo bảng Markdown gồm 4 cột cụ thể:
 Tạo bảng Markdown gồm 4 cột cụ thể:
 | Nhóm Chỉ số | Chỉ số Cụ thể & Mục tiêu | Tần suất Đo lường | Hành động khi Không đạt |
 | :--- | :--- | :--- | :--- |
-| **Vận hành & Năng suất** | Năng suất lao động tăng $\ge 15\%$ | Hàng tuần | Rà soát quy trình, đào tạo lại thao tác chuẩn |
-| **Nhân sự & Gắn kết** | Tỷ lệ giữ chân nhân sự cốt lõi $\ge 95\%$ | Hàng tháng | Điều chỉnh chính sách đãi ngộ, lắng nghe phản hồi |
-| **Tài chính & Chi phí** | Tiết kiệm chi phí vận hành $\ge 10\%$ | Hàng tháng | Tinh gọn quy trình, rà soát các khoản chi lãng phí |
+| **Vận hành & Năng suất** | Năng suất lao động tăng $\\ge 15\\%$ | Hàng tuần | Rà soát quy trình, đào tạo lại thao tác chuẩn |
+| **Nhân sự & Gắn kết** | Tỷ lệ giữ chân nhân sự cốt lõi $\\ge 95\\%$ | Hàng tháng | Điều chỉnh chính sách đãi ngộ, lắng nghe phản hồi |
+| **Tài chính & Chi phí** | Tiết kiệm chi phí vận hành $\\ge 10\\%$ | Hàng tháng | Tinh gọn quy trình, rà soát các khoản chi lãng phí |
 
 > 💡 **Khuyến nghị Trọng tâm cho Ban Điều Hành:** [1 câu quyết sách thể chế hóa bộ chỉ số đo lường hiệu suất]."""
 

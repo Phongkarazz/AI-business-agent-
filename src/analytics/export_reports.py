@@ -21,7 +21,7 @@ EMOJI_REGEX = re.compile(
 
 
 def clean_text_for_pdf(text: str) -> str:
-    """Loại bỏ triệt để các emoji gây lỗi ô vuông trắng và chuẩn hóa cú pháp XML an toàn cho ReportLab:
+    r"""Loại bỏ triệt để các emoji gây lỗi ô vuông trắng và chuẩn hóa cú pháp XML an toàn cho ReportLab:
     - Loại bỏ toàn bộ emoji và ký tự glyph lạ gây ô vuông tofu.
     - Chuyển đổi Markdown (**bold**, *italic*, `code`, \$) sang thẻ XML ReportLab (<b>, <i>, ...).
     - Bảo vệ các thẻ XML hợp lệ (<b>, <i>, <u>, <font>, <br/>, &bull;) để ReportLab render định dạng thay vì in chữ thô.
@@ -1108,7 +1108,7 @@ def export_to_pdf(result: dict, df: pd.DataFrame, chart_png_bytes: bytes = None)
         return b""
 
 
-def export_resolution_to_pdf(res: dict, layer_id: str = "overview", time_label: str = "") -> bytes:
+def export_resolution_to_pdf(res: Any, layer_id: str = "overview", time_label: str = "", doc_code: str = None, **kwargs) -> bytes:
     """Xuất văn bản Nghị Quyết Hội Đồng Quản Trị & Ban Điều Hành chuẩn mực sang định dạng PDF:
     - Tiêu đề văn bản, Căn cứ pháp lý & Mã văn bản chính thức
     - Căn cứ vận hành & Chẩn đoán dữ liệu thực tế (Điểm bất thường, lượng hóa rủi ro)
@@ -1119,6 +1119,8 @@ def export_resolution_to_pdf(res: dict, layer_id: str = "overview", time_label: 
     """
     if res is None:
         return b""
+    if not isinstance(res, dict):
+        res = {}
 
     buffer = io.BytesIO()
     try:
@@ -1230,10 +1232,12 @@ def export_resolution_to_pdf(res: dict, layer_id: str = "overview", time_label: 
         story.append(Paragraph("Độc lập - Tự do - Hạnh phúc", ParagraphStyle("VN2", fontName=font_name, fontSize=8.0, alignment=1, textColor=TEXT_MUTED, spaceAfter=6)))
         story.append(HRFlowable(width="28%", thickness=0.8, color=ACCENT_GOLD, spaceAfter=10, hAlign="CENTER"))
 
-        story.append(Paragraph("NGHỊ QUYẾT HỘI ĐỒNG QUẢN TRỊ & BAN ĐIỀU HÀNH", title_style))
-        clean_t_code = t_label.replace(' ', '').replace('—', '_').replace('-', '_')
-        doc_code = f"Mã văn bản: NQ-BĐH/{clean_t_code or 'STRAT'} &bull; Ngày ban hành: {datetime.date.today().strftime('%d/%m/%Y')}"
-        story.append(Paragraph(doc_code, meta_style))
+        if doc_code:
+            doc_code_meta = f"Mã văn bản: {doc_code} &bull; Ngày ban hành: {datetime.date.today().strftime('%d/%m/%Y')}"
+        else:
+            clean_t_code = t_label.replace(' ', '').replace('—', '_').replace('-', '_')
+            doc_code_meta = f"Mã văn bản: NQ-BĐH/{clean_t_code or 'STRAT'} &bull; Ngày ban hành: {datetime.date.today().strftime('%d/%m/%Y')}"
+        story.append(Paragraph(doc_code_meta, meta_style))
 
         # Khung tóm tắt sức khỏe vận hành & phạm vi quản trị
         clean_health_status = clean_text_for_pdf(health_status)

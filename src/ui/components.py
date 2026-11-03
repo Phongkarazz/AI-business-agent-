@@ -21,6 +21,8 @@ from src.analytics.heuristics import (
     find_matching_col,
     filter_matching_cols,
     has_keyword,
+    format_entity_label,
+    _is_status_or_eval_column,
 )
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
@@ -559,6 +561,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             and not (any(k in str(c).lower() for k in ["year", "hireyear", "nam"]) and not any(k in str(c).lower() for k in ["service", "thâm_niên"]))
         ]
         label_cols = [c for c in df.columns if c not in measure_cols]
+    non_eval_labels = [c for c in label_cols if not _is_status_or_eval_column(df, c)]
+    label_cols = non_eval_labels if (non_eval_labels or time_col) else label_cols
 
     total_rows = len(df)
 
@@ -725,6 +729,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         boxes_val = None
         entity_name = None
 
+        entity_col_name = ""
         for col in df.columns:
             c_low = str(col).lower()
             val = float(pd.to_numeric(df[col].iloc[0], errors="coerce") or 0.0)
@@ -736,17 +741,23 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 boxes_val = int(val)
             elif not pd.api.types.is_numeric_dtype(df[col]):
                 entity_name = str(df[col].iloc[0])
+                entity_col_name = c_low
 
         if entity_name is None:
             for col in df.columns:
                 if not pd.api.types.is_numeric_dtype(df[col]):
                     entity_name = str(df[col].iloc[0])
+                    entity_col_name = str(col).lower()
                     break
         if not entity_name:
-            entity_name = "Australia (Úc)" if any(k in (user_query or "").lower() for k in ["úc", "australia"]) else "Thị trường mục tiêu"
+            entity_name = "Australia (Úc)" if any(k in (user_query or "").lower() for k in ["úc", "australia"]) else "Đơn vị dẫn đầu"
 
         if avg_price_val is None and rev_val and boxes_val:
             avg_price_val = round(rev_val / boxes_val, 2)
+
+        is_person_ent = any(k in entity_col_name for k in ["salesperson", "person", "nhân viên", "nhân sự"]) or any(k in (user_query or "").lower() for k in ["nhân viên", "salesperson"])
+        is_prod_ent = any(k in entity_col_name for k in ["product", "sản phẩm", "mặt hàng"]) or any(k in (user_query or "").lower() for k in ["sản phẩm", "product"])
+        ent_prefix = "nhân sự" if is_person_ent else ("sản phẩm" if is_prod_ent else "thị trường")
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
@@ -757,14 +768,14 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.metric("📦 " + ("Tổng Sản Lượng" if not is_en else "Total Boxes Sold"), f"{boxes_val:,} hộp" if boxes_val else "N/A", delta="Khối lượng socola bán ra" if not is_en else "Volume delivered")
         with c4:
             is_top_tier = avg_price_val and avg_price_val >= 15.0
-            pricing_eval = "Top 3 Thị Trường Cao Nhất" if is_top_tier else "Đạt Mức Chuẩn Benchmark"
+            pricing_eval = ("Hiệu Suất Giá #1" if is_person_ent else ("Phân Khúc Cao Cấp" if is_prod_ent else "Top Thị Trường Cao")) if is_top_tier else "Đạt Chuẩn Benchmark"
             st.metric("🎯 " + ("Hiệu Quả Định Giá" if not is_en else "Pricing Efficiency"), pricing_eval, delta="Biên độ giá ổn định" if not is_en else "Stable margin")
 
         st.caption(
-            f"ℹ️ **Phân tích Hiệu quả Định giá Thị trường (Unit Economics Analysis)**: Tại thị trường **{entity_name}**, mỗi hộp sô-cô-la bán ra mang về giá trị bình quân **\\${avg_price_val:,.2f}** "
-            f"(với tổng sản lượng **{boxes_val:,} hộp** và tổng doanh thu **\\${rev_val:,.0f}**). Mức giá này thuộc nhóm các thị trường có biên độ định giá cao và ổn định nhất của thương hiệu."
+            f"ℹ️ **Phân tích Hiệu quả Đơn giá (Unit Economics Analysis)**: Đối với {ent_prefix} **{entity_name}**, mỗi hộp sô-cô-la bán ra mang về giá trị bình quân **\\${avg_price_val:,.2f}/hộp** "
+            f"(với tổng sản lượng **{boxes_val:,} hộp** và tổng doanh thu **\\${rev_val:,.0f}**)."
             if not is_en else
-            f"ℹ️ **Unit Economics Analysis**: In {entity_name}, each box delivers an average of \\${avg_price_val:,.2f} with total volume of {boxes_val:,} boxes and revenue of \\${rev_val:,.0f}."
+            f"ℹ️ **Unit Economics Analysis**: For {entity_name}, each box delivers an average of \\${avg_price_val:,.2f} with total volume of {boxes_val:,} boxes and revenue of \\${rev_val:,.0f}."
         )
         st.write("")
         return
@@ -3413,26 +3424,131 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         st.write("")
         return
 
+    # KIỂM TRA BÀI TOÁN CỰC TRỊ LƯƠNG THEO CHU KỲ THỜI GIAN (TIME-SERIES PEAK & VALLEY SALARY AUDIT: YEAR / MONTH / QUARTER)
+    has_salary_signal = any(
+        k in ((user_query or "").lower() + " " + " ".join(str(c).lower() for c in df.columns))
+        for k in ["lương", "salary", "payroll", "thu nhập", "đãi ngộ"]
+    )
+    has_org_entity_col = any(
+        any(k in str(c).lower() for k in ["title", "chức danh", "position", "department", "dept_name", "phòng ban", "phòng", "fullname", "nhân viên", "emp_no"])
+        for c in df.columns
+    )
+    avg_s_cands_ts = [c for c in df.columns if any(k in str(c).lower() for k in ["averagesalary", "avg_salary", "avgsalary", "lương trung bình", "lương tb", "bình quân"])]
+    max_s_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["maxsalary", "max_salary", "cao nhất", "lương cao nhất", "highest_salary"])]
+    min_s_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["minsalary", "min_salary", "thấp nhất", "lương thấp nhất", "lowest_salary"])]
+    rec_cands_ts = [c for c in df.columns if any(k in str(c).lower() for k in ["totalrecords", "total_records", "recordcount", "bản ghi", "totalemployees", "headcount", "nhân sự"])]
+
+    is_time_peak_valley_salary_kpi = (
+        bool(time_col)
+        and not has_org_entity_col
+        and has_salary_signal
+        and total_rows >= 2
+        and bool(avg_s_cands_ts or max_s_cands)
+        and (
+            any(k in (user_query or "").lower() for k in ["khoảng thời gian", "giai đoạn", "thời điểm", "năm nào", "tháng nào", "quý nào", "qua các năm", "theo năm", "từng năm"])
+            or any(_is_status_or_eval_column(df, c) for c in df.columns)
+            or (bool(avg_s_cands_ts) and bool(max_s_cands) and bool(min_s_cands))
+        )
+    )
+
+    if is_time_peak_valley_salary_kpi and time_col:
+        avg_col_ts = avg_s_cands_ts[0] if avg_s_cands_ts else (max_s_cands[0] if max_s_cands else measure_cols[0])
+        max_col_ts = max_s_cands[0] if max_s_cands else None
+        min_col_ts = min_s_cands[0] if min_s_cands else None
+        rec_col_ts = rec_cands_ts[0] if rec_cands_ts else None
+
+        avg_ser = pd.to_numeric(df[avg_col_ts], errors="coerce").dropna()
+        if not avg_ser.empty:
+            pk_idx = avg_ser.idxmax()
+            tr_idx = avg_ser.idxmin()
+            pk_period = str(df.loc[pk_idx, time_col])
+            tr_period = str(df.loc[tr_idx, time_col])
+            pk_avg = float(avg_ser.loc[pk_idx])
+            tr_avg = float(avg_ser.loc[tr_idx])
+            growth_abs = pk_avg - tr_avg
+            growth_pct = (growth_abs / tr_avg * 100.0) if tr_avg > 0 else 0.0
+
+            t_low = str(time_col).lower()
+            p_unit = "Năm" if any(k in t_low for k in ["year", "năm"]) else ("Tháng" if any(k in t_low for k in ["month", "tháng"]) else ("Quý" if any(k in t_low for k in ["quarter", "quý"]) else "Kỳ"))
+            pk_disp = f"{p_unit} {pk_period}" if not pk_period.lower().startswith(p_unit.lower()) else pk_period
+            tr_disp = f"{p_unit} {tr_period}" if not tr_period.lower().startswith(p_unit.lower()) else tr_period
+
+            abs_max_sal = float(pd.to_numeric(df[max_col_ts], errors="coerce").max()) if max_col_ts else pk_avg
+            abs_min_sal = float(pd.to_numeric(df[min_col_ts], errors="coerce").min()) if min_col_ts else tr_avg
+            abs_spread = abs_max_sal - abs_min_sal
+            tot_records = int(pd.to_numeric(df[rec_col_ts], errors="coerce").sum()) if rec_col_ts else total_rows
+
+            first_p = str(df[time_col].iloc[0])
+            last_p = str(df[time_col].iloc[-1])
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric(
+                    "🏆 " + (f"{p_unit} Lương TB Đạt Đỉnh" if not is_en else f"Peak Avg Salary {p_unit}"),
+                    pk_disp,
+                    delta=f"${pk_avg:,.2f} (+{growth_pct:.1f}% vs đáy)" if not is_en else f"${pk_avg:,.2f} (+{growth_pct:.1f}% vs trough)"
+                )
+            with c2:
+                st.metric(
+                    "📉 " + (f"{p_unit} Lương TB Chạm Đáy" if not is_en else f"Lowest Avg Salary {p_unit}"),
+                    tr_disp,
+                    delta=f"${tr_avg:,.2f} (Mức khởi điểm)" if not is_en else f"${tr_avg:,.2f} (Baseline)"
+                )
+            with c3:
+                st.metric(
+                    "🚀 " + ("Biên Độ Lương Cá Nhân (Trần - Sàn)" if not is_en else "Individual Salary Band (Max - Min)"),
+                    f"${abs_max_sal:,.0f}",
+                    delta=f"Sàn: ${abs_min_sal:,.0f} (Biên độ ${abs_spread:,.0f})" if not is_en else f"Floor: ${abs_min_sal:,.0f} (Spread ${abs_spread:,.0f})"
+                )
+            with c4:
+                st.metric(
+                    "🗂️ " + ("Tổng Bản Ghi Kiểm Toán" if not is_en else "Total Audited Records"),
+                    f"{tot_records:,}",
+                    delta=f"Chu kỳ {total_rows} {p_unit.lower()} ({first_p}–{last_p})" if not is_en else f"{total_rows} periods ({first_p}–{last_p})"
+                )
+
+            st.caption(
+                f"ℹ️ **Toàn cảnh Chu kỳ Biến động Lương ({first_p}–{last_p} — {total_rows} {p_unit.lower()})**: Mặt bằng lương trung bình tăng trưởng từ mức đáy **${tr_avg:,.2f} ({tr_disp})** "
+                f"lên đỉnh **${pk_avg:,.2f} ({pk_disp})** (tăng **+${growth_abs:,.2f}**, tương đương **+{growth_pct:.1f}%**). "
+                + (
+                    f"Xét trên toàn bộ **{tot_records:,}** bản ghi lương lịch sử, mức lương cá nhân cao nhất đạt đỉnh **${abs_max_sal:,.0f}** và mức sàn thấp nhất là **${abs_min_sal:,.0f}**."
+                    if (max_col_ts and min_col_ts) else ""
+                )
+                if not is_en else
+                f"ℹ️ **Historical Salary Cycle Overview ({first_p}–{last_p} — {total_rows} periods)**: Average salary grew from a trough of **${tr_avg:,.2f} ({tr_disp})** "
+                f"to a peak of **${pk_avg:,.2f} ({pk_disp})** (**+${growth_abs:,.2f} / +{growth_pct:.1f}%** across **{tot_records:,}** salary records)."
+            )
+            st.write("")
+            return
+
     # KIỂM TRA BÀI TOÁN PHÂN TÍCH CHÊNH LỆCH LƯƠNG NỘI BỘ / ĐỐI CHIẾU CAO NHẤT VS THẤP NHẤT (SALARY SPREAD / DISPARITY)
     is_stddev_in_q = any(k in (user_query or "").lower() for k in ["chuẩn", "stddev", "standard deviation", "độ phân tán", "mức lương phân tán"])
+    is_commercial_spread_df = any(
+        any(k in str(c).lower() for k in ["biên độ thay đổi", "tháng cao nhất", "tháng thấp nhất", "doanh thu", "doanh số", "product", "sản phẩm", "sales"])
+        for c in df.columns
+    )
     user_asked_spread_kpi = (
-        not is_stddev_in_q and (
+        not is_stddev_in_q
+        and not is_commercial_spread_df
+        and not is_time_peak_valley_salary_kpi
+        and (has_org_entity_col or not time_col)
+        and has_salary_signal
+        and (
             any(k in (user_query or "").lower() for k in ["chênh lệch", "khoảng cách", "phân hóa", "salary spread", "spread", "gap", "biên độ", "nhóm cao nhất và nhóm thấp nhất", "cao nhất và thấp nhất", "cao nhất vs thấp nhất"]) or
             any(any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương", "biên độ chênh lệch", "salarydifference", "salary_difference", "salarygap", "salary_gap"]) for c in df.columns)
         )
     )
     spread_col_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["salaryspread", "salary_spread", "chênh lệch lương", "khoảng cách lương", "biên độ chênh lệch", "salarydifference", "salary_difference", "salarygap", "salary_gap", "spread", "diff"])]
-    max_s_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["maxsalary", "max_salary", "cao nhất", "lương cao nhất", "highest_salary"])]
-    min_s_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["minsalary", "min_salary", "thấp nhất", "lương thấp nhất", "lowest_salary"])]
 
     if user_asked_spread_kpi and (spread_col_cands or (max_s_cands and min_s_cands)):
         spread_col = spread_col_cands[0] if spread_col_cands else None
         max_s_col = max_s_cands[0] if max_s_cands else None
         min_s_col = min_s_cands[0] if min_s_cands else None
-        dim_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["title", "chức danh", "position", "department", "dept_name", "phòng ban", "phòng"])), label_cols[0] if label_cols else "Department")
+        dim_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["title", "chức danh", "position", "department", "dept_name", "phòng ban", "phòng"])), label_cols[0] if label_cols else (time_col or "Department"))
         is_title_entity = any(k in str(dim_col).lower() for k in ["title", "chức danh", "position"]) or any(k in (user_query or "").lower() for k in ["chức danh", "title", "vị trí"])
-        entity_type = "Chức danh" if is_title_entity else ("Phòng ban" if not is_en else "Department")
-        entity_icon = "💼" if is_title_entity else "🏢"
+        is_time_entity = bool(time_col and dim_col == time_col)
+        entity_type = "Năm" if is_time_entity else ("Chức danh" if is_title_entity else ("Phòng ban" if not is_en else "Department"))
+        entity_icon = "📅" if is_time_entity else ("💼" if is_title_entity else "🏢")
 
         # Nếu không có sẵn cột spread_col nhưng có max_s_col và min_s_col, tính tự động
         if not spread_col and max_s_col and min_s_col:
@@ -3939,19 +4055,125 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             f"({total_rows} products) at an average of ${avg_price:,.2f}/box, led by {top_prod_name}."
         )
         st.write("")
+    # KIỂM TRA BÀI TOÁN PHÂN TÍCH TỶ TRỌNG ĐƠN HÀNG SO VỚI MỨC TRUNG BÌNH (ORDER BENCHMARK SHARE ANALYSIS)
+    is_order_benchmark_share_analysis = (
+        any(any(k in str(c).lower() for k in ["nhóm đơn hàng", "ordergroup", "order_group", "phân nhóm đơn"]) for c in df.columns)
+        or (
+            any(any(k in str(c).lower() for k in ["mức tb chuẩn", "avgbenchmark", "benchmark"]) for c in df.columns)
+            and any(any(k in str(c).lower() for k in ["tỷ trọng số đơn", "tỉ trọng số đơn", "ordershare", "order_share"]) for c in df.columns)
+        )
+    )
+    if is_order_benchmark_share_analysis and total_rows >= 1:
+        grp_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["nhóm đơn hàng", "ordergroup", "order_group", "nhóm"])), df.columns[0])
+        orders_col = next((c for c in df.columns if c != grp_col and any(k in str(c).lower() for k in ["số lượng đơn", "soluongdon", "orderscount", "order_count", "totalorders"]) and not any(x in str(c).lower() for x in ["tỷ trọng", "tỉ trọng", "%", "pct", "share"])), None)
+        order_share_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["tỷ trọng số đơn", "tỉ trọng số đơn", "ordershare", "order_share"]) or ("đơn" in str(c).lower() and "%" in str(c).lower())), None)
+        val_col = next((c for c in df.columns if c != grp_col and any(k in str(c).lower() for k in ["tổng doanh số", "tổng doanh thu", "totalsales", "totalrevenue", "tổng số hộp", "totalboxes", "doanh số", "doanh thu"]) and not any(x in str(c).lower() for x in ["tỷ trọng", "tỉ trọng", "%", "pct", "share", "tb chuẩn", "benchmark"])), None)
+        val_share_col = next((c for c in df.columns if c != order_share_col and any(k in str(c).lower() for k in ["tỷ trọng doanh số", "tỉ trọng doanh số", "tỷ trọng doanh thu", "tỷ trọng số hộp", "revenueshare", "salesshare", "boxesshare"]) or (any(k in str(c).lower() for k in ["doanh số", "doanh thu", "hộp"]) and "%" in str(c).lower())), None)
+        bench_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["mức tb chuẩn", "avgbenchmark", "benchmark", "tb chuẩn"])), None)
+
+        uq_low_bm = (user_query or "").lower()
+        wants_below = any(k in uq_low_bm for k in ["nhỏ hơn", "nho hon", "thấp hơn", "thap hon", "ít hơn", "dưới", "duoi", "<"]) and not any(k in uq_low_bm for k in ["lớn hơn", "lướn hơn", "lơn hơn", "lon hon", "cao hơn", "vượt", "trên", ">"])
+
+        target_idx = 0
+        other_idx = 1 if total_rows > 1 else 0
+        for idx_i, r_i in df.iterrows():
+            lbl_i = str(r_i[grp_col]).lower()
+            if wants_below and any(k in lbl_i for k in ["dưới", "nhỏ hơn", "thấp hơn", "below", "under"]):
+                target_idx = idx_i
+                break
+            elif not wants_below and any(k in lbl_i for k in ["trên", "vượt", "lớn hơn", "above", "over"]):
+                target_idx = idx_i
+                break
+        if total_rows > 1:
+            other_indices = [i for i in df.index if i != target_idx]
+            if other_indices:
+                other_idx = other_indices[0]
+
+        t_row = df.loc[target_idx]
+        o_row = df.loc[other_idx]
+
+        tot_orders_all = int(pd.to_numeric(df[orders_col], errors="coerce").sum() or 0) if orders_col else 0
+        tot_val_all = float(pd.to_numeric(df[val_col], errors="coerce").sum() or 0.0) if val_col else 0.0
+
+        t_orders = int(pd.to_numeric(t_row[orders_col], errors="coerce") or 0) if orders_col else 0
+        o_orders = int(pd.to_numeric(o_row[orders_col], errors="coerce") or 0) if orders_col else 0
+        t_order_pct = float(pd.to_numeric(t_row[order_share_col], errors="coerce") or 0.0) if order_share_col else ((t_orders * 100.0 / tot_orders_all) if tot_orders_all > 0 else 0.0)
+        o_order_pct = float(pd.to_numeric(o_row[order_share_col], errors="coerce") or 0.0) if order_share_col else ((o_orders * 100.0 / tot_orders_all) if tot_orders_all > 0 else 0.0)
+
+        t_val = float(pd.to_numeric(t_row[val_col], errors="coerce") or 0.0) if val_col else 0.0
+        o_val = float(pd.to_numeric(o_row[val_col], errors="coerce") or 0.0) if val_col else 0.0
+        t_val_pct = float(pd.to_numeric(t_row[val_share_col], errors="coerce") or 0.0) if val_share_col else ((t_val * 100.0 / tot_val_all) if tot_val_all > 0 else 0.0)
+        o_val_pct = float(pd.to_numeric(o_row[val_share_col], errors="coerce") or 0.0) if val_share_col else ((o_val * 100.0 / tot_val_all) if tot_val_all > 0 else 0.0)
+
+        bench_val = float(pd.to_numeric(t_row[bench_col], errors="coerce") or 0.0) if bench_col else ((tot_val_all / tot_orders_all) if tot_orders_all > 0 else 0.0)
+        t_avg_order = (t_val / t_orders) if t_orders > 0 else 0.0
+
+        is_box_bm = val_col is not None and any(k in str(val_col).lower() for k in ["hộp", "boxes", "thùng"])
+        val_fmt_t = f"{t_val:,.0f} hộp" if is_box_bm else f"${t_val:,.0f}"
+        val_fmt_all = f"{tot_val_all:,.0f} hộp" if is_box_bm else f"${tot_val_all:,.0f}"
+        val_fmt_o = f"{o_val:,.0f} hộp" if is_box_bm else f"${o_val:,.0f}"
+        bench_fmt = f"{bench_val:,.1f} hộp/đơn" if is_box_bm else f"${bench_val:,.2f}/đơn"
+        t_avg_fmt = f"{t_avg_order:,.1f} hộp/đơn" if is_box_bm else f"${t_avg_order:,.0f}/đơn"
+
+        target_short = ("Dưới TB" if wants_below else "Vượt TB") if not is_en else ("Below Avg" if wants_below else "Above Avg")
+        other_short = ("Từ TB Trở Lên" if wants_below else "Dưới/Bằng TB") if not is_en else ("At/Above Avg" if wants_below else "Below/At Avg")
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "📊 " + (f"Tỷ Trọng Đơn {target_short}" if not is_en else f"Order Share ({target_short})"),
+                f"{t_order_pct:.2f}%",
+                delta=f"{t_orders:,} / {tot_orders_all:,} đơn hàng" if not is_en else f"{t_orders:,} / {tot_orders_all:,} orders"
+            )
+        with c2:
+            st.metric(
+                "💰 " + (f"Tỷ Trọng Doanh Số ({target_short})" if not is_en else f"Revenue Share ({target_short})"),
+                f"{t_val_pct:.2f}%",
+                delta=f"{val_fmt_t} / {val_fmt_all}"
+            )
+        with c3:
+            st.metric(
+                "🎯 " + ("Mức Trung Bình Chuẩn" if not is_en else "Benchmark Average"),
+                bench_fmt,
+                delta=(f"TB nhóm {target_short.lower()}: {t_avg_fmt}" if not is_en else f"{target_short} avg: {t_avg_fmt}")
+            )
+        with c4:
+            st.metric(
+                "⚖️ " + (f"Nhóm {other_short}" if not is_en else f"{other_short} Group"),
+                f"{o_order_pct:.2f}% số đơn" if not is_en else f"{o_order_pct:.2f}% orders",
+                delta=f"{o_orders:,} đơn ({val_fmt_o} • {o_val_pct:.2f}%)" if not is_en else f"{o_orders:,} orders ({val_fmt_o} • {o_val_pct:.2f}%)",
+                delta_color="off"
+            )
+
+        st.caption(
+            f"ℹ️ **Phân tích Tỷ trọng Đơn hàng So với Ngưỡng Trung bình ({bench_fmt})**: "
+            f"Nhóm **{t_row[grp_col]}** ghi nhận **{t_orders:,} đơn hàng** (chiếm **{t_order_pct:.2f}%** trên tổng số **{tot_orders_all:,} đơn**), "
+            f"nhưng đóng góp tới **{val_fmt_t}** (chiếm **{t_val_pct:.2f}%** tổng quy mô **{val_fmt_all}**, trung bình đạt **{t_avg_fmt}**). "
+            f"Ngược lại, nhóm **{o_row[grp_col]}** chiếm **{o_order_pct:.2f}%** số đơn (**{o_orders:,} đơn**) với quy mô **{val_fmt_o}** (**{o_val_pct:.2f}%**)."
+            if not is_en else
+            f"ℹ️ **Order Benchmark Share Analysis ({bench_fmt})**: "
+            f"**{t_row[grp_col]}** accounts for **{t_orders:,} orders** (**{t_order_pct:.2f}%** of **{tot_orders_all:,} total orders**) "
+            f"while contributing **{val_fmt_t}** (**{t_val_pct:.2f}%** of **{val_fmt_all}** total, averaging **{t_avg_fmt}**). "
+            f"Conversely, **{o_row[grp_col]}** represents **{o_order_pct:.2f}%** of orders (**{o_orders:,} orders**) and **{o_val_pct:.2f}%** of volume (**{val_fmt_o}**)."
+        )
+        st.write("")
+        return
+
     # KIỂM TRA BÀI TOÁN PHÂN TÍCH ĐƠN HÀNG LỚN THEO PHÂN KHÚC (SEGMENT LARGE ORDERS: GEO × CATEGORY/PRODUCT)
     is_segment_large_orders_analysis = (
-        any(any(k in str(c).lower() for k in ["largeorderscount", "largeorder", "soluongdon", "số lượng đơn"]) for c in df.columns)
-        and any(any(k in str(c).lower() for k in ["totalrevenue", "totalsales", "doanh thu", "doanh số"]) for c in df.columns)
+        not is_order_benchmark_share_analysis
+        and any(any(k in str(c).lower() for k in ["largeorderscount", "largeorder", "soluongdon", "số lượng đơn"]) for c in measure_cols)
+        and any(any(k in str(c).lower() for k in ["totalrevenue", "totalsales", "doanh thu", "doanh số"]) for c in measure_cols)
+        and any(any(k in str(c).lower() for k in ["product", "sản phẩm", "market", "geo", "country", "quốc gia", "thị trường", "category", "nhóm hàng", "danh mục"]) for c in df.columns)
         and (
             any(k in (user_query or "").lower() for k in ["đơn hàng", "orders", "giao dịch", "quy mô"])
             and any(char.isdigit() for char in (user_query or ""))
         )
     )
     if is_segment_large_orders_analysis and total_rows >= 1:
-        orders_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["largeorderscount", "largeorder", "count", "soluongdon", "đơn"])), None)
-        sales_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["totalrevenue", "totalsales", "sales", "amount", "doanh thu"])), None)
-        boxes_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["totalboxessold", "totalboxes", "boxes", "hộp", "thùng"])), None)
+        orders_col = next((c for c in measure_cols if any(k in str(c).lower() for k in ["largeorderscount", "largeorder", "count", "soluongdon", "số lượng đơn", "đơn"]) and not any(x in str(c).lower() for x in ["tỷ trọng", "tỉ trọng", "%", "pct", "share"])), None)
+        sales_col = next((c for c in measure_cols if any(k in str(c).lower() for k in ["totalrevenue", "totalsales", "sales", "amount", "doanh thu", "doanh số"]) and not any(x in str(c).lower() for x in ["tỷ trọng", "tỉ trọng", "%", "pct", "share", "tb chuẩn", "benchmark"])), None)
+        boxes_col = next((c for c in measure_cols if any(k in str(c).lower() for k in ["totalboxessold", "totalboxes", "boxes", "hộp", "thùng"])), None)
         prod_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["product", "sản phẩm"])), None)
         market_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["market", "geo", "country", "quốc gia", "thị trường"])), None)
 
@@ -4130,13 +4352,374 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.write("")
             return
 
+    # 0.09A_STREAK BÀI TOÁN CHUỖI TĂNG TRƯỞNG DOANH SỐ LIÊN TIẾP (CONSECUTIVE MONTHLY GROWTH STREAKS)
+    streak_win_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["các tháng tăng liên tục", "chuỗi tháng tăng", "consecutive_months"])), None)
+    streak_len_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["số tháng tăng liên tiếp", "độ dài chuỗi", "streak_length"])), None)
+    streak_tot_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["tổng tăng trưởng chuỗi", "streak_total_growth"])), None)
+    if (streak_win_col is not None or streak_len_col is not None) and streak_tot_col is not None and not df.empty:
+        dim_col = label_cols[0] if label_cols else df.columns[0]
+        len_series = pd.to_numeric(df[streak_len_col], errors="coerce").fillna(3) if streak_len_col else pd.Series([3] * len(df), index=df.index)
+        tot_series = pd.to_numeric(df[streak_tot_col], errors="coerce").fillna(0)
+        top_row = df.iloc[0]
+        top_ent = str(top_row[dim_col])
+        top_len = int(len_series.iloc[0])
+        top_tot = float(tot_series.iloc[0])
+        top_win = str(top_row[streak_win_col]) if streak_win_col else f"{top_len} tháng"
+        max_tot_idx = tot_series.idxmax()
+        max_tot_row = df.loc[max_tot_idx]
+        max_tot_ent = str(max_tot_row[dim_col])
+        max_tot_val = float(tot_series.loc[max_tot_idx])
+        avg_tot = float(tot_series.mean())
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🏆 " + ("Chuỗi dài nhất" if not is_en else "Longest Streak"),
+                top_ent,
+                delta=f"{top_len} tháng ({top_win})"
+            )
+        with c2:
+            st.metric(
+                "🚀 " + ("Bứt phá mạnh nhất" if not is_en else "Highest Streak Growth"),
+                max_tot_ent,
+                delta=f"+{max_tot_val:,.2f}% toàn chuỗi"
+            )
+        with c3:
+            st.metric(
+                "📈 " + ("Tăng trưởng TB chuỗi" if not is_en else "Avg Streak Growth"),
+                f"+{avg_tot:,.2f}%",
+                delta=f"Trên {total_rows} đối tượng đạt chuẩn",
+                delta_color="off"
+            )
+        with c4:
+            st.metric(
+                "🎯 " + ("Số lượng đạt chuẩn" if not is_en else "Qualified Entities"),
+                f"{total_rows}",
+                delta="Tăng liên tiếp ≥ 3 tháng",
+                delta_color="off"
+            )
+
+        st.caption(
+            f"ℹ️ **Phân tích Chuỗi Tăng trưởng Doanh số Liên tiếp (≥ 3 tháng)**: Có **{total_rows}** đối tượng xác lập kỷ lục tăng trưởng liên tục không đứt gãy từ 3 tháng trở lên. "
+            f"Dẫn đầu tuyệt đối là **{top_ent}** với chuỗi **{top_len} tháng liên tiếp ({top_win})** và tổng mức bứt phá lũy kế đạt **+{top_tot:,.2f}%**."
+        )
+        st.write("")
+        return
+
+    # 0.09A BÀI TOÁN BIÊN ĐỘ THAY ĐỔI / DAO ĐỘNG DOANH THU THÁNG (MONTHLY REVENUE SPREAD / VOLATILITY)
+    spread_rev_col = next((c for c in df.columns if "biên độ thay đổi" in str(c).lower()), None)
+    peak_m_col = next((c for c in df.columns if "tháng cao nhất" in str(c).lower()), None)
+    low_m_col = next((c for c in df.columns if "tháng thấp nhất" in str(c).lower()), None)
+    if spread_rev_col is not None and peak_m_col is not None and low_m_col is not None and not df.empty:
+        dim_col = label_cols[0] if label_cols else df.columns[0]
+        vol_pct_col = next((c for c in df.columns if "tỷ lệ biến động" in str(c).lower()), None)
+        avg_m_col = next((c for c in df.columns if "doanh thu tb/tháng" in str(c).lower() or "tb/tháng" in str(c).lower()), None)
+        pk_name_col = next((c for c in df.columns if "tháng đạt đỉnh" in str(c).lower()), None)
+        lw_name_col = next((c for c in df.columns if "tháng chạm đáy" in str(c).lower()), None)
+
+        s_series = pd.to_numeric(df[spread_rev_col], errors="coerce").fillna(0)
+        max_idx = s_series.idxmax()
+        min_idx = s_series.idxmin()
+
+        top_row = df.loc[max_idx]
+        bot_row = df.loc[min_idx]
+        top_ent = str(top_row[dim_col])
+        bot_ent = str(bot_row[dim_col])
+        sp_top = float(s_series.loc[max_idx])
+        sp_bot = float(s_series.loc[min_idx])
+        pk_top = float(pd.to_numeric(top_row[peak_m_col], errors="coerce") or 0)
+        lw_top = float(pd.to_numeric(top_row[low_m_col], errors="coerce") or 0)
+        vol_top = float(pd.to_numeric(top_row[vol_pct_col], errors="coerce") or 0) if vol_pct_col else ((pk_top - lw_top) / lw_top * 100.0 if lw_top > 0 else 0)
+        sp_avg = float(s_series.mean())
+        avg_rev_m = float(pd.to_numeric(df[avg_m_col], errors="coerce").mean() or 0) if avg_m_col else 0.0
+        pk_m_str = f" ({top_row[pk_name_col]})" if pk_name_col and pd.notna(top_row[pk_name_col]) else ""
+        lw_m_str = f" ({top_row[lw_name_col]})" if lw_name_col and pd.notna(top_row[lw_name_col]) else ""
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🏆 " + ("Biến động lớn nhất" if not is_en else "Highest Volatility"),
+                top_ent,
+                delta=f"Biên độ: ${sp_top:,.0f} (+{vol_top:.1f}%)"
+            )
+        with c2:
+            st.metric(
+                "📈 " + (f"Đỉnh tháng ({top_ent})" if not is_en else f"Peak Month ({top_ent})"),
+                f"${pk_top:,.0f}{pk_m_str}",
+                delta=f"Tháng đáy: ${lw_top:,.0f}{lw_m_str}",
+                delta_color="off"
+            )
+        with c3:
+            st.metric(
+                "🛡️ " + ("Ổn định nhất" if not is_en else "Most Stable"),
+                bot_ent,
+                delta=f"Biên độ: ${sp_bot:,.0f} / tháng",
+                delta_color="off"
+            )
+        with c4:
+            st.metric(
+                "📊 " + (f"Biên độ TB ({total_rows} SP)" if not is_en else f"Avg Spread ({total_rows} SKUs)"),
+                f"${sp_avg:,.0f} / tháng",
+                delta=f"Doanh thu TB: ${avg_rev_m:,.0f}/tháng" if avg_rev_m > 0 else f"{total_rows} sản phẩm",
+                delta_color="off"
+            )
+
+        st.caption(
+            f"ℹ️ **Phân tích Biên độ Biến động Doanh thu Tháng (Năm 2021)**: **{top_ent}** là sản phẩm có sự thay đổi doanh thu giữa các tháng lớn nhất với biên độ **\\${sp_top:,.2f}** "
+            f"(dao động từ mức đáy **\\${lw_top:,.2f}/tháng**{lw_m_str} lên mức đỉnh **\\${pk_top:,.2f}/tháng**{pk_m_str}, tương đương tỷ lệ biến động **+{vol_top:,.2f}%**). "
+            f"Ngược lại, **{bot_ent}** duy trì doanh thu tháng ổn định nhất với biên độ chỉ **\\${sp_bot:,.2f}** (so với mức bình quân toàn danh mục **\\${sp_avg:,.2f}/tháng**)."
+        )
+        st.write("")
+        return
+
+    # 0.09B BÀI TOÁN SO SÁNH DOANH SỐ TRUNG BÌNH THÁNG 6 THÁNG ĐẦU NĂM (H1) VÀ 6 THÁNG CUỐI NĂM (H2)
+    h1_col = next((c for c in df.columns if "h1" in str(c).lower() or "6t đầu" in str(c).lower()), None)
+    h2_col = next((c for c in df.columns if "h2" in str(c).lower() or "6t cuối" in str(c).lower()), None)
+    imp_col = next((c for c in df.columns if "tỷ lệ cải thiện" in str(c).lower()), None)
+    if h1_col is not None and h2_col is not None and imp_col is not None and not df.empty:
+        dim_col = label_cols[0] if label_cols else df.columns[0]
+        imp_series = pd.to_numeric(df[imp_col], errors="coerce").fillna(0)
+        max_idx = imp_series.idxmax()
+        min_idx = imp_series.idxmin()
+
+        top_row = df.loc[max_idx]
+        bot_row = df.loc[min_idx]
+        top_ent = str(top_row[dim_col])
+        bot_ent = str(bot_row[dim_col])
+        imp_top = float(imp_series.loc[max_idx])
+        imp_bot = float(imp_series.loc[min_idx])
+        h1_top = float(pd.to_numeric(top_row[h1_col], errors="coerce") or 0)
+        h2_top = float(pd.to_numeric(top_row[h2_col], errors="coerce") or 0)
+        h2_bot = float(pd.to_numeric(bot_row[h2_col], errors="coerce") or 0)
+        pos_cnt = int((imp_series > 0).sum())
+        imp_avg = float(imp_series.mean())
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🏆 " + ("Cải thiện cao nhất (#1)" if not is_en else "Top Improver (#1)"),
+                top_ent,
+                delta=f"+{imp_top:.2f}% (H2 vs H1)"
+            )
+        with c2:
+            st.metric(
+                "📈 " + (f"TB Tháng ({top_ent})" if not is_en else f"Monthly Avg ({top_ent})"),
+                f"${h2_top:,.0f} / tháng",
+                delta=f"H1: ${h1_top:,.0f}/tháng (+${h2_top - h1_top:,.0f})"
+            )
+        with c3:
+            st.metric(
+                "📊 " + ("Nhân sự tăng trưởng dương" if not is_en else "Positive Growth Reps"),
+                f"{pos_cnt}/{total_rows} Nhân viên",
+                delta=f"TB toàn đội: {imp_avg:+.2f}%",
+                delta_color="normal" if imp_avg >= 0 else "inverse"
+            )
+        with c4:
+            st.metric(
+                "📉 " + ("Suy giảm mạnh nhất" if not is_en else "Largest Decline"),
+                bot_ent,
+                delta=f"{imp_bot:+.2f}% (H2: ${h2_bot:,.0f}/tháng)",
+                delta_color="normal"
+            )
+
+        st.caption(
+            f"ℹ️ **Tổng kết So sánh 6 Tháng Đầu Năm (H1) vs 6 Tháng Cuối Năm (H2) 2021**: Nhân viên có tỷ lệ cải thiện doanh số cao nhất là **{top_ent}** với mức tăng trưởng bứt phá **+{imp_top:.2f}%** "
+            f"(doanh số trung bình tháng tăng từ **\\${h1_top:,.2f}/tháng** trong H1 lên **\\${h2_top:,.2f}/tháng** trong H2, tức tăng thêm **+\\${h2_top - h1_top:,.2f}/tháng**). "
+            f"Toàn hệ thống ghi nhận **{pos_cnt}/{total_rows} nhân viên** có tốc độ tăng trưởng dương trong nửa cuối năm."
+        )
+        st.write("")
+        return
+
+    # 0.09C BÀI TOÁN TỶ TRỌNG ĐÓNG GÓP SO VỚI MẶT BẰNG CHUNG TRUNG BÌNH (CONTRIBUTION SHARE VS BENCHMARK AVG)
+    share_bm_col = next((c for c in df.columns if str(c).strip().lower() in ["tỷ trọng (%)", "tỉ trọng (%)"]), None)
+    bench_avg_col = next((c for c in df.columns if "mặt bằng chung tb" in str(c).lower()), None)
+    vs_bm_pct_col = next((c for c in df.columns if "tỷ lệ so với tb" in str(c).lower()), None)
+    if share_bm_col is not None and bench_avg_col is not None and vs_bm_pct_col is not None and not df.empty:
+        dim_col = label_cols[0] if label_cols else df.columns[0]
+        sales_bm_col = next((c for c in df.columns if "tổng doanh số" in str(c).lower() or "totalsales" in str(c).lower()), None)
+        sh_series = pd.to_numeric(df[share_bm_col], errors="coerce").fillna(0)
+        vs_series = pd.to_numeric(df[vs_bm_pct_col], errors="coerce").fillna(0)
+        max_idx = sh_series.idxmax()
+        min_idx = sh_series.idxmin()
+
+        top_row = df.loc[max_idx]
+        bot_row = df.loc[min_idx]
+        top_ent = str(top_row[dim_col])
+        bot_ent = str(bot_row[dim_col])
+        sh_top = float(sh_series.loc[max_idx])
+        sh_bot = float(sh_series.loc[min_idx])
+        vs_top = float(vs_series.loc[max_idx])
+        vs_bot = float(vs_series.loc[min_idx])
+        bench_val = float(pd.to_numeric(top_row[bench_avg_col], errors="coerce") or 0)
+        sales_top = float(pd.to_numeric(top_row[sales_bm_col], errors="coerce") or 0) if sales_bm_col else 0.0
+        sales_bot = float(pd.to_numeric(bot_row[sales_bm_col], errors="coerce") or 0) if sales_bm_col else 0.0
+        bench_share = round(100.0 / total_rows, 2) if total_rows > 0 else 4.0
+        above_cnt = int((vs_series > 0).sum())
+        above_share_sum = float(sh_series[vs_series > 0].sum())
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🏆 " + (f"Dẫn đầu: {top_ent}" if not is_en else f"Top #1: {top_ent}"),
+                f"{sh_top:.2f}%",
+                delta=f"{vs_top:+.2f}% vs TB (${sales_top:,.0f})"
+            )
+        with c2:
+            st.metric(
+                "⚖️ " + ("Mặt bằng chung TB" if not is_en else "Average Benchmark"),
+                f"{bench_share:.2f}% / người",
+                delta=f"Doanh số TB: ${bench_val:,.0f}",
+                delta_color="off"
+            )
+        with c3:
+            st.metric(
+                "📊 " + ("Vượt mặt bằng chung" if not is_en else "Above Benchmark"),
+                f"{above_cnt}/{total_rows} Nhân viên",
+                delta=f"Chiếm {above_share_sum:.2f}% tổng doanh số",
+                delta_color="off"
+            )
+        with c4:
+            st.metric(
+                "📉 " + (f"Thấp nhất: {bot_ent}" if not is_en else f"Lowest: {bot_ent}"),
+                f"{sh_bot:.2f}%",
+                delta=f"{vs_bot:+.2f}% vs TB (${sales_bot:,.0f})",
+                delta_color="normal"
+            )
+
+        st.caption(
+            f"ℹ️ **Đối chiếu Tỷ trọng Đóng góp so với Mặt bằng chung Trung bình (Năm 2021)**: Mặt bằng chuẩn bình quân của {total_rows} nhân sự là **{bench_share:.2f}%/người** (tương đương **\\${bench_val:,.2f}**). "
+            f"Có **{above_cnt}/{total_rows} nhân sự** vượt mặt bằng chung (dẫn đầu bởi **{top_ent}** chiếm **{sh_top:.2f}%**, cao hơn chuẩn **+{vs_top:.2f}%**), "
+            f"trong khi **{bot_ent}** đứng cuối bảng với tỷ trọng **{sh_bot:.2f}%** (thấp hơn chuẩn **{vs_bot:+.2f}%**)."
+        )
+        st.write("")
+        return
+
+    # 0.09D BÀI TOÁN CHUỖI THÁNG TĂNG TRƯỞNG LIÊN TIẾP (CONSECUTIVE MONTHLY GROWTH STREAK)
+    streak_months_col = next((c for c in df.columns if "các tháng tăng liên tục" in str(c).lower()), None)
+    streak_len_col = next((c for c in df.columns if "số tháng tăng liên tiếp" in str(c).lower()), None)
+    streak_pct_col = next((c for c in df.columns if "tổng tăng trưởng chuỗi" in str(c).lower()), None)
+    if streak_months_col is not None and streak_len_col is not None and not df.empty:
+        dim_col = label_cols[0] if label_cols else df.columns[0]
+        peak_s_col = next((c for c in df.columns if "doanh số đỉnh chuỗi" in str(c).lower()), None)
+        base_s_col = next((c for c in df.columns if "doanh số nền" in str(c).lower() or "doanh số đầu chuỗi" in str(c).lower()), None)
+
+        top_row = df.iloc[0]
+        top_ent = str(top_row[dim_col])
+        s_len_top = int(pd.to_numeric(top_row[streak_len_col], errors="coerce") or 0)
+        s_months_top = str(top_row[streak_months_col])
+        s_pct_top = float(pd.to_numeric(top_row[streak_pct_col], errors="coerce") or 0) if streak_pct_col else 0.0
+        base_top = float(pd.to_numeric(top_row[base_s_col], errors="coerce") or 0) if base_s_col else 0.0
+        peak_top = float(pd.to_numeric(top_row[peak_s_col], errors="coerce") or 0) if peak_s_col else 0.0
+        n_unique = df[dim_col].nunique()
+        s_pct_avg = float(pd.to_numeric(df[streak_pct_col], errors="coerce").mean() or 0) if streak_pct_col else 0.0
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🏆 " + ("Chuỗi tăng dài nhất" if not is_en else "Longest Growth Streak"),
+                f"{top_ent} ({s_len_top} tháng)",
+                delta=s_months_top
+            )
+        with c2:
+            st.metric(
+                "🚀 " + (f"Tăng trưởng chuỗi ({top_ent})" if not is_en else f"Streak Growth ({top_ent})"),
+                f"+{s_pct_top:,.2f}%",
+                delta=f"${base_top:,.0f} ➔ ${peak_top:,.0f}" if peak_top > 0 else "Tăng liên tục MoM",
+                delta_color="off"
+            )
+        with c3:
+            st.metric(
+                "📦 " + ("Số chuỗi đạt chuẩn (≥3T)" if not is_en else "Qualified Streaks (≥3M)"),
+                f"{total_rows} Chuỗi ({n_unique} SP)",
+                delta=f"Tăng trưởng TB: +{s_pct_avg:,.1f}%"
+            )
+        with c4:
+            max_len_all = int(pd.to_numeric(df[streak_len_col], errors="coerce").max() or 0)
+            min_len_all = int(pd.to_numeric(df[streak_len_col], errors="coerce").min() or 0)
+            st.metric(
+                "⏱️ " + ("Độ dài chuỗi liên tiếp" if not is_en else "Streak Span"),
+                f"{min_len_all} – {max_len_all} tháng" if min_len_all != max_len_all else f"{max_len_all} tháng",
+                delta="Tăng trưởng dương MoM liên tiếp",
+                delta_color="off"
+            )
+
+        st.caption(
+            f"ℹ️ **Phân tích Chuỗi Tăng trưởng Doanh số Liên tiếp (≥3 Tháng Năm 2021)**: Ghi nhận **{total_rows} chuỗi tăng trưởng liên tục** (trên **{n_unique} sản phẩm**). "
+            f"Dẫn đầu là **{top_ent}** với chuỗi **{s_len_top} tháng tăng liên tiếp** (`{s_months_top}`), đưa doanh số tháng bứt phá **+{s_pct_top:,.2f}%** (từ nền **\\${base_top:,.2f}** lên đỉnh **\\${peak_top:,.2f}**)."
+        )
+        st.write("")
+        return
+
+    # 0.09E BÀI TOÁN KIỂM TOÁN SẢN PHẨM MỚI RA MẮT TRONG QUÝ / NĂM (NEW PRODUCT LAUNCH AUDIT)
+    launch_date_col = next((c for c in df.columns if "ngày mở bán đầu tiên" in str(c).lower()), None)
+    launch_status_col = next((c for c in df.columns if "trạng thái ra mắt" in str(c).lower()), None)
+    if launch_date_col is not None and launch_status_col is not None and not df.empty:
+        dim_col = label_cols[0] if label_cols else df.columns[0]
+        qtr_sales_col = next((c for c in df.columns if "doanh số q" in str(c).lower()), None)
+        qtr_share_col = next((c for c in df.columns if "tỷ trọng q" in str(c).lower()), None)
+        ann_sales_col = next((c for c in df.columns if "doanh số năm" in str(c).lower()), None)
+
+        has_zero_new = any("0 sp mới" in str(v).lower() for v in df[launch_status_col].dropna())
+        new_count = 0 if has_zero_new else len(df)
+        min_launch_dt = str(df[launch_date_col].min())
+        max_launch_dt = str(df[launch_date_col].max())
+
+        top_row = df.iloc[0]
+        top_ent = str(top_row[dim_col])
+        q_top_val = float(pd.to_numeric(top_row[qtr_sales_col], errors="coerce") or 0) if qtr_sales_col else 0.0
+        q_top_sh = float(pd.to_numeric(top_row[qtr_share_col], errors="coerce") or 0) if qtr_share_col else 0.0
+        q_total = float(pd.to_numeric(df[qtr_sales_col], errors="coerce").sum() or 0) if qtr_sales_col else 0.0
+        ann_total = float(pd.to_numeric(df[ann_sales_col], errors="coerce").sum() or 0) if ann_sales_col else 0.0
+        q_of_ann_pct = (q_total / ann_total * 100.0) if ann_total > 0 else 0.0
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric(
+                "🆕 " + ("Sản phẩm mới Quý 4/2021" if not is_en else "New SKUs in Q4/2021"),
+                f"{new_count} Sản Phẩm",
+                delta=f"100% ({total_rows}/{total_rows} SP) đã ra mắt từ Q1/2021" if has_zero_new else f"{new_count} SKU mới mở bán",
+                delta_color="off"
+            )
+        with c2:
+            st.metric(
+                "📅 " + ("Ngày mở bán đầu tiên" if not is_en else "First Sale Date Range"),
+                f"{min_launch_dt} ➔ {max_launch_dt[-5:]}",
+                delta="Toàn bộ danh mục mở bán Tháng 01/2021",
+                delta_color="off"
+            )
+        with c3:
+            st.metric(
+                "🏆 " + ("Chủ lực Quý 4/2021" if not is_en else "Top Q4/2021 Product"),
+                top_ent,
+                delta=f"${q_top_val:,.0f} ({q_top_sh:.1f}% doanh số năm)"
+            )
+        with c4:
+            st.metric(
+                "💰 " + ("Tổng doanh số Quý 4/2021" if not is_en else "Total Q4/2021 Sales"),
+                f"${q_total:,.0f}",
+                delta=f"Chiếm {q_of_ann_pct:.1f}% cả năm 2021",
+                delta_color="off"
+            )
+
+        if has_zero_new:
+            st.info(
+                f"🔍 **Kết quả Kiểm toán Ngày Mở Bán Đầu Tiên (`MIN(SaleDate)`)**: Trong **Quý 4 năm 2021**, công ty có **0 sản phẩm mới ra mắt** "
+                f"vì toàn bộ **{total_rows}/{total_rows} sản phẩm (100% danh mục SKU)** đã phát sinh giao dịch mở bán đầu tiên ngay từ **đầu Quý 1/2021** (từ ngày `{min_launch_dt}` đến `{max_launch_dt}`). "
+                f"Để hỗ trợ điều hành, bảng và biểu đồ bên dưới trình bày chi tiết **Ngày mở bán đầu tiên** kèm **Bảng xếp hạng Doanh số Quý 4/2021** của cả {total_rows} sản phẩm hiện hữu (dẫn đầu bởi **{top_ent}** với **\\${q_top_val:,.2f}**)."
+            )
+        st.write("")
+        return
+
     # KIỂM TRA BÀI TOÁN PHÂN TÍCH BIÊN ĐỘ DAO ĐỘNG GIÁ BÁN TRUNG BÌNH (PRICE SPREAD / FLUCTUATION)
     is_price_spread_analysis = (
-        any(any(k in str(c).lower() for k in ["pricespread", "price_spread", "biên độ", "dao động giá", "chênh lệch giá"]) for c in df.columns)
-        or (
-            any(k in (user_query or "").lower() for k in ["biên độ", "dao động", "chênh lệch giá", "khoảng cách giá", "price spread", "fluctuation"])
-            and any(k in (user_query or "").lower() for k in ["giá", "giá bán", "đơn giá", "price", "mỗi hộp", "hộp"])
-            and any(any(k in str(c).lower() for k in ["price", "spread", "highest", "lowest", "giá", "max", "min"]) for c in df.columns)
+        not any("biên độ thay đổi" in str(c).lower() or "tháng cao nhất" in str(c).lower() for c in df.columns)
+        and (
+            any(any(k in str(c).lower() for k in ["pricespread", "price_spread", "dao động giá", "chênh lệch giá"]) for c in df.columns)
+            or (
+                any(k in (user_query or "").lower() for k in ["biên độ", "dao động", "chênh lệch giá", "khoảng cách giá", "price spread", "fluctuation"])
+                and any(k in (user_query or "").lower() for k in ["giá", "giá bán", "đơn giá", "price", "mỗi hộp", "hộp"])
+                and any(any(k in str(c).lower() for k in ["price", "spread", "highest", "lowest", "giá", "max", "min"]) for c in df.columns)
+            )
         )
     )
     if is_price_spread_analysis:
@@ -4258,12 +4841,21 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
 
             p_vals = pd.to_numeric(df[p_col], errors="coerce")
             top_p_idx = p_vals.idxmax() if not p_vals.dropna().empty else df.index[0]
+            min_p_idx = p_vals.idxmin() if not p_vals.dropna().empty else df.index[-1]
             
-            p_label_col = label_cols[0] if label_cols else (df.columns[0] if not df.empty else "Sản Phẩm")
+            p_label_col = next((c for c in label_cols if "nhóm xếp hạng" not in str(c).lower() and "rankgroup" not in str(c).lower()), label_cols[0] if label_cols else (df.columns[0] if not df.empty else "Sản Phẩm"))
             top_p_name = str(df.loc[top_p_idx, p_label_col])
             top_p_val = float(p_vals.loc[top_p_idx]) if not p_vals.dropna().empty else 0.0
+            min_p_name = str(df.loc[min_p_idx, p_label_col])
+            min_p_val = float(p_vals.loc[min_p_idx]) if not p_vals.dropna().empty else 0.0
 
-            entity_lbl = "sản phẩm" if any(k in _uq_low for k in ["sản phẩm", "product"]) else ("quốc gia" if any(k in _uq_low for k in ["quốc gia", "country", "thị trường"]) else ("đội ngũ" if any(k in _uq_low for k in ["team", "đội"]) else "đối tượng"))
+            has_rank_group = any("nhóm xếp hạng" in str(c).lower() or "rankgroup" in str(c).lower() for c in df.columns)
+            is_dual_pnl = has_rank_group or (
+                any(k in _uq_low for k in ["cao nhất", "lớn nhất", "nhiều nhất", "highest", "top"])
+                and any(k in _uq_low for k in ["thấp nhất", "nhỏ nhất", "ít nhất", "lowest", "bottom"])
+            )
+
+            entity_lbl = "sản phẩm" if any(k in _uq_low for k in ["sản phẩm", "product"]) else ("quốc gia" if any(k in _uq_low for k in ["quốc gia", "country", "thị trường"]) else ("đội ngũ" if any(k in _uq_low for k in ["team", "đội"]) else ("nhân viên" if any(k in _uq_low for k in ["nhân viên", "salesperson"]) else "đối tượng")))
 
             k1, k2, k3, k4 = st.columns(4)
             with k1:
@@ -4274,28 +4866,43 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 )
             with k2:
                 st.metric(
-                    "📉 " + ("Tổng Chi Phí" if not is_en else "Total Cost"),
-                    f"${tot_cost:,.0f}",
-                    delta=f"{(tot_cost * 100.0 / tot_rev):.1f}% " + ("doanh thu" if not is_en else "of rev"),
-                    delta_color="inverse"
-                )
-            with k3:
-                st.metric(
                     "💵 " + ("Lợi Nhuận Ròng" if not is_en else "Net Profit"),
                     f"${tot_profit:,.0f}",
                     delta=f"{avg_margin:.1f}% " + ("biên LN" if not is_en else "margin")
                 )
-            with k4:
+            with k3:
                 st.metric(
-                    "🏆 " + ("Quán Quân Lợi Nhuận" if not is_en else "Top Contributor"),
+                    "🏆 " + ("Dẫn Đầu Lợi Nhuận" if not is_en else "Highest Profit"),
                     top_p_name,
                     delta=f"${top_p_val:,.0f}"
                 )
-            st.caption(
-                f"ℹ️ **Tổng quan P&L {total_rows} {entity_lbl}**: Tổng doanh thu **\\${tot_rev:,.0f}**, tổng chi phí **\\${tot_cost:,.0f}**, mang lại tổng lợi nhuận ròng **\\${tot_profit:,.0f}** (Biên LN bình quân **{avg_margin:.1f}%**). Đối tượng dẫn đầu lợi nhuận là **{top_p_name}** (**\\${top_p_val:,.0f}**)."
-                if not is_en else
-                f"ℹ️ **P&L Summary across {total_rows} entities**: Total revenue **\\${tot_rev:,.0f}**, total cost **\\${tot_cost:,.0f}**, yielding net profit of **\\${tot_profit:,.0f}** (Avg Margin **{avg_margin:.1f}%**). Top contributor is **{top_p_name}** (**\\${top_p_val:,.0f}**)."
-            )
+            with k4:
+                if is_dual_pnl and total_rows >= 2:
+                    st.metric(
+                        "🔻 " + ("Thấp Nhất Nhóm" if not is_en else "Lowest Profit"),
+                        min_p_name,
+                        delta=f"${min_p_val:,.0f}",
+                        delta_color="inverse"
+                    )
+                else:
+                    st.metric(
+                        "📉 " + ("Tổng Chi Phí" if not is_en else "Total Cost"),
+                        f"${tot_cost:,.0f}",
+                        delta=f"{(tot_cost * 100.0 / tot_rev):.1f}% " + ("doanh thu" if not is_en else "of rev"),
+                        delta_color="inverse"
+                    )
+            if is_dual_pnl and total_rows >= 2:
+                st.caption(
+                    f"ℹ️ **Đối chiếu 2 đầu cực trị ({total_rows} {entity_lbl})**: Dẫn đầu lợi nhuận là **{top_p_name}** (**\\${top_p_val:,.0f}**) và thấp nhất là **{min_p_name}** (**\\${min_p_val:,.0f}**, chênh lệch **\\${(top_p_val - min_p_val):,.0f}**). Tổng lợi nhuận ròng của {total_rows} {entity_lbl} đạt **\\${tot_profit:,.0f}** trên doanh thu **\\${tot_rev:,.0f}** (Biên LN bình quân **{avg_margin:.1f}%**)."
+                    if not is_en else
+                    f"ℹ️ **Dual-Extreme Comparison ({total_rows} entities)**: Highest profit is **{top_p_name}** (**\\${top_p_val:,.0f}**) and lowest is **{min_p_name}** (**\\${min_p_val:,.0f}**, spread **\\${(top_p_val - min_p_val):,.0f}**). Combined net profit is **\\${tot_profit:,.0f}** on **\\${tot_rev:,.0f}** revenue (Avg Margin **{avg_margin:.1f}%**)."
+                )
+            else:
+                st.caption(
+                    f"ℹ️ **Tổng quan P&L {total_rows} {entity_lbl}**: Tổng doanh thu **\\${tot_rev:,.0f}**, tổng chi phí **\\${tot_cost:,.0f}**, mang lại tổng lợi nhuận ròng **\\${tot_profit:,.0f}** (Biên LN bình quân **{avg_margin:.1f}%**). Đối tượng dẫn đầu lợi nhuận là **{top_p_name}** (**\\${top_p_val:,.0f}**)."
+                    if not is_en else
+                    f"ℹ️ **P&L Summary across {total_rows} entities**: Total revenue **\\${tot_rev:,.0f}**, total cost **\\${tot_cost:,.0f}**, yielding net profit of **\\${tot_profit:,.0f}** (Avg Margin **{avg_margin:.1f}%**). Top contributor is **{top_p_name}** (**\\${top_p_val:,.0f}**)."
+                )
             st.write("")
             return
 
@@ -4362,8 +4969,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
                 total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
                 m_col = total_like_cols[0] if total_like_cols else (count_like_cols[0] if count_like_cols else measure_cols[0])
-        elif any(k in _uq_low for k in ["amount due", "amount_due", "công nợ", "tiền phải trả", "doanh thu", "revenue", "doanh số", "sales", "tiền", "giá trị", "spend", "chi tiêu"]) and any(any(k in str(c).lower() for k in ["amountdue", "amount_due", "totalrevenue", "totalsales", "totalamountdue", "revenue", "sales", "doanh", "spend"]) for c in measure_cols):
-            rev_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["amountdue", "amount_due", "totalrevenue", "totalsales", "totalamountdue", "revenue", "sales", "doanh", "spend"])]
+        elif any(k in _uq_low for k in ["amount due", "amount_due", "công nợ", "tiền phải trả", "doanh thu", "revenue", "doanh số", "sales", "tiền", "số tiền", "tiền mặt", "tổng số tiền", "giá trị", "spend", "chi tiêu", "amount"]) and any(any(k in str(c).lower() for k in ["amountdue", "amount_due", "totalrevenue", "totalsales", "totalamountdue", "revenue", "sales", "doanh", "spend", "tiền", "amount"]) for c in measure_cols):
+            rev_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["amountdue", "amount_due", "totalrevenue", "totalsales", "totalamountdue", "revenue", "sales", "doanh", "spend", "tiền", "amount"])]
             m_col = rev_candidates[0]
         elif any(k in _uq_low for k in ["đơn hàng", "orders", "số đơn", "lượt mua", "giao dịch"]) and any(any(k in str(c).lower() for k in ["order", "đơn"]) for c in measure_cols):
             ord_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["order", "đơn"])]
@@ -4372,7 +4979,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             hc_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["employee", "headcount", "nhân sự", "nhân viên", "emp_count", "employeecount"])]
             m_col = hc_candidates[0]
         else:
-            curr_like_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["revenue", "sales", "amount", "salary", "lương", "doanh", "cost", "profit", "quỹ"])]
+            curr_like_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["revenue", "sales", "amount", "salary", "lương", "doanh", "cost", "profit", "quỹ", "tiền"])]
             count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
             total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
             total_curr_cols = [c for c in total_like_cols if c in curr_like_cols]
@@ -4456,7 +5063,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             "top", "danh sách", "hàng đầu", "cao nhất", "thấp nhất",
             "lâu nhất", "lịch sử", "xếp hạng", "nhiều nhất", "ít nhất",
             "dẫn đầu", "nổi bật", "ranking", "longest", "shortest",
-            "lớn nhất", "nhỏ nhất", "so sánh", "bao nhiêu",
+            "lớn nhất", "nhỏ nhất", "so sánh", "bao nhiêu", "xuất sắc",
+            "xuất sắc nhất", "bán chạy", "bán chạy nhất", "quán quân", "ai là", "người nào", "ai có"
         ])
         # Phát hiện truy vấn so sánh cực trị (lớn nhất VÀ nhỏ nhất, highest AND lowest)
         _uq_low = (user_query or "").lower()
@@ -4496,16 +5104,16 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     label_series = df[other_cols[0]]
 
             if label_series is not None and max_idx in label_series.index:
-                peak_label = str(label_series.loc[max_idx])
+                peak_label = format_entity_label(label_series.loc[max_idx])
             elif label_cols:
-                peak_label = str(df.loc[max_idx, label_cols[0]])
+                peak_label = format_entity_label(df.loc[max_idx, label_cols[0]])
             else:
                 peak_label = f"#{max_idx + 1}"
 
             if label_series is not None and min_idx in label_series.index:
-                min_label = str(label_series.loc[min_idx])
+                min_label = format_entity_label(label_series.loc[min_idx])
             elif label_cols:
-                min_label = str(df.loc[min_idx, label_cols[0]])
+                min_label = format_entity_label(df.loc[min_idx, label_cols[0]])
             else:
                 min_label = f"#{min_idx + 1}"
 
@@ -4778,6 +5386,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                         entity_name = "Phòng ban" if not is_en else "Departments"
                     elif any(k in _dim_low for k in ["manager", "quản lý", "trưởng phòng"]):
                         entity_name = "Quản lý" if not is_en else "Managers"
+                    elif any(k in _dim_low for k in ["customer", "khách hàng"]):
+                        entity_name = "Khách hàng" if not is_en else "Customers"
                     elif any(k in _dim_low for k in ["employee", "nhân sự", "nhân viên", "emp", "name", "salesperson"]):
                         entity_name = "Nhân sự" if not is_en else "Employees"
                     elif any(k in _dim_low for k in ["product", "sản phẩm", "item"]):
@@ -4845,7 +5455,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     with col3:
                         st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
                     with col4:
-                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
+                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}", delta_color="off")
                 else:
                     _dim_col = label_cols[0] if label_cols else (dim_cols[0] if dim_cols else "")
                     _dim_low = str(_dim_col).lower()
@@ -4885,7 +5495,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     with col3:
                         st.metric(f"🏆 " + ("Dẫn đầu (Cao nhất)" if not is_en else "Highest"), peak_label, delta=f"{fmt_peak}")
                     with col4:
-                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}")
+                        st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}", delta_color="off")
             else:
                 # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
                 _unassigned_keywords = ["(chưa phân nhóm)", "(chưa xác định)", "(unassigned)", "chưa phân nhóm", "chưa xác định", "unassigned", "(trống)", "none", "n/a", ""]
@@ -4940,7 +5550,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     if not real_valid.empty:
                         real_max_idx = real_valid.idxmax()
                         peak_val = df.loc[real_max_idx, m_col]
-                        peak_label = str(label_series.loc[real_max_idx]) if (label_series is not None and real_max_idx in label_series.index) else str(df.loc[real_max_idx, label_cols[0]])
+                        peak_label = format_entity_label(label_series.loc[real_max_idx]) if (label_series is not None and real_max_idx in label_series.index) else format_entity_label(df.loc[real_max_idx, label_cols[0]])
                         if is_hc_measure:
                             peak_delta_val = f"{int(peak_val):,} Người"
                         else:
@@ -5002,6 +5612,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                                 _entity_top = " Quốc gia" if not is_en else " Countries"
                             elif any(k in _dim_low for k in ["product", "sản phẩm"]):
                                 _entity_top = " Sản phẩm" if not is_en else " Products"
+                            elif any(k in _dim_low for k in ["customer", "khách hàng"]):
+                                _entity_top = " Khách hàng" if not is_en else " Customers"
                             elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
                                 _entity_top = " Chức danh" if not is_en else " Job Titles"
                             elif any(k in _dim_low for k in ["manager", "quản lý"]):
@@ -5037,9 +5649,15 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                             elif any(k in _dim_low for k in ["country", "geo", "quốc gia", "thị trường"]):
                                 _card1_title = "🌍 " + ("Số thị trường" if not is_en else "Markets")
                                 _card1_val = f"{display_rows_count} Quốc gia"
+                            elif any(k in _dim_low for k in ["city", "thành phố"]):
+                                _card1_title = "🏙️ " + ("Số thành phố" if not is_en else "Cities")
+                                _card1_val = f"{display_rows_count:,} Thành phố"
                             elif any(k in _dim_low for k in ["product", "sản phẩm"]):
                                 _card1_title = "🍫 " + ("Số sản phẩm" if not is_en else "Products")
                                 _card1_val = f"{display_rows_count} Sản phẩm"
+                            elif any(k in _dim_low for k in ["customer", "khách hàng"]):
+                                _card1_title = "👤 " + ("Số khách hàng" if not is_en else "Customers")
+                                _card1_val = f"{display_rows_count} Khách hàng"
                             elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
                                 _card1_title = "💼 " + ("Số chức danh" if not is_en else "Job Titles")
                                 _card1_val = f"{display_rows_count} Chức danh"
@@ -5053,8 +5671,20 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                                 _card1_title = "📋 " + ("Tổng số đối tượng" if not is_en else "Total Entities")
                                 _card1_val = f"{display_rows_count:,}"
                             st.metric(_card1_title, _card1_val, delta=card1_delta)
+                    card2_title = f"{card_icon}{clean_card_title}{scope_suffix}"
+                    card2_delta = None
+                    pct_cols_for_c2 = [c for c in df.columns if any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "contribution", "tỷ trọng"])]
+                    if pct_cols_for_c2:
+                        try:
+                            sum_p = float(pd.to_numeric(df[pct_cols_for_c2[0]], errors="coerce").dropna().sum())
+                            if 0 < sum_p < 95.0:
+                                card2_title = f"{card_icon}{clean_card_title} (Top {display_rows_count})"
+                                card2_delta = f"Chiếm {sum_p:.2f}% toàn hệ thống" if not is_en else f"{sum_p:.2f}% of system total"
+                        except Exception:
+                            pass
+
                     with col2:
-                        st.metric(f"{card_icon}{clean_card_title}{scope_suffix}", fmt_total, help=f"Tổng số liệu trên toàn bộ {display_rows_count} đối tượng" if not is_en else f"Total aggregated across all {display_rows_count} records")
+                        st.metric(card2_title, fmt_total, delta=card2_delta, help=f"Tổng số liệu trên toàn bộ {display_rows_count} đối tượng" if not is_en else f"Total aggregated across all {display_rows_count} records")
                     with col3:
                         if is_comparison_query and total_rows == 2:
                             peak_title = "🥇 " + ("Lớn nhất" if not is_en else "Largest")
@@ -5069,6 +5699,14 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                         else:
                             peak_title = "🏆 " + ("Đội lớn nhất" if (is_hc_measure and any(k in str(label_cols[0] if label_cols else "").lower() for k in ["team", "đội"])) else ("Đỉnh cao nhất" if not is_en else "Peak Record"))
                             clean_peak_label = peak_label.replace("Representative", "Rep.").replace("Coordinator", "Coord.") if (len(peak_label) > 16 and not is_en) else peak_label
+                            pct_cols_for_peak = [c for c in df.columns if any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "contribution", "tỷ trọng"])]
+                            if pct_cols_for_peak and max_idx in df.index and not _is_pct_measure:
+                                try:
+                                    peak_pct_val = float(df.loc[max_idx, pct_cols_for_peak[0]])
+                                    if 0 < peak_pct_val <= 100:
+                                        peak_delta_val = f"{peak_delta_val} ({peak_pct_val:.2f}%)"
+                                except Exception:
+                                    pass
                             st.metric(peak_title, clean_peak_label, delta=peak_delta_val, help=f"Đối tượng dẫn đầu: {peak_label} ({peak_delta_val})" if not is_en else f"Leading record: {peak_label} ({peak_delta_val})")
 
                     if _is_db_capped and _req_top_n:
@@ -5088,6 +5726,26 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                             f"ℹ️ **HR Note**: Database records show {int(unassigned_measure_sum):,} employees ({pct_unassigned:.1f}%) "
                             f"currently unassigned to any business Team (field `Team` is blank in `people` table)."
                         )
+
+                    # Đối với tập dữ liệu phân tán cao trên nhiều thực thể (như hàng trăm thành phố)
+                    pct_cols_cands = [c for c in df.columns if any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "contribution", "tỷ trọng"])]
+                    if total_rows > 30 and pct_cols_cands and any(k in (user_query or "").lower() for k in ["tỷ lệ", "tỉ lệ", "đóng góp", "tỷ trọng", "tỉ trọng", "phần trăm"]):
+                        try:
+                            p_s = pd.to_numeric(df[pct_cols_cands[0]], errors="coerce").dropna()
+                            if not p_s.empty and float(p_s.max()) < 1.0:
+                                top10_share = float(p_s.head(10).sum())
+                                top1_name = str(df[label_cols[0]].iloc[0]) if label_cols else "Đối tượng dẫn đầu"
+                                st.caption(
+                                    f"ℹ️ **Đặc tính thị trường**: Cơ sở dữ liệu ghi nhận mức độ phân tán cao trải dài trên **{total_rows:,}** thành phố/thực thể. "
+                                    f"Thực thể dẫn đầu (**{top1_name}**) đóng góp **{p_s.max():.2f}%**, và Top 10 đóng góp lũy kế **{top10_share:.2f}%** tổng doanh thu. "
+                                    f"Biểu đồ bên dưới mặc định hiển thị Top 15 để đảm bảo trực quan rõ nét."
+                                    if not is_en else
+                                    f"ℹ️ **Market Distribution**: High fragmentation across **{total_rows:,}** entities. "
+                                    f"The leading entity (**{top1_name}**) accounts for **{p_s.max():.2f}%**, with the Top 10 cumulatively generating **{top10_share:.2f}%**. "
+                                    f"Chart defaults to Top 15 for optimal visual clarity."
+                                )
+                        except Exception:
+                            pass
             st.write("")
 
     elif total_rows == 1 and measure_cols:
@@ -5163,8 +5821,12 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         st.write("")
 
 
-def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool = False, user_query: str = ""):
-    """Render 3 Thẻ Giao Diện Độc Lập (Cards) cho Insight: Bất thường, Nguyên nhân, Đề xuất chiến lược phân cấp 3 bậc."""
+def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool = False, user_query: str = "", turn_id: str = "main"):
+    """Render 3 Thẻ Giao Diện Độc Lập (Cards) cho Insight:
+    1. Phát hiện Bất thường & Xu hướng Chính
+    2. Sơ đồ Cây Giả Thuyết & Kiểm định Nguyên nhân Gốc rễ (McKinsey Issue Tree)
+    3. Kế hoạch Hành động Phân tầng Đối tượng (CEO/CFO Macro Strategy vs Team Lead/KAM Local Execution)
+    """
     if not insights_raw and (df is None or df.empty):
         return
 
@@ -5177,7 +5839,6 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         if not text:
             return ""
         text = str(text).strip()
-        # Tách dòng rõ ràng giữa các ý: chỉ tách khi gặp ký tự • hoặc icon 🔴🟡🟢 ở giữa chuỗi
         text = re.sub(r"(?<=[^\n])\s*•\s*", "\n\n• ", text)
         text = re.sub(r"(?<=[^\n])\s*(?=[🔴🟡🟢])", "\n\n• ", text)
         raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -5186,38 +5847,200 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             l = re.sub(r"^[•\.\-\s]+", "", l).strip()
             if not l:
                 continue
-            # Tự động sửa lỗi orphaned **: nếu thiếu dấu mở ** (VD: "Tag**:" -> "**Tag**:")
             l = re.sub(r"^(?!\*\*)([^\n\*:]+)\*\*\s*:", r"**\1**:", l)
             l = f"• {l}"
             formatted_lines.append(l)
         return escape_markdown_currency_symbols("\n\n".join(formatted_lines))
 
     st.markdown("---")
-    st.markdown("#### 🤖 Strategic Insights & Executive Action Plan:" if is_en else "#### 🤖 Nhận định & Đề xuất Chiến lược từ AI:")
+    st.markdown("#### 🤖 Strategic Insights & Hypothesis-Driven Action Plan:" if is_en else "#### 🤖 Chẩn Đoán Giả Thuyết & Kế Hoạch Hành Động Phân Tầng:")
 
     # Card 1: Phát hiện bất thường & Xu hướng
     if p21:
         with st.container(border=True):
             title_21 = "🚨 1. Key Discoveries & Trend Anomalies" if is_en else "🚨 1. Phát hiện Bất thường & Xu hướng Chính"
-            st.markdown(f"<h4 style='color: #B23C00; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_21}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<h4 style='color: #F87171; margin: 2px 0 10px 0; font-size: 1.08rem; font-weight: 800;'>{title_21}</h4>", unsafe_allow_html=True)
             st.markdown(format_card_markdown(p21))
 
-    # Card 2: Giả thuyết & Nguyên nhân
-    if p22:
-        with st.container(border=True):
-            title_22 = "🔍 2. Potential Root Causes & Hypotheses" if is_en else "🔍 2. Giả thuyết & Nguyên nhân Tiềm năng"
-            st.markdown(f"<h4 style='color: #01579B; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
+    # Card 2: Sơ đồ Cây Giả Thuyết (Diagnostic Hypothesis Issue Tree)
+    from src.analytics.heuristics import generate_hypothesis_tree, generate_persona_action_plan
+    tree_data = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {}
+    branches = tree_data.get("branches", [])
+
+    with st.container(border=True):
+        title_22 = "🌿 2. Diagnostic Hypothesis Issue Tree (Hypothesis → Data Test → Verdict)" if is_en else "🌿 2. Sơ đồ Cây Giả Thuyết & Kiểm Định Dữ Liệu (Đặt Giả Thuyết → Kiểm Định → Kết Luận)"
+        st.markdown(f"<h4 style='color: #38BDF8; margin: 2px 0 8px 0; font-size: 1.08rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
+
+        if branches:
+            prob_stmt = tree_data.get("problem_statement", "")
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.85) 100%); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;">
+                <div style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px;">
+                    {'🎯 ROOT PROBLEM STATEMENT (BÀI TOÁN TRỌNG TÂM CẦN KIỂM ĐỊNH)' if not is_en else '🎯 ROOT PROBLEM STATEMENT'}
+                </div>
+                <div style="font-size: 0.9rem; font-weight: 700; color: #F8FAFC; line-height: 1.4;">
+                    {prob_stmt}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            for b in branches:
+                status = b.get("status", "PARTIAL")
+                if status == "CONFIRMED":
+                    border_c = "#10B981"
+                    bg_c = "rgba(16, 185, 129, 0.08)"
+                    badge_bg = "rgba(16, 185, 129, 0.2)"
+                    badge_c = "#34D399"
+                elif status == "PARTIAL":
+                    border_c = "#F59E0B"
+                    bg_c = "rgba(245, 158, 11, 0.07)"
+                    badge_bg = "rgba(245, 158, 11, 0.2)"
+                    badge_c = "#FBBF24"
+                else:
+                    border_c = "#64748B"
+                    bg_c = "rgba(100, 116, 139, 0.06)"
+                    badge_bg = "rgba(100, 116, 139, 0.2)"
+                    badge_c = "#94A3B8"
+
+                conf_pct = b.get("confidence", 50)
+                imp_pct = b.get("impact", 50)
+                prio_score = b.get("priority_score", 50)
+                conf_lbl = "Độ chính xác" if not is_en else "Confidence"
+                imp_lbl = "Mức tác động" if not is_en else "Impact"
+                prio_lbl = "Điểm ưu tiên" if not is_en else "Priority Score"
+
+                branch_html = f"""
+                <div style="margin-left: 14px; border-left: 3px solid {border_c}; padding-left: 12px; margin-bottom: 10px;">
+                    <div style="background: {bg_c}; border: 1px solid {border_c}55; border-radius: 9px; padding: 10px 14px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
+                            <span style="font-size: 0.88rem; font-weight: 800; color: #F8FAFC;">├─ {b.get('title')}</span>
+                            <span style="font-size: 0.7rem; font-weight: 800; color: {badge_c}; background: {badge_bg}; border: 1px solid {border_c}88; padding: 2px 8px; border-radius: 6px;">{b.get('status_label')}</span>
+                        </div>
+                        <div style="font-size: 0.82rem; color: #CBD5E1; margin-bottom: 8px; line-height: 1.45;">
+                            🔬 <b>{'Bằng chứng dữ liệu:' if not is_en else 'Data Evidence:'}</b> {b.get('evidence')}
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 0.75rem; color: #94A3B8;">
+                            <div style="flex: 1; min-width: 140px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                                    <span>🎯 {conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
+                                    <span>⚡ {imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
+                                </div>
+                                <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
+                                </div>
+                            </div>
+                            <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 6px; font-weight: 700;">
+                                🏆 {prio_lbl}: {prio_score}/100
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                """
+                st.markdown(re.sub(r'\n\s*', ' ', branch_html).strip(), unsafe_allow_html=True)
+
+            concl = tree_data.get("conclusion", "")
+            if concl:
+                st.markdown(f"""
+                <div style="background: rgba(16, 185, 129, 0.12); border-left: 4px solid #10B981; border-radius: 6px; padding: 10px 14px; margin-top: 6px; font-size: 0.85rem; color: #ECFDF5; line-height: 1.5;">
+                    💡 <b>{concl}</b>
+                </div>
+                """, unsafe_allow_html=True)
+
+            if p22:
+                with st.expander("📖 Xem thêm phân tích ngữ cảnh bổ trợ từ AI" if not is_en else "📖 View Additional AI Contextual Notes", expanded=False):
+                    st.markdown(format_card_markdown(p22))
+        elif p22:
             st.markdown(format_card_markdown(p22))
 
-    # Card 3: Đề xuất chiến lược phân cấp (Cấp bách | Trung hạn | Dài hạn)
+    # Card 3: Đề xuất Chiến lược Phân tầng theo Đối tượng (Persona-Targeted Action Plan: CEO/CFO vs Team Lead/KAM)
     if not p23 and df is not None and not df.empty:
         from src.analytics.heuristics import generate_data_grounded_action_plan
         p23 = generate_data_grounded_action_plan(df, is_en=is_en, user_query=user_query)
 
-    if p23:
-        with st.container(border=True):
-            title_23 = "🎯 3. Executive Strategic Recommendations (Urgent | Medium | Long-term)" if is_en else "🎯 3. Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)"
-            st.markdown(f"<h4 style='color: #1B5E20; margin: 2px 0 10px 0; font-size: 1.12rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
+    with st.container(border=True):
+        title_23 = "🎯 3. Role-Targeted Strategic Action Plan (Select Target Persona)" if is_en else "🎯 3. Kế Hoạch Hành Động Phân Tầng Theo Đối Tượng (Chọn Vai Trò Quản Trị)"
+        st.markdown(f"<h4 style='color: #34D399; margin: 2px 0 8px 0; font-size: 1.08rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
+
+        is_hr_ctx = tree_data.get("is_hr", False)
+        ent_type_ctx = tree_data.get("entity_type", "general")
+        is_ts_ctx = tree_data.get("is_time_series", False) or ent_type_ctx == "time_series"
+        if is_ts_ctx and is_hr_ctx:
+            persona_options = [
+                "🏛️ Ban Điều Hành (CEO / CFO / CHRO) — Hoạch định Ngân sách & Chu kỳ Dài hạn" if not is_en else "🏛️ C-Level (CEO / CFO / CHRO) — Multi-Year Budget & Cycle Planning",
+                "🎯 Quản lý Thực thi (HRBP / FP&A / Trưởng Bộ phận) — Điều phối Kế hoạch Năm & Kỳ Lương" if not is_en else "🎯 Execution Lead (HRBP / FP&A / Dept Head) — Annual Plan & Payroll Cut-off",
+                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
+            ]
+        elif is_ts_ctx:
+            persona_options = [
+                "🏛️ Ban Điều Hành (CEO / CFO) — Quản trị Chu kỳ Kinh doanh & Dòng tiền" if not is_en else "🏛️ C-Level (CEO / CFO) — Business Cycle & Cashflow Governance",
+                "🎯 Quản lý Vận hành (Giám đốc Kinh doanh / Chuỗi cung ứng / KAM) — Điều độ Theo Kỳ" if not is_en else "🎯 Operational Lead (Sales Director / Supply Chain / KAM) — Period Pacing Execution",
+                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
+            ]
+        elif is_hr_ctx:
+            persona_options = [
+                "🏛️ Ban Điều Hành (CEO / CFO / CHRO) — Cấu trúc Tổ chức & Ngân sách Vĩ mô" if not is_en else "🏛️ C-Level (CEO / CFO / CHRO) — Org Design & Macro Governance",
+                "🎯 Quản lý Khối & HRBP (Giám đốc Khối / Trưởng Phòng / HRBP) — Điều phối Định biên & Quy trình" if not is_en else "🎯 Division Head & HRBP (Department Head / HRBP) — Workforce & Process Execution",
+                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
+            ]
+        elif ent_type_ctx == "product":
+            persona_options = [
+                "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Danh mục & Phân bổ Vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Portfolio Strategy & Capital Allocation",
+                "🎯 Quản lý Ngành hàng (Category Manager / Trade Marketing / KAM) — Tối ưu SKU & Combo" if not is_en else "🎯 Category Lead (Category Manager / Trade Marketing / KAM) — SKU & Bundling Execution",
+                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
+            ]
+        else:
+            persona_options = [
+                "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Vĩ mô & Phân bổ Vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Macro Strategy & Capital Allocation",
+                "🎯 Quản lý Trực tiếp (Giám đốc Vùng / Team Lead / KAM) — Thực thi Cục bộ" if not is_en else "🎯 Operational Lead (Regional Director / Team Lead / KAM) — Local Execution",
+                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
+            ]
+        sel_persona = st.radio(
+            "Chọn đối tượng nhận báo cáo khuyến nghị:" if not is_en else "Select target audience for recommendations:",
+            options=persona_options,
+            index=0,
+            horizontal=True,
+            key=f"persona_radio_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+        )
+
+        def _render_persona_box(p_code: str, border_col: str, badge_col: str):
+            p_data = generate_persona_action_plan(df, persona=p_code, user_query=user_query, is_en=is_en)
+            kpis_html = "".join(
+                f"<span style='background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.76rem; font-weight: 600; padding: 3px 10px; border-radius: 6px;'>📌 {k}</span>"
+                for k in p_data.get("kpis", [])
+            )
+            box_header = f"""
+            <div style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 10px; padding: 12px 16px; margin-top: 8px; margin-bottom: 10px;">
+                <div style="font-size: 0.92rem; font-weight: 800; color: {badge_col}; margin-bottom: 4px;">
+                    {p_data.get('role_title')}
+                </div>
+                <div style="font-size: 0.8rem; color: #94A3B8; margin-bottom: 8px; font-style: italic;">
+                    {p_data.get('role_focus')}
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
+                    {kpis_html}
+                </div>
+            </div>
+            """
+            st.markdown(re.sub(r'\n\s*', ' ', box_header).strip(), unsafe_allow_html=True)
+            for act in p_data.get("actions", []):
+                st.markdown(escape_markdown_currency_symbols(f"• {act}"))
+
+        if df is not None and not df.empty:
+            if sel_persona == persona_options[0]:
+                _render_persona_box("ceo", "#00F0FF", "#38BDF8")
+            elif sel_persona == persona_options[1]:
+                _render_persona_box("lead", "#10B981", "#34D399")
+            else:
+                col_p1, col_p2 = st.columns(2)
+                with col_p1:
+                    _render_persona_box("ceo", "#00F0FF", "#38BDF8")
+                with col_p2:
+                    _render_persona_box("lead", "#10B981", "#34D399")
+
+            if p23:
+                with st.expander("📑 Chi tiết lộ trình 3 giai đoạn (Cấp bách | Trung hạn | Dài hạn)" if not is_en else "📑 Detailed 3-Horizon Roadmap (Urgent | Medium | Long-term)", expanded=False):
+                    st.markdown(format_card_markdown(p23))
+        elif p23:
             st.markdown(format_card_markdown(p23))
 
 
@@ -5286,27 +6109,29 @@ def render_result(result: dict, turn_id: str):
         return
 
     # 1. Hiển thị giải thích tự nhiên / Cố vấn nghiệp vụ từ AI (Zero-Red-Error Advisory Mode)
+    has_df = result.get("df") is not None and not result.get("df").empty
     if result.get("explanation"):
         title_exp = "💡 **Notice from AI Assistant:**" if is_en else "💡 **Thông báo & Cố vấn từ Trợ lý Veraxus AI:**"
         st.info(f"{title_exp}\n\n{result['explanation']}")
 
-        # Hiển thị các câu hỏi gợi ý tương thích để người dùng 1-click tiếp tục
-        followups = result.get("followups", [])
-        if followups:
-            st.markdown("##### 🚀 " + ("Compatible Suggested Queries:" if is_en else "Câu hỏi gợi ý tương thích:"))
-            cols = st.columns(min(len(followups), 3))
-            for idx, (col_f, q_text) in enumerate(zip(cols, followups[:3])):
-                with col_f:
-                    clean_q = sanitize_followup_question(q_text)
-                    if st.button(f"💬 {clean_q}", key=f"btn_exp_followup_{turn_id}_{idx}", use_container_width=True):
-                        st.session_state["submitted_query"] = clean_q
-                        st.rerun()
+        # Chỉ hiển thị danh sách câu hỏi gợi ý tương thích và dừng lại nếu KHÔNG có dữ liệu bảng để vẽ biểu đồ
+        if not has_df:
+            followups = result.get("followups", [])
+            if followups:
+                st.markdown("##### 🚀 " + ("Compatible Suggested Queries:" if is_en else "Câu hỏi gợi ý tương thích:"))
+                cols = st.columns(min(len(followups), 3))
+                for idx, (col_f, q_text) in enumerate(zip(cols, followups[:3])):
+                    with col_f:
+                        clean_q = sanitize_followup_question(q_text)
+                        if st.button(f"💬 {clean_q}", key=f"btn_exp_followup_{turn_id}_{idx}", use_container_width=True):
+                            st.session_state["submitted_query"] = clean_q
+                            st.rerun()
 
-        # Hiển thị chi tiết kỹ thuật nếu có lệnh SQL
-        if result.get("sql"):
-            with st.expander("🛠️ Technical SQL Context" if is_en else "🛠️ Chi tiết Kỹ thuật & Câu lệnh SQL", expanded=False):
-                st.code(result["sql"], language="sql")
-        return
+            # Hiển thị chi tiết kỹ thuật nếu có lệnh SQL
+            if result.get("sql"):
+                with st.expander("🛠️ Technical SQL Context" if is_en else "🛠️ Chi tiết Kỹ thuật & Câu lệnh SQL", expanded=False):
+                    st.code(result["sql"], language="sql")
+            return
 
     # 2. Hiển thị lỗi nếu có kèm Khung Sao chép Lỗi 1-Click (Copy to Clipboard)
     if result.get("error"):
@@ -5556,15 +6381,27 @@ def render_result(result: dict, turn_id: str):
                 display_df = display_df[reordered_emp]
 
             # Tự động gắn nhãn huy chương cho bảng xếp hạng Top N / Danh sách nhân sự / Vượt chuẩn
-            is_ranking = any(k in (user_query or "").lower() for k in [
-                "top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất", "chênh lệch",
-                "những nhân viên", "các nhân viên", "nhân viên nào", "ai", "thăng chức", "bổ nhiệm",
-                "những chức danh", "các chức danh", "chức danh nào", "vượt trên", "vượt mức", "vượt", "trên mức trung bình"
-            ])
+            first_col_name = str(display_df.columns[0]).lower() if len(display_df.columns) > 0 else ""
+            is_chronological_ts_table = (
+                any(k in first_col_name for k in ["year", "năm", "month", "tháng", "quarter", "quý", "period", "kỳ"])
+                and len(display_df) >= 4
+                and display_df.iloc[:, 0].astype(str).is_monotonic_increasing
+            )
+            is_ranking = (
+                not is_chronological_ts_table
+                and any(k in (user_query or "").lower() for k in [
+                    "top", "cao nhất", "thấp nhất", "xếp hạng", "danh sách", "lâu nhất", "nhiều nhất", "chênh lệch",
+                    "những nhân viên", "các nhân viên", "nhân viên nào", "ai", "thăng chức", "bổ nhiệm",
+                    "những chức danh", "các chức danh", "chức danh nào", "vượt trên", "vượt mức", "vượt", "trên mức trung bình"
+                ])
+            )
             if is_ranking and len(display_df) <= 50:
                 medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
                 display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
                 display_df.index.name = "Xếp hạng" if not is_en else "Rank"
+            elif is_chronological_ts_table:
+                display_df.index = [f"{i+1}" for i in range(len(display_df))]
+                display_df.index.name = "STT" if not is_en else "No."
 
             for col in display_df.columns:
                 if str(col).lower() in ["team", "đội ngũ", "đội"]:
@@ -5594,6 +6431,20 @@ def render_result(result: dict, turn_id: str):
                     except Exception:
                         pass
 
+            # Tự động loại bỏ các cột tỷ lệ phần trăm bị trùng lặp nội dung (e.g. TyLePhanTram & Tỷ Lệ Đóng Góp (%))
+            pct_cols_dup = [
+                c for c in display_df.columns
+                if any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "phần trăm", "share", "tyle", "phantram"])
+            ]
+            if len(pct_cols_dup) >= 2:
+                try:
+                    s0 = pd.to_numeric(display_df[pct_cols_dup[0]], errors="coerce")
+                    s1 = pd.to_numeric(display_df[pct_cols_dup[1]], errors="coerce")
+                    if (s0.round(1) == s1.round(1)).all() or (s0.fillna(0) == s1.fillna(0)).all():
+                        display_df = display_df.drop(columns=[pct_cols_dup[1]])
+                except Exception:
+                    pass
+
             column_config = {}
             for col in display_df.columns:
                 c_low = str(col).lower()
@@ -5602,9 +6453,9 @@ def render_result(result: dict, turn_id: str):
 
                 is_tenure = any(k in c_low for k in ["thâm niên", "tham_nien", "tenure", "service", "cống hiến", "kinh nghiệm", "yearsofservice", "years_of_service", "avgyears", "avgyearsofservice"])
                 is_calendar_year_or_id = (is_id_like(col) or (
-                    (any(k in c_low for k in ["hireyear", "tháng", "month"]) or c_low in ["nam", "năm", "year", "hire_year", "hiredate_year"])
+                    (c_low in ["nam", "năm", "year", "hire_year", "hiredate_year", "hireyear", "tháng", "month"])
                     and not is_tenure
-                    and not any(k in c_low for k in ["salary", "lương", "cost", "revenue", "amount", "profit", "budget", "tiền"])
+                    and not any(k in c_low for k in ["salary", "lương", "cost", "revenue", "amount", "profit", "budget", "tiền", "doanh", "$", "%", "cao nhất", "thấp nhất", "tb", "tăng trưởng", "biên độ", "số tháng"])
                 )) and not any(k in c_low for k in ["name", "tên", "department", "phòng", "title", "chức"])
 
                 if is_tenure:
@@ -5612,12 +6463,21 @@ def render_result(result: dict, turn_id: str):
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%.2f")
                     else:
                         column_config[col] = st.column_config.Column(col_label)
+                elif any(k in c_low for k in ["số tháng tăng", "số tháng liên tiếp", "streak_length", "consecutive_months_count"]):
+                    if is_num:
+                        column_config[col] = st.column_config.NumberColumn(col_label, format="%d tháng" if not is_en else "%d months")
+                    else:
+                        column_config[col] = st.column_config.Column(col_label)
                 elif is_calendar_year_or_id:
                     if is_num:
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%d")
                     else:
                         column_config[col] = st.column_config.Column(col_label)
-                elif any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỷ suất", "tỉ suất", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin", "biên", "%"]):
+                elif (
+                    any(k in c_low for k in ["pct", "percent", "percentage", "tỷ lệ", "tỉ lệ", "tỷ suất", "tỉ suất", "tỉ trọng", "tỷ trọng", "phần trăm", "share", "rate", "ratio", "margin", "biên lợi nhuận", "biên ln", "%"])
+                    and "$" not in c_low
+                    and not any(k in c_low for k in ["biên độ thay đổi", "biên độ chênh lệch", "biên độ dao động"])
+                ):
                     if is_num:
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%.2f%%")
                     else:
@@ -5627,7 +6487,7 @@ def render_result(result: dict, turn_id: str):
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%d lần" if not is_en else "%d times")
                     else:
                         column_config[col] = st.column_config.Column(col_label)
-                elif any(k in c_low for k in ["subordinateswithhighersalary", "headcount", "hires", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]):
+                elif any(k in c_low for k in ["subordinateswithhighersalary", "headcount", "hires", "count", "số lượng", "tổng số", "boxes", "thùng", "hộp", "nhân viên", "nhân sự", "slngnhnvin"]) and "$" not in c_low:
                     if is_num:
                         column_config[col] = st.column_config.NumberColumn(col_label, format="%,d")
                     else:
@@ -5635,7 +6495,7 @@ def render_result(result: dict, turn_id: str):
                 elif any(k in c_low for k in [
                     "salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales",
                     "amount", "profit", "ordervalue", "doanh thu", "doanh số", "doanh", "lợi nhuận", "lãi", "lỗ",
-                    "giá vốn", "cogs", "$"
+                    "giá vốn", "cogs", "$", "biên độ thay đổi", "tháng cao nhất", "tháng thấp nhất"
                 ]):
                     if is_num:
                         has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
@@ -5877,8 +6737,8 @@ def render_result(result: dict, turn_id: str):
             st.success("✅ No extreme anomalies or spikes detected in this dataset." if is_en else "✅ Thuật toán không phát hiện điểm đột biến hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
 
         insights = result.get("insights", "")
-        if insights:
-            render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""))
+        if insights or (df is not None and not df.empty):
+            render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""), turn_id=f"tab2_{turn_id}")
         else:
             btn_insight_text = "🔍 Generate Executive Insights & Priority Action Plan" if is_en else "🔍 Yêu cầu Veraxus phân tích Insight & Đề xuất hành động"
             if st.button(btn_insight_text, key=f"gen_insight_{turn_id}"):
@@ -5892,7 +6752,7 @@ def render_result(result: dict, turn_id: str):
                     if generated:
                         clean_gen = sanitize_insight_markdown(generated)
                         result["insights"] = clean_gen
-                        render_insight_cards(clean_gen, df=df, is_en=is_en, user_query=result.get("query", ""))
+                        render_insight_cards(clean_gen, df=df, is_en=is_en, user_query=result.get("query", ""), turn_id=f"tab2_gen_{turn_id}")
 
     # -----------------------------------------------------
     # TAB 3: DỰ BÁO XU HƯỚNG
@@ -6088,10 +6948,18 @@ def render_result(result: dict, turn_id: str):
                     st.caption(hlth.get("detail", ""))
 
             attempts = result.get("attempts", 1)
+            eval_score = evaluator.get("score", 100) if evaluator else 100
+            eval_verdict = evaluator.get("verdict", "PASS") if evaluator else "PASS"
             if attempts > 1:
-                st.info(f"🔄 **Maker-Checker Self-Correction Loop**: Tác tử Auditor đã phát hiện điểm cần tối ưu và kích hoạt Data Engineer tự sửa lỗi hoàn tất sau **{attempts} vòng lặp âm thầm (Silent Self-Healing)**.")
+                if eval_score >= 100 or eval_verdict == "PASS":
+                    st.info(f"🔄 **Maker-Checker Self-Correction Loop**: Tác tử Auditor đã phát hiện điểm cần tối ưu và kích hoạt Data Engineer tự sửa lỗi hoàn tất sau **{attempts} vòng lặp âm thầm (Silent Self-Healing)**.")
+                else:
+                    st.warning(f"⚠️ **Maker-Checker Self-Correction Notice**: Tác tử Auditor đã thực hiện **{attempts} vòng lặp kiểm định** ({eval_score}/100 — {eval_verdict}).")
             else:
-                st.success("✅ **Maker-Checker Single Pass**: Dữ liệu và truy vấn đã vượt qua toàn bộ 4 tiêu chuẩn kiểm toán ngay trong lượt đầu tiên (Điểm tuyệt đối 100/100).")
+                if eval_score >= 100 or eval_verdict == "PASS":
+                    st.success("✅ **Maker-Checker Single Pass**: Dữ liệu và truy vấn đã vượt qua toàn bộ 4 tiêu chuẩn kiểm toán ngay trong lượt đầu tiên (Điểm tuyệt đối 100/100).")
+                else:
+                    st.warning(f"⚠️ **Maker-Checker Audit Notice**: Kết quả kiểm định đạt {eval_score}/100 ({eval_verdict}).")
 
         # AGENT 4: 🔍 ANOMALY DETECTIVE & BI FORENSICS
         with st.expander("🔍 **Agent 4: Anomaly Detective & BI Forensics** (Thám tử Dị biệt & Phân tích Biến động)", expanded=False):
@@ -6113,9 +6981,9 @@ def render_result(result: dict, turn_id: str):
         # AGENT 5: 💡 EXECUTIVE STRATEGY ADVISOR
         with st.expander("💡 **Agent 5: Executive Strategy Advisor** (Cố vấn Chiến lược & Nghị quyết Điều hành C-Level)", expanded=False):
             insights = result.get("insights", "")
-            if insights:
+            if insights or (df is not None and not df.empty):
                 st.markdown("#### 💡 Khuyến nghị Trọng tâm & Kế hoạch Hành động:")
-                render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""))
+                render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""), turn_id=f"tab4_{turn_id}")
             else:
                 st.info("Chuyển sang tab 'Insight & Hành động' để xem phân tích chi tiết từ Strategy Advisor.")
 
@@ -6273,12 +7141,22 @@ def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
     # Agent 3: Data Auditor
     score = evaluator.get("score", 100) if evaluator else 100
     verdict = evaluator.get("verdict", "PASS") if evaluator else "PASS"
+    crits = evaluator.get("criteria", {}) if evaluator else {}
+    passed_pillars = sum(1 for c in crits.values() if c.get("passed")) if crits else (4 if score >= 100 else 3)
+    total_pillars = len(crits) if crits else 4
+    pillar_icon = "✅" if (passed_pillars == total_pillars and score >= 100) else "⚠️"
+    pillar_text = f"{pillar_icon} {passed_pillars}/{total_pillars} {'Pillars Check' if is_en else 'Trụ cột đạt'}"
+
     if attempts > 1:
-        audit_tag = f"Self-Healed ({attempts}x)" if is_en else f"Tự Sửa Lỗi ({attempts} Lần)"
-        audit_color = "#F59E0B"
+        if score >= 100:
+            audit_tag = f"Self-Healed ({attempts}x)" if is_en else f"Tự Sửa Lỗi ({attempts} Lần)"
+            audit_color = "#10B981"
+        else:
+            audit_tag = f"Audited ({attempts}x)" if is_en else f"Tự Sửa Lỗi ({attempts} Lần)"
+            audit_color = "#F59E0B"
     else:
         audit_tag = "Single-Pass 100%" if is_en else "Vượt Chuẩn 100%"
-        audit_color = "#10B981"
+        audit_color = "#10B981" if score >= 100 else "#F59E0B"
 
     # Agent 4: Anomaly Detective
     num_anom = len(anomalies_findings)
@@ -6328,7 +7206,7 @@ def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
 <span style="font-size: 0.6rem; font-weight: 700; color: {audit_color}; background: rgba(16, 185, 129, 0.15); padding: 1px 4px; border-radius: 4px;">{score}/100</span>
 </div>
 <div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{audit_tag}</div>
-<div style="font-size: 0.66rem; color: #94A3B8;">✅ 4/4 {'Pillars Check' if is_en else 'Trụ cột đạt'}</div>
+<div style="font-size: 0.66rem; color: #94A3B8;">{pillar_text}</div>
 </div>
 <div style="background: rgba(168, 85, 247, 0.04); border: 1px solid rgba(168, 85, 247, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">

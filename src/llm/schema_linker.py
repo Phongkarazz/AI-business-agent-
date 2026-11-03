@@ -15,7 +15,7 @@ from collections import defaultdict
 # Business synonyms and domain dictionary (Vietnamese <-> English <-> Business Metrics)
 BUSINESS_SYNONYMS: Dict[str, List[str]] = {
     # Finance / Revenue / Sales / Cash
-    "amount": ["tiền", "tiền mặt", "doanh thu", "doanh số", "doanh so", "sales", "revenue", "spend", "spending", "chi tiêu", "thanh toán", "payment", "giá trị", "total revenue", "totalrevenue"],
+    "amount": ["tiền", "tiền mặt", "doanh thu", "doanh số", "doanh so", "sales", "revenue", "spend", "spending", "chi tiêu", "thanh toán", "payment", "giá trị", "tổng giá trị", "total revenue", "totalrevenue", "tong gia tri", "total value"],
     "amount_due": ["amount due", "amount_due", "công nợ", "tiền phải trả", "tổng tiền", "hóa đơn", "invoice", "invoices"],
     "salary": ["lương", "tiền lương", "thu nhập", "bảng lương", "payroll", "wage", "compensation", "income"],
     "boxes": ["hộp", "số hộp", "số lượng hộp", "hộp kẹo", "thùng", "pack", "volume", "units", "quantity"],
@@ -51,8 +51,8 @@ BUSINESS_SYNONYMS: Dict[str, List[str]] = {
     "hire_date": ["ngày vào làm", "ngày tuyển dụng", "ngày gia nhập", "tuyển dụng", "nhập ngũ"],
     "birth_date": ["ngày sinh", "năm sinh", "sinh nhật", "tuổi"],
     "saledate": ["ngày bán", "ngày giao dịch", "thời gian bán", "order_date", "sale_date"],
-    "payment_date": ["ngày thanh toán", "ngày trả tiền", "thời điểm thanh toán", "paid_at"],
-    "rental_date": ["ngày thuê", "thời điểm thuê", "rented_at"],
+    "payment_date": ["ngày thanh toán", "ngày trả tiền", "thời điểm thanh toán", "paid_at", "thời gian", "theo thời gian", "tháng", "năm", "ngày", "thời điểm", "date", "time"],
+    "rental_date": ["ngày thuê", "thời điểm thuê", "thời gian thuê", "rented_at"],
     "from_date": ["ngày bắt đầu", "từ ngày", "hiệu lực từ"],
     "to_date": ["ngày kết thúc", "đến ngày", "hạn chót", "hiện tại"],
 }
@@ -353,6 +353,13 @@ class SchemaLinker:
         if any(k in q_low for k in ["thành phố", "city", "quốc gia", "country", "khách hàng", "customer"]):
             if "customers" in self.tables_meta and ("orders" in connected_set or "invoices" in connected_set):
                 connected_set.add("customers")
+            # Sakila Database: Thành phố liên kết qua city -> address -> customer -> payment
+            if "city" in self.tables_meta or "address" in self.tables_meta:
+                if any(k in q_low for k in ["thành phố", "city"]):
+                    if "city" in self.tables_meta: connected_set.add("city")
+                    if "address" in self.tables_meta: connected_set.add("address")
+                    if "customer" in self.tables_meta: connected_set.add("customer")
+                    if "payment" in self.tables_meta: connected_set.add("payment")
         if any(k in q_low for k in ["vị trí", "công việc", "chức danh", "chức vụ", "job title", "job_title", "nhân viên", "nhân sự", "employee", "sales rep"]):
             if "employees" in self.tables_meta:
                 connected_set.add("employees")

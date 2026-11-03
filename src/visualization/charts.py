@@ -21,6 +21,7 @@ from src.analytics.heuristics import (
     get_row_identity_column,
     pick_label_column,
     is_id_like,
+    _is_status_or_eval_column,
     unify_year_month_columns,
     ensure_full_twelve_months,
     ensure_full_four_quarters,
@@ -41,10 +42,17 @@ VI_COLUMN_MAP = {
     "number_of_films": "Số Lượng Phim",
     "totalspent": "Tổng Chi Tiêu ($)",
     "total_spent": "Tổng Chi Tiêu ($)",
-    "totalpayments": "Tổng Thanh Toán ($)",
-    "total_payments": "Tổng Thanh Toán ($)",
-    "totalpayment": "Tổng Thanh Toán ($)",
-    "total_payment": "Tổng Thanh Toán ($)",
+    "totalpayments": "Số Lượt Thanh Toán",
+    "total_payments": "Số Lượt Thanh Toán",
+    "totalpayment": "Số Lượt Thanh Toán",
+    "total_payment": "Số Lượt Thanh Toán",
+    "paymentcount": "Số Lượt Thanh Toán",
+    "payment_count": "Số Lượt Thanh Toán",
+    "totalamount": "Tổng Doanh Thu ($)",
+    "total_amount": "Tổng Doanh Thu ($)",
+    "city": "Thành Phố",
+    "city_name": "Thành Phố",
+    "cityname": "Thành Phố",
     "actorname": "Tên Diễn Viên",
     "actor_name": "Tên Diễn Viên",
     "customername": "Tên Khách Hàng",
@@ -523,6 +531,65 @@ VI_COLUMN_MAP = {
     "managername": "Tên Quản Lý",
     "manager_name": "Tên Quản Lý",
     "subordinateswithhighersalary": "Số Cấp Dưới Lương Cao Hơn",
+    "nhom": "Nhóm",
+    "giatritrungbinh": "Giá Trị Trung Bình",
+    "giatricaonhat": "Giá Trị Cao Nhất",
+    "giatrithapnhat": "Giá Trị Thấp Nhất",
+    "dochenhlech": "Độ Chênh Lệch",
+    "soluong": "Số Lượng",
+    "tonggiatri": "Tổng Giá Trị",
+    "tong_gia_tri": "Tổng Giá Trị",
+    "tenthucthe": "Tên Thực Thể",
+    "thoigian": "Thời Gian",
+    "sogiaodich": "Số Giao Dịch",
+    "soluonggiaodich": "Số Lượng Giao Dịch",
+    "sodonhang": "Số Đơn Hàng",
+    "so_don_hang": "Số Đơn Hàng",
+    "soluongdonhang": "Số Lượng Đơn Hàng",
+    "so_luong_don_hang": "Số Lượng Đơn Hàng",
+    "tensp": "Tên Sản Phẩm",
+    "ten_sp": "Tên Sản Phẩm",
+    "giavon": "Giá Vốn",
+    "gia_von": "Giá Vốn",
+    "giaban": "Giá Bán",
+    "gia_ban": "Giá Bán",
+    "ngaydat": "Ngày Đặt",
+    "ngay_dat": "Ngày Đặt",
+    "sanpham": "Sản Phẩm",
+    "donhang": "Đơn Hàng",
+    "khachhang": "Khách Hàng",
+    "chitietdonhang": "Chi Tiết Đơn Hàng",
+    "tien_da_tra": "Tiền Đã Trả ($)",
+    "tiendatra": "Tiền Đã Trả ($)",
+    "con_no": "Còn Nợ ($)",
+    "conno": "Còn Nợ ($)",
+    "lastyearsales": "Doanh Thu Năm Trước ($)",
+    "last_year_sales": "Doanh Thu Năm Trước ($)",
+    "currentyearsales": "Doanh Thu Năm Nay ($)",
+    "current_year_sales": "Doanh Thu Năm Nay ($)",
+    "changeinsales": "Mức Chênh Lệch Doanh Thu ($)",
+    "change_in_sales": "Mức Chênh Lệch Doanh Thu ($)",
+    "percentagechange": "Tỷ Lệ Thay Đổi (%)",
+    "percentage_change": "Tỷ Lệ Thay Đổi (%)",
+    "tylephantram": "Tỷ Lệ Phần Trăm (%)",
+    "ty_le_phan_tram": "Tỷ Lệ Phần Trăm (%)",
+    "tyledonggop": "Tỷ Lệ Đóng Góp (%)",
+    "ty_le_dong_gop": "Tỷ Lệ Đóng Góp (%)",
+    "ty_le": "Tỷ Lệ (%)",
+    "tyle": "Tỷ Lệ (%)",
+    "ty_trong": "Tỷ Trọng (%)",
+    "tytrong": "Tỷ Trọng (%)",
+    "phan_tram": "Phần Trăm (%)",
+    "phantram": "Phần Trăm (%)",
+    "contribution_pct": "Tỷ Lệ Đóng Góp (%)",
+    "contributionpct": "Tỷ Lệ Đóng Góp (%)",
+    "share_pct": "Tỷ Trọng (%)",
+    "sharepct": "Tỷ Trọng (%)",
+    "totalrecords": "Tổng Số Bản Ghi",
+    "total_records": "Tổng Số Bản Ghi",
+    "recordcount": "Tổng Số Bản Ghi",
+    "record_count": "Tổng Số Bản Ghi",
+    "evaluation": "Đánh Giá Cực Trị",
 }
 
 
@@ -537,8 +604,13 @@ def format_col_title(col_name: str) -> str:
     norm = re.sub(r"[^a-zA-Z0-9]", "", col_str).lower()
     if norm in VI_COLUMN_MAP:
         return VI_COLUMN_MAP[norm]
-    # Fallback to readable title case
+    # Fallback to readable title case with Vietnamese diacritics restored
     clean = re.sub(r"([a-z])([A-Z])", r"\1 \2", col_str).replace("_", " ").strip().title()
+    try:
+        from src.analytics.heuristics import restore_vietnamese_diacritics
+        clean = restore_vietnamese_diacritics(clean)
+    except Exception:
+        pass
     return clean
 
 
@@ -1375,7 +1447,7 @@ def render_insight5_manager_turnover_chart(df: pd.DataFrame, user_query: str = "
             y=turnovers,
             name="Department turnover (%)" if is_en else "Tỷ lệ turnover (%)",
             yaxis="y2",
-            mode="lines+markers+text",
+            mode="lines+markers+text" if len(depts) <= 10 else "lines+markers",
             text=[f"<b>{to:.1f}%</b>" for to in turnovers],
             textposition=to_positions,
             textfont=dict(color="#EC4899", size=11, family="Inter, Arial, sans-serif"),
@@ -1446,6 +1518,31 @@ def render_insight5_manager_turnover_chart(df: pd.DataFrame, user_query: str = "
     return _display_and_register_chart(fig, df, user_query, turn_id)
 
 
+def clean_dataframe_for_visualization(df: pd.DataFrame) -> pd.DataFrame:
+    """Làm sạch triệt để các chuỗi thời gian, timestamp rác .000000, 00:00:00
+    và chuẩn hóa các cột cho trực quan hóa biểu đồ và bảng dữ liệu."""
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            try:
+                non_null = df[col].dropna()
+                if not non_null.empty and (non_null.dt.hour == 0).all() and (non_null.dt.minute == 0).all() and (non_null.dt.second == 0).all():
+                    df[col] = non_null.dt.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        elif df[col].dtype == object or pd.api.types.is_string_dtype(df[col]):
+            try:
+                sample_s = df[col].astype(str)
+                cleaned = sample_s.str.replace(r"\s+00:00:00(?:\.0+)?$", "", regex=True)
+                cleaned = cleaned.str.replace(r"\.000000$", "", regex=True)
+                df[col] = cleaned
+            except Exception:
+                pass
+    return df
+
+
 def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user_query: str = ""):
     """Tự động phân loại cột và render biểu đồ phù hợp nhất:
     - Line/Area: Nếu có cột thời gian -> biểu đồ xu hướng theo thời gian, hiển thị đầy đủ 100% các tháng với số nằm ngang thẳng.
@@ -1459,11 +1556,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
         st.info("Không có dữ liệu để vẽ biểu đồ.")
         return None
 
+    df = clean_dataframe_for_visualization(df)
     df = ensure_full_twelve_months(df, user_query)
     df = ensure_full_four_quarters(df, user_query)
     df = unify_year_month_columns(df)
 
-    measure_cols, label_cols, time_col = get_axis_columns(df)
+    measure_cols, raw_label_cols, time_col = get_axis_columns(df)
+    non_eval_label_cols = [c for c in raw_label_cols if not _is_status_or_eval_column(df, c)]
+    label_cols = non_eval_label_cols if (non_eval_label_cols or time_col) else raw_label_cols
     row_identity_col = get_row_identity_column(df)
 
     try:
@@ -1518,6 +1618,290 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
         # Số mốc thời gian độc lập trong dữ liệu
         n_time = df[time_col].nunique(dropna=True) if time_col and time_col in df.columns else 0
+
+        # 💎 Specialized Executive Chart A: H1 vs H2 Monthly Average Sales & Improvement Rate (Dual-Axis Combo)
+        h1_c = next((c for c in df.columns if "h1" in str(c).lower() or "6t đầu" in str(c).lower()), None)
+        h2_c = next((c for c in df.columns if "h2" in str(c).lower() or "6t cuối" in str(c).lower()), None)
+        imp_c = next((c for c in df.columns if "tỷ lệ cải thiện" in str(c).lower()), None)
+        if chart_override == "Tự động" and h1_c is not None and h2_c is not None and imp_c is not None and len(df) >= 2:
+            lbl_c = label_cols[0] if label_cols else df.columns[0]
+            plot_h = df.copy()
+            plot_h[h1_c] = pd.to_numeric(plot_h[h1_c], errors="coerce").fillna(0)
+            plot_h[h2_c] = pd.to_numeric(plot_h[h2_c], errors="coerce").fillna(0)
+            plot_h[imp_c] = pd.to_numeric(plot_h[imp_c], errors="coerce").fillna(0)
+            plot_h = plot_h.sort_values(by=imp_c, ascending=False).reset_index(drop=True)
+
+            fig_h12 = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_h12.add_trace(
+                go.Bar(
+                    x=plot_h[lbl_c],
+                    y=plot_h[h1_c],
+                    name="TB Tháng 6T Đầu Năm (H1)",
+                    marker_color="#64748B",
+                    hovertemplate="<b>%{x}</b><br>TB Tháng H1: $%{y:,.2f}<extra></extra>",
+                ),
+                secondary_y=False,
+            )
+            h2_colors = ["#F59E0B" if i == 0 else "#0068FF" for i in range(len(plot_h))]
+            fig_h12.add_trace(
+                go.Bar(
+                    x=plot_h[lbl_c],
+                    y=plot_h[h2_c],
+                    name="TB Tháng 6T Cuối Năm (H2)",
+                    marker_color=h2_colors,
+                    hovertemplate="<b>%{x}</b><br>TB Tháng H2: $%{y:,.2f}<extra></extra>",
+                ),
+                secondary_y=False,
+            )
+            fig_h12.add_trace(
+                go.Scatter(
+                    x=plot_h[lbl_c],
+                    y=plot_h[imp_c],
+                    name="Tỷ Lệ Cải Thiện H2 vs H1 (%)",
+                    mode="lines+markers+text",
+                    line=dict(color="#10B981", width=2.8),
+                    marker=dict(
+                        size=[11 if i == 0 else 7 for i in range(len(plot_h))],
+                        color=["#F59E0B" if i == 0 else ("#10B981" if v >= 0 else "#F43F5E") for i, v in enumerate(plot_h[imp_c])],
+                        line=dict(width=1.5, color="#0F172A"),
+                    ),
+                    text=[f"{v:+.1f}%" for v in plot_h[imp_c]],
+                    textposition="top center",
+                    textfont=dict(size=10, color="#10B981"),
+                    hovertemplate="<b>%{x}</b><br>Tỷ lệ cải thiện: %{y:+.2f}%<extra></extra>",
+                ),
+                secondary_y=True,
+            )
+            fig_h12.add_hline(y=0, line_dash="dot", line_color="#94A3B8", line_width=1, secondary_y=True)
+            fig_h12.update_layout(
+                title=f"So Sánh Doanh Số TB Tháng (H1 vs H2) & Tỷ Lệ Cải Thiện (%) theo {format_col_title(lbl_c)}",
+                barmode="group",
+                template="plotly_white",
+                height=500,
+                xaxis=dict(tickangle=-35, automargin=True),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(l=50, r=50, t=80, b=90),
+            )
+            fig_h12.update_yaxes(title_text="Doanh Số TB Tháng ($)", tickprefix="$", secondary_y=False)
+            fig_h12.update_yaxes(title_text="Tỷ Lệ Cải Thiện (%)", ticksuffix="%", showgrid=False, secondary_y=True)
+            fig_h12 = apply_veraxus_dark_theme(fig_h12)
+            return _display_and_register_chart(fig_h12, df, user_query, turn_id)
+
+        # 💎 Specialized Executive Chart B: Monthly Revenue Spread / Volatility Ranking (Horizontal Bar with Peak-to-Trough Context)
+        spread_c = next((c for c in df.columns if "biên độ thay đổi" in str(c).lower()), None)
+        peak_m_c = next((c for c in df.columns if "tháng cao nhất" in str(c).lower()), None)
+        low_m_c = next((c for c in df.columns if "tháng thấp nhất" in str(c).lower()), None)
+        if chart_override in ("Tự động", "Bar") and spread_c is not None and peak_m_c is not None and low_m_c is not None and len(df) >= 2:
+            lbl_c = label_cols[0] if label_cols else df.columns[0]
+            vol_c = next((c for c in df.columns if "tỷ lệ biến động" in str(c).lower()), None)
+            avg_m_c = next((c for c in df.columns if "doanh thu tb/tháng" in str(c).lower() or "tb/tháng" in str(c).lower()), None)
+            pk_name_c = next((c for c in df.columns if "tháng đạt đỉnh" in str(c).lower()), None)
+            lw_name_c = next((c for c in df.columns if "tháng chạm đáy" in str(c).lower()), None)
+
+            plot_sp = df.copy()
+            plot_sp[spread_c] = pd.to_numeric(plot_sp[spread_c], errors="coerce").fillna(0)
+            plot_sp[peak_m_c] = pd.to_numeric(plot_sp[peak_m_c], errors="coerce").fillna(0)
+            plot_sp[low_m_c] = pd.to_numeric(plot_sp[low_m_c], errors="coerce").fillna(0)
+            plot_sp = plot_sp.sort_values(by=spread_c, ascending=True).reset_index(drop=True)
+
+            avg_sp = float(plot_sp[spread_c].mean())
+            sp_colors = [
+                "#F59E0B" if i == len(plot_sp) - 1 else ("#0068FF" if float(v) >= avg_sp else "#475569")
+                for i, v in enumerate(plot_sp[spread_c])
+            ]
+            bar_texts = []
+            hover_texts = []
+            for _, r in plot_sp.iterrows():
+                sp_v = float(r[spread_c])
+                pk_v = float(r[peak_m_c])
+                lw_v = float(r[low_m_c])
+                vol_v = float(pd.to_numeric(r[vol_c], errors="coerce") or 0) if vol_c else ((pk_v - lw_v) / lw_v * 100.0 if lw_v > 0 else 0)
+                avg_v = float(pd.to_numeric(r[avg_m_c], errors="coerce") or 0) if avg_m_c else 0.0
+                pk_m_s = f" ({r[pk_name_c]})" if pk_name_c and pd.notna(r[pk_name_c]) else ""
+                lw_m_s = f" ({r[lw_name_c]})" if lw_name_c and pd.notna(r[lw_name_c]) else ""
+                bar_texts.append(f"${sp_v:,.0f} (+{vol_v:.1f}%)")
+                hover_texts.append(
+                    f"<b>{r[lbl_c]}</b><br>"
+                    f"• Biên độ thay đổi: <b>${sp_v:,.2f}</b><br>"
+                    f"• Tháng cao nhất: <b>${pk_v:,.2f}</b>{pk_m_s}<br>"
+                    f"• Tháng thấp nhất: <b>${lw_v:,.2f}</b>{lw_m_s}<br>"
+                    + (f"• Doanh thu TB/tháng: <b>${avg_v:,.2f}</b><br>" if avg_v > 0 else "")
+                    + f"• Tỷ lệ biến động: <b>+{vol_v:,.2f}%</b>"
+                )
+
+            fig_sp = go.Figure(
+                go.Bar(
+                    x=plot_sp[spread_c],
+                    y=plot_sp[lbl_c],
+                    name=spread_c,
+                    orientation="h",
+                    marker_color=sp_colors,
+                    text=bar_texts,
+                    textposition="outside",
+                    textfont=dict(size=11, color="#E2E8F0"),
+                    cliponaxis=False,
+                    hovertext=hover_texts,
+                    hoverinfo="text",
+                )
+            )
+            fig_sp.add_vline(
+                x=avg_sp,
+                line_dash="dash",
+                line_color="#F59E0B",
+                line_width=2,
+                annotation_text=f"Biên độ TB (${avg_sp:,.0f})",
+                annotation_position="bottom right",
+                annotation_font=dict(color="#F59E0B", size=11),
+            )
+            max_sp = float(plot_sp[spread_c].max()) if not plot_sp.empty else 1.0
+            fig_sp.update_layout(
+                title=f"Xếp Hạng Biên Độ Thay Đổi Doanh Thu Tháng ($) theo {format_col_title(lbl_c)} (Năm 2021)",
+                template="plotly_white",
+                height=max(540, len(plot_sp) * 34 + 120),
+                xaxis=dict(title="Biên Độ Thay Đổi Doanh Thu Tháng ($)", tickprefix="$", range=[0, max_sp * 1.28]),
+                yaxis=dict(
+                    title="",
+                    type="category",
+                    categoryorder="array",
+                    categoryarray=plot_sp[lbl_c].tolist(),
+                    automargin=True,
+                ),
+                margin=dict(l=170, r=95, t=70, b=55),
+            )
+            fig_sp = apply_veraxus_dark_theme(fig_sp)
+            return _display_and_register_chart(fig_sp, df, user_query, turn_id)
+
+        # 💎 Specialized Executive Chart C: Consecutive Monthly Growth Streak Ranking
+        streak_m_c = next((c for c in df.columns if "các tháng tăng liên tục" in str(c).lower()), None)
+        streak_n_c = next((c for c in df.columns if "số tháng tăng liên tiếp" in str(c).lower()), None)
+        streak_g_c = next((c for c in df.columns if "tổng tăng trưởng chuỗi" in str(c).lower()), None)
+        if chart_override in ("Tự động", "Bar") and streak_m_c is not None and streak_n_c is not None and streak_g_c is not None and not df.empty:
+            lbl_c = label_cols[0] if label_cols else df.columns[0]
+            detail_c = next((c for c in df.columns if "chi tiết" in str(c).lower()), None)
+            avg_g_c = next((c for c in df.columns if "tăng trưởng tb" in str(c).lower()), None)
+            plot_st = df.copy()
+            plot_st[streak_g_c] = pd.to_numeric(plot_st[streak_g_c], errors="coerce").fillna(0)
+            plot_st[streak_n_c] = pd.to_numeric(plot_st[streak_n_c], errors="coerce").fillna(0)
+            plot_st["_StreakLabel"] = [
+                f"{r[lbl_c]} ({r[streak_m_c]})" for _, r in plot_st.iterrows()
+            ]
+            plot_st = plot_st.sort_values(by=[streak_n_c, streak_g_c], ascending=[True, True]).reset_index(drop=True)
+
+            st_colors = [
+                "#F59E0B" if i == len(plot_st) - 1 else ("#10B981" if int(r[streak_n_c]) >= 4 else "#0068FF")
+                for i, (_, r) in enumerate(plot_st.iterrows())
+            ]
+            st_texts = [
+                f"+{float(r[streak_g_c]):,.1f}% ({int(r[streak_n_c])} tháng)"
+                for _, r in plot_st.iterrows()
+            ]
+            st_hovers = []
+            for _, r in plot_st.iterrows():
+                det_s = f"<br>• Chi tiết từng tháng: {r[detail_c]}" if detail_c and pd.notna(r[detail_c]) else ""
+                avg_s = f"<br>• Tăng trưởng TB/tháng: <b>+{float(pd.to_numeric(r[avg_g_c], errors='coerce') or 0):.2f}%</b>" if avg_g_c and pd.notna(r[avg_g_c]) else ""
+                st_hovers.append(
+                    f"<b>{r[lbl_c]}</b><br>"
+                    f"• Chuỗi tháng tăng: <b>{r[streak_m_c]} ({int(r[streak_n_c])} tháng liên tiếp)</b><br>"
+                    f"• Tổng tăng trưởng chuỗi: <b>+{float(r[streak_g_c]):,.2f}%</b>"
+                    f"{avg_s}{det_s}"
+                )
+            fig_st = go.Figure(
+                go.Bar(
+                    x=plot_st[streak_g_c],
+                    y=plot_st["_StreakLabel"],
+                    name=streak_g_c,
+                    orientation="h",
+                    marker_color=st_colors,
+                    text=st_texts,
+                    textposition="outside",
+                    textfont=dict(size=11, color="#E2E8F0"),
+                    cliponaxis=False,
+                    hovertext=st_hovers,
+                    hoverinfo="text",
+                )
+            )
+            max_g = float(plot_st[streak_g_c].max()) if not plot_st.empty else 100.0
+            fig_st.update_layout(
+                title=f"Xếp Hạng Các Chuỗi Tăng Trưởng Doanh Số Liên Tiếp (≥3 Tháng) theo {format_col_title(lbl_c)}",
+                template="plotly_white",
+                height=max(480, len(plot_st) * 36 + 110),
+                xaxis=dict(title="Tổng Tăng Trưởng Doanh Số Trong Chuỗi (%)", ticksuffix="%", range=[0, max_g * 1.28]),
+                yaxis=dict(
+                    title="",
+                    type="category",
+                    categoryorder="array",
+                    categoryarray=plot_st["_StreakLabel"].tolist(),
+                    automargin=True,
+                ),
+                margin=dict(l=220, r=95, t=70, b=50),
+            )
+            fig_st = apply_veraxus_dark_theme(fig_st)
+            return _display_and_register_chart(fig_st, df, user_query, turn_id)
+
+        # 💎 Specialized Executive Chart D: New Product Launch Audit & Target Quarter Revenue Ranking
+        launch_dt_c = next((c for c in df.columns if "ngày mở bán đầu tiên" in str(c).lower()), None)
+        launch_st_c = next((c for c in df.columns if "trạng thái ra mắt" in str(c).lower()), None)
+        qtr_rev_c = next((c for c in df.columns if "doanh số q" in str(c).lower() or "doanh số quý" in str(c).lower()), None)
+        if chart_override == "Tự động" and launch_dt_c is not None and launch_st_c is not None and qtr_rev_c is not None and not df.empty:
+            lbl_c = label_cols[0] if label_cols else df.columns[0]
+            qtr_sh_c = next((c for c in df.columns if "tỷ trọng q" in str(c).lower() or "tỷ trọng quý" in str(c).lower()), None)
+            plot_lp = df.copy()
+            plot_lp[qtr_rev_c] = pd.to_numeric(plot_lp[qtr_rev_c], errors="coerce").fillna(0)
+            plot_lp = plot_lp.sort_values(by=qtr_rev_c, ascending=True).reset_index(drop=True)
+
+            avg_q_rev = float(plot_lp[qtr_rev_c].mean())
+            lp_colors = [
+                "#F59E0B" if i == len(plot_lp) - 1 else ("#0068FF" if float(v) >= avg_q_rev else "#475569")
+                for i, v in enumerate(plot_lp[qtr_rev_c])
+            ]
+            lp_texts = []
+            for _, r in plot_lp.iterrows():
+                qv = float(r[qtr_rev_c])
+                dt_s = str(r[launch_dt_c])
+                sh_v = float(pd.to_numeric(r[qtr_sh_c], errors="coerce") or 0) if qtr_sh_c else 0.0
+                lp_texts.append(f"${qv:,.0f} (Mở bán: {dt_s} | {sh_v:.1f}% cả năm)")
+
+            fig_lp = go.Figure(
+                go.Bar(
+                    x=plot_lp[qtr_rev_c],
+                    y=plot_lp[lbl_c],
+                    orientation="h",
+                    marker_color=lp_colors,
+                    text=lp_texts,
+                    textposition="outside",
+                    cliponaxis=False,
+                    hovertemplate=(
+                        "<b>%{y}</b><br>"
+                        f"{qtr_rev_c}: $%{{x:,.2f}}<extra></extra>"
+                    ),
+                )
+            )
+            fig_lp.add_vline(
+                x=avg_q_rev,
+                line_dash="dash",
+                line_color="#F59E0B",
+                line_width=2,
+                annotation_text=f"TB Danh mục (${avg_q_rev:,.0f})",
+                annotation_position="bottom right",
+                annotation_font=dict(color="#F59E0B", size=11),
+            )
+            max_qv = float(plot_lp[qtr_rev_c].max()) if not plot_lp.empty else 1.0
+            fig_lp.update_layout(
+                title=f"Kiểm Toán Ngày Mở Bán Đầu Tiên & Xếp Hạng {qtr_rev_c} theo {format_col_title(lbl_c)}",
+                template="plotly_white",
+                height=max(460, len(plot_lp) * 34 + 110),
+                xaxis=dict(title=str(qtr_rev_c), tickprefix="$", range=[0, max_qv * 1.38]),
+                yaxis=dict(
+                    title="",
+                    type="category",
+                    categoryorder="array",
+                    categoryarray=plot_lp[lbl_c].tolist(),
+                    automargin=True,
+                ),
+                margin=dict(l=160, r=90, t=70, b=50),
+            )
+            fig_lp = apply_veraxus_dark_theme(fig_lp)
+            return _display_and_register_chart(fig_lp, df, user_query, turn_id)
 
         if chart_override == "Tự động":
             # 0. QUY TẮC ADAPTIVE VIZ: Chặn vẽ biểu đồ vô nghĩa cho kết quả tổng hợp 1 dòng (Single-row metric aggregate)
@@ -1578,34 +1962,59 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
             ])
             non_pct_cols = [c for c in measure_cols if c not in pct_cols]
             is_top_ranking = any(k in uq_low for k in ["top", "cao nhất", "thấp nhất", "lâu nhất", "xếp hạng", "danh sách", "liệt kê"])
-            user_asked_time_trend = any(k in uq_low for k in ["qua các", "qua từng", "theo tháng", "theo năm", "theo quý", "biến động", "xu hướng", "trend", "thay đổi"])
+            user_asked_time_trend = (
+                any(k in uq_low for k in [
+                    "qua các", "qua từng", "theo tháng", "theo từng tháng", "từng tháng", "mỗi tháng", "các tháng", "trong các tháng", "hàng tháng",
+                    "theo năm", "theo từng năm", "từng năm", "mỗi năm", "các năm", "qua các năm", "hàng năm",
+                    "theo quý", "theo từng quý", "từng quý", "mỗi quý", "các quý", "qua các quý", "hàng quý",
+                    "theo ngày", "theo từng ngày", "từng ngày", "mỗi ngày", "hàng ngày",
+                    "biến động", "xu hướng", "diễn biến", "trend", "thay đổi", "tăng trưởng", "tiến trình", "lịch sử", "timeline",
+                    "khoảng thời gian", "thời gian nào", "thời điểm nào", "giai đoạn nào", "chu kỳ nào", "mốc thời gian",
+                    "monthly", "quarterly", "yearly", "annually", "over time", "by month", "by quarter", "by year"
+                ])
+                or bool(re.search(r"\b(theo|trong|qua)\s+(từng|các|mỗi)?\s*(tháng|quý|năm|ngày|month|quarter|year|date)\b", uq_low))
+                or (time_col is not None and any(k in uq_low for k in ["theo", "qua", "trong"]) and any(k in str(time_col).lower() for k in ["month", "tháng", "quarter", "quý", "year", "năm", "date", "ngày"]))
+            )
 
-            # Kiểm tra xem cột phần trăm có tổng xấp xỉ 100% (cơ cấu thành phần khép kín)
+            is_order_benchmark_share_df = (
+                any(any(k in str(c).lower() for k in ["nhóm đơn hàng", "ordergroup", "order_group", "phân nhóm đơn"]) for c in df.columns)
+                or (
+                    any(any(k in str(c).lower() for k in ["mức tb chuẩn", "avgbenchmark", "benchmark"]) for c in df.columns)
+                    and any(any(k in str(c).lower() for k in ["tỷ trọng số đơn", "tỉ trọng số đơn", "ordershare", "order_share"]) for c in df.columns)
+                )
+            )
+
+            # Kiểm tra xem có cột phần trăm nào có tổng xấp xỉ 100% (cơ cấu thành phần khép kín)
             pct_sum_approx_100 = False
-            if has_single_pct_col and 2 <= len(df) <= 10:
-                try:
-                    s_val = float(pd.to_numeric(df[pct_cols[0]], errors="coerce").sum())
-                    if abs(s_val - 100.0) <= 3.0:
-                        pct_sum_approx_100 = True
-                except Exception:
-                    pass
+            if pct_cols and 2 <= len(df) <= 10:
+                for _pc in pct_cols:
+                    try:
+                        s_val = float(pd.to_numeric(df[_pc], errors="coerce").sum())
+                        if abs(s_val - 100.0) <= 3.0:
+                            pct_sum_approx_100 = True
+                            break
+                    except Exception:
+                        pass
 
             is_distribution_breakdown = (
-                (
-                    (len(measure_cols) == 1 and (user_asked_pct or (has_single_pct_col and not non_pct_cols)))
-                    or (pct_sum_approx_100 and (user_asked_pct or has_single_pct_col))
-                    or (user_asked_pct and has_single_pct_col and len(df) <= 10)
+                is_order_benchmark_share_df
+                or (
+                    (
+                        (len(measure_cols) == 1 and (user_asked_pct or (has_single_pct_col and not non_pct_cols)))
+                        or (pct_sum_approx_100 and (user_asked_pct or has_single_pct_col))
+                        or (user_asked_pct and len(pct_cols) >= 1 and len(df) <= 10)
+                    )
+                    and (2 <= len(df) <= 10)
+                    and (len(pct_cols) <= 2)
+                    and (not time_col or n_time <= 1)  # TUYỆT ĐỐI không dùng Pie cho chuỗi thời gian n_time > 1
+                    and not user_asked_time_trend
+                    and not is_individual_entity
+                    and not is_top_ranking
+                    and not any(k in uq_low for k in ["thăng chức", "đổi chức danh", "chuyển chức danh", "thay đổi chức danh", "promotion", "promoted", "tỷ lệ thăng chức", "tỉ lệ thăng chức"])
+                    and not any(any(k in str(c).lower() for k in ["promotionrate", "thăng chức", "promoted"]) for c in measure_cols)
+                    and not (len(measure_cols) == 1 and any(k in str(measure_cols[0]).lower() for k in ["rate", "thăng chức", "promotion"]))
+                    and not (len(measure_cols) == 1 and not user_asked_pct and any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "thu nhập", "wage", "pay", "sales", "doanh", "amount", "revenue"]))
                 )
-                and (2 <= len(df) <= 10)
-                and (len(pct_cols) <= 1)
-                and (not time_col or n_time <= 1)  # TUYỆT ĐỐI không dùng Pie cho chuỗi thời gian n_time > 1
-                and not user_asked_time_trend
-                and not is_individual_entity
-                and not is_top_ranking
-                and not any(k in uq_low for k in ["thăng chức", "đổi chức danh", "chuyển chức danh", "thay đổi chức danh", "promotion", "promoted", "tỷ lệ thăng chức", "tỉ lệ thăng chức"])
-                and not any(any(k in str(c).lower() for k in ["promotionrate", "thăng chức", "promoted"]) for c in measure_cols)
-                and not (len(measure_cols) == 1 and any(k in str(measure_cols[0]).lower() for k in ["rate", "thăng chức", "promotion"]))
-                and not (len(measure_cols) == 1 and not user_asked_pct and any(k in str(measure_cols[0]).lower() for k in ["salary", "lương", "thu nhập", "wage", "pay", "sales", "doanh", "amount", "revenue"]))
             )
 
             is_gender_compare = (
@@ -1619,13 +2028,40 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 and n_time <= 10
             )
 
-            if is_distribution_breakdown:
-                chosen = "Pie"
+            # Phân biệt rõ: Xếp hạng thời gian cực trị (chỉ khi trả về <= 3 mốc thời gian cực trị) vs Xu hướng thời gian (toàn bộ chuỗi >= 4 mốc thời gian)
+            is_top_period = (
+                any(k in uq_low for k in ["top", "tháng nào", "quý nào", "năm nào"])
+                and any(k in uq_low for k in ["cao nhất", "thấp nhất", "nhiều nhất", "ít nhất", "lớn nhất", "nhỏ nhất"])
+                and not user_asked_time_trend
+                and n_time <= 3
+            )
+            is_time_series_data = (
+                time_col is not None 
+                and measure_cols 
+                and n_time > 1 
+                and not is_top_period
+            )
+
+            # 1. QUY TẮC VÀNG CHUỖI THỜI GIAN (TIME-SERIES / TEMPORAL TREND):
+            # Nếu dữ liệu có trục thời gian (Month, Quarter, Year, Date) với >= 2 mốc thời gian:
+            # - Khi người dùng hỏi xu hướng/diễn biến hoặc bảng là chuỗi thời gian thuần túy (not label_cols):
+            #   -> BẮT BUỘC CHỌN LINE CHART (hoặc Combo Multi-Metric Time-Series) để đảm bảo tính liên tục niên đại và biểu diễn đầy đủ các chỉ số!
+            if is_time_series_data and (user_asked_time_trend or not label_cols or len(df.columns) <= 3):
+                chosen = "Line"
+            elif is_distribution_breakdown:
+                chosen = "Bar Ngang" if len(df) > 6 else "Pie"
+            elif (is_gender_compare or is_multi_measure_compare) and measure_cols:
+                chosen = "Bar"
+            elif (
+                is_top_ranking 
+                or is_individual_entity 
+                or any(k in uq_low for k in ["từng dòng", "từng sản phẩm", "mỗi sản phẩm", "các sản phẩm", "dòng sản phẩm", "theo sản phẩm", "từng nhân viên", "mỗi nhân viên", "từng người", "từng khách hàng", "mỗi khách hàng", "per box", "mỗi hộp", "mỗi đơn"])
+            ) and not user_asked_time_trend and measure_cols and len(df) <= 25:
+                chosen = "Bar Ngang"
+            elif is_top_ranking and not user_asked_time_trend and measure_cols:
+                chosen = "Bar"
             elif is_individual_entity and measure_cols:
-                if is_top_ranking and len(df) <= 15 and len(measure_cols) == 1:
-                    chosen = "Bar Ngang"
-                else:
-                    chosen = "Bar"
+                chosen = "Bar"
             elif time_col and measure_cols and n_time > 1:
                 chosen = "Line"
             elif (is_gender_compare or is_multi_measure_compare) and measure_cols:
@@ -1696,7 +2132,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
         if chosen == "Line" and time_col and measure_cols:
             sorted_df = df.sort_values([time_color_col, time_col]) if time_color_col else df.sort_values(time_col)
             n_time_points = sorted_df[time_col].nunique(dropna=True)
-            tick_angle = 0 if n_time_points <= 20 else -45
+            max_time_str_len = max([len(str(x)) for x in sorted_df[time_col].dropna().head(20)], default=0)
+            if n_time_points > 20 or max_time_str_len > 7:
+                tick_angle = -35 if max_time_str_len <= 12 else -45
+            else:
+                tick_angle = 0
             y_range = None
             diff_unit_or_scale = False
 
@@ -1745,7 +2185,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         if p_cols:
                             target_m = p_cols[0]
                         else:
-                            s_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["doanh thu", "sales", "amount"])]
+                            s_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["doanh thu", "sales", "amount", "tiền", "số tiền", "tiền mặt"])]
                             target_m = s_cols[0] if s_cols else measure_cols[0]
 
                     options = [format_col_title(c) for c in measure_cols]
@@ -2096,23 +2536,279 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             labels=labels_map
                         )
                         fig.update_traces(line=dict(width=3), marker=dict(size=8))
+                        fig.for_each_trace(lambda t: t.update(name=format_col_title(t.name)))
+                        fig.update_layout(legend_title_text="")
                 else:
-                    chart_title = f"Xu hướng qua từng {clean_time}{time_range_str}"
-                    labels_map = {c: format_col_title(c) for c in measure_cols}
-                    palette = ["#0068FF", "#FF7A00", "#10B981", "#8B5CF6", "#EC4899", "#F59E0B", "#3B82F6", "#14B8A6"]
-                    fig = px.line(
-                        sorted_df,
-                        x=time_col,
-                        y=measure_cols,
-                        markers=True,
-                        title=chart_title,
-                        template="plotly_white",
-                        color_discrete_sequence=palette,
-                        labels=labels_map
-                    )
-                    fig.update_traces(line=dict(width=3), marker=dict(size=8))
+                    # Phân tách nhóm chỉ số tiền tệ ($: Avg / Max / Min Salary) và nhóm chỉ số quy mô/bản ghi (TotalRecords / Headcount)
+                    curr_cols = [
+                        c for c in measure_cols
+                        if any(k in str(c).lower() for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                    ]
+                    vol_cols = [
+                        c for c in measure_cols
+                        if c not in curr_cols and any(k in str(c).lower() for k in ["record", "bản ghi", "count", "headcount", "employees", "nhân sự", "nhân viên", "số lượng", "orders", "boxes", "giao dịch"])
+                    ]
+                    avg_band_c = next((c for c in curr_cols if any(k in str(c).lower() for k in ["avg", "average", "trung bình", "bình quân"])), None)
+                    max_band_c = next((c for c in curr_cols if any(k in str(c).lower() for k in ["max", "cao nhất", "đỉnh", "trần"])), None)
+                    min_band_c = next((c for c in curr_cols if any(k in str(c).lower() for k in ["min", "thấp nhất", "đáy", "sàn"])), None)
 
-            if not (len(measure_cols) == 2 and not time_color_col and not is_gender_line and diff_unit_or_scale):
+                    if avg_band_c and max_band_c and min_band_c:
+                        diff_unit_or_scale = True
+                        has_vol_axis = len(vol_cols) > 0
+                        vol_c = vol_cols[0] if has_vol_axis else None
+                        eval_c = next((c for c in sorted_df.columns if _is_status_or_eval_column(sorted_df, c)), None)
+
+                        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+                        # Xác định xem time_col có phải là năm (Year dạng số 1900..2100) để dùng trục linear chuẩn xác, tránh lỗi nén category
+                        time_numeric = pd.to_numeric(sorted_df[time_col], errors="coerce")
+                        is_year_numeric = bool(
+                            time_numeric.notna().all()
+                            and (time_numeric.min() >= 1900)
+                            and (time_numeric.max() <= 2100)
+                            and (time_numeric.nunique() == len(sorted_df))
+                        )
+
+                        if is_year_numeric:
+                            x_vals = time_numeric.astype(int).tolist()
+                            min_yr = int(min(x_vals))
+                            max_yr = int(max(x_vals))
+                        else:
+                            x_vals = sorted_df[time_col].astype(str).tolist()
+                            min_yr, max_yr = None, None
+
+                        # 1. Vẽ cột Quy mô bản ghi / Nhân sự trên trục Y phụ (nền mờ tinh tế) để phản ánh đủ 100% các cột dữ liệu
+                        if has_vol_axis and vol_c:
+                            clean_vol = format_col_title(vol_c)
+                            fig.add_trace(
+                                go.Bar(
+                                    x=x_vals,
+                                    y=sorted_df[vol_c],
+                                    name=f"📊 {clean_vol} (Trục phải)",
+                                    marker_color="rgba(148, 163, 184, 0.16)",
+                                    marker_line=dict(color="rgba(148, 163, 184, 0.35)", width=1),
+                                    hovertemplate=f"{clean_vol}: <b>%{{y:,.0f}}</b><extra></extra>",
+                                    width=0.45 if is_year_numeric else None,
+                                    opacity=0.85
+                                ),
+                                secondary_y=True
+                            )
+
+                        # 2. Vẽ Dải biên độ Lương Thấp Nhất (Sàn) -> Lương Cao Nhất (Trần) với vùng tô mờ (Shaded Band)
+                        clean_min = format_col_title(min_band_c)
+                        clean_max = format_col_title(max_band_c)
+                        clean_avg = format_col_title(avg_band_c)
+
+                        fig.add_trace(
+                            go.Scatter(
+                                x=x_vals,
+                                y=sorted_df[min_band_c],
+                                name=f"🟢 {clean_min} (Sàn)",
+                                mode="lines+markers",
+                                line=dict(width=2.2, color="#34D399", dash="dot"),
+                                marker=dict(size=6, color="#34D399", symbol="circle-open"),
+                                hovertemplate=f"{clean_min} (Sàn): <b>$%{{y:,.0f}}</b><extra></extra>"
+                            ),
+                            secondary_y=False
+                        )
+                        fig.add_trace(
+                            go.Scatter(
+                                x=x_vals,
+                                y=sorted_df[max_band_c],
+                                name=f"🟣 {clean_max} (Trần)",
+                                mode="lines+markers",
+                                line=dict(width=2.2, color="#C084FC", dash="dash"),
+                                marker=dict(size=6, color="#C084FC", symbol="diamond-open"),
+                                fill="tonexty",
+                                fillcolor="rgba(0, 240, 255, 0.05)",
+                                hovertemplate=f"{clean_max} (Trần): <b>$%{{y:,.0f}}</b><extra></extra>"
+                            ),
+                            secondary_y=False
+                        )
+
+                        # 3. Vẽ đường Trọng tâm Lương Trung Bình + Highlight Điểm Đỉnh (Peak 🏆) & Điểm Đáy (Trough 📉)
+                        avg_series = pd.to_numeric(sorted_df[avg_band_c], errors="coerce")
+                        peak_idx = avg_series.idxmax() if not avg_series.dropna().empty else None
+                        trough_idx = avg_series.idxmin() if not avg_series.dropna().empty else None
+
+                        pt_colors = []
+                        pt_sizes = []
+                        pt_symbols = []
+                        avg_hover_texts = []
+
+                        for r_idx, row in sorted_df.iterrows():
+                            v_avg = float(row[avg_band_c]) if pd.notna(row[avg_band_c]) else 0.0
+                            v_max = float(row[max_band_c]) if pd.notna(row[max_band_c]) else 0.0
+                            v_min = float(row[min_band_c]) if pd.notna(row[min_band_c]) else 0.0
+                            v_spread = v_max - v_min
+                            eval_str = f"<br>Đánh giá: <b>{row[eval_c]}</b>" if (eval_c and pd.notna(row[eval_c])) else ""
+                            p_val_str = f"Năm {int(row[time_col])}" if is_year_numeric else f"{clean_time} {row[time_col]}"
+
+                            if r_idx == peak_idx:
+                                pt_colors.append("#F59E0B")
+                                pt_sizes.append(14)
+                                pt_symbols.append("star")
+                            elif r_idx == trough_idx:
+                                pt_colors.append("#F43F5E")
+                                pt_sizes.append(13)
+                                pt_symbols.append("diamond")
+                            else:
+                                pt_colors.append("#00F0FF")
+                                pt_sizes.append(8)
+                                pt_symbols.append("circle")
+
+                            avg_hover_texts.append(
+                                f"<b>{p_val_str}</b>"
+                                f"<br>⭐ {clean_avg}: <b>${v_avg:,.2f}</b>"
+                                f"<br>📐 Biên độ Trần - Sàn: ${v_spread:,.0f}"
+                                f"{eval_str}"
+                            )
+
+                        fig.add_trace(
+                            go.Scatter(
+                                x=x_vals,
+                                y=sorted_df[avg_band_c],
+                                name=f"🌟 {clean_avg} (Trọng tâm)",
+                                mode="lines+markers",
+                                line=dict(width=3.8, color="#00F0FF"),
+                                marker=dict(
+                                    size=pt_sizes,
+                                    color=pt_colors,
+                                    symbol=pt_symbols,
+                                    line=dict(width=2, color="#FFFFFF")
+                                ),
+                                text=avg_hover_texts,
+                                hovertemplate="%{text}<extra></extra>"
+                            ),
+                            secondary_y=False
+                        )
+
+                        # Gắn nhãn chú thích trực tiếp (Callout Annotations) cho Năm Đạt Đỉnh & Năm Chạm Đáy
+                        if peak_idx is not None and peak_idx in sorted_df.index:
+                            pk_row = sorted_df.loc[peak_idx]
+                            pk_x = int(pk_row[time_col]) if is_year_numeric else str(pk_row[time_col])
+                            pk_y = float(pk_row[avg_band_c])
+                            fig.add_annotation(
+                                x=pk_x,
+                                y=pk_y,
+                                text=f"🏆 Đỉnh {pk_x}: ${pk_y:,.0f}",
+                                showarrow=True,
+                                arrowhead=2,
+                                arrowsize=1,
+                                arrowwidth=1.8,
+                                arrowcolor="#F59E0B",
+                                ax=0,
+                                ay=-36,
+                                bgcolor="rgba(245, 158, 11, 0.95)",
+                                bordercolor="#FFFFFF",
+                                borderwidth=1.5,
+                                borderpad=4,
+                                font=dict(size=11, color="#000000", family="'Inter', sans-serif")
+                            )
+                        if trough_idx is not None and trough_idx in sorted_df.index and trough_idx != peak_idx:
+                            tr_row = sorted_df.loc[trough_idx]
+                            tr_x = int(tr_row[time_col]) if is_year_numeric else str(tr_row[time_col])
+                            tr_y = float(tr_row[avg_band_c])
+                            fig.add_annotation(
+                                x=tr_x,
+                                y=tr_y,
+                                text=f"📉 Đáy {tr_x}: ${tr_y:,.0f}",
+                                showarrow=True,
+                                arrowhead=2,
+                                arrowsize=1,
+                                arrowwidth=1.8,
+                                arrowcolor="#F43F5E",
+                                ax=0,
+                                ay=36,
+                                bgcolor="rgba(244, 63, 94, 0.95)",
+                                bordercolor="#FFFFFF",
+                                borderwidth=1.5,
+                                borderpad=4,
+                                font=dict(size=11, color="#FFFFFF", family="'Inter', sans-serif")
+                            )
+
+                        chart_title = f"Biến Động Dải Lương (TB, Trần, Sàn) & Quy Mô Bản Ghi qua từng {clean_time}{time_range_str}" if has_vol_axis else f"Biến Động Dải Lương (TB, Trần, Sàn) qua từng {clean_time}{time_range_str}"
+
+                        # Cấu hình trục hoành X chuẩn xác: Nếu là năm số nguyên thì dùng linear dtick=1 để hiển thị từng năm đều đẹp
+                        if is_year_numeric:
+                            xaxis_cfg = dict(
+                                type="linear",
+                                tickmode="linear",
+                                tick0=min_yr,
+                                dtick=1,
+                                range=[min_yr - 0.6, max_yr + 0.6],
+                                tickangle=-45 if len(x_vals) > 10 else 0,
+                                automargin=True,
+                                title=clean_time
+                            )
+                        else:
+                            xaxis_cfg = dict(
+                                type="category",
+                                categoryorder="array",
+                                categoryarray=x_vals,
+                                tickangle=tick_angle,
+                                automargin=True,
+                                title=clean_time
+                            )
+
+                        fig.update_layout(
+                            title=dict(
+                                text=chart_title,
+                                font=dict(size=15, color="#FFFFFF"),
+                                x=0.02,
+                                y=0.98,
+                                xanchor="left",
+                                yanchor="top"
+                            ),
+                            template="plotly_white",
+                            xaxis=xaxis_cfg,
+                            yaxis=dict(
+                                title="Mức Lương ($)",
+                                tickprefix="$",
+                                showgrid=True,
+                                automargin=True
+                            ),
+                            yaxis2=dict(
+                                title=format_col_title(vol_c) if (has_vol_axis and vol_c) else "",
+                                showgrid=False,
+                                automargin=True,
+                                rangemode="tozero"
+                            ),
+                            hovermode="x unified",
+                            legend=dict(
+                                orientation="h",
+                                yanchor="top",
+                                y=-0.18 if (is_year_numeric or tick_angle != 0) else -0.14,
+                                xanchor="center",
+                                x=0.5,
+                                font=dict(size=11, color="#CBD5E1"),
+                                bgcolor="rgba(21, 26, 48, 0.75)",
+                                bordercolor="rgba(0, 240, 255, 0.25)"
+                            ),
+                            height=560,
+                            margin=dict(l=45, r=45, t=75, b=95 if (is_year_numeric or tick_angle != 0) else 75)
+                        )
+                    else:
+                        diff_unit_or_scale = False
+                        plot_m_cols = curr_cols if (curr_cols and vol_cols) else measure_cols
+                        chart_title = f"Xu hướng qua từng {clean_time}{time_range_str}"
+                        labels_map = {c: format_col_title(c) for c in plot_m_cols}
+                        palette = ["#0068FF", "#FF7A00", "#10B981", "#8B5CF6", "#EC4899", "#F59E0B", "#3B82F6", "#14B8A6"]
+                        fig = px.line(
+                            sorted_df,
+                            x=time_col,
+                            y=plot_m_cols,
+                            markers=True,
+                            title=chart_title,
+                            template="plotly_white",
+                            color_discrete_sequence=palette,
+                            labels=labels_map
+                        )
+                        fig.update_traces(line=dict(width=3), marker=dict(size=8))
+                        fig.for_each_trace(lambda t: t.update(name=format_col_title(t.name)))
+                        fig.update_layout(legend_title_text="")
+
+            if not (len(measure_cols) >= 2 and not time_color_col and not is_gender_line and diff_unit_or_scale):
                 if is_gender_line:
                     curr_metric_name = male_cols[0]
                     m_title = f"{m_name} ($)" if is_curr_m else m_name
@@ -2139,9 +2835,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     ),
                     yaxis=yaxis_cfg,
                     hovermode="x unified" if (time_color_col or len(measure_cols) > 1 or is_gender_line) else None,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="right", x=1) if (time_color_col or len(measure_cols) > 1 or is_gender_line) else None,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1) if (time_color_col or len(measure_cols) > 1 or is_gender_line) else None,
                     height=520,
-                    margin=dict(l=30, r=30, t=50, b=60)
+                    margin=dict(l=40, r=30, t=85, b=75 if tick_angle != 0 else 60)
                 )
 
         elif chosen == "Area" and time_col and measure_cols:
@@ -2199,7 +2895,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         marker_color="#0068FF",
                         text=plot_df[val_col],
                         texttemplate="$%{text:,.0f}" if any(k in val_col.lower() for k in ["sales", "salary", "amount", "budget"]) else "%{text:,.0f}",
-                        textposition="outside"
+                        textposition="outside" if len(plot_df) <= 12 else "none",
+                        hovertemplate="<b>%{x}</b><br>" + format_col_title(val_col) + ": " + ("$%{y:,.0f}" if any(k in val_col.lower() for k in ["sales", "salary", "amount", "budget"]) else "%{y:,.0f}") + "<extra></extra>"
                     ),
                     secondary_y=False
                 )
@@ -2208,12 +2905,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         x=plot_df[lbl_col],
                         y=plot_df[cum_col],
                         name=format_col_title(cum_col),
-                        mode="lines+markers+text",
+                        mode="lines+markers+text" if len(plot_df) <= 10 else "lines+markers",
                         marker=dict(size=8, color="#D97706"),
                         line=dict(width=3, color="#D97706"),
                         text=plot_df[cum_col],
                         texttemplate="%{text:.1f}%",
-                        textposition="top center"
+                        textposition="top center",
+                        hovertemplate="<b>%{x}</b><br>" + format_col_title(cum_col) + ": <b>%{y:.1f}%</b><extra></extra>"
                     ),
                     secondary_y=True
                 )
@@ -2231,23 +2929,97 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     xaxis=dict(type="category", tickangle=tick_angle, automargin=True, title=format_col_title(lbl_col)),
                     yaxis=dict(title=format_col_title(val_col), tickprefix="$" if any(k in val_col.lower() for k in ["sales", "salary", "amount", "budget"]) else ""),
                     yaxis2=dict(title=format_col_title(cum_col), ticksuffix="%", range=[0, 105], showgrid=False),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    margin=dict(l=40, r=40, t=60, b=85 if tick_angle != 0 else 50)
+                    legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+                    margin=dict(l=40, r=40, t=85, b=85 if tick_angle != 0 else 50)
                 )
                 fig = apply_veraxus_dark_theme(fig)
                 return _display_and_register_chart(fig, df, user_query, turn_id)
+
+            # 0.08 Trường hợp đặc biệt: Phân Tích Tỷ Trọng Đơn Hàng So Với Ngưỡng Trung Bình (Order Benchmark Share Grouped Bar)
+            is_order_bm_bar = (
+                any(any(k in str(c).lower() for k in ["nhóm đơn hàng", "ordergroup", "order_group", "phân nhóm đơn"]) for c in df.columns)
+                or (
+                    any(any(k in str(c).lower() for k in ["mức tb chuẩn", "avgbenchmark", "benchmark"]) for c in df.columns)
+                    and any(any(k in str(c).lower() for k in ["tỷ trọng số đơn", "tỉ trọng số đơn", "ordershare", "order_share"]) for c in df.columns)
+                )
+            )
+            if is_order_bm_bar and label_cols and len(df) >= 2:
+                lbl_col = label_cols[0]
+                plot_df = df.copy()
+                ord_pct_c = next((c for c in df.columns if any(k in str(c).lower() for k in ["tỷ trọng số đơn", "tỉ trọng số đơn", "ordershare", "order_share"])), None)
+                val_pct_c = next((c for c in df.columns if c != ord_pct_c and any(k in str(c).lower() for k in ["tỷ trọng doanh số", "tỉ trọng doanh số", "tỷ trọng doanh thu", "tỷ trọng số hộp", "revenueshare", "salesshare", "boxesshare"])), None)
+                ord_cnt_c = next((c for c in df.columns if c != lbl_col and any(k in str(c).lower() for k in ["số lượng đơn", "soluongdon", "orderscount"]) and not any(x in str(c).lower() for x in ["%", "tỷ trọng", "tỉ trọng"])), None)
+                val_tot_c = next((c for c in df.columns if c != lbl_col and any(k in str(c).lower() for k in ["tổng doanh số", "tổng doanh thu", "totalsales", "totalrevenue", "tổng số hộp", "totalboxes"]) and not any(x in str(c).lower() for x in ["%", "tỷ trọng", "tỉ trọng", "tb chuẩn", "benchmark"])), None)
+                bench_c = next((c for c in df.columns if any(k in str(c).lower() for k in ["mức tb chuẩn", "avgbenchmark", "benchmark", "tb chuẩn"])), None)
+
+                if ord_pct_c and val_pct_c:
+                    fig = go.Figure()
+                    ord_texts = [
+                        f"{float(r[ord_pct_c]):.2f}% ({int(float(r[ord_cnt_c])):,} đơn)" if ord_cnt_c and pd.notna(r[ord_cnt_c]) else f"{float(r[ord_pct_c]):.2f}%"
+                        for _, r in plot_df.iterrows()
+                    ]
+                    is_box_bm = val_tot_c is not None and any(k in str(val_tot_c).lower() for k in ["hộp", "boxes", "thùng"])
+                    val_texts = [
+                        (f"{float(r[val_pct_c]):.2f}% ({int(float(r[val_tot_c])):,} hộp)" if is_box_bm else f"{float(r[val_pct_c]):.2f}% (${float(r[val_tot_c])/1e6:,.2f}M)")
+                        if val_tot_c and pd.notna(r[val_tot_c]) else f"{float(r[val_pct_c]):.2f}%"
+                        for _, r in plot_df.iterrows()
+                    ]
+                    fig.add_trace(go.Bar(
+                        x=plot_df[lbl_col],
+                        y=pd.to_numeric(plot_df[ord_pct_c], errors="coerce"),
+                        name=format_col_title(ord_pct_c),
+                        marker_color="#0068FF",
+                        text=ord_texts,
+                        textposition="outside",
+                        hovertemplate="<b>%{x}</b><br>" + format_col_title(ord_pct_c) + ": <b>%{y:.2f}%</b><extra></extra>"
+                    ))
+                    fig.add_trace(go.Bar(
+                        x=plot_df[lbl_col],
+                        y=pd.to_numeric(plot_df[val_pct_c], errors="coerce"),
+                        name=format_col_title(val_pct_c),
+                        marker_color="#10B981",
+                        text=val_texts,
+                        textposition="outside",
+                        hovertemplate="<b>%{x}</b><br>" + format_col_title(val_pct_c) + ": <b>%{y:.2f}%</b><extra></extra>"
+                    ))
+                    bm_note = ""
+                    if bench_c:
+                        try:
+                            bv = float(pd.to_numeric(plot_df[bench_c], errors="coerce").dropna().iloc[0])
+                            bm_note = f" (Ngưỡng TB Chuẩn: {bv:,.1f} hộp/đơn)" if is_box_bm else f" (Ngưỡng TB Chuẩn: ${bv:,.2f}/đơn)"
+                        except Exception:
+                            pass
+                    fig.update_layout(
+                        barmode="group",
+                        title=f"📊 Đối Chiếu Tỷ Trọng Số Đơn (%) & {format_col_title(val_pct_c)} theo {format_col_title(lbl_col)}{bm_note}",
+                        template="plotly_dark",
+                        xaxis=dict(type="category", title=format_col_title(lbl_col)),
+                        yaxis=dict(title="Tỷ Trọng (%)", ticksuffix="%", range=[0, 105]),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+                        margin=dict(l=40, r=40, t=85, b=50)
+                    )
+                    fig = apply_veraxus_dark_theme(fig)
+                    return _display_and_register_chart(fig, df, user_query, turn_id)
 
             # 0.1 Trường hợp đặc biệt: Biểu đồ Dual-Axis Phân Tích Vượt Ngưỡng Trung Bình (Benchmark & Above-Average Combo Chart)
             bench_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["benchmark", "companyavg", "company_avg", "companyaverage", "avgbenchmark", "benchmarkavg", "overall_avg", "overallavg", "mức trung bình chuẩn", "tb chuẩn", "tb toan"])]
             surplus_pct_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["surpluspct", "surplus_pct", "pctsurplus", "growthpct", "growth_pct", "% vượt", "vượt (%)", "tyle_vuot", "tỷ lệ vượt", "phần trăm vượt"])]
             surplus_val_cols = [c for c in df.columns if any(k in str(c).lower() for k in ["salessurplus", "salarysurplus", "surplus", "mức vượt", "chênh lệch", "diff"]) and c not in surplus_pct_cols]
 
-            if (bench_cols or surplus_pct_cols) and label_cols and len(df) >= 2:
+            if not is_order_bm_bar and (bench_cols or surplus_pct_cols) and label_cols and len(df) >= 2:
                 lbl_col = label_cols[0]
                 plot_df = df.copy()
 
-                # Xác định cột giá trị chính (TotalSales, AvgSalary, Amount, Boxes...)
-                non_bench_meas = [c for c in measure_cols if c not in bench_cols and c not in surplus_pct_cols and c not in surplus_val_cols]
+                # Xác định cột giá trị chính cùng đơn vị đo lường với cột Benchmark (TotalSales, AvgSalary, Amount, Boxes...)
+                non_bench_meas = [
+                    c for c in measure_cols
+                    if c not in bench_cols and c not in surplus_pct_cols and c not in surplus_val_cols
+                    and not any(k in str(c).lower() for k in ["tỷ trọng", "tỉ trọng", "tỷ lệ", "tỉ lệ", "percent", "pct", "share", "%"])
+                ]
+                if bench_cols and any(k in str(bench_cols[0]).lower() for k in ["$", "doanh", "sales", "revenue", "salary", "lương", "amount", "tiền"]):
+                    curr_bench_meas = [c for c in non_bench_meas if any(k in str(c).lower() for k in ["$", "doanh", "sales", "revenue", "salary", "lương", "amount", "tiền"])]
+                    if curr_bench_meas:
+                        non_bench_meas = curr_bench_meas
                 val_col = non_bench_meas[0] if non_bench_meas else measure_cols[0]
 
                 # Xác định giá trị benchmark thực tế từ CSDL
@@ -2308,9 +3080,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         name=format_col_title(val_col),
                         marker_color=bar_colors,
                         text=bar_texts,
-                        textposition="inside" if len(plot_df) <= 12 else "outside",
+                        textposition="inside" if len(plot_df) <= 12 else "none",
                         insidetextanchor="middle",
-                        textfont=dict(color="#000000" if len(plot_df) <= 12 else "#FFFFFF", size=11, family="sans-serif")
+                        textfont=dict(color="#000000" if len(plot_df) <= 12 else "#FFFFFF", size=11, family="sans-serif"),
+                        hovertemplate="<b>%{x}</b><br>" + format_col_title(val_col) + ": <b>" + prefix_str + "%{y:,.2f}" + suffix_str + "</b><extra></extra>"
                     ),
                     secondary_y=False
                 )
@@ -2323,14 +3096,15 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             x=plot_df[lbl_col],
                             y=plot_df[pct_col],
                             name="% Vượt Trội So Với TB (Surplus %)",
-                            mode="lines+markers+text",
+                            mode="lines+markers+text" if len(plot_df) <= 10 else "lines+markers",
                             marker=dict(size=10, color="#FF7A00", line=dict(width=2, color="#FFFFFF")),
                             line=dict(width=3, color="#FF7A00"),
                             text=pct_texts,
                             texttemplate="%{text}",
                             textposition="top center",
                             cliponaxis=False,
-                            textfont=dict(color="#FF7A00", size=12, family="sans-serif")
+                            textfont=dict(color="#FF7A00", size=12, family="sans-serif"),
+                            hovertemplate="<b>%{x}</b><br>% Vượt Trội: <b>%{y:.1f}%</b><extra></extra>"
                         ),
                         secondary_y=True
                     )
@@ -2369,8 +3143,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     xaxis=dict(type="category", tickangle=tick_angle, automargin=True, title=format_col_title(lbl_col)),
                     yaxis=dict(title=format_col_title(val_col), tickprefix=prefix_str, range=[0, upper_bound]),
                     yaxis2=y2_dict,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                    margin=dict(l=40, r=40, t=60, b=85 if tick_angle != 0 else 50)
+                    legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+                    margin=dict(l=40, r=40, t=85, b=85 if tick_angle != 0 else 50)
                 )
                 fig = apply_veraxus_dark_theme(fig)
                 return _display_and_register_chart(fig, df, user_query, turn_id)
@@ -2670,9 +3444,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 marker_color="#1E40AF",
                                 text=plot_df[sales_c],
                                 texttemplate="$%{text:,.0f}",
-                                textposition="inside",
+                                textposition="inside" if len(plot_df) <= 12 else "none",
                                 insidetextanchor="middle",
                                 textfont=dict(color="#FFFFFF", size=11, family="sans-serif"),
+                                hovertemplate="<b>%{x}</b><br>" + format_col_title(sales_c) + ": <b>$%{y:,.0f}</b><extra></extra>",
                             ),
                             secondary_y=False,
                         )
@@ -2681,7 +3456,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 x=plot_df[label_name],
                                 y=plot_df[boxes_c],
                                 name=format_col_title(boxes_c),
-                                mode="lines+markers+text",
+                                mode="lines+markers+text" if len(plot_df) <= 10 else "lines+markers",
                                 marker=dict(size=12, color="#FF7A00", line=dict(width=2, color="#FFFFFF")),
                                 line=dict(width=3.5, color="#FF7A00"),
                                 text=plot_df[boxes_c],
@@ -2689,6 +3464,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 textposition="top center",
                                 cliponaxis=False,
                                 textfont=dict(color="#B45309", size=13, family="sans-serif"),
+                                hovertemplate="<b>%{x}</b><br>" + format_col_title(boxes_c) + ": <b>%{y:,.0f} hộp</b><extra></extra>",
                             ),
                             secondary_y=True,
                         )
@@ -2709,8 +3485,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             xaxis=dict(type="category", automargin=True, title=format_col_title(label_name)),
                             yaxis=dict(title=format_col_title(sales_c), tickprefix="$", range=[0, max_s * 1.25]),
                             yaxis2=dict(title=format_col_title(boxes_c), ticksuffix=" hộp", range=[0, max_b * 1.45], showgrid=False),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                            margin=dict(l=40, r=40, t=60, b=50)
+                            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+                            margin=dict(l=40, r=40, t=85, b=50)
                         )
                         fig = apply_veraxus_dark_theme(fig)
                         return _display_and_register_chart(fig, df, user_query, turn_id)
@@ -2777,7 +3553,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 name=format_col_title(payroll_c),
                                 marker_color="#1E40AF",
                                 text=bar_texts,
-                                textposition="inside" if len(plot_df) <= 12 else "outside",
+                                textposition="inside" if len(plot_df) <= 12 else "none",
                                 insidetextanchor="middle",
                                 textfont=dict(color="#FFFFFF" if len(plot_df) <= 12 else "#1E40AF", size=12, family="sans-serif"),
                                 hovertext=hover_bars,
@@ -2812,7 +3588,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 x=plot_df[label_name],
                                 y=plot_df[secondary_c],
                                 name=sec_name,
-                                mode="lines+markers+text",
+                                mode="lines+markers+text" if len(plot_df) <= 10 else "lines+markers",
                                 marker=dict(size=12, color="#FF7A00", line=dict(width=2, color="#FFFFFF")),
                                 line=dict(width=3.5, color="#FF7A00"),
                                 text=sec_texts,
@@ -2840,8 +3616,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             xaxis=dict(type="category", tickangle=tick_angle, automargin=True, title=format_col_title(label_name)),
                             yaxis=dict(title=format_col_title(payroll_c), tickprefix="$", range=[0, max_p * 1.25]),
                             yaxis2=dict(title=sec_axis_title, tickprefix=sec_tickprefix, ticksuffix=sec_ticksuffix, range=[0, max_s * 1.45], showgrid=False),
-                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                            margin=dict(l=40, r=40, t=60, b=85 if tick_angle != 0 else 50)
+                            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+                            margin=dict(l=40, r=40, t=85, b=85 if tick_angle != 0 else 50)
                         )
                         fig = apply_veraxus_dark_theme(fig)
                         return _display_and_register_chart(fig, df, user_query, turn_id)
@@ -2850,10 +3626,19 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         has_pct_eff = [c for c in eff_cols if any(k in c.lower() for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "%"])]
                         has_non_pct_eff = [c for c in eff_cols if c not in has_pct_eff]
                         
-                        is_margin_focus = any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"])
-                        is_box_focus = any(k in uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng"]) and not is_margin_focus
+                        user_asked_both = any(k in uq_low for k in ["cả hai", "cả 2", "và", "vừa", "cùng với", "kết hợp", "song song", "both"]) and (
+                            any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]) and any(k in uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng", "mỗi đơn", "profit per box", "$"])
+                        )
+                        is_margin_focus = any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]) and not user_asked_both
+                        is_box_focus = any(k in uq_low for k in ["mỗi hộp", "per box", "hộp", "thùng", "perbox", "profit per box"]) and not is_margin_focus and not user_asked_both
                         
-                        if has_pct_eff and has_non_pct_eff:
+                        if is_box_focus and has_non_pct_eff:
+                            active_measures = [has_non_pct_eff[0]]
+                            chart_title = f"{format_col_title(has_non_pct_eff[0])} theo {format_col_title(label_name)}"
+                        elif is_margin_focus and has_pct_eff:
+                            active_measures = [has_pct_eff[0]]
+                            chart_title = f"{format_col_title(has_pct_eff[0])} theo {format_col_title(label_name)}"
+                        elif (user_asked_both or (not is_box_focus and not is_margin_focus)) and (has_pct_eff and has_non_pct_eff):
                             # Biểu đồ 2 trục Y (Dual Axis Combo Chart): Bar cho % và Line cho $
                             pct_col = has_pct_eff[0]
                             non_pct_col = has_non_pct_eff[0]
@@ -2881,9 +3666,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                     marker_color="#1E40AF",
                                     text=plot_df[pct_col],
                                     texttemplate="%{text:,.2f}%",
-                                    textposition="inside",
+                                    textposition="inside" if len(plot_df) <= 12 else "none",
                                     insidetextanchor="middle",
                                     textfont=dict(color="#FFFFFF", size=11, family="sans-serif"),
+                                    hovertemplate="<b>%{x}</b><br>" + format_col_title(pct_col) + ": <b>%{y:,.2f}%</b><extra></extra>",
                                 ),
                                 secondary_y=False,
                             )
@@ -2892,7 +3678,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                     x=plot_df[label_name],
                                     y=plot_df[non_pct_col],
                                     name=format_col_title(non_pct_col),
-                                    mode="lines+markers+text",
+                                    mode="lines+markers+text" if len(plot_df) <= 10 else "lines+markers",
                                     marker=dict(size=12, color="#FF7A00", line=dict(width=2, color="#FFFFFF")),
                                     line=dict(width=3.5, color="#FF7A00"),
                                     text=plot_df[non_pct_col],
@@ -2900,6 +3686,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                     textposition="top center",
                                     cliponaxis=False,
                                     textfont=dict(color="#B45309", size=13, family="sans-serif"),
+                                    hovertemplate="<b>%{x}</b><br>" + format_col_title(non_pct_col) + ": <b>$%{y:,.2f}</b><extra></extra>",
                                 ),
                                 secondary_y=True,
                             )
@@ -2918,17 +3705,17 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 xaxis=dict(type="category", tickangle=tick_angle, automargin=True, title=format_col_title(label_name)),
                                 yaxis=dict(title=format_col_title(pct_col), ticksuffix="%", range=[0, max(100.0, max_pct * 1.25)]),
                                 yaxis2=dict(title=format_col_title(non_pct_col), tickprefix="$", range=[0, max_non_pct * 1.45], showgrid=False),
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                                margin=dict(l=40, r=40, t=60, b=90 if tick_angle != 0 else 50)
+                                legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+                                margin=dict(l=40, r=40, t=85, b=90 if tick_angle != 0 else 50)
                             )
                             fig = apply_veraxus_dark_theme(fig)
                             return _display_and_register_chart(fig, df, user_query, turn_id)
-                        elif is_margin_focus and has_pct_eff:
-                            active_measures = [has_pct_eff[0]]
-                            chart_title = f"{format_col_title(has_pct_eff[0])} theo {format_col_title(label_name)}"
-                        elif is_box_focus and has_non_pct_eff:
+                        elif has_non_pct_eff:
                             active_measures = [has_non_pct_eff[0]]
                             chart_title = f"{format_col_title(has_non_pct_eff[0])} theo {format_col_title(label_name)}"
+                        elif has_pct_eff:
+                            active_measures = [has_pct_eff[0]]
+                            chart_title = f"{format_col_title(has_pct_eff[0])} theo {format_col_title(label_name)}"
 
                     # 3.88 Ưu tiên vẽ bài toán Hồ Sơ Nhân Sự Ngoại Lệ: Thâm niên thấp & Lương Top % (Low Tenure & High Salary Outliers)
                     user_asked_outlier_tenure = (
@@ -3815,18 +4602,24 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             chart_title = f"So Sánh ({', '.join([format_col_title(c) for c in active_measures])}) theo {format_col_title(label_name)} (Grouped Bar)"
                         else:
                             avg_sal_c = [c for c in sal_meas if any(k in c.lower() for k in ["avg", "trung bình"])]
-                            if user_asked_payroll and payroll_cands_meas:
-                                chosen_sal = payroll_cands_meas[0]
-                            elif user_asked_avg_salary and avg_sal_c:
-                                chosen_sal = avg_sal_c[0]
-                            elif payroll_cands_meas:
-                                chosen_sal = payroll_cands_meas[0]
-                            elif avg_sal_c:
-                                chosen_sal = avg_sal_c[0]
+                            max_sal_c = [c for c in sal_meas if any(k in c.lower() for k in ["max", "cao nhất", "trần"])]
+                            min_sal_c = [c for c in sal_meas if any(k in c.lower() for k in ["min", "thấp nhất", "sàn"])]
+                            if avg_sal_c and max_sal_c and min_sal_c and (is_time_series_data or any(k in uq_low for k in ["cao nhất và thấp nhất", "cao nhất", "thấp nhất", "biên độ", "chênh lệch"])):
+                                active_measures = [avg_sal_c[0], max_sal_c[0], min_sal_c[0]]
+                                chart_title = f"Đối Chiếu Dải Lương ({', '.join([format_col_title(c) for c in active_measures])}) theo {format_col_title(label_name)}"
                             else:
-                                chosen_sal = sal_meas[0]
-                            active_measures = [chosen_sal]
-                            chart_title = f"{format_col_title(chosen_sal)} theo {format_col_title(label_name)}"
+                                if user_asked_payroll and payroll_cands_meas:
+                                    chosen_sal = payroll_cands_meas[0]
+                                elif user_asked_avg_salary and avg_sal_c:
+                                    chosen_sal = avg_sal_c[0]
+                                elif payroll_cands_meas:
+                                    chosen_sal = payroll_cands_meas[0]
+                                elif avg_sal_c:
+                                    chosen_sal = avg_sal_c[0]
+                                else:
+                                    chosen_sal = sal_meas[0]
+                                active_measures = [chosen_sal]
+                                chart_title = f"{format_col_title(chosen_sal)} theo {format_col_title(label_name)}"
                     elif pct_cols and (user_asked_pct or not non_pct_cols):
                         # Ưu tiên nếu có cột đo lường tỷ lệ nghiệp vụ cụ thể (như PromotionRate / Tỷ Lệ Thăng Chức)
                         prom_cands = [c for c in pct_cols if any(k in c.lower() for k in ["promotion", "thăng chức", "promoted", "doichucdanh", "chucdanh"])]
@@ -3936,11 +4729,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
 
                     if total_rows > 30:
+                        default_val = min(15, total_rows)
                         max_display = st.slider(
                             f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
                             min_value=min(10, total_rows),
                             max_value=total_rows,
-                            value=min(total_rows, MAX_BAR_CATEGORIES),
+                            value=default_val,
                             step=5 if total_rows <= 100 else 10,
                             key=f"bar_limit_{turn_id}"
                         )
@@ -4426,9 +5220,10 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 max_val = float(plot_df[meas].max() or 0)
                             except Exception:
                                 max_val = 100.0
+                            y_max_bound = min(100.0, max_val * 1.25) if max_val > 0 else 10.0
                             fig.update_layout(
                                 showlegend=bool(color_col),
-                                yaxis=dict(title=format_col_title(meas), ticksuffix="%", range=[0, min(100.0, max(10.0, max_val * 1.25))])
+                                yaxis=dict(title=format_col_title(meas), ticksuffix="%", range=[0, y_max_bound])
                             )
                         elif is_curr:
                             trace_up["texttemplate"] = "$%{y:,.2f}" if any('.' in str(v) for v in plot_df[meas]) else "$%{y:,.0f}"
@@ -4512,15 +5307,24 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             total_rows = len(plot_df)
 
                     if total_rows > 30:
+                        default_val = min(15, total_rows)
                         max_display = st.slider(
                             f"Số lượng đối tượng hiển thị trên biểu đồ (Tổng kết quả: {total_rows:,} dòng)",
                             min_value=min(10, total_rows),
                             max_value=total_rows,
-                            value=min(total_rows, MAX_BAR_CATEGORIES),
+                            value=default_val,
                             step=5 if total_rows <= 100 else 10,
                             key=f"bar_limit_{turn_id}"
                         )
                         plot_df = plot_df.head(max_display)
+
+                    # Tự động sắp xếp biểu đồ cột giảm dần khi câu hỏi là bài toán xếp hạng / top / đóng góp / cao nhất
+                    uq_low = (user_query or "").lower()
+                    if not color_col and measure_cols and any(k in uq_low for k in ["cao nhất", "lớn nhất", "nhiều nhất", "top", "highest", "best", "xếp hạng", "đóng góp", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng"]):
+                        try:
+                            plot_df = plot_df.sort_values(by=measure_cols[0], ascending=False)
+                        except Exception:
+                            pass
 
                     category_order = list(dict.fromkeys(plot_df[label_name].tolist()))
 
@@ -4604,9 +5408,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
 
                     m_lower = str(measure_cols[0]).lower()
                     is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
-                    is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "doanh số", "doanh so", "sales", "amount", "$", "usd", "price", "giá", "đơn giá", "dongia", "giaban", "spread", "delta"])
+                    is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "doanh số", "doanh so", "sales", "amount", "$", "usd", "price", "giá", "đơn giá", "dongia", "giaban", "spread", "delta", "profit", "lợi nhuận", "loi_nhuan", "perbox", "per_box"])
                     is_raises = any(k in m_lower for k in ["raise", "tăng lương", "tang_luong", "tăng_lương", "salary_increase", "salaryincrease", "increases", "số lần", "so lan", "lần tăng", "lan tang"])
-                    is_boxes = any(k in m_lower for k in ["box", "thùng", "hộp", "thung", "hop"]) and not is_salary
+                    is_boxes = any(k in m_lower for k in ["box", "thùng", "hộp", "thung", "hop"]) and not is_salary and not any(k in m_lower for k in ["profit", "lợi nhuận", "loi_nhuan", "perbox", "per_box", "$", "usd", "revenue_per", "cost_per"])
                     is_orders = any(k in m_lower for k in ["order", "đơn hàng", "don_hang", "giao dịch", "transaction"])
                     is_title_count = any(k in m_lower for k in ["title", "chức danh", "chuc_danh", "titles", "titlecount", "title_count"])
                     is_headcount = (
@@ -4950,6 +5754,111 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 plot_df = df.copy()
                 plot_df[label_name] = label_series.values
 
+                # Kiểm tra đặc biệt: Bài toán Tỷ trọng Đơn hàng Vượt Chuẩn Trung Bình có cả 2 cột Tỷ Trọng Số Đơn (%) và Tỷ Trọng Doanh Số/Số Hộp (%)
+                ord_share_col = next((c for c in measure_cols if any(k in str(c).lower() for k in ["tỷ trọng số đơn", "tỉ trọng số đơn", "ordershare", "order_share"])), None)
+                val_share_col = next((c for c in measure_cols if c != ord_share_col and any(k in str(c).lower() for k in ["tỷ trọng doanh số", "tỉ trọng doanh số", "tỷ trọng doanh thu", "tỷ trọng số hộp", "revenueshare", "salesshare", "boxesshare"])), None)
+                if ord_share_col and val_share_col and 2 <= len(plot_df) <= 6:
+                    ord_cnt_col = next((c for c in df.columns if c != label_name and any(k in str(c).lower() for k in ["số lượng đơn", "soluongdon", "orderscount"]) and not any(x in str(c).lower() for x in ["%", "tỷ trọng", "tỉ trọng"])), None)
+                    val_tot_col = next((c for c in df.columns if c != label_name and any(k in str(c).lower() for k in ["tổng doanh số", "tổng doanh thu", "totalsales", "totalrevenue", "tổng số hộp", "totalboxes"]) and not any(x in str(c).lower() for x in ["%", "tỷ trọng", "tỉ trọng", "tb chuẩn", "benchmark"])), None)
+                    bench_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["mức tb chuẩn", "avgbenchmark", "benchmark", "tb chuẩn"])), None)
+
+                    is_box_bm = val_tot_col is not None and any(k in str(val_tot_col).lower() for k in ["hộp", "boxes", "thùng"])
+                    tot_orders_sum = int(pd.to_numeric(plot_df[ord_cnt_col], errors="coerce").sum() or 0) if ord_cnt_col else 0
+                    tot_val_sum = float(pd.to_numeric(plot_df[val_tot_col], errors="coerce").sum() or 0.0) if val_tot_col else 0.0
+                    bench_val_num = float(pd.to_numeric(plot_df[bench_col], errors="coerce").dropna().iloc[0]) if bench_col and not pd.to_numeric(plot_df[bench_col], errors="coerce").dropna().empty else 0.0
+
+                    slice_colors = []
+                    for lbl_v in plot_df[label_name]:
+                        lbl_l = str(lbl_v).lower()
+                        if any(k in lbl_l for k in ["trên", "vượt", "lớn hơn", "above", "over"]):
+                            slice_colors.append("#0068FF")
+                        elif any(k in lbl_l for k in ["dưới", "nhỏ hơn", "thấp hơn", "below", "under"]):
+                            slice_colors.append("#334155")
+                        else:
+                            slice_colors.append("#10B981")
+
+                    ord_custom = [
+                        f"{int(float(r[ord_cnt_col])):,} đơn" if ord_cnt_col and pd.notna(r[ord_cnt_col]) else ""
+                        for _, r in plot_df.iterrows()
+                    ]
+                    val_custom = [
+                        (f"{int(float(r[val_tot_col])):,} hộp" if is_box_bm else f"${float(r[val_tot_col]):,.0f}")
+                        if val_tot_col and pd.notna(r[val_tot_col]) else ""
+                        for _, r in plot_df.iterrows()
+                    ]
+
+                    val_donut_title = "Cơ Cấu Sản Lượng Hộp (%)" if is_box_bm else "Cơ Cấu Tổng Doanh Số (%)"
+                    fig = make_subplots(
+                        rows=1,
+                        cols=2,
+                        specs=[[{"type": "domain"}, {"type": "domain"}]],
+                        subplot_titles=["📦 Cơ Cấu Số Lượng Đơn (%)", f"💰 {val_donut_title}"]
+                    )
+                    fig.add_trace(
+                        go.Pie(
+                            labels=plot_df[label_name],
+                            values=pd.to_numeric(plot_df[ord_share_col], errors="coerce"),
+                            customdata=ord_custom,
+                            name="Tỷ Trọng Số Đơn",
+                            hole=0.56,
+                            marker=dict(colors=slice_colors, line=dict(color="#0F172A", width=2.5)),
+                            textinfo="percent",
+                            textposition="inside",
+                            insidetextorientation="horizontal",
+                            textfont=dict(size=13, color="#FFFFFF", family="sans-serif"),
+                            hovertemplate="<b>%{label}</b><br>Tỷ trọng đơn: <b>%{value:.2f}%</b><br>Quy mô: <b>%{customdata}</b><extra></extra>",
+                            sort=False
+                        ),
+                        row=1,
+                        col=1
+                    )
+                    right_colors = [("#10B981" if c == "#0068FF" else c) for c in slice_colors]
+                    fig.add_trace(
+                        go.Pie(
+                            labels=plot_df[label_name],
+                            values=pd.to_numeric(plot_df[val_share_col], errors="coerce"),
+                            customdata=val_custom,
+                            name=format_col_title(val_share_col),
+                            hole=0.56,
+                            marker=dict(colors=right_colors, line=dict(color="#0F172A", width=2.5)),
+                            textinfo="percent",
+                            textposition="inside",
+                            insidetextorientation="horizontal",
+                            textfont=dict(size=13, color="#FFFFFF", family="sans-serif"),
+                            hovertemplate="<b>%{label}</b><br>" + format_col_title(val_share_col) + ": <b>%{value:.2f}%</b><br>Giá trị: <b>%{customdata}</b><extra></extra>",
+                            sort=False
+                        ),
+                        row=1,
+                        col=2
+                    )
+
+                    left_badge = f"<b>{tot_orders_sum:,}</b><br><span style='font-size:11px;color:#94a3b8'>Tổng số đơn</span>" if tot_orders_sum > 0 else "<b>100%</b><br><span style='font-size:11px;color:#94a3b8'>Số đơn</span>"
+                    if tot_val_sum > 0:
+                        right_val_str = f"{tot_val_sum:,.0f} hộp" if is_box_bm else (f"${tot_val_sum/1e6:,.2f}M" if tot_val_sum >= 1e6 else f"${tot_val_sum:,.0f}")
+                        right_badge = f"<b>{right_val_str}</b><br><span style='font-size:11px;color:#94a3b8'>{'Tổng số hộp' if is_box_bm else 'Tổng doanh số'}</span>"
+                    else:
+                        right_badge = "<b>100%</b><br><span style='font-size:11px;color:#94a3b8'>Doanh số</span>"
+
+                    bm_suffix = ""
+                    if bench_val_num > 0:
+                        bm_suffix = f" (Ngưỡng TB Chuẩn: {bench_val_num:,.1f} hộp/đơn)" if is_box_bm else f" (Ngưỡng TB Chuẩn: ${bench_val_num:,.2f}/đơn)"
+
+                    existing_annots = list(fig.layout.annotations) if fig.layout.annotations else []
+                    existing_annots.extend([
+                        dict(text=left_badge, x=0.225, y=0.5, font_size=14, showarrow=False, xanchor="center", yanchor="middle"),
+                        dict(text=right_badge, x=0.775, y=0.5, font_size=14, showarrow=False, xanchor="center", yanchor="middle")
+                    ])
+                    fig.update_layout(
+                        title=clean_chart_title(f"🍩 Phân Tích Tỷ Trọng Đơn Hàng Vượt Ngưỡng Trung Bình{bm_suffix}"),
+                        template="plotly_dark",
+                        margin=dict(l=30, r=30, t=80, b=50),
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=-0.12, xanchor="center", x=0.5),
+                        annotations=existing_annots
+                    )
+                    fig = apply_veraxus_dark_theme(fig)
+                    return _display_and_register_chart(fig, df, user_query, turn_id)
+
                 # Tìm cột giá trị tốt nhất cho Pie: Ưu tiên cột phần trăm/tỷ trọng, hoặc cột lương phòng ban
                 pie_val_col = measure_cols[0]
                 pct_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phan_tram", "share"])]
@@ -4960,10 +5869,11 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if sal_candidates:
                         pie_val_col = sal_candidates[0]
 
-                # Nếu quá nhiều lát cắt (> 10), giữ top 9 và gộp phần còn lại vào 'Khác'
-                if len(plot_df) > 10:
-                    top_df = plot_df.sort_values(pie_val_col, ascending=False).head(9)
-                    other_sum = plot_df.sort_values(pie_val_col, ascending=False).iloc[9:][pie_val_col].sum()
+                # Nếu quá nhiều lát cắt (> 6), giữ top 5 và gộp phần còn lại vào 'Các đối tượng khác'
+                # giúp biểu đồ tròn/donut thanh thoát, không bị rối nhãn hay đè vạch chỉ dẫn
+                if len(plot_df) > 6:
+                    top_df = plot_df.sort_values(pie_val_col, ascending=False).head(5)
+                    other_sum = plot_df.sort_values(pie_val_col, ascending=False).iloc[5:][pie_val_col].sum()
                     other_row = pd.DataFrame([{label_name: "Các đối tượng khác", pie_val_col: other_sum}])
                     plot_df = pd.concat([top_df, other_row], ignore_index=True)
 
@@ -5001,25 +5911,35 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     plot_df,
                     names=label_name,
                     values=pie_val_col,
-                    hole=0.45,
+                    hole=0.50,
                     title=chart_title,
                     template="plotly_white",
                     color_discrete_sequence=pie_palette
                 )
                 
-                # Cấu hình đường viền trắng phân cách rõ nét giữa các lát cắt và tự động đặt text
+                # Cấu hình đường viền trắng phân cách rõ nét giữa các lát cắt và nhãn
                 fig.update_traces(
-                    textposition='auto',
+                    textposition='outside',
                     textinfo='percent+label',
                     insidetextorientation='horizontal',
                     marker=dict(line=dict(color='#FFFFFF', width=2)),
                     hovertemplate="<b>%{label}</b><br>" + f"{clean_pie_val}: " + ("%{value:,.2f}%" if is_val_pct else ("$%{value:,.2f} (%{percent})" if is_curr_pie else "%{value:,.0f} (%{percent})")) + "<extra></extra>"
                 )
+                # Loại bỏ hoàn toàn hộp legend đè lên tâm donut; đặt huy hiệu tổng quan ở lỗ giữa
                 fig.update_layout(
-                    margin=dict(l=20, r=20, t=50, b=50),
-                    uniformtext_minsize=8,
+                    margin=dict(l=30, r=30, t=50, b=30),
+                    showlegend=False,
+                    uniformtext_minsize=9,
                     uniformtext_mode='hide',
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+                    annotations=[
+                        dict(
+                            text="<b>100%</b><br><span style='font-size:11px;color:#94a3b8'>Tổng cộng</span>",
+                            x=0.5,
+                            y=0.5,
+                            font_size=16,
+                            showarrow=False
+                        )
+                    ]
                 )
             elif len(df) == 1:
                 val = df[measure_cols[0]].iloc[0]
@@ -5070,27 +5990,63 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 plot_df = df.copy()
                 plot_df[label_name] = label_series.values
 
+                # Lựa chọn measure thông minh bám sát câu hỏi người dùng
+                uq_low = (user_query or "").lower()
+                chosen_m = measure_cols[0]
+                if any(k in uq_low for k in ["mỗi hộp", "per box", "per_box", "hộp", "boxes", "thùng"]) and any(k in uq_low for k in ["lợi nhuận", "profit", "doanh thu", "sales", "revenue", "chi phí", "cost"]):
+                    box_curr_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["perbox", "per_box", "mỗi hộp", "moi_hop", "lợi nhuận/hộp", "profit_per_box", "profitperbox", "revenue_per_box", "sales_per_box"])]
+                    if box_curr_cands:
+                        chosen_m = box_curr_cands[0]
+                elif any(k in uq_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "percent", "percentage", "đóng góp", "tỷ trọng", "tỉ trọng", "cơ cấu", "share", "tỷ suất", "tỉ suất", "margin"]):
+                    pct_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "contribution", "tỷ trọng", "tỉ trọng", "margin", "%"])]
+                    if pct_cands:
+                        chosen_m = pct_cands[0]
+                elif any(k in uq_low for k in ["lợi nhuận", "lãi", "profit"]) and not any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
+                    prof_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["lợi nhuận", "profit", "lãi"]) and not any(k in str(c).lower() for k in ["pct", "percent", "margin", "tỷ suất", "tỉ suất", "%"])]
+                    if prof_cands:
+                        chosen_m = prof_cands[0]
+                elif any(k in uq_low for k in ["chi phí", "giá vốn", "cost", "cogs"]) and not any(k in uq_low for k in ["doanh thu", "lợi nhuận", "profit"]):
+                    cost_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["chi phí", "giá vốn", "cost", "cogs"])]
+                    if cost_cands:
+                        chosen_m = cost_cands[0]
+                elif any(k in uq_low for k in ["số tiền", "tiền", "tiền mặt", "tổng số tiền", "doanh thu", "sales", "revenue", "amount", "chi tiêu", "lương", "salary", "giá", "lợi nhuận", "profit"]):
+                    curr_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["amount", "revenue", "sales", "tiền", "số tiền", "tiền mặt", "salary", "lương", "doanh thu", "totalamount", "spent", "cost", "giá", "profit", "lợi nhuận"])]
+                    if curr_cands:
+                        chosen_m = curr_cands[0]
+                elif any(k in uq_low for k in ["hộp", "thùng", "box", "boxes", "sản lượng"]):
+                    box_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["box", "thùng", "hộp", "sản lượng"]) and not any(k in str(c).lower() for k in ["pct", "margin", "%"])]
+                    if box_cands:
+                        chosen_m = box_cands[0]
+                else:
+                    curr_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["amount", "revenue", "sales", "salary", "doanh", "totalamount", "tiền", "số tiền", "tiền mặt", "profit", "lợi nhuận"])]
+                    if curr_cands:
+                        chosen_m = curr_cands[0]
+
                 # Kiểm tra độ biến thiên (variance) cho Bar Ngang
-                if pd.api.types.is_numeric_dtype(plot_df[measure_cols[0]]) and plot_df[measure_cols[0]].nunique(dropna=True) == 1 and len(plot_df) > 1:
+                if pd.api.types.is_numeric_dtype(plot_df[chosen_m]) and plot_df[chosen_m].nunique(dropna=True) == 1 and len(plot_df) > 1:
                     alt_cands = [
                         c for c in plot_df.columns
-                        if c != measure_cols[0] and pd.api.types.is_numeric_dtype(plot_df[c]) and not is_id_like(c)
+                        if c != chosen_m and pd.api.types.is_numeric_dtype(plot_df[c]) and not is_id_like(c)
                         and plot_df[c].nunique(dropna=True) > 1
                         and not any(k in str(c).lower() for k in ["totalcohort", "overall", "year", "nam", "hireyear"])
                     ]
                     if alt_cands:
                         sal_cands = [c for c in alt_cands if any(k in c.lower() for k in ["salary", "lương", "thu nhập", "amount", "revenue"])]
-                        measure_cols = [sal_cands[0] if sal_cands else alt_cands[0]]
+                        chosen_m = sal_cands[0] if sal_cands else alt_cands[0]
 
-                # Giữ nguyên thứ tự xếp hạng từ Bảng dữ liệu (đối tượng #1 ở dòng đầu tiên)
+                measure_cols = [chosen_m]
+
                 if len(plot_df) > 30:
                     plot_df = plot_df.head(30)
 
+                # Sắp xếp tăng dần theo chosen_m để đối tượng lớn nhất (#1) luôn nằm ở ĐỈNH TRÊN CÙNG của biểu đồ cột ngang Plotly
+                plot_df = plot_df.sort_values(by=chosen_m, ascending=True)
+
                 m_lower = str(measure_cols[0]).lower()
                 is_years = any(k in m_lower for k in ["year", "thâm niên", "tham_nien", "tenure", "kinh nghiệm", "kinh_nghiem", "service"])
-                is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "sales", "amount", "price", "giá", "đơn giá", "dongia", "giaban", "spread", "delta"])
+                is_salary = any(k in m_lower for k in ["salary", "lương", "luong", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "doanh thu", "sales", "amount", "price", "giá", "đơn giá", "dongia", "giaban", "spread", "delta", "profit", "lợi nhuận", "loi_nhuan", "perbox", "per_box", "$"])
                 is_raises = any(k in m_lower for k in ["raise", "tăng lương", "tang_luong", "tăng_lương", "salary_increase", "salaryincrease", "increases", "số lần", "so lan", "lần tăng", "lan tang"])
-                is_boxes = any(k in m_lower for k in ["box", "thùng", "hộp", "thung", "hop"]) and not is_salary
+                is_boxes = any(k in m_lower for k in ["box", "thùng", "hộp", "thung", "hop"]) and not is_salary and not any(k in m_lower for k in ["profit", "lợi nhuận", "loi_nhuan", "perbox", "per_box", "$", "usd", "revenue_per", "cost_per"])
                 is_orders = any(k in m_lower for k in ["order", "đơn hàng", "don_hang", "giao dịch", "transaction"])
                 is_title_count = any(k in m_lower for k in ["title", "chức danh", "chuc_danh", "titles", "titlecount", "title_count"])
                 is_headcount = (
@@ -5102,13 +6058,33 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 clean_m = format_col_title(measure_cols[0])
                 clean_lbl = format_col_title(label_name)
 
+                rank_grp_cols = [
+                    c for c in plot_df.columns
+                    if any(k in str(c).lower() for k in ["nhóm xếp hạng", "nhom_xep_hang", "phân nhóm", "rankgroup", "rank_group", "evaluation", "đánh giá", "periodstatus", "trạng thái thời điểm"])
+                ]
+                has_dual_rank_grp = False
+                rank_grp_col = None
+                if rank_grp_cols:
+                    rank_grp_col = rank_grp_cols[0]
+                    grp_vals_low = " ".join(plot_df[rank_grp_col].astype(str).tolist()).lower()
+                    if any(k in grp_vals_low for k in ["cao nhất", "top", "🏆"]) and any(k in grp_vals_low for k in ["thấp nhất", "bottom", "📉"]):
+                        has_dual_rank_grp = True
+
+                hbar_title = f"So Sánh Cực Trị Cao Nhất & Thấp Nhất: {clean_m} theo {clean_lbl}" if has_dual_rank_grp else f"Xếp hạng {clean_m} theo {clean_lbl}"
+                extra_hover_cols = [c for c in plot_df.columns if c not in (measure_cols[0], label_name)]
+                hbar_hover = extra_hover_cols if extra_hover_cols else ([rank_grp_col] if rank_grp_col else None)
+
+                # Kiểm tra xem có cột so sánh với Mặt Bằng Chung TB không (VD: Tỷ Lệ So Với TB (%), Mặt Bằng Chung TB ($))
+                vs_tb_col = next((c for c in plot_df.columns if "tỷ lệ so với tb" in str(c).lower() or "surpluspct" in str(c).lower()), None)
+                bench_tb_col = next((c for c in plot_df.columns if "mặt bằng chung tb" in str(c).lower() or "benchmarkavg" in str(c).lower()), None)
+
                 fig = px.bar(
                     plot_df,
                     x=measure_cols[0],
                     y=label_name,
                     orientation='h',
-                    title=f"Xếp hạng {clean_m} theo {clean_lbl}",
-                    category_orders={label_name: plot_df[label_name].tolist()},
+                    title=hbar_title,
+                    hover_data=hbar_hover,
                     template="plotly_white"
                 )
                 target_entity = None
@@ -5120,17 +6096,33 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             target_entity = v_str
                             break
 
-                if target_entity:
+                is_pct = any(k in m_lower for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng", "đóng góp", "dong_gop", "%"])
+
+                if has_dual_rank_grp and rank_grp_col:
+                    # Tô màu phân biệt trực quan: Nhóm Thấp Nhất màu Đỏ San Hô (#F43F5E), Nhóm Cao Nhất màu Zalo Blue (#0068FF), và #1 dẫn đầu màu Vàng Gold (#F59E0B)
+                    h_colors = [
+                        '#F43F5E' if any(k in str(g).lower() for k in ["thấp nhất", "bottom", "nhỏ nhất", "ít nhất"]) else '#0068FF'
+                        for g in plot_df[rank_grp_col]
+                    ]
+                    if len(h_colors) > 0:
+                        h_colors[-1] = '#F59E0B'
+                elif target_entity:
                     h_colors = ['#F59E0B' if str(v).strip().lower() == (target_entity or "").lower() else '#0068FF' for v in plot_df[label_name]]
-                elif any(k in (user_query or "").lower() for k in ["top", "cao nhất", "nhất", "xếp hạng", "leading", "lâu nhất", "dẫn đầu", "nhiều nhất"]):
-                    # Highlight đối tượng #1 (dòng đầu tiên trên bảng & đỉnh trên cùng của biểu đồ) màu Vàng Gold #F59E0B, các đối tượng khác màu Blue #0068FF
+                elif vs_tb_col is not None and vs_tb_col in plot_df.columns:
+                    # Tô màu 3 tầng theo Mặt Bằng Chung: #1 Vàng Gold (#F59E0B), Vượt TB màu Blue (#0068FF), Dưới TB màu Xám Slate (#475569)
+                    vs_vals = pd.to_numeric(plot_df[vs_tb_col], errors="coerce").fillna(0).tolist()
+                    h_colors = ['#0068FF' if v >= 0 else '#475569' for v in vs_vals]
+                    if len(h_colors) > 0:
+                        h_colors[-1] = '#F59E0B'
+                else:
+                    # Highlight đối tượng #1 (dòng cuối cùng trong ascending plot_df, tức đỉnh trên cùng của biểu đồ) màu Vàng Gold #F59E0B, các đối tượng khác màu Blue #0068FF
                     h_colors = ['#0068FF'] * len(plot_df)
                     if len(h_colors) > 0:
-                        h_colors[0] = '#F59E0B'
-                else:
-                    h_colors = '#0068FF'
+                        h_colors[-1] = '#F59E0B'
 
-                if is_years:
+                if is_pct:
+                    h_ttemplate = "%{x:.2f}%"
+                elif is_years:
                     h_ttemplate = "%{x:.2f} năm" if not is_en else "%{x:.2f} yrs"
                 elif is_raises:
                     u_raise = " lần" if not is_en else " times"
@@ -5152,18 +6144,59 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 else:
                     h_ttemplate = f"{curr_sym}%{{x:,.0f}}"
 
-                fig.update_traces(
-                    marker_color=h_colors,
-                    texttemplate=h_ttemplate,
-                    textposition='outside',
-                    width=0.45 if len(plot_df) <= 3 else None
-                )
+                if vs_tb_col is not None and vs_tb_col in plot_df.columns and is_pct:
+                    custom_texts = [
+                        f"{float(r[measure_cols[0]]):.2f}% ({float(pd.to_numeric(r[vs_tb_col], errors='coerce') or 0):+.1f}% vs TB)"
+                        for _, r in plot_df.iterrows()
+                    ]
+                    fig.update_traces(
+                        marker_color=h_colors,
+                        text=custom_texts,
+                        texttemplate="%{text}",
+                        textposition='outside',
+                        cliponaxis=False,
+                        width=0.45 if len(plot_df) <= 3 else None
+                    )
+                else:
+                    fig.update_traces(
+                        marker_color=h_colors,
+                        texttemplate=h_ttemplate,
+                        textposition='outside',
+                        cliponaxis=False,
+                        width=0.45 if len(plot_df) <= 3 else None
+                    )
+
+                # Vẽ đường tham chiếu Mặt Bằng Chung Trung Bình nếu có
+                if vs_tb_col is not None and is_pct and len(plot_df) > 1:
+                    bench_share_x = round(100.0 / len(plot_df), 2)
+                    fig.add_vline(
+                        x=bench_share_x,
+                        line_dash="dash",
+                        line_color="#F59E0B",
+                        line_width=2,
+                        annotation_text=f"Mặt bằng chung TB ({bench_share_x:.2f}%)",
+                        annotation_position="bottom right",
+                        annotation_font=dict(color="#F59E0B", size=11),
+                    )
+                elif bench_tb_col is not None and bench_tb_col in plot_df.columns and not is_pct:
+                    bench_abs_x = float(pd.to_numeric(plot_df[bench_tb_col].iloc[0], errors="coerce") or 0)
+                    if bench_abs_x > 0:
+                        fig.add_vline(
+                            x=bench_abs_x,
+                            line_dash="dash",
+                            line_color="#F59E0B",
+                            line_width=2,
+                            annotation_text=f"Mặt bằng chung TB (${bench_abs_x:,.0f})",
+                            annotation_position="bottom right",
+                            annotation_font=dict(color="#F59E0B", size=11),
+                        )
 
                 max_val = float(plot_df[measure_cols[0]].max()) if not plot_df.empty else 0
 
                 # Dành không gian bên phải để nhãn text outside không bị cắt hay chạm biên
                 if max_val > 0:
-                    fig.update_xaxes(range=[0, max_val * 1.22])
+                    extra_pad = 1.32 if (vs_tb_col is not None and is_pct) else 1.22
+                    fig.update_xaxes(range=[0, max_val * extra_pad])
 
                 max_name_len = max((len(str(v)) for v in plot_df[label_name]), default=10)
                 margin_left = max(130, min(250, max_name_len * 9))
@@ -5188,11 +6221,16 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     xaxis_title_str = clean_m
 
                 fig.update_layout(
-                    yaxis=dict(type="category", autorange="reversed", automargin=True),
+                    yaxis=dict(
+                        type="category",
+                        categoryorder="array",
+                        categoryarray=plot_df[label_name].tolist(),
+                        automargin=True,
+                    ),
                     xaxis_title=xaxis_title_str,
                     yaxis_title="",
                     height=chart_height,
-                    margin=dict(l=margin_left, r=60, t=60, b=50)
+                    margin=dict(l=margin_left, r=70, t=60, b=50)
                 )
             else:
                 st.info("Không tìm thấy cột phù hợp để làm nhãn biểu đồ.")

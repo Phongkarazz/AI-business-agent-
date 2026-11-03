@@ -167,6 +167,33 @@ def score_few_shot_relevance(user_query: str, example: dict) -> float:
             intent_score += 65.0
     elif cat == "window_function" and any(k in q_low for k in ["top 10%", "top 1 mỗi", "nhất của từng", "dẫn đầu từng"]):
         intent_score += 20.0
+    elif cat == "monthly_trend":
+        is_geo_q = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"])
+        is_team_q = any(k in q_low for k in ["team", "đội ngũ", "yummies", "delish", "jucies"])
+        is_prod_q = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
+        ex_id = example.get("id", "")
+        if is_geo_q and not is_team_q and not is_prod_q:
+            if "country" in ex_id or "geo" in ex_id:
+                intent_score += 85.0
+            else:
+                intent_score -= 35.0
+        elif is_team_q and not is_geo_q:
+            if "team" in ex_id:
+                intent_score += 85.0
+            else:
+                intent_score -= 35.0
+        else:
+            intent_score += 35.0
+    elif cat == "monthly_spread_volatility":
+        has_extreme = any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "mạnh nhất", "rộng nhất", "biên độ", "volatility", "spread"])
+        has_trend_how = any(k in q_low for k in ["như thế nào", "xu hướng", "diễn biến"])
+        is_geo_q = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"])
+        if has_trend_how and not has_extreme:
+            intent_score -= 75.0
+        elif is_geo_q and "product" in example.get("id", ""):
+            intent_score -= 50.0
+        elif has_extreme and any(k in q_low for k in ["thay đổi", "biến động", "dao động", "chênh lệch"]):
+            intent_score += 65.0
     elif cat == "time_series" and any(k in q_low for k in ["gần nhất", "12 tháng", "qua các tháng", "theo năm", "xu hướng"]):
         intent_score += 20.0
     elif cat == "threshold" and any(k in q_low for k in ["vượt mức", "trên", "hơn", "đạt từ", "ngưỡng"]) and any(c.isdigit() for c in q_low):
@@ -202,6 +229,27 @@ def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect:
     if not candidate_examples and target_domain not in ("employees", "awesome_chocolates", "sakila", "northwind"):
         candidate_examples = [ex for ex in FEW_SHOT_EXAMPLES if ex.get("domain") == "generic"]
 
+    # 2.5 BẢO ĐẢM CÔ LẬP SCHEMA TUYỆT ĐỐI: Loại bỏ ví dụ có bảng ngoại lai không tồn tại trong schema hiện tại
+    try:
+        from src.llm.prompts import extract_tables_from_schema, validate_hint_against_schema
+        valid_tables = extract_tables_from_schema(schema_context)
+        if valid_tables and validate_hint_against_schema:
+            filtered_dyn = []
+            for dyn_ex in dynamic_learned:
+                s_dyn = dyn_ex.get("sql_sqlite" if is_sqlite else "sql_mysql", dyn_ex.get("sql_query", "")).strip()
+                if validate_hint_against_schema(s_dyn, schema_context):
+                    filtered_dyn.append(dyn_ex)
+            dynamic_learned = filtered_dyn
+
+            filtered_cand = []
+            for ex in candidate_examples:
+                s_cand = ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
+                if validate_hint_against_schema(s_cand, schema_context):
+                    filtered_cand.append(ex)
+            candidate_examples = filtered_cand
+    except Exception:
+        pass
+
     # Chấm điểm và sắp xếp ví dụ tĩnh
     scored_examples = []
     for ex in candidate_examples:
@@ -210,23 +258,25 @@ def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect:
 
     scored_examples.sort(key=lambda x: x[0], reverse=True)
 
-    # 3. Kết hợp mẫu tự học (ưu tiên hàng đầu) và mẫu tĩnh
-    selected = []
+    # 3. Kết hợp mẫu tự học và mẫu tĩnh theo điểm tương đồng thực tế
+    all_scored = []
     for dyn_ex in dynamic_learned:
-        ex_copy = dict(dyn_ex)
-        ex_copy["selected_sql"] = dyn_ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
-        ex_copy["relevance_score"] = 99.0
-        ex_copy["intent_explanation"] = f"🧠 [Tri thức Động Tự Học] {dyn_ex.get('intent_explanation', '')}"
-        selected.append(ex_copy)
+        s_dyn = score_few_shot_relevance(user_query, dyn_ex)
+        if s_dyn > 20.0:
+            ex_copy = dict(dyn_ex)
+            ex_copy["selected_sql"] = dyn_ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
+            ex_copy["relevance_score"] = round(s_dyn + 20.0, 2)  # Ưu tiên vừa phải cho mẫu động
+            ex_copy["intent_explanation"] = f"🧠 [Tri thức Động Tự Học] {dyn_ex.get('intent_explanation', '')}"
+            all_scored.append((ex_copy["relevance_score"], ex_copy))
 
-    remaining_slots = top_k - len(selected)
-    if remaining_slots > 0:
-        for score, ex in scored_examples[:remaining_slots]:
-            ex_copy = dict(ex)
-            ex_copy["selected_sql"] = ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
-            ex_copy["relevance_score"] = round(score, 2)
-            selected.append(ex_copy)
+    for score, ex in scored_examples:
+        ex_copy = dict(ex)
+        ex_copy["selected_sql"] = ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "").strip()
+        ex_copy["relevance_score"] = round(score, 2)
+        all_scored.append((score, ex_copy))
 
+    all_scored.sort(key=lambda x: x[0], reverse=True)
+    selected = [item[1] for item in all_scored[:top_k]]
     return selected
 
 

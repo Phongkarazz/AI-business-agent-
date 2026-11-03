@@ -32,10 +32,11 @@ from src.ui.crm_dashboard import render_crm_dashboard
 from src.llm.agent import run_agent
 
 # Tự động xóa sạch query cache cũ khi có phiên bản cập nhật code mới
-CACHE_BUILD_ID = "20260930_fix_cte_regex_v71"
+CACHE_BUILD_ID = "20261026_fix_smart_chart_line_priority_v101"
 if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
     st.session_state["_cache_build_id"] = CACHE_BUILD_ID
     st.session_state["query_cache"] = {}
+    st.session_state["_needs_history_heal"] = True
 
 # ---------------------------------------------------------
 # 1. Cấu hình Trang Streamlit & Custom CSS Giao Diện Doanh Nghiệp
@@ -762,6 +763,45 @@ else:
         return query
 
     history = st.session_state.get("history", [])
+    if history and st.session_state.get("engine") is not None:
+        try:
+            from src.llm.agent import (
+                auto_fix_chocolates_half_year_comparison_query,
+                auto_fix_chocolates_consecutive_growth_streak_query,
+                auto_fix_chocolates_new_products_query,
+                auto_fix_chocolates_monthly_spread_query,
+            )
+            from src.database.query_runner import read_sql_capped
+            from src.analytics.anomaly import analyze_data_anomalies
+            from src.analytics.heuristics import split_insight_sections
+            _eng = st.session_state.get("engine")
+            _dial = st.session_state.get("db_dialect", "MySQL")
+            for _turn in history:
+                if not isinstance(_turn, dict):
+                    continue
+                _q = str(_turn.get("query") or "")
+                _sql_orig = str(_turn.get("sql") or "")
+                if not _q:
+                    continue
+                _sql_new = _sql_orig
+                _sql_new = auto_fix_chocolates_half_year_comparison_query(_sql_new, _q, dialect=_dial)
+                _sql_new = auto_fix_chocolates_consecutive_growth_streak_query(_sql_new, _q, dialect=_dial)
+                _sql_new = auto_fix_chocolates_new_products_query(_sql_new, _q, dialect=_dial)
+                _sql_new = auto_fix_chocolates_monthly_spread_query(_sql_new, _q, dialect=_dial)
+                if _sql_new and _sql_new != _sql_orig:
+                    _df_new, _ = read_sql_capped(_sql_new, _eng)
+                    if _df_new is not None and not _df_new.empty:
+                        _turn["sql"] = _sql_new
+                        _turn["df"] = _df_new
+                        _turn["anomalies_info"] = analyze_data_anomalies(_df_new)
+                        _sec = split_insight_sections("", df=_df_new, user_query=_q, is_en=(_turn.get("lang") == "en"))
+                        _turn["insights"] = (
+                            f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{_sec['anomaly']}\n\n"
+                            f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{_sec['hypothesis']}\n\n"
+                            f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec['action_plan']}"
+                        )
+        except Exception:
+            pass
     focused_turn_idx = st.session_state.get("focused_turn_idx", None)
     view_mode = st.session_state.get("view_mode", "chat")
 
@@ -886,7 +926,7 @@ else:
                     <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
                     <polygon points="38,58 50,54 62,58 50,88" fill="url(#heroFacetCenterGlow)"/>
                 </svg>
-                <div class="hero-title" style="margin-bottom: 0;">
+                <div class="hero-title" style="margin-bottom: 0; color: #FFFFFF !important; font-weight: 900; letter-spacing: -0.025em;">
                     {t("hero_title")}
                 </div>
             </div>

@@ -16,6 +16,8 @@ from .heuristics import (
     detect_query_language,
     unify_year_month_columns,
     ensure_full_twelve_months,
+    restore_vietnamese_diacritics,
+    sanitize_followup_question,
 )
 from .forecasting import forecast_series
 from .anomaly import detect_outliers, analyze_data_anomalies
@@ -34,6 +36,8 @@ __all__ = [
     "detect_query_language",
     "unify_year_month_columns",
     "ensure_full_twelve_months",
+    "restore_vietnamese_diacritics",
+    "sanitize_followup_question",
     "forecast_series",
     "detect_outliers",
     "analyze_data_anomalies",
