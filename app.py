@@ -9,10 +9,15 @@ import sys
 import textwrap
 import streamlit as st
 
-# Tự động giải phóng cache submodules trong src/ để Python luôn tải mã nguồn mới nhất từ ổ đĩa
-for _mod in list(sys.modules.keys()):
-    if _mod.startswith("src.") or _mod == "src":
-        del sys.modules[_mod]
+# ---------------------------------------------------------
+# 1. Cấu hình Trang Streamlit (BẮT BUỘC là lệnh Streamlit đầu tiên)
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="Veraxus - Enterprise Intelligence",
+    page_icon="💎",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 try:
     from dotenv import load_dotenv
@@ -37,16 +42,6 @@ if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
     st.session_state["_cache_build_id"] = CACHE_BUILD_ID
     st.session_state["query_cache"] = {}
     st.session_state["_needs_history_heal"] = True
-
-# ---------------------------------------------------------
-# 1. Cấu hình Trang Streamlit & Custom CSS Giao Diện Doanh Nghiệp
-# ---------------------------------------------------------
-st.set_page_config(
-    page_title="Veraxus - Enterprise Intelligence",
-    page_icon="💎",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 st.markdown("""
 <style>
