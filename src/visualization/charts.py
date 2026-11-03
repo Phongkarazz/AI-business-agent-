@@ -3264,8 +3264,18 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     label_name, label_series, consumed_cols = pick_label_column(df, effective_label_cols)
 
                 if label_name is None:
-                    st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
-                    return None
+                    candidates = [c for c in df.columns if c not in measure_cols and not is_id_like(c)]
+                    if not candidates:
+                        candidates = [c for c in df.columns if c not in measure_cols]
+                    if not candidates and len(df.columns) > 0:
+                        candidates = list(df.columns)
+                    if candidates:
+                        label_name = candidates[0]
+                        label_series = df[label_name].astype(str)
+                        consumed_cols = [label_name]
+                    else:
+                        st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
+                        return None
 
                 plot_df = df.copy()
                 plot_df[label_name] = label_series.values
@@ -5740,8 +5750,24 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         yaxis=dict(range=[0, val_num * 1.25] if isinstance(val_num, (int, float)) and val_num > 0 else None)
                     )
             else:
-                st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
-                return None
+                candidates = [c for c in df.columns if c not in measure_cols and not is_id_like(c)]
+                if not candidates:
+                    candidates = [c for c in df.columns if c not in measure_cols]
+                if not candidates and len(df.columns) > 0:
+                    candidates = list(df.columns)
+                if candidates and measure_cols:
+                    label_name = candidates[0]
+                    fig = px.bar(
+                        df,
+                        x=label_name,
+                        y=measure_cols[0],
+                        title=f"{format_col_title(measure_cols[0])} theo {format_col_title(label_name)}",
+                        template="plotly_white"
+                    )
+                    fig.update_layout(margin=dict(l=20, r=20, t=50, b=50))
+                else:
+                    st.info("Không tìm thấy cột phù hợp để làm nhãn trục X.")
+                    return None
 
         elif chosen in ("Pie", "Biểu đồ tròn (Pie)", "Pie (Tròn)") and measure_cols:
             effective_label_cols = label_cols if label_cols else ([time_col] if time_col else [])
