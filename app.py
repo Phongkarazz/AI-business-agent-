@@ -720,31 +720,6 @@ else:
     # 4.1 Hiển thị Sidebar tra cứu bảng và lịch sử chat
     render_main_sidebar()
 
-    # Tự động khôi phục mở rộng Sidebar nếu bị thu gọn trong LocalStorage của trình duyệt
-    import streamlit.components.v1 as _components
-    _components.html("""
-    <script>
-        function autoExpandSidebar() {
-            try {
-                const pStorage = window.parent.localStorage;
-                if (pStorage) {
-                    for (let i = 0; i < pStorage.length; i++) {
-                        const k = pStorage.key(i);
-                        if (k && k.startsWith('stSidebarCollapsed')) {
-                            pStorage.setItem(k, 'false');
-                        }
-                    }
-                }
-                const expandBtn = window.parent.document.querySelector('[data-testid="stExpandSidebarButton"] button, [data-testid="stExpandSidebarButton"]');
-                if (expandBtn) {
-                    expandBtn.click();
-                }
-            } catch(e) {}
-        }
-        setTimeout(autoExpandSidebar, 80);
-        setTimeout(autoExpandSidebar, 400);
-    </script>
-    """, height=0, width=0)
 
     def _format_user_chat_display(query: str) -> str:
         if not query:

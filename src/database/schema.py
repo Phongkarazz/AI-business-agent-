@@ -103,13 +103,22 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA, force_refre
         return f"Không thể tự động đọc schema: {e}"
 
 
+_TABLE_NAMES_CACHE = {}
+_COLS_INFO_CACHE = {}
+
+
 def get_table_names(engine) -> list[str]:
     """Lấy danh sách tất cả các bảng trong database đang kết nối."""
     if not engine:
         return []
+    cache_key = id(engine)
+    if cache_key in _TABLE_NAMES_CACHE:
+        return _TABLE_NAMES_CACHE[cache_key]
     try:
         inspector = inspect(engine)
-        return inspector.get_table_names()
+        tables = inspector.get_table_names()
+        _TABLE_NAMES_CACHE[cache_key] = tables
+        return tables
     except Exception:
         return []
 
@@ -118,10 +127,15 @@ def get_table_columns_info(engine, table_name: str) -> list[dict]:
     """Lấy danh sách chi tiết các cột và kiểu dữ liệu của một bảng."""
     if not engine or not table_name:
         return []
+    cache_key = f"{id(engine)}_{table_name}"
+    if cache_key in _COLS_INFO_CACHE:
+        return _COLS_INFO_CACHE[cache_key]
     try:
         inspector = inspect(engine)
         columns = inspector.get_columns(table_name)
-        return [{"name": col["name"], "type": str(col["type"])} for col in columns]
+        res = [{"name": col["name"], "type": str(col["type"])} for col in columns]
+        _COLS_INFO_CACHE[cache_key] = res
+        return res
     except Exception:
         return []
 
