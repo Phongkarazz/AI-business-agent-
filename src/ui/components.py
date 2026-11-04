@@ -5963,8 +5963,17 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
 
         is_hr_ctx = tree_data.get("is_hr", False)
         ent_type_ctx = tree_data.get("entity_type", "general")
-        is_ts_ctx = tree_data.get("is_time_series", False) or ent_type_ctx == "time_series"
-        if is_ts_ctx and is_hr_ctx:
+        is_multi_entity_ts = tree_data.get("is_multi_entity_time_series", False)
+        is_ts_ctx = (tree_data.get("is_time_series", False) or ent_type_ctx == "time_series") and not is_multi_entity_ts
+        if is_multi_entity_ts:
+            ent_label_vi = {"team": "Đội ngũ", "geo": "Thị trường", "product": "Sản phẩm", "employee": "Nhân sự", "department": "Phòng ban", "title": "Chức danh"}.get(ent_type_ctx, "Đơn vị")
+            ent_label_en = {"team": "Teams", "geo": "Markets", "product": "Products", "employee": "Salespeople", "department": "Departments", "title": "Job Titles"}.get(ent_type_ctx, "Units")
+            persona_options = [
+                f"🏛️ Ban Điều Hành (CEO / CFO) — Quản trị Hiệu quả {ent_label_vi} & Chu kỳ Doanh số" if not is_en else f"🏛️ C-Level (CEO / CFO) — {ent_label_en} Performance & Cycle Governance",
+                f"🎯 Quản lý Vận hành (Giám đốc Kinh doanh / Trưởng nhóm) — Điều phối {ent_label_vi} & Kỳ Hoạt động" if not is_en else f"🎯 Operational Lead (Sales Director / Team Lead) — {ent_label_en} Execution & Periodic Pacing",
+                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
+            ]
+        elif is_ts_ctx and is_hr_ctx:
             persona_options = [
                 "🏛️ Ban Điều Hành (CEO / CFO / CHRO) — Hoạch định Ngân sách & Chu kỳ Dài hạn" if not is_en else "🏛️ C-Level (CEO / CFO / CHRO) — Multi-Year Budget & Cycle Planning",
                 "🎯 Quản lý Thực thi (HRBP / FP&A / Trưởng Bộ phận) — Điều phối Kế hoạch Năm & Kỳ Lương" if not is_en else "🎯 Execution Lead (HRBP / FP&A / Dept Head) — Annual Plan & Payroll Cut-off",
