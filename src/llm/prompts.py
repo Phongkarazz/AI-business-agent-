@@ -2799,10 +2799,14 @@ ORDER BY AvgPricePerBox {sort_dir}{limit_clause};
         is_above_avg = any(k in q_low for k in [
             "vượt trên mức trung bình", "vượt mức trung bình", "trên mức trung bình", 
             "cao hơn mức trung bình", "cao hơn trung bình", "vượt trung bình", 
-            "above average", "above the average", "vượt ngưỡng trung bình"
+            "above average", "above the average", "vượt ngưỡng trung bình",
+            "lớn hơn doanh số trung bình", "lớn hơn mức trung bình", "lớn hơn trung bình",
+            "cao hơn doanh số trung bình", "nhiều hơn trung bình", "vượt mức tb", "vượt tb",
+            "lớn hơn tb", "cao hơn tb", "trên trung bình", "trên tb",
+            "higher than average", "greater than average", "exceeding average", "more than average"
         ])
         if is_above_avg:
-            is_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"]) and not any(k in q_low for k in ["tiền", "amount", "sales", "doanh thu", "doanh số"])
+            is_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"]) and not any(k in q_low for k in ["tiền", "amount", "sales", "doanh thu", "doanh số", "số tiền", "dollar", "$"])
             is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "chuyên viên", "chuyên viên bán hàng", "salesperson", "sales person", "người bán", "sales rep", "rep", "thành viên"])
             is_geo = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "khu vực"])
             is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"]) and not is_person

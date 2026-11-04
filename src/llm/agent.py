@@ -7706,7 +7706,9 @@ def auto_fix_chocolates_above_average_query(sql: str, user_query: str, dialect: 
         "cao hơn mức trung bình", "cao hơn trung bình", "vượt trung bình",
         "above average", "above the average", "vượt ngưỡng trung bình",
         "lớn hơn doanh số trung bình", "lớn hơn mức trung bình", "lớn hơn trung bình",
-        "cao hơn doanh số trung bình", "nhiều hơn trung bình"
+        "cao hơn doanh số trung bình", "nhiều hơn trung bình", "vượt mức tb", "vượt tb",
+        "lớn hơn tb", "cao hơn tb", "trên trung bình", "trên tb",
+        "higher than average", "greater than average", "exceeding average", "more than average"
     ])
     if not is_above_avg:
         return sql
@@ -7716,6 +7718,7 @@ def auto_fix_chocolates_above_average_query(sql: str, user_query: str, dialect: 
         return auto_fix_chocolates_order_benchmark_query(sql, user_query, dialect=dialect)
 
     is_sqlite = "sqlite" in (dialect or "").lower()
+    is_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"]) and not any(k in q_low for k in ["tiền", "amount", "sales", "doanh thu", "doanh số", "số tiền", "dollar", "$"])
     is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "chuyên viên", "chuyên viên bán hàng", "salesperson", "sales person", "người bán", "sales rep", "rep", "thành viên"])
     is_geo = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "khu vực"])
     is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"]) and not is_person
@@ -7724,6 +7727,7 @@ def auto_fix_chocolates_above_average_query(sql: str, user_query: str, dialect: 
     year_match = re.search(r'\b(20\d{2})\b', q_low)
     year_val = year_match.group(1) if year_match else None
     year_cond = (f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {year_val}") if year_val else ""
+    yr_clause = f"\n    {year_cond}" if year_cond else ""
 
     if is_prod:
         needs_fix = (
@@ -7733,8 +7737,33 @@ def auto_fix_chocolates_above_average_query(sql: str, user_query: str, dialect: 
             or (year_val and f"{year_val}" not in sql_low)
         )
         if needs_fix:
-            yr_clause = f"\n    {year_cond}" if year_cond else ""
-            return f"""WITH ProductSummary AS (
+            if is_boxes:
+                return f"""WITH ProductSummary AS (
+    SELECT 
+        pr.Product AS Product,
+        SUM(s.Boxes) AS TotalBoxesSold,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID{yr_clause}
+    GROUP BY pr.PID, pr.Product
+),
+Benchmark AS (
+    SELECT ROUND(AVG(TotalBoxesSold), 2) AS BenchmarkAvg
+    FROM ProductSummary
+)
+SELECT 
+    ps.Product,
+    ps.TotalBoxesSold,
+    b.BenchmarkAvg,
+    ROUND(ps.TotalBoxesSold - b.BenchmarkAvg, 2) AS BoxesSurplus,
+    ROUND(((ps.TotalBoxesSold - b.BenchmarkAvg) / b.BenchmarkAvg) * 100.0, 2) AS SurplusPct,
+    ps.TotalSales
+FROM ProductSummary ps
+CROSS JOIN Benchmark b
+WHERE ps.TotalBoxesSold > b.BenchmarkAvg
+ORDER BY ps.TotalBoxesSold DESC;""".strip()
+            else:
+                return f"""WITH ProductSummary AS (
     SELECT 
         pr.Product AS Product,
         SUM(s.Amount) AS TotalSales,
@@ -7767,8 +7796,33 @@ ORDER BY ps.TotalSales DESC;""".strip()
             or (year_val and f"{year_val}" not in sql_low)
         )
         if needs_fix:
-            yr_clause = f"\n    {year_cond}" if year_cond else ""
-            return f"""WITH PersonSummary AS (
+            if is_boxes:
+                return f"""WITH PersonSummary AS (
+    SELECT 
+        pe.Salesperson AS Salesperson,
+        SUM(s.Boxes) AS TotalBoxesSold,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID{yr_clause}
+    GROUP BY pe.SPID, pe.Salesperson
+),
+Benchmark AS (
+    SELECT ROUND(AVG(TotalBoxesSold), 2) AS BenchmarkAvg
+    FROM PersonSummary
+)
+SELECT 
+    ps.Salesperson,
+    ps.TotalBoxesSold,
+    b.BenchmarkAvg,
+    ROUND(ps.TotalBoxesSold - b.BenchmarkAvg, 2) AS BoxesSurplus,
+    ROUND(((ps.TotalBoxesSold - b.BenchmarkAvg) / b.BenchmarkAvg) * 100.0, 2) AS SurplusPct,
+    ps.TotalSales
+FROM PersonSummary ps
+CROSS JOIN Benchmark b
+WHERE ps.TotalBoxesSold > b.BenchmarkAvg
+ORDER BY ps.TotalBoxesSold DESC;""".strip()
+            else:
+                return f"""WITH PersonSummary AS (
     SELECT 
         pe.Salesperson AS Salesperson,
         SUM(s.Amount) AS TotalSales,
@@ -7796,7 +7850,34 @@ ORDER BY ps.TotalSales DESC;""".strip()
     elif is_team:
         needs_fix = "benchmark" not in sql_low or "surplus" not in sql_low
         if needs_fix:
-            return f"""WITH TeamSummary AS (
+            if is_boxes:
+                return f"""WITH TeamSummary AS (
+    SELECT 
+        pe.Team AS Team,
+        SUM(s.Boxes) AS TotalBoxesSold,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    WHERE pe.Team != '' AND pe.Team IS NOT NULL
+    GROUP BY pe.Team
+),
+Benchmark AS (
+    SELECT ROUND(AVG(TotalBoxesSold), 2) AS BenchmarkAvg
+    FROM TeamSummary
+)
+SELECT 
+    ts.Team,
+    ts.TotalBoxesSold,
+    b.BenchmarkAvg,
+    ROUND(ts.TotalBoxesSold - b.BenchmarkAvg, 2) AS BoxesSurplus,
+    ROUND(((ts.TotalBoxesSold - b.BenchmarkAvg) / b.BenchmarkAvg) * 100.0, 2) AS SurplusPct,
+    ts.TotalSales
+FROM TeamSummary ts
+CROSS JOIN Benchmark b
+WHERE ts.TotalBoxesSold > b.BenchmarkAvg
+ORDER BY ts.TotalBoxesSold DESC;""".strip()
+            else:
+                return f"""WITH TeamSummary AS (
     SELECT 
         pe.Team AS Team,
         SUM(s.Amount) AS TotalSales,
@@ -7825,8 +7906,33 @@ ORDER BY ts.TotalSales DESC;""".strip()
     elif is_geo:
         needs_fix = "benchmark" not in sql_low or "surplus" not in sql_low
         if needs_fix:
-            yr_clause = f"\n    {year_cond}" if year_cond else ""
-            return f"""WITH GeoSummary AS (
+            if is_boxes:
+                return f"""WITH GeoSummary AS (
+    SELECT 
+        g.Geo AS Country,
+        SUM(s.Boxes) AS TotalBoxesSold,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN geo g ON s.GeoID = g.GeoID{yr_clause}
+    GROUP BY g.GeoID, g.Geo
+),
+Benchmark AS (
+    SELECT ROUND(AVG(TotalBoxesSold), 2) AS BenchmarkAvg
+    FROM GeoSummary
+)
+SELECT 
+    gs.Country,
+    gs.TotalBoxesSold,
+    b.BenchmarkAvg,
+    ROUND(gs.TotalBoxesSold - b.BenchmarkAvg, 2) AS BoxesSurplus,
+    ROUND(((gs.TotalBoxesSold - b.BenchmarkAvg) / b.BenchmarkAvg) * 100.0, 2) AS SurplusPct,
+    gs.TotalSales
+FROM GeoSummary gs
+CROSS JOIN Benchmark b
+WHERE gs.TotalBoxesSold > b.BenchmarkAvg
+ORDER BY gs.TotalBoxesSold DESC;""".strip()
+            else:
+                return f"""WITH GeoSummary AS (
     SELECT 
         g.Geo AS Country,
         SUM(s.Amount) AS TotalSales,
@@ -7958,6 +8064,21 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     # Không can thiệp nếu là câu hỏi lọc theo điều kiện ngưỡng (đã có auto_fix_chocolates_threshold_query xử lý)
     has_threshold_filter = any(k in q_low for k in ["vượt", "trên", "dưới", "cao hơn", "lớn hơn", "thấp hơn", "nhỏ hơn", "nhiều hơn", "ít hơn", "từ", "ít nhất", "tối thiểu", "tối đa", ">", "<", ">=", "<="]) and any(char.isdigit() for char in q_low)
     if has_threshold_filter:
+        return sql
+
+    # Không can thiệp nếu là câu hỏi vượt/trên/dưới mức trung bình (đã có auto_fix_chocolates_above_average_query xử lý)
+    is_above_avg = any(k in q_low for k in [
+        "vượt trên mức trung bình", "vượt mức trung bình", "trên mức trung bình",
+        "cao hơn mức trung bình", "cao hơn trung bình", "vượt trung bình",
+        "above average", "above the average", "vượt ngưỡng trung bình",
+        "lớn hơn doanh số trung bình", "lớn hơn mức trung bình", "lớn hơn trung bình",
+        "cao hơn doanh số trung bình", "nhiều hơn trung bình", "vượt mức tb", "vượt tb",
+        "lớn hơn tb", "cao hơn tb", "trên trung bình", "trên tb",
+        "higher than average", "greater than average", "exceeding average", "more than average",
+        "dưới mức trung bình", "thấp hơn mức trung bình", "thấp hơn trung bình", "dưới trung bình",
+        "below average", "below the average", "thấp hơn tb", "dưới tb"
+    ]) or any(k in sql_low for k in ["benchmark", "benchmarkavg", "salessurplus", "surpluspct", "boxessurplus"])
+    if is_above_avg:
         return sql
 
     # Không can thiệp nếu là câu hỏi so sánh doanh số và số lượng hộp giữa các Team kinh doanh (đã có auto_fix_chocolates_team_sales_and_boxes_query xử lý)
@@ -9722,9 +9843,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             sql_cur = auto_fix_chocolates_team_sales_and_boxes_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_segment_large_orders_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_threshold_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_above_average_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_top_transactions_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_top_rankings_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_chocolates_above_average_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_unassigned_team_filter(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         elif is_sakila_db:

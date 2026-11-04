@@ -2927,6 +2927,68 @@ FROM PersonSales ps
 CROSS JOIN CompanyStats cs
 ORDER BY ps.TotalSales DESC;"""
     },
+    {
+        "id": "choco_product_above_average_sales",
+        "domain": "awesome_chocolates",
+        "category": "above_average",
+        "tags": [
+            "những product nào có số tiền vượt trên mức trung bình", "vượt trên mức trung bình",
+            "vượt mức trung bình", "trên mức trung bình", "sản phẩm vượt trung bình",
+            "product", "sản phẩm", "doanh số vượt trung bình", "số tiền vượt trung bình",
+            "above average", "above the average"
+        ],
+        "question": "Những product nào có số tiền vượt trên mức trung bình?",
+        "question_en": "Which products have sales amount exceeding above the average?",
+        "intent_explanation": "Tìm danh sách các sản phẩm (Product) có tổng doanh số (Amount) vượt trên mức trung bình của toàn bộ các sản phẩm. Sử dụng 2 bước CTE: CTE 1 (ProductSummary) tính tổng doanh số và số hộp của từng sản phẩm từ sales JOIN products; CTE 2 (Benchmark) tính giá trị trung bình chuẩn (ROUND(AVG(TotalSales), 2)) trên toàn bộ sản phẩm. Sau đó CROSS JOIN và lọc điều kiện ps.TotalSales > b.BenchmarkAvg để chỉ giữ lại các sản phẩm vượt trên mức trung bình.",
+        "sql_mysql": """WITH ProductSummary AS (
+    SELECT 
+        pr.Product AS Product,
+        SUM(s.Amount) AS TotalSales,
+        SUM(s.Boxes) AS TotalBoxesSold
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    GROUP BY pr.PID, pr.Product
+),
+Benchmark AS (
+    SELECT ROUND(AVG(TotalSales), 2) AS BenchmarkAvg
+    FROM ProductSummary
+)
+SELECT 
+    ps.Product,
+    ps.TotalSales,
+    b.BenchmarkAvg,
+    ROUND(ps.TotalSales - b.BenchmarkAvg, 2) AS SalesSurplus,
+    ROUND(((ps.TotalSales - b.BenchmarkAvg) / b.BenchmarkAvg) * 100.0, 2) AS SurplusPct,
+    ps.TotalBoxesSold
+FROM ProductSummary ps
+CROSS JOIN Benchmark b
+WHERE ps.TotalSales > b.BenchmarkAvg
+ORDER BY ps.TotalSales DESC;""",
+        "sql_sqlite": """WITH ProductSummary AS (
+    SELECT 
+        pr.Product AS Product,
+        SUM(s.Amount) AS TotalSales,
+        SUM(s.Boxes) AS TotalBoxesSold
+    FROM sales s
+    JOIN products pr ON s.PID = pr.PID
+    GROUP BY pr.PID, pr.Product
+),
+Benchmark AS (
+    SELECT ROUND(AVG(TotalSales), 2) AS BenchmarkAvg
+    FROM ProductSummary
+)
+SELECT 
+    ps.Product,
+    ps.TotalSales,
+    b.BenchmarkAvg,
+    ROUND(ps.TotalSales - b.BenchmarkAvg, 2) AS SalesSurplus,
+    ROUND(((ps.TotalSales - b.BenchmarkAvg) / b.BenchmarkAvg) * 100.0, 2) AS SurplusPct,
+    ps.TotalBoxesSold
+FROM ProductSummary ps
+CROSS JOIN Benchmark b
+WHERE ps.TotalSales > b.BenchmarkAvg
+ORDER BY ps.TotalSales DESC;"""
+    },
     # =========================================================================
     # NHÓM 3: CSDL SAKILA (DVD RENTAL STORE)
     # =========================================================================
