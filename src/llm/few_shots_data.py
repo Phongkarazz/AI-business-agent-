@@ -2196,6 +2196,61 @@ FROM MonthlySales
 ORDER BY SalesMonth ASC;"""
     },
     {
+        "id": "choco_team_quarterly_sales_growth",
+        "domain": "awesome_chocolates",
+        "category": "quarterly_growth_rate",
+        "tags": ["tăng trưởng", "tốc độ", "tốc độ tăng trưởng", "từng team", "các team", "đội ngũ", "từng quý", "quý", "qoq", "quarterly", "growth"],
+        "question": "Cho tôi biết tốc độ tăng trưởng doanh số của từng team bán hàng qua từng quý trong năm 2021",
+        "question_en": "Show quarterly sales growth rate for each sales team across quarters in 2021",
+        "intent_explanation": "Dùng CTE tính doanh số từng quý theo từng team, sau đó dùng hàm LAG() OVER (PARTITION BY pe.Team ORDER BY Quarter ASC) để tính tốc độ tăng trưởng doanh số QoQ % so với quý liền trước.",
+        "sql_mysql": """WITH QuarterlyTeamSales AS (
+    SELECT 
+        pe.Team AS Team,
+        CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate)) AS Quarter,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    WHERE pe.Team != '' AND pe.Team IS NOT NULL
+      AND YEAR(s.SaleDate) = 2021
+    GROUP BY pe.Team, CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate))
+)
+SELECT 
+    Team,
+    Quarter,
+    TotalSales,
+    LAG(TotalSales) OVER (PARTITION BY Team ORDER BY Quarter ASC) AS PrevQuarterSales,
+    ROUND(
+        (TotalSales - LAG(TotalSales) OVER (PARTITION BY Team ORDER BY Quarter ASC)) * 100.0 / 
+        NULLIF(LAG(TotalSales) OVER (PARTITION BY Team ORDER BY Quarter ASC), 0), 
+        2
+    ) AS QoQGrowthPct
+FROM QuarterlyTeamSales
+ORDER BY Team, Quarter ASC;""",
+        "sql_sqlite": """WITH QuarterlyTeamSales AS (
+    SELECT 
+        pe.Team AS Team,
+        strftime('%Y', s.SaleDate) || '-Q' || ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) AS Quarter,
+        SUM(s.Amount) AS TotalSales
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    WHERE pe.Team != '' AND pe.Team IS NOT NULL
+      AND strftime('%Y', s.SaleDate) = '2021'
+    GROUP BY pe.Team, Quarter
+)
+SELECT 
+    Team,
+    Quarter,
+    TotalSales,
+    LAG(TotalSales) OVER (PARTITION BY Team ORDER BY Quarter ASC) AS PrevQuarterSales,
+    ROUND(
+        (TotalSales - LAG(TotalSales) OVER (PARTITION BY Team ORDER BY Quarter ASC)) * 100.0 / 
+        NULLIF(LAG(TotalSales) OVER (PARTITION BY Team ORDER BY Quarter ASC), 0), 
+        2
+    ) AS QoQGrowthPct
+FROM QuarterlyTeamSales
+ORDER BY Team, Quarter ASC;"""
+    },
+    {
         "id": "choco_category_share_ratio",
         "domain": "awesome_chocolates",
         "category": "ratio_share",

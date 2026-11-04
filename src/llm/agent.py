@@ -5978,7 +5978,11 @@ JOIN geo g ON s.GeoID = g.GeoID
 {where_clause}GROUP BY Quarter, Country
 ORDER BY Quarter ASC, TotalSales DESC"""
 
-    # 3. Doanh thu của một Team cụ thể qua từng quý (ví dụ: Yummies theo từng quý)
+    # 3. Doanh thu & Tốc độ tăng trưởng của từng Team qua từng quý (Đa đội ngũ / Multi-team quarterly sales & growth)
+    is_multi_team = (
+        any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "các team", "từng team", "mỗi team", "các đội", "từng đội", "các nhóm", "từng nhóm", "mỗi nhóm"])
+        and not any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "nhân viên", "salesperson", "khách hàng", "customer"])
+    )
     specific_team = None
     if "yummies" in q_low:
         specific_team = "Yummies"
@@ -5987,6 +5991,52 @@ ORDER BY Quarter ASC, TotalSales DESC"""
     elif "jucies" in q_low:
         specific_team = "Jucies"
 
+    if is_multi_team and not specific_team:
+        has_growth = any(k in q_low for k in [
+            "tăng trưởng", "tốc độ", "tốc độ tăng trưởng", "growth", "qoq", 
+            "tỷ lệ tăng", "tỉ lệ tăng", "chênh lệch %", "phần trăm tăng"
+        ])
+        metric_col = "TotalBoxesSold" if has_boxes else "TotalSales"
+        conds = ["pe.Team != ''", "pe.Team IS NOT NULL"]
+        if year_cond:
+            conds.append(year_cond)
+        where_clause = "WHERE " + " AND ".join(conds)
+
+        if has_growth:
+            return f"""WITH QuarterlyTeamSales AS (
+    SELECT 
+        pe.Team AS Team,
+        {qtr_expr} AS Quarter,
+        {metric_expr}
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    {where_clause}
+    GROUP BY pe.Team, Quarter
+)
+SELECT 
+    Team,
+    Quarter,
+    {metric_col},
+    LAG({metric_col}) OVER (PARTITION BY Team ORDER BY Quarter ASC) AS PrevQuarterSales,
+    ROUND(
+        ({metric_col} - LAG({metric_col}) OVER (PARTITION BY Team ORDER BY Quarter ASC)) * 100.0 / 
+        NULLIF(LAG({metric_col}) OVER (PARTITION BY Team ORDER BY Quarter ASC), 0), 
+        2
+    ) AS QoQGrowthPct
+FROM QuarterlyTeamSales
+ORDER BY Team, Quarter ASC"""
+        else:
+            return f"""SELECT 
+    pe.Team AS Team,
+    {qtr_expr} AS Quarter,
+    {metric_expr}
+FROM sales s
+JOIN people pe ON s.SPID = pe.SPID
+{where_clause}
+GROUP BY pe.Team, Quarter
+ORDER BY Team, Quarter ASC"""
+
+    # 4. Doanh thu của một Team cụ thể qua từng quý (ví dụ: Yummies theo từng quý)
     if specific_team:
         conds = [f"pe.Team = '{specific_team}'"]
         if year_cond:
@@ -6001,7 +6051,7 @@ JOIN people pe ON s.SPID = pe.SPID
 GROUP BY Quarter
 ORDER BY Quarter ASC"""
 
-    # 4. Doanh thu của một Sản phẩm cụ thể qua từng quý (ví dụ: 85% Dark Bars theo từng quý)
+    # 5. Doanh thu của một Sản phẩm cụ thể qua từng quý (ví dụ: 85% Dark Bars theo từng quý)
     specific_prod = match_chocolates_specific_product(q_low)
     if specific_prod:
         escaped_prod = specific_prod.replace("'", "''")
@@ -6018,8 +6068,8 @@ JOIN products pr ON s.PID = pr.PID
 GROUP BY Quarter
 ORDER BY Quarter ASC"""
 
-    # 5. Doanh thu toàn công ty / tổng hợp theo từng quý
-    if any(k in q_low for k in ["doanh thu", "doanh số", "sales", "số lượng", "hộp", "thùng"]):
+    # 6. Doanh thu toàn công ty / tổng hợp theo từng quý
+    if not is_multi_team and not specific_team and any(k in q_low for k in ["doanh thu", "doanh số", "sales", "số lượng", "hộp", "thùng"]):
         where_clause = f"WHERE {year_cond}\n" if year_cond else ""
         needs_fix = "with " in sql_low or "max(" in sql_low or "group by quarter" not in sql_low
         if needs_fix:
@@ -7458,6 +7508,15 @@ def auto_fix_chocolates_team_sales_and_boxes_query(sql: str, user_query: str, di
     if not (is_team_q and (has_sales_kw or has_boxes_kw)):
         return sql
 
+    # Không can thiệp nếu là câu hỏi theo thời gian (quý, tháng, năm) hoặc tốc độ tăng trưởng (growth / QoQ / MoM / xu hướng)
+    if any(k in q_low for k in [
+        "quý", "quarter", "từng quý", "theo quý", "qua các quý", "quarterly",
+        "tháng", "month", "từng tháng", "theo tháng", "qua các tháng", "monthly",
+        "tăng trưởng", "tốc độ", "tốc độ tăng trưởng", "growth", "qoq", "mom",
+        "theo thời gian", "qua thời gian", "xu hướng"
+    ]):
+        return sql
+
     # Không can thiệp nếu là câu hỏi P&L theo thời gian hoặc P&L Đội ngũ (đã có auto_fix_chocolates_pnl_query)
     if any(k in q_low for k in ["p&l", "pnl", "lãi, lỗ", "lãi lỗ", "kết quả kinh doanh", "chi phí", "cost", "giá vốn", "cogs", "lợi nhuận ròng", "net profit"]):
         return sql
@@ -7832,7 +7891,8 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     is_time_trend = any(k in q_low for k in [
         "tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "xu hướng", 
         "quý", "quarter", "từng quý", "theo quý", "qua các quý", "thay đổi", "biến động", 
-        "thời gian", "dòng thời gian", "qua thời gian"
+        "thời gian", "dòng thời gian", "qua thời gian",
+        "tăng trưởng", "tốc độ", "tốc độ tăng trưởng", "growth", "qoq", "mom"
     ])
     is_top_entity_in_period = (
         any(k in q_low for k in ["top", "cao nhất", "nhiều nhất", "lớn nhất", "thấp nhất"])

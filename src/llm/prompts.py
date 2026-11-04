@@ -615,6 +615,31 @@ def get_db_specific_rules(schema_context: str) -> str:
           WHERE pe.Team != '' AND pe.Team IS NOT NULL
           GROUP BY pe.Team
           ORDER BY TotalSales DESC;
+      + MẪU CHUẨN TỐC ĐỘ TĂNG TRƯỞNG DOANH SỐ TỪNG QUÝ (Q1 ĐẾN Q4) CỦA TỪNG TEAM / ĐỘI NGŨ (QOQ GROWTH RATE):
+        * Khi hỏi 'tốc độ tăng trưởng doanh số của từng team qua từng quý', 'tăng trưởng doanh số từng quý năm 2021 của các team', 'doanh số từng team từ Quý 1 đến Quý 4':
+          BẮT BUỘC dùng CTE tính doanh thu từng quý theo Team (`GROUP BY pe.Team, Quarter`), sau đó dùng LAG() OVER (PARTITION BY pe.Team ORDER BY Quarter ASC) để tính Tốc Độ Tăng Trưởng (%):
+          WITH QuarterlyTeamSales AS (
+              SELECT 
+                  pe.Team AS `Đội Ngũ`,
+                  CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate)) AS `Quý`,
+                  SUM(s.Amount) AS `Doanh Thu ($)`
+              FROM sales s
+              JOIN people pe ON s.SPID = pe.SPID
+              WHERE pe.Team != '' AND pe.Team IS NOT NULL AND YEAR(s.SaleDate) = 2021
+              GROUP BY pe.Team, `Quý`
+          )
+          SELECT 
+              `Đội Ngũ`,
+              `Quý`,
+              `Doanh Thu ($)`,
+              LAG(`Doanh Thu ($)`) OVER (PARTITION BY `Đội Ngũ` ORDER BY `Quý` ASC) AS `Doanh Thu Quý Trước ($)`,
+              ROUND(
+                  (`Doanh Thu ($)` - LAG(`Doanh Thu ($)`) OVER (PARTITION BY `Đội Ngũ` ORDER BY `Quý` ASC)) * 100.0 / 
+                  NULLIF(LAG(`Doanh Thu ($)`) OVER (PARTITION BY `Đội Ngũ` ORDER BY `Quý` ASC), 0), 
+                  2
+              ) AS `Tốc Độ Tăng Trưởng (%)`
+          FROM QuarterlyTeamSales
+          ORDER BY `Đội Ngũ`, `Quý` ASC;
       + MẪU CHUẨN TOP NHÂN SỰ:
         SELECT pe.Salesperson, SUM(s.Amount) AS TotalSales, pe.Team
         FROM people pe
@@ -3563,6 +3588,49 @@ LIMIT {req_limit};
 2. Lợi nhuận mỗi hộp = ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) / SUM(s.Boxes), 2) AS ProfitPerBox.
 3. TUYỆT ĐỐI KHÔNG chỉ SELECT cột Cost_per_box và ORDER BY Cost_per_box vì Cost_per_box là GIÁ VỐN chứ không phải lợi nhuận hay tỷ suất lợi nhuận!
 4. BẮT BUỘC JOIN giữa sales s và products pr ON s.PID = pr.PID!)
+"""
+
+        # 0.0779 Tốc độ tăng trưởng doanh số theo từng Quý của từng Team (Quý 1 đến Quý 4) / QoQ Team Growth Rate
+        elif (
+            any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "các team", "từng team", "mỗi team", "các đội", "từng đội", "các nhóm", "từng nhóm", "mỗi nhóm"])
+            and any(k in q_low for k in ["quý", "quarter", "từng quý", "theo quý", "qua các quý", "quý 1", "quý 4", "q1", "q4", "4 quý"])
+            and not any(k in q_low for k in ["so với", "vs", "so voi", "sản phẩm", "product", "nhân viên", "salesperson"])
+        ):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_val = yr_match.group(1) if yr_match else "2021"
+            is_sqlite_hint = is_sqlite or "sqlite" in schema_low
+            qtr_calc = "strftime('%Y', s.SaleDate) || '-Q' || ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3)" if is_sqlite_hint else "CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate))"
+            yr_filter = f"WHERE pe.Team != '' AND pe.Team IS NOT NULL AND strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite_hint else f"WHERE pe.Team != '' AND pe.Team IS NOT NULL AND YEAR(s.SaleDate) = {yr_val}"
+
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (TỐC ĐỘ TĂNG TRƯỞNG DOANH SỐ TỪNG TEAM QUA TỪNG QUÝ NĂM {yr_val}):
+WITH QuarterlyTeamSales AS (
+    SELECT 
+        pe.Team AS `Đội Ngũ`,
+        {qtr_calc} AS `Quý`,
+        SUM(s.Amount) AS `Doanh Thu ($)`
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID
+    {yr_filter}
+    GROUP BY pe.Team, `Quý`
+)
+SELECT 
+    `Đội Ngũ`,
+    `Quý`,
+    `Doanh Thu ($)`,
+    LAG(`Doanh Thu ($)`) OVER (PARTITION BY `Đội Ngũ` ORDER BY `Quý` ASC) AS `Doanh Thu Quý Trước ($)`,
+    ROUND(
+        (`Doanh Thu ($)` - LAG(`Doanh Thu ($)`) OVER (PARTITION BY `Đội Ngũ` ORDER BY `Quý` ASC)) * 100.0 / 
+        NULLIF(LAG(`Doanh Thu ($)`) OVER (PARTITION BY `Đội Ngũ` ORDER BY `Quý` ASC), 0), 
+        2
+    ) AS `Tốc Độ Tăng Trưởng (%)`
+FROM QuarterlyTeamSales
+ORDER BY `Đội Ngũ`, `Quý` ASC;
+(CẢNH BÁO BẮT BUỘC:
+1. ĐÂY LÀ BÀI TOÁN TÍNH TỐC ĐỘ TĂNG TRƯỞNG DOANH THU THEO TỪNG QUÝ CỦA TỪNG TEAM KINH DOANH TRONG NĂM {yr_val}.
+2. TUYỆT ĐỐI KHÔNG TỔNG HỢP GỘP CẢ NĂM (GROUP BY pe.Team đơn thuần) VÌ SẼ BỊ MẤT DỮ LIỆU CÁC QUÝ (Q1 ĐẾN Q4)!
+3. TUYỆT ĐỐI KHÔNG BỎ QUÊN MỆNH ĐỀ LỌC pe.Team != '' AND pe.Team IS NOT NULL!
+4. BẮT BUỘC dùng CTE tính doanh thu từng quý cho từng Team (`GROUP BY pe.Team, Quý`), sau đó dùng LAG() OVER (PARTITION BY `Đội Ngũ` ORDER BY `Quý` ASC) để tính Tốc Độ Tăng Trưởng (%) so với quý liền trước!)
 """
 
         # 0.078 So sánh tăng trưởng doanh số theo Quý giữa 2 mốc quý cụ thể (Quarter-over-Quarter Growth Comparison)

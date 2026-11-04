@@ -893,7 +893,7 @@ def evaluate_execution(
                 "sản phẩm", "product", "category", "danh mục", "bars", "bites",
                 "canada", "india", "usa", "uk", "new zealand", "australia", "thị trường", "quốc gia",
                 "nhân viên", "nhân sự", "salesperson", "của riêng", "riêng", "tại", "đối với", "thuộc",
-                "quý", "quarter", "tháng", "month"
+                "quý", "quarter", "tháng", "month", "tăng trưởng", "tốc độ", "growth", "qoq", "tỷ lệ tăng", "tỉ lệ tăng", "theo thời gian", "xu hướng"
             ])
         )
         if is_team_sales_boxes_eval:
