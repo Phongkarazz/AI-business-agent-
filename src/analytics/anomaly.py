@@ -515,41 +515,71 @@ def scan_dashboard_anomalies_and_strategies(
     is_multi_year = (start_year != end_year)
     
     anomalies: List[Dict[str, Any]] = []
+    lid_low = str(layer_id or "").lower()
+    is_sales_layer = any(k in lid_low for k in ["sales", "northwind", "product", "geo", "people", "trend", "top_performer", "order", "customer", "supplier"])
     
     # -------------------------------------------------------------
     # 1. Quét Chuỗi Thời Gian (Trend Analysis)
     # -------------------------------------------------------------
     trend_df = data.get("trend_df") if isinstance(data.get("trend_df"), pd.DataFrame) else None
     if trend_df is not None and not trend_df.empty:
-        t_col = "TimePeriod" if "TimePeriod" in trend_df.columns else (trend_df.columns[0])
-        v1_col = "Metric1" if "Metric1" in trend_df.columns else ("Headcount" if "Headcount" in trend_df.columns else trend_df.columns[1])
-        metric1_name = data.get("metric1_name", "Quy mô Tuyển Dụng" if not is_en else "Hiring Headcount")
+        t_col = "TimePeriod" if "TimePeriod" in trend_df.columns else ("YearMonth" if "YearMonth" in trend_df.columns else ("Month" if "Month" in trend_df.columns else trend_df.columns[0]))
+        v1_col = "Metric1" if "Metric1" in trend_df.columns else ("Revenue" if "Revenue" in trend_df.columns else ("Headcount" if "Headcount" in trend_df.columns else trend_df.columns[1]))
+        is_rev_col = is_sales_layer or any(k in str(v1_col).lower() for k in ["rev", "amount", "sales", "doanh"])
         
         t_res = detect_time_series_inflections(trend_df, t_col, v1_col)
         if t_res.get("has_inflection"):
             drop_pct = abs(t_res['peak_to_trough_drop_pct'])
             severity = "CRITICAL 🚨" if drop_pct >= 50.0 else "WARNING ⚠️"
+            peak_p_fmt = format_anomaly_label(t_res['peak_period'], t_col)
+            trough_p_fmt = format_anomaly_label(t_res['trough_period'], t_col)
             
-            if is_en:
-                anomalies.append({
-                    "severity": severity,
-                    "category": "Time Series & Hiring Trend",
-                    "title": f"Hiring Cliff: -{drop_pct:.1f}% contraction from historical peak",
-                    "metrics_summary": f"Hiring peaked at <b>{t_res['peak_val']:,.0f}</b> headcount ({t_res['peak_period']}) then plunged down to a trough of <b>{t_res['trough_val']:,.0f}</b> ({t_res['trough_period']}), representing a <b>-{drop_pct:.1f}%</b> decline.",
-                    "root_cause": "The organization rapidly shifted from 'Hyper-growth Expansion' to 'Lean Operations & Productivity Consolidation'. However, multi-year excessive hiring freezes risk disrupting talent succession.",
-                    "quantified_impact": f"Diminished influx of junior staff increases average employee age, elevating mid/senior talent shortage risks when natural retirements begin after {time_label}.",
-                    "raw": t_res
-                })
+            if is_rev_col:
+                if is_en:
+                    anomalies.append({
+                        "severity": severity,
+                        "category": "Time Series & Commercial Cycle",
+                        "title": f"Revenue Cycle Volatility: -{drop_pct:.1f}% pullback from peak to trough",
+                        "metrics_summary": f"Revenue peaked at <b>${t_res['peak_val']:,.0f}</b> ({peak_p_fmt}) before pulling back to a trough of <b>${t_res['trough_val']:,.0f}</b> ({trough_p_fmt}), a <b>-{drop_pct:.1f}%</b> amplitude swing.",
+                        "root_cause": "Post-peak seasonal demand cooldown combined with front-loaded distributor order batching during promotional campaigns.",
+                        "quantified_impact": f"High monthly cashflow variance (${t_res['peak_val'] - t_res['trough_val']:,.0f} spread) creates inventory buffer pressure and underutilized logistics capacity during off-peak periods.",
+                        "raw": t_res,
+                        "is_sales": True
+                    })
+                else:
+                    anomalies.append({
+                        "severity": severity,
+                        "category": "Chuỗi Thời Gian & Chu Kỳ Doanh Số",
+                        "title": f"Biến động chu kỳ doanh thu: Chênh lệch -{drop_pct:.1f}% từ đỉnh xuống đáy kỳ",
+                        "metrics_summary": f"Doanh thu đạt đỉnh <b>${t_res['peak_val']:,.0f}</b> ({peak_p_fmt}) sau đó điều chỉnh về mức đáy <b>${t_res['trough_val']:,.0f}</b> ({trough_p_fmt}), tương ứng biên độ giảm <b>-{drop_pct:.1f}%</b>.",
+                        "root_cause": "Hiệu ứng dồn đơn hàng đại lý (Front-loading) vào các chiến dịch cao điểm đầu năm, kéo theo nhịp chững lại tự nhiên của sức mua ở các tháng kế tiếp.",
+                        "quantified_impact": f"Biên độ dao động dòng tiền tháng lên tới <b>${t_res['peak_val'] - t_res['trough_val']:,.0f}</b>, gây áp lực lên kế hoạch dự trữ tồn kho và công suất chuỗi cung ứng.",
+                        "raw": t_res,
+                        "is_sales": True
+                    })
             else:
-                anomalies.append({
-                    "severity": severity,
-                    "category": "Chuỗi Thời Gian & Xu Hướng Tuyển Dụng",
-                    "title": f"Đứt gãy tuyển dụng: Co hẹp {drop_pct:.1f}% từ đỉnh lịch sử",
-                    "metrics_summary": f"Tuyển dụng đạt đỉnh <b>{t_res['peak_val']:,.0f}</b> nhân sự ({t_res['peak_period']}) nhưng lao dốc liên tục xuống đáy <b>{t_res['trough_val']:,.0f}</b> nhân sự ({t_res['trough_period']}), tương ứng mức giảm <b>-{drop_pct:.1f}%</b>.",
-                    "root_cause": "Doanh nghiệp dịch chuyển mạnh mẽ từ giai đoạn 'Siêu mở rộng quy mô' (Hyper-growth) sang giai đoạn 'Tối ưu hóa năng suất & Vận hành tinh gọn'. Tuy nhiên, việc siết tuyển dụng quá sâu trong nhiều năm liên tiếp dẫn đến nguy cơ đứt gãy thế hệ kế thừa.",
-                    "quantified_impact": f"Hụt giảm dòng nhân sự mới khiến độ tuổi bình quân tăng lên, gia tăng rủi ro thiếu hụt nhân lực trung/cao cấp khi làn sóng nghỉ hưu tự nhiên bắt đầu sau {time_label}.",
-                    "raw": t_res
-                })
+                if is_en:
+                    anomalies.append({
+                        "severity": severity,
+                        "category": "Time Series & Hiring Trend",
+                        "title": f"Hiring Cliff: -{drop_pct:.1f}% contraction from historical peak",
+                        "metrics_summary": f"Hiring peaked at <b>{t_res['peak_val']:,.0f}</b> headcount ({peak_p_fmt}) then plunged down to a trough of <b>{t_res['trough_val']:,.0f}</b> ({trough_p_fmt}), representing a <b>-{drop_pct:.1f}%</b> decline.",
+                        "root_cause": "The organization rapidly shifted from 'Hyper-growth Expansion' to 'Lean Operations & Productivity Consolidation'. However, multi-year excessive hiring freezes risk disrupting talent succession.",
+                        "quantified_impact": f"Diminished influx of junior staff increases average employee age, elevating mid/senior talent shortage risks when natural retirements begin after {time_label}.",
+                        "raw": t_res,
+                        "is_sales": False
+                    })
+                else:
+                    anomalies.append({
+                        "severity": severity,
+                        "category": "Chuỗi Thời Gian & Xu Hướng Tuyển Dụng",
+                        "title": f"Đứt gãy tuyển dụng: Co hẹp {drop_pct:.1f}% từ đỉnh lịch sử",
+                        "metrics_summary": f"Tuyển dụng đạt đỉnh <b>{t_res['peak_val']:,.0f}</b> nhân sự ({peak_p_fmt}) nhưng lao dốc liên tục xuống đáy <b>{t_res['trough_val']:,.0f}</b> nhân sự ({trough_p_fmt}), tương ứng mức giảm <b>-{drop_pct:.1f}%</b>.",
+                        "root_cause": "Doanh nghiệp dịch chuyển mạnh mẽ từ giai đoạn 'Siêu mở rộng quy mô' (Hyper-growth) sang giai đoạn 'Tối ưu hóa năng suất & Vận hành tinh gọn'. Tuy nhiên, việc siết tuyển dụng quá sâu trong nhiều năm liên tiếp dẫn đến nguy cơ đứt gãy thế hệ kế thừa.",
+                        "quantified_impact": f"Hụt giảm dòng nhân sự mới khiến độ tuổi bình quân tăng lên, gia tăng rủi ro thiếu hụt nhân lực trung/cao cấp khi làn sóng nghỉ hưu tự nhiên bắt đầu sau {time_label}.",
+                        "raw": t_res,
+                        "is_sales": False
+                    })
 
     # -------------------------------------------------------------
     # 2. Quét Cơ Cấu Phòng Ban & Tỷ Trọng Nhân Sự (Structural Imbalance)
@@ -662,7 +692,23 @@ def scan_dashboard_anomalies_and_strategies(
         for a in anomalies:
             cat = a["category"]
             
-            if "Tuyển Dụng" in cat or "Hiring" in cat or "Time Series" in cat or "Chuỗi Thời Gian" in cat:
+            if a.get("is_sales"):
+                raw_t = a.get("raw", {})
+                peak_p = format_anomaly_label(raw_t.get("peak_period", "start"), "YearMonth")
+                trough_p = format_anomaly_label(raw_t.get("trough_period", "end"), "YearMonth")
+                drop_val = abs(raw_t.get("peak_to_trough_drop_pct", 50.0))
+                trough_floor = int(raw_t.get("trough_val", 2000000) * 1.15)
+                if is_en:
+                    immediate_actions.append(f"<b>Smooth Off-Peak Demand (0 - 30 Days)</b>: Counter the -{drop_val:.1f}% pullback in {trough_p} by launching bundled B2B trade promotions to hold monthly revenue above ${trough_floor:,d}.")
+                    structural_optimizations.append(f"<b>Rebalance S&OP & Inventory Pacing (1 - 2 Quarters)</b>: Align working capital and safety stock 30-45 days ahead of peak cycles like {peak_p} (${raw_t.get('peak_val', 5280000):,.0f}) while preventing post-peak overstock.")
+                    sustainable_strategies.append(f"<b>Dynamic Seasonal Quota & Pricing Model</b>: Replace flat monthly targets with season-adjusted commercial quotas and early-bird distributor rebates.")
+                    okrs.append(f"Narrow peak-to-trough monthly revenue volatility by 20% and maintain a monthly revenue floor ≥ ${trough_floor:,d}.")
+                else:
+                    immediate_actions.append(f"<b>Kích cầu làm phẳng đáy chu kỳ (0 - 30 ngày)</b>: Khắc phục mức giảm -{drop_val:.1f}% tại {trough_p} bằng gói khuyến mãi B2B theo bậc và bán chéo Combo nhằm giữ sàn doanh thu trên <b>${trough_floor:,d}/tháng</b>.")
+                    structural_optimizations.append(f"<b>Tái cấu trúc điều độ S&OP & Tồn kho (1 - 2 Quý)</b>: Chủ động chuẩn bị hạn mức vốn lưu động và tồn kho đệm trước các kỳ đỉnh như {peak_p} (<b>${raw_t.get('peak_val', 5280000):,.0f}</b>) từ 30-45 ngày, đồng thời xả tồn kho có kiểm soát sau đỉnh.")
+                    sustainable_strategies.append(f"<b>Mô hình Giao Quota & Chiết khấu Động theo Mùa vụ</b>: Chuyển từ giao chỉ tiêu bình quân tĩnh sang hệ thống KPI gắn với chỉ số mùa vụ (Seasonal Index) và hợp đồng bao tiêu dài hạn.")
+                    okrs.append(f"Thu hẹp 20% biên độ dao động doanh thu tháng (CV%) và bảo vệ mức sàn doanh thu tối thiểu ≥ ${trough_floor:,d}/tháng.")
+            elif "Tuyển Dụng" in cat or "Hiring" in cat or "Time Series" in cat or "Chuỗi Thời Gian" in cat:
                 raw_t = a.get("raw", {})
                 peak_p = raw_t.get("peak_period", "start")
                 trough_p = raw_t.get("trough_period", "end")
@@ -734,26 +780,40 @@ def scan_dashboard_anomalies_and_strategies(
         if is_en:
             immediate_actions.append(f"<b>Sustain Operational Momentum (0 - 30 Days)</b>: Continue tracking established KPIs for {time_label}.")
             structural_optimizations.append("<b>Optimize Internal Processes (1 - 2 Quarters)</b>: Automate repetitive workflows to preserve high productivity.")
-            sustainable_strategies.append("<b>Expand Competitive Moat (1 - 3 Years)</b>: Invest in talent upskilling and capability diversification.")
-            okrs.append("Maintain business growth ≥ 12% and keep payroll expenditure variance within ± 5%.")
+            sustainable_strategies.append("<b>Expand Competitive Moat (1 - 3 Years)</b>: Invest in capability diversification and market expansion.")
+            okrs.append("Maintain business growth ≥ 12% and keep operational expenditure variance within ± 5%.")
         else:
             immediate_actions.append(f"<b>Duy trì đà vận hành ổn định (0 - 30 ngày)</b>: Tiếp tục bám sát các chỉ số KPI hiện tại trong {time_label}.")
             structural_optimizations.append("<b>Tối ưu hóa quy trình nội bộ (1 - 2 Quý)</b>: Tự động hóa các tác vụ lặp lại để duy trì mức hiệu suất cao.")
-            sustainable_strategies.append("<b>Mở rộng năng lực cạnh tranh (1 - 3 Năm)</b>: Đầu tư vào nâng cao chất lượng nguồn nhân lực và mở rộng danh mục.")
-            okrs.append("Duy trì tốc độ tăng trưởng doanh nghiệp ≥ 12% và kiểm soát chi phí quỹ lương trong giới hạn ± 5%.")
+            sustainable_strategies.append("<b>Mở rộng năng lực cạnh tranh (1 - 3 Năm)</b>: Đầu tư vào nâng cao năng lực cốt lõi và mở rộng danh mục thị trường.")
+            okrs.append("Duy trì tốc độ tăng trưởng doanh nghiệp ≥ 12% và kiểm soát biên độ biến động chi phí trong giới hạn ± 5%.")
 
-    if is_en:
-        headline = (
-            f"Identified {len(anomalies)} key operational anomalies during {time_label}. Immediate intervention recommended for hiring trends and internal compensation equity."
-            if anomalies else
-            f"Operational structures and indicators during {time_label} remain stable and balanced."
-        )
+    if is_sales_layer or any(a.get("is_sales") for a in anomalies):
+        if is_en:
+            headline = (
+                f"Detected {len(anomalies)} commercial cycle & performance variance point(s) in {time_label}. Recommended focus: seasonal S&OP pacing, portfolio margin optimization, and trough demand uplift."
+                if anomalies else
+                f"Commercial revenue, volume, and market share indicators during {time_label} remain stable and well-balanced."
+            )
+        else:
+            headline = (
+                f"Phát hiện {len(anomalies)} điểm biến động chu kỳ thương mại trong {time_label}. Đề xuất trọng tâm: điều độ kế hoạch S&OP theo mùa vụ, tối ưu cơ cấu danh mục và kích cầu tại các kỳ thấp điểm."
+                if anomalies else
+                f"Cơ cấu doanh thu, sản lượng và thị phần thương mại trong {time_label} duy trì trạng thái ổn định và cân bằng."
+            )
     else:
-        headline = (
-            f"Phát hiện {len(anomalies)} điểm bất thường trọng yếu trong {time_label}. Đề xuất can thiệp ngay vào xu hướng tuyển dụng và cân đối đãi ngộ nội bộ."
-            if anomalies else
-            f"Cơ cấu vận hành và các chỉ số trong {time_label} duy trì trạng thái ổn định và cân bằng."
-        )
+        if is_en:
+            headline = (
+                f"Identified {len(anomalies)} key operational anomalies during {time_label}. Immediate intervention recommended for hiring trends and internal compensation equity."
+                if anomalies else
+                f"Operational structures and indicators during {time_label} remain stable and balanced."
+            )
+        else:
+            headline = (
+                f"Phát hiện {len(anomalies)} điểm bất thường trọng yếu trong {time_label}. Đề xuất can thiệp ngay vào xu hướng tuyển dụng và cân đối đãi ngộ nội bộ."
+                if anomalies else
+                f"Cơ cấu vận hành và các chỉ số trong {time_label} duy trì trạng thái ổn định và cân bằng."
+            )
 
     # Đóng gói Prompt Payload cho AI Agent (làm sạch thẻ HTML trước khi gửi vào prompt)
     clean_anomalies_text = ""

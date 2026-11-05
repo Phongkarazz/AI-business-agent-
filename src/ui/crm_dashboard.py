@@ -683,10 +683,32 @@ def render_smart_analyst_anomaly_panel(
 """).strip()
     st.markdown(header_html, unsafe_allow_html=True)
 
+    # Hàm chuẩn hóa Markdown inline (**bold**, `code`) sang HTML sạch để nhúng trong thẻ <div> không bị lỗi hiển thị dấu **
+    def _md_inline_to_html(raw_txt: Any) -> str:
+        if raw_txt is None:
+            return ""
+        s = str(raw_txt)
+        s = re.sub(
+            r"\*\*\[([^\]]+)\]\*\*",
+            r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>",
+            s
+        )
+        s = re.sub(
+            r"\*\*([^*]+)\*\*",
+            r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>",
+            s
+        )
+        s = re.sub(
+            r"`([^`]+)`",
+            r"<code style='background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; color: #67E8F9; font-family: inherit;'>\1</code>",
+            s
+        )
+        return s
+
+    vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
     # Xác định các tập dữ liệu chẩn đoán hiện có trong Layer để dựng Cây Giả Thuyết & Phân Tầng Vai Trò
     diag_sources = {}
-    if isinstance(data.get("df"), pd.DataFrame) and not data["df"].empty:
-        diag_sources["📊 Bảng dữ liệu chính (Primary Table)" if not is_en else "📊 Primary Layer Dataset"] = (data["df"], layer_id)
     if isinstance(data.get("geo_df"), pd.DataFrame) and not data["geo_df"].empty:
         diag_sources["🌍 Thị trường Quốc gia (Market Share)" if not is_en else "🌍 Global Markets (Geo)"] = (data["geo_df"], "doanh số theo quốc gia thị trường")
     if isinstance(data.get("category_df"), pd.DataFrame) and not data["category_df"].empty:
@@ -697,13 +719,17 @@ def render_smart_analyst_anomaly_panel(
         diag_sources["🏢 Khối Phòng Ban (Departments)" if not is_en else "🏢 Departments"] = (data["dept_df"], "nhân sự và lương theo phòng ban")
     if isinstance(data.get("dept_sal_df"), pd.DataFrame) and not data["dept_sal_df"].empty:
         diag_sources["💰 Lương theo Phòng Ban (Dept Salary)" if not is_en else "💰 Salary by Department"] = (data["dept_sal_df"], "lương trung bình theo phòng ban")
+    if isinstance(data.get("df"), pd.DataFrame) and not data["df"].empty:
+        diag_sources["📊 Bảng dữ liệu chính (Primary Table)" if not is_en else "📊 Primary Layer Dataset"] = (data["df"], layer_id)
     if isinstance(data.get("trend_df"), pd.DataFrame) and not data["trend_df"].empty:
         diag_sources["📈 Chuỗi thời gian Tháng (Monthly Trend)" if not is_en else "📈 Monthly Time Series"] = (data["trend_df"], "xu hướng doanh thu theo từng tháng")
 
-    diag_tab_label = f"🔍 {t('tab_diagnosis', count=len(anomalies))}"
+    raw_diag_lbl = str(t('tab_diagnosis', count=len(anomalies))).lstrip("🔍 ").strip()
+    raw_strat_lbl = str(t('tab_strategic_plan')).lstrip("🎯 ").strip()
+    diag_tab_label = f"🔍 {raw_diag_lbl}"
     tree_tab_label = "🌿 Hypothesis Issue Tree" if is_en else "🌿 Cây Giả Thuyết & Kiểm Định"
     persona_tab_label = "👥 Role-Targeted Plan (CEO vs. KAM)" if is_en else "👥 Phân Tầng Vai Trò (CEO vs. KAM/Lead)"
-    strat_tab_label = f"🎯 {t('tab_strategic_plan')}"
+    strat_tab_label = f"🎯 {raw_strat_lbl}"
 
     tab_diag, tab_tree, tab_persona, tab_strat = st.tabs([diag_tab_label, tree_tab_label, persona_tab_label, strat_tab_label])
     
@@ -718,23 +744,23 @@ def render_smart_analyst_anomaly_panel(
                 imp_label = "Quantified Risk & Impact:" if is_en else "Lượng hóa rủi ro & tác động (Quantified Impact):"
 
                 card_html = textwrap.dedent(f"""
-<div style="background: rgba(15, 23, 42, 0.75); border-left: 4px solid {sev_color}; border-top: 1px solid rgba(255,255,255,0.05); border-right: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;">
+<div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.75); border-left: 4px solid {sev_color}; border-top: 1px solid rgba(255,255,255,0.05); border-right: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;">
 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
 <span style="font-size: 0.95rem; font-weight: 700; color: #F8FAFC;">
-#{idx}. {a['title']}
+#{idx}. {_md_inline_to_html(a['title'])}
 </span>
 <span style="font-size: 0.74rem; font-weight: 700; color: {sev_color}; background: rgba(0,0,0,0.35); padding: 3px 10px; border-radius: 12px; border: 1px solid {sev_color}40;">
 {a['severity']}
 </span>
 </div>
 <div style="font-size: 0.86rem; color: #E2E8F0; margin-bottom: 8px; line-height: 1.55;">
-📊 <b style="color: #67E8F9;">{act_label}</b> {a['metrics_summary']}
+📊 <b style="color: #67E8F9;">{act_label}</b> {_md_inline_to_html(a['metrics_summary'])}
 </div>
 <div style="font-size: 0.84rem; color: #CBD5E1; margin-bottom: 6px; line-height: 1.5;">
-🔬 <b style="color: #FDE047;">{rc_label}</b> {a['root_cause']}
+🔬 <b style="color: #FDE047;">{rc_label}</b> {_md_inline_to_html(a['root_cause'])}
 </div>
 <div style="font-size: 0.84rem; color: #FCA5A5; line-height: 1.5;">
-💥 <b style="color: #F87171;">{imp_label}</b> {a['quantified_impact']}
+💥 <b style="color: #F87171;">{imp_label}</b> {_md_inline_to_html(a['quantified_impact'])}
 </div>
 </div>
 """).strip()
@@ -755,19 +781,21 @@ def render_smart_analyst_anomaly_panel(
                 horizontal=True,
                 key=f"diag_tree_src_{key_prefix}_{layer_id}"
             )
-            active_diag_df, active_diag_q = diag_sources[sel_src_lbl]
+            tree_df, tree_q = diag_sources[sel_src_lbl]
+        else:
+            tree_df, tree_q = active_diag_df, active_diag_q
 
-        if active_diag_df is not None and not active_diag_df.empty:
-            tree_data = generate_hypothesis_tree(active_diag_df, user_query=active_diag_q, is_en=is_en)
+        if tree_df is not None and not tree_df.empty:
+            tree_data = generate_hypothesis_tree(tree_df, user_query=tree_q, is_en=is_en)
             branches = tree_data.get("branches", [])
-            prob_stmt = tree_data.get("problem_statement", "")
+            prob_stmt = _md_inline_to_html(tree_data.get("problem_statement", ""))
             if branches:
                 st.markdown(f"""
-                <div style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 10px; padding: 12px 16px; margin-bottom: 12px;">
-                    <div style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 10px; padding: 12px 16px; margin-bottom: 12px;">
+                    <div style="font-size: 0.72rem; font-weight: 700; color: #00F0FF; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">
                         {'🎯 ROOT PROBLEM STATEMENT (BÀI TOÁN TRỌNG TÂM CẦN KIỂM ĐỊNH)' if not is_en else '🎯 ROOT PROBLEM STATEMENT'}
                     </div>
-                    <div style="font-size: 0.92rem; font-weight: 700; color: #F8FAFC; line-height: 1.45;">
+                    <div style="font-size: 0.92rem; font-weight: 700; color: #F8FAFC; line-height: 1.48;">
                         {prob_stmt}
                     </div>
                 </div>
@@ -788,16 +816,18 @@ def render_smart_analyst_anomaly_panel(
                     conf_lbl = "Độ chính xác" if not is_en else "Confidence"
                     imp_lbl = "Mức tác động" if not is_en else "Impact"
                     prio_lbl = "Điểm ưu tiên" if not is_en else "Priority Score"
+                    b_title_clean = _md_inline_to_html(b.get("title", ""))
+                    b_evid_clean = _md_inline_to_html(b.get("evidence", ""))
 
                     branch_html = f"""
-                    <div style="margin-left: 12px; border-left: 3px solid {border_c}; padding-left: 12px; margin-bottom: 10px;">
+                    <div style="font-family: {vn_font_stack}; margin-left: 12px; border-left: 3px solid {border_c}; padding-left: 12px; margin-bottom: 10px;">
                         <div style="background: {bg_c}; border: 1px solid {border_c}55; border-radius: 9px; padding: 10px 14px;">
                             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
-                                <span style="font-size: 0.88rem; font-weight: 800; color: #F8FAFC;">├─ {b.get('title')}</span>
-                                <span style="font-size: 0.7rem; font-weight: 800; color: {badge_c}; background: {badge_bg_c}; border: 1px solid {border_c}88; padding: 2px 8px; border-radius: 6px;">{b.get('status_label')}</span>
+                                <span style="font-size: 0.88rem; font-weight: 700; color: #F8FAFC;">├─ {b_title_clean}</span>
+                                <span style="font-size: 0.7rem; font-weight: 700; color: {badge_c}; background: {badge_bg_c}; border: 1px solid {border_c}88; padding: 2px 8px; border-radius: 6px;">{b.get('status_label')}</span>
                             </div>
-                            <div style="font-size: 0.83rem; color: #CBD5E1; margin-bottom: 8px; line-height: 1.48;">
-                                🔬 <b>{'Bằng chứng kiểm định:' if not is_en else 'Data Evidence:'}</b> {b.get('evidence')}
+                            <div style="font-size: 0.83rem; color: #CBD5E1; margin-bottom: 8px; line-height: 1.52;">
+                                🔬 <strong style="color: #F8FAFC; font-weight: 700;">{'Bằng chứng kiểm định:' if not is_en else 'Data Evidence:'}</strong> {b_evid_clean}
                             </div>
                             <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 0.75rem; color: #94A3B8;">
                                 <div style="flex: 1; min-width: 140px;">
@@ -818,17 +848,28 @@ def render_smart_analyst_anomaly_panel(
                     """
                     st.markdown(re.sub(r'\n\s*', ' ', branch_html).strip(), unsafe_allow_html=True)
 
-                concl = tree_data.get("conclusion", "")
+                concl = _md_inline_to_html(tree_data.get("conclusion", ""))
                 if concl:
                     st.markdown(f"""
-                    <div style="background: rgba(16, 185, 129, 0.12); border-left: 4px solid #10B981; border-radius: 6px; padding: 10px 14px; margin-top: 6px; font-size: 0.85rem; color: #ECFDF5; line-height: 1.5;">
-                        💡 <b>{concl}</b>
+                    <div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.12); border-left: 4px solid #10B981; border-radius: 6px; padding: 10px 14px; margin-top: 6px; font-size: 0.85rem; color: #ECFDF5; line-height: 1.52;">
+                        💡 <strong style="font-weight: 700;">{concl}</strong>
                     </div>
                     """, unsafe_allow_html=True)
         else:
             st.info("No dataset available for hypothesis testing in this period." if is_en else "Chưa có dữ liệu chi tiết để kiểm định cây giả thuyết trong kỳ này.")
 
     with tab_persona:
+        if len(diag_sources) > 1:
+            sel_p_src_lbl = st.radio(
+                "Chọn chiều dữ liệu phân tầng hành động:" if not is_en else "Select data dimension for role-targeted action plan:",
+                options=list(diag_sources.keys()),
+                horizontal=True,
+                key=f"diag_persona_src_{key_prefix}_{layer_id}"
+            )
+            persona_df, persona_q = diag_sources[sel_p_src_lbl]
+        else:
+            persona_df, persona_q = active_diag_df, active_diag_q
+
         persona_opts = [
             "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Vĩ mô & Phân bổ Vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Macro Strategy & Capital Allocation",
             "🎯 Quản lý Trực tiếp (KAM / Team Lead / Quản lý Vùng) — Thực thi Cục bộ" if not is_en else "🎯 Operational Lead (KAM / Team Lead / Regional Manager) — Local Execution",
@@ -843,36 +884,38 @@ def render_smart_analyst_anomaly_panel(
         )
 
         def _render_dash_persona_card(p_code: str, border_col: str, badge_col: str):
-            if active_diag_df is None or active_diag_df.empty:
+            if persona_df is None or persona_df.empty:
                 return
-            p_data = generate_persona_action_plan(active_diag_df, persona=p_code, user_query=active_diag_q, is_en=is_en)
+            p_data = generate_persona_action_plan(persona_df, persona=p_code, user_query=persona_q, is_en=is_en)
+            role_title_clean = _md_inline_to_html(p_data.get("role_title", ""))
+            role_focus_clean = _md_inline_to_html(p_data.get("role_focus", ""))
             kpis_html = "".join(
-                f"<span style='background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.75rem; font-weight: 600; padding: 3px 9px; border-radius: 6px;'>📌 {k}</span>"
+                f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F8FAFC; font-size: 0.76rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.4;'>📌 {_md_inline_to_html(k)}</span>"
                 for k in p_data.get("kpis", [])
             )
             acts_html = "".join(
-                f"<div style='font-size: 0.84rem; color: #E2E8F0; margin-bottom: 7px; line-height: 1.52;'>• {act}</div>"
+                f"<div style='font-family: {vn_font_stack}; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 9px; line-height: 1.62; font-weight: 400;'>• {_md_inline_to_html(act)}</div>"
                 for act in p_data.get("actions", [])
             )
             box_html = f"""
-            <div style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 10px; padding: 14px 16px; margin-top: 6px; margin-bottom: 10px;">
-                <div style="font-size: 0.92rem; font-weight: 800; color: {badge_col}; margin-bottom: 4px;">
-                    {p_data.get('role_title')}
+            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 16px 18px; margin-top: 6px; margin-bottom: 10px;">
+                <div style="font-family: {vn_font_stack}; font-size: 0.92rem; font-weight: 700; color: {badge_col}; margin-bottom: 6px; line-height: 1.45; letter-spacing: 0.01em;">
+                    {role_title_clean}
                 </div>
-                <div style="font-size: 0.8rem; color: #94A3B8; margin-bottom: 10px; font-style: italic;">
-                    {p_data.get('role_focus')}
+                <div style="font-family: {vn_font_stack}; font-size: 0.81rem; color: #94A3B8; margin-bottom: 12px; font-style: normal; font-weight: 500; line-height: 1.5;">
+                    {role_focus_clean}
                 </div>
-                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;">
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;">
                     {kpis_html}
                 </div>
-                <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px;">
+                <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
                     {acts_html}
                 </div>
             </div>
             """
             st.markdown(re.sub(r'\n\s*', ' ', box_html).strip(), unsafe_allow_html=True)
 
-        if active_diag_df is not None and not active_diag_df.empty:
+        if persona_df is not None and not persona_df.empty:
             if sel_p == persona_opts[0]:
                 _render_dash_persona_card("ceo", "#00F0FF", "#38BDF8")
             elif sel_p == persona_opts[1]:
@@ -1087,10 +1130,23 @@ def render_crm_dashboard():
     # 1. Custom CSS Theme Cyber Dark / Glassmorphism (High-Contrast SaaS Executive Layout)
     st.markdown("""
     <style>
-        /* Main Dashboard Background & Typography */
+        @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
+
+        /* Main Dashboard Background & Vietnamese-Safe Typography */
         .block-container {
             padding-top: 1.5rem !important;
             padding-bottom: 2.5rem !important;
+        }
+        [data-testid="stMarkdownContainer"],
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] div,
+        [data-testid="stMarkdownContainer"] span:not([data-testid="stIconMaterial"]):not(.material-symbols-rounded),
+        [data-testid="stMarkdownContainer"] li,
+        [data-testid="stTabs"] button p,
+        [data-testid="stRadio"] label p,
+        [data-testid="stRadio"] label span {
+            font-family: 'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+            -webkit-font-smoothing: antialiased;
         }
         
         /* High-Contrast Neon Gradient Metric KPI Cards (100% Uniform Diagnostic Dimensions) */

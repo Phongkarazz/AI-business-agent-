@@ -6013,26 +6013,38 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
 
         def _render_persona_box(p_code: str, border_col: str, badge_col: str):
             p_data = generate_persona_action_plan(df, persona=p_code, user_query=user_query, is_en=is_en)
+            vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+            def _clean_md_inline(s_raw):
+                s_val = str(s_raw or "")
+                s_val = re.sub(r"\*\*\[([^\]]+)\]\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>", s_val)
+                s_val = re.sub(r"\*\*([^*]+)\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>", s_val)
+                s_val = re.sub(r"`([^`]+)`", r"<code style='background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; color: #67E8F9; font-family: inherit;'>\1</code>", s_val)
+                return s_val
             kpis_html = "".join(
-                f"<span style='background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.76rem; font-weight: 600; padding: 3px 10px; border-radius: 6px;'>📌 {k}</span>"
+                f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F8FAFC; font-size: 0.76rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.4;'>📌 {_clean_md_inline(k)}</span>"
                 for k in p_data.get("kpis", [])
             )
+            acts_html = "".join(
+                f"<div style='font-family: {vn_font_stack}; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 9px; line-height: 1.62; font-weight: 400;'>• {_clean_md_inline(act)}</div>"
+                for act in p_data.get("actions", [])
+            )
             box_header = f"""
-            <div style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 10px; padding: 12px 16px; margin-top: 8px; margin-bottom: 10px;">
-                <div style="font-size: 0.92rem; font-weight: 800; color: {badge_col}; margin-bottom: 4px;">
-                    {p_data.get('role_title')}
+            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 16px 18px; margin-top: 8px; margin-bottom: 10px;">
+                <div style="font-family: {vn_font_stack}; font-size: 0.92rem; font-weight: 700; color: {badge_col}; margin-bottom: 6px; line-height: 1.45;">
+                    {_clean_md_inline(p_data.get('role_title'))}
                 </div>
-                <div style="font-size: 0.8rem; color: #94A3B8; margin-bottom: 8px; font-style: italic;">
-                    {p_data.get('role_focus')}
+                <div style="font-family: {vn_font_stack}; font-size: 0.81rem; color: #94A3B8; margin-bottom: 12px; font-style: normal; font-weight: 500; line-height: 1.5;">
+                    {_clean_md_inline(p_data.get('role_focus'))}
                 </div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
                     {kpis_html}
+                </div>
+                <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    {acts_html}
                 </div>
             </div>
             """
             st.markdown(re.sub(r'\n\s*', ' ', box_header).strip(), unsafe_allow_html=True)
-            for act in p_data.get("actions", []):
-                st.markdown(escape_markdown_currency_symbols(f"• {act}"))
 
         if df is not None and not df.empty:
             if sel_persona == persona_options[0]:
