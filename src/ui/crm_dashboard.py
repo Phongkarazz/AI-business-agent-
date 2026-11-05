@@ -553,45 +553,61 @@ def show_dashboard_copilot_dialog(ctx: Dict[str, Any]):
 
 
 def _render_diagnostic_kpi_card(
-    color_class: str,
-    title: str,
-    value_html: str,
-    status_pill: str,
-    bench_label: str,
-    bench_pct: float,
-    badge_text: str,
-    sub_text: str,
-    extra_style: str = ""
+    color_class: str = "",
+    title: str = "",
+    value_html: str = "",
+    status_pill: str = "",
+    bench_label: str = "",
+    bench_pct: float = 100.0,
+    badge_text: str = "",
+    sub_text: str = "",
+    extra_style: str = "",
+    card_class: str = "",
+    val_html: str = "",
+    delta_str: str = "",
+    delta_dir: str = "up",
+    status_text: str = "",
+    status_level: str = "good",
+    fill_color: str = ""
 ):
     """Render thẻ KPI chẩn đoán hiệu suất động với kích thước đồng nhất 100%, thanh Benchmark và huy hiệu trạng thái."""
+    resolved_class = color_class or card_class or "kpi-card-cyan"
+    resolved_val = value_html or val_html or ""
+    if delta_str and "kpi-delta-tag" not in resolved_val:
+        arrow = "▲ " if delta_dir == "up" and not delta_str.startswith(("▲", "▼")) else ("▼ " if delta_dir == "down" and not delta_str.startswith(("▲", "▼")) else "")
+        resolved_val = f"<span>{resolved_val}</span><span class='kpi-delta-tag'>{arrow}{delta_str}</span>"
+    elif "kpi-delta-tag" not in resolved_val and not resolved_val.strip().startswith("<span"):
+        resolved_val = f"<span>{resolved_val}</span>"
+
+    resolved_pill = status_pill or status_text or "🟢 OPTIMAL"
     fill_w = min(100.0, max(8.0, float(bench_pct)))
-    if bench_pct >= 100.0:
-        fill_color = "linear-gradient(90deg, #FFFFFF 0%, #6EE7B7 100%)"
+    if bench_pct >= 98.0 or status_level == "good":
+        bar_bg = fill_color or "linear-gradient(90deg, #FFFFFF 0%, #6EE7B7 100%)"
         pill_bg = "rgba(16, 185, 129, 0.34)"
         pill_border = "rgba(167, 243, 208, 0.72)"
-    elif bench_pct >= 85.0:
-        fill_color = "linear-gradient(90deg, #FFFFFF 0%, #FDE047 100%)"
+    elif bench_pct >= 85.0 or status_level == "warn":
+        bar_bg = fill_color or "linear-gradient(90deg, #FFFFFF 0%, #FDE047 100%)"
         pill_bg = "rgba(245, 158, 11, 0.34)"
         pill_border = "rgba(253, 230, 138, 0.72)"
     else:
-        fill_color = "linear-gradient(90deg, #FFFFFF 0%, #FCA5A5 100%)"
+        bar_bg = fill_color or "linear-gradient(90deg, #FFFFFF 0%, #FCA5A5 100%)"
         pill_bg = "rgba(239, 68, 68, 0.36)"
         pill_border = "rgba(252, 165, 165, 0.75)"
 
     st.markdown(f"""
-    <div class="{color_class}" style="{extra_style}">
+    <div class="{resolved_class}" style="{extra_style}">
         <div class="kpi-title">
             <span class="kpi-title-text" title="{title}">{title}</span>
-            <span class="kpi-status-pill" style="background:{pill_bg}; border:1px solid {pill_border};">{status_pill}</span>
+            <span class="kpi-status-pill" style="background:{pill_bg}; border:1px solid {pill_border};">{resolved_pill}</span>
         </div>
-        <div class="kpi-val">{value_html}</div>
+        <div class="kpi-val">{resolved_val}</div>
         <div class="kpi-bench-wrap">
             <div class="kpi-bench-header">
                 <span title="{bench_label}">🎯 {bench_label}</span>
                 <span><b>{bench_pct:.1f}%</b></span>
             </div>
             <div class="kpi-bench-track">
-                <div class="kpi-bench-fill" style="width: {fill_w:.1f}%; background: {fill_color};"></div>
+                <div class="kpi-bench-fill" style="width: {fill_w:.1f}%; background: {bar_bg};"></div>
             </div>
         </div>
         <div class="kpi-sub">

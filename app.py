@@ -25,6 +25,23 @@ try:
 except ImportError:
     pass
 
+import importlib
+import src.i18n
+import src.database.crm_queries
+import src.ui.crm_dashboard
+
+# Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
+CACHE_BUILD_ID = "20261105_dynamic_diagnostic_dashboard_v202"
+if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
+    importlib.reload(src.i18n)
+    importlib.reload(src.database.crm_queries)
+    importlib.reload(src.ui.crm_dashboard)
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    setattr(sys, "_veraxus_loaded_build_id", CACHE_BUILD_ID)
+
 from src.i18n import t, get_current_language, set_current_language
 from src.config_store import load_saved_config
 from src.database.schema import get_table_names
@@ -36,12 +53,14 @@ from src.ui.components import render_result, render_voice_input_button, render_v
 from src.ui.crm_dashboard import render_crm_dashboard
 from src.llm.agent import run_agent
 
-# Tự động xóa sạch query cache cũ khi có phiên bản cập nhật code mới
-CACHE_BUILD_ID = "20261026_fix_smart_chart_line_priority_v101"
 if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
     st.session_state["_cache_build_id"] = CACHE_BUILD_ID
     st.session_state["query_cache"] = {}
     st.session_state["_needs_history_heal"] = True
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
 
 st.markdown("""
 <style>
