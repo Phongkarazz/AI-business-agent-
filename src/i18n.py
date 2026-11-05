@@ -227,7 +227,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "sales_kpi_revenue": "Tổng Doanh Thu",
         "sales_kpi_boxes": "Tổng Số Hộp Bán Ra",
         "sales_kpi_orders": "Tổng Số Giao Dịch",
-        "sales_kpi_customers": "Số Chuyên Viên Kinh Doanh",
+        "sales_kpi_customers": "Tổng Lượt Khách Mua",
 
         # --- Northwind ERP Dashboard ---
         "northwind_dash_title": "📦 Global Supply Chain & Sales Intelligence Dashboard",
@@ -463,7 +463,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "sales_kpi_revenue": "Total Revenue",
         "sales_kpi_boxes": "Total Boxes Sold",
         "sales_kpi_orders": "Total Transactions",
-        "sales_kpi_customers": "Sales Specialists",
+        "sales_kpi_customers": "Total Customer Visits",
 
         # --- Northwind ERP Dashboard ---
         "northwind_dash_title": "📦 Global Supply Chain & Sales Intelligence Dashboard",
