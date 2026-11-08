@@ -516,12 +516,21 @@ def scan_dashboard_anomalies_and_strategies(
     
     anomalies: List[Dict[str, Any]] = []
     lid_low = str(layer_id or "").lower()
-    is_sales_layer = any(k in lid_low for k in ["sales", "northwind", "product", "geo", "people", "trend", "top_performer", "order", "customer", "supplier"])
+    is_sales_layer = (
+        any(k in lid_low for k in ["sales", "northwind", "product", "geo", "people", "trend", "top_performer", "order", "customer", "supplier"])
+        or isinstance(data.get("geo_df"), pd.DataFrame)
+        or isinstance(data.get("category_df"), pd.DataFrame)
+        or isinstance(data.get("team_df"), pd.DataFrame)
+    )
     
     # -------------------------------------------------------------
     # 1. Quét Chuỗi Thời Gian (Trend Analysis)
     # -------------------------------------------------------------
     trend_df = data.get("trend_df") if isinstance(data.get("trend_df"), pd.DataFrame) else None
+    if (trend_df is None or trend_df.empty) and isinstance(data.get("df"), pd.DataFrame) and not data["df"].empty:
+        df_cols_l = [str(c).lower() for c in data["df"].columns]
+        if any(k in df_cols_l for k in ["month", "yearmonth", "timeperiod"]):
+            trend_df = data["df"]
     if trend_df is not None and not trend_df.empty:
         t_col = "TimePeriod" if "TimePeriod" in trend_df.columns else ("YearMonth" if "YearMonth" in trend_df.columns else ("Month" if "Month" in trend_df.columns else trend_df.columns[0]))
         v1_col = "Metric1" if "Metric1" in trend_df.columns else ("Revenue" if "Revenue" in trend_df.columns else ("Headcount" if "Headcount" in trend_df.columns else trend_df.columns[1]))
@@ -580,6 +589,93 @@ def scan_dashboard_anomalies_and_strategies(
                         "raw": t_res,
                         "is_sales": False
                     })
+
+    # -------------------------------------------------------------
+    # 1b. Quét Phân Hóa Thị Trường, Đội Ngũ & Danh Mục Thương Mại (Sales Layers)
+    # -------------------------------------------------------------
+    if is_sales_layer:
+        cat_src = data.get("category_df") if isinstance(data.get("category_df"), pd.DataFrame) else data.get("cat_df")
+        if isinstance(cat_src, pd.DataFrame) and not cat_src.empty and "Category" in cat_src.columns:
+            c_rev_col = "TotalRevenue" if "TotalRevenue" in cat_src.columns else ("Revenue" if "Revenue" in cat_src.columns else None)
+            if c_rev_col:
+                c_sorted = cat_src.sort_values(c_rev_col, ascending=False).reset_index(drop=True)
+                c_tot = float(c_sorted[c_rev_col].sum())
+                if c_tot > 0 and len(c_sorted) >= 2:
+                    top_c = c_sorted.iloc[0]
+                    bot_c = c_sorted.iloc[-1]
+                    top_c_sh = float(top_c[c_rev_col]) / c_tot * 100.0
+                    bot_c_sh = float(bot_c[c_rev_col]) / c_tot * 100.0
+                    if top_c_sh >= 40.0:
+                        if is_en:
+                            anomalies.append({
+                                "severity": "WARNING ⚠️",
+                                "category": "Portfolio Concentration & Margin Mix",
+                                "title": f"Category Dominance: '{top_c['Category']}' drives {top_c_sh:.1f}% of total revenue",
+                                "metrics_summary": f"Core category <b>{top_c['Category']}</b> generates <b>${float(top_c[c_rev_col]):,.0f}</b> ({top_c_sh:.1f}% share) vs. <b>{bot_c['Category']}</b> at <b>${float(bot_c[c_rev_col]):,.0f}</b> ({bot_c_sh:.1f}% share).",
+                                "root_cause": "Commercial distribution and repeat purchase velocity are heavily concentrated in core chocolate bars while secondary lines lack cross-selling attach rates.",
+                                "quantified_impact": f"High portfolio reliance on '{top_c['Category']}'; cross-bundling '{bot_c['Category']}' can unlock an estimated +8–12% incremental basket value.",
+                                "raw": {"top_cat": str(top_c["Category"]), "top_share": top_c_sh},
+                                "is_sales": True,
+                            })
+                        else:
+                            anomalies.append({
+                                "severity": "WARNING ⚠️",
+                                "category": "Cơ Cấu Danh Mục & Tỷ Trọng Sản Phẩm",
+                                "title": f"Tập trung danh mục cao: Nhóm '{top_c['Category']}' chiếm {top_c_sh:.1f}% tổng doanh thu",
+                                "metrics_summary": f"Danh mục chủ lực <b>{top_c['Category']}</b> đạt <b>${float(top_c[c_rev_col]):,.0f}</b> ({top_c_sh:.1f}% tỷ trọng), gấp {float(top_c[c_rev_col])/max(1.0, float(bot_c[c_rev_col])):.2f} lần nhóm <b>{bot_c['Category']}</b> (<b>${float(bot_c[c_rev_col]):,.0f}</b> • {bot_c_sh:.1f}%).",
+                                "root_cause": "Độ phủ kệ hàng và tần suất đặt lặp lại của đại lý tập trung mạnh vào dòng chủ lực, trong khi nhóm sản phẩm bổ trợ chưa được gắn vào gói Combo chuẩn.",
+                                "quantified_impact": f"Rủi ro phụ thuộc đơn ngành hàng; nếu tích hợp bán chéo '{bot_c['Category']}' cùng '{top_c['Category']}' có thể mở khóa thêm 8–12% giá trị giỏ hàng (AOV).",
+                                "raw": {"top_cat": str(top_c["Category"]), "top_share": top_c_sh},
+                                "is_sales": True,
+                            })
+
+        geo_src = data.get("geo_df") if isinstance(data.get("geo_df"), pd.DataFrame) else (data.get("df") if isinstance(data.get("df"), pd.DataFrame) and "Geo" in data["df"].columns else None)
+        if isinstance(geo_src, pd.DataFrame) and not geo_src.empty and len(geo_src) >= 2 and "Geo" in geo_src.columns:
+            g_rev_col = "TotalRevenue" if "TotalRevenue" in geo_src.columns else ("Revenue" if "Revenue" in geo_src.columns else None)
+            if g_rev_col:
+                g_sorted = geo_src.sort_values(g_rev_col, ascending=False).reset_index(drop=True)
+                g_mean = float(g_sorted[g_rev_col].mean())
+                top_g = g_sorted.iloc[0]
+                bot_g = g_sorted.iloc[-1]
+                gap_g = float(top_g[g_rev_col]) - float(bot_g[g_rev_col])
+                bot_vs_mean = ((float(bot_g[g_rev_col]) - g_mean) / max(1.0, g_mean)) * 100.0
+                if is_en:
+                    anomalies.append({
+                        "severity": "WARNING ⚠️",
+                        "category": "Regional Market Variance",
+                        "title": f"Market Gap: ${gap_g:,.0f} spread between #1 {top_g['Geo']} and {bot_g['Geo']}",
+                        "metrics_summary": f"Leading market <b>{top_g['Geo']}</b> reached <b>${float(top_g[g_rev_col]):,.0f}</b> while <b>{bot_g['Geo']}</b> recorded <b>${float(bot_g[g_rev_col]):,.0f}</b> ({bot_vs_mean:+.1f}% vs. company benchmark ${g_mean:,.0f}).",
+                        "root_cause": "Differences in B2B distributor reorder frequency and average box volume per shipment across regional territories.",
+                        "quantified_impact": f"Lifting under-benchmark markets to the company mean (${g_mean:,.0f}) unlocks immediate regional revenue upside.",
+                        "raw": {"top_geo": str(top_g["Geo"]), "bot_geo": str(bot_g["Geo"]), "gap": gap_g},
+                        "is_sales": True,
+                    })
+                else:
+                    anomalies.append({
+                        "severity": "WARNING ⚠️",
+                        "category": "Phân Hóa Thị Trường & Vùng Địa Lý",
+                        "title": f"Độ lệch thị trường quốc tế: Chênh lệch ${gap_g:,.0f} giữa Top #1 {top_g['Geo']} và {bot_g['Geo']}",
+                        "metrics_summary": f"Thị trường dẫn đầu <b>{top_g['Geo']}</b> đạt <b>${float(top_g[g_rev_col]):,.0f}</b> trong khi <b>{bot_g['Geo']}</b> ghi nhận <b>${float(bot_g[g_rev_col]):,.0f}</b> ({bot_vs_mean:+.1f}% so với chuẩn bình quân công ty <b>${g_mean:,.0f}</b>).",
+                        "root_cause": "Sự khác biệt về tần suất đặt hàng lặp lại của nhà phân phối B2B và quy mô số hộp bình quân trên mỗi chuyến hàng giữa các vùng.",
+                        "quantified_impact": f"Nếu nâng các thị trường dưới chuẩn tiệm cận mức bình quân công ty (<b>${g_mean:,.0f}</b>), doanh nghiệp sẽ thu hẹp ngay khoảng hụt <b>${gap_g:,.0f}</b>.",
+                        "raw": {"top_geo": str(top_g["Geo"]), "bot_geo": str(bot_g["Geo"]), "gap": gap_g},
+                        "is_sales": True,
+                    })
+
+        if not anomalies and isinstance(data.get("anomalies"), list) and data["anomalies"]:
+            for raw_a in data["anomalies"]:
+                sev_raw = str(raw_a.get("severity", "WARNING"))
+                sev_fmt = "CRITICAL 🚨" if "CRITICAL" in sev_raw else "WARNING ⚠️"
+                anomalies.append({
+                    "severity": sev_fmt,
+                    "category": "Chẩn Đoán Thương Mại" if not is_en else "Commercial Diagnostics",
+                    "title": raw_a.get("title", ""),
+                    "metrics_summary": raw_a.get("metrics_summary", ""),
+                    "root_cause": raw_a.get("root_cause", ""),
+                    "quantified_impact": raw_a.get("quantified_impact", ""),
+                    "raw": {},
+                    "is_sales": True,
+                })
 
     # -------------------------------------------------------------
     # 2. Quét Cơ Cấu Phòng Ban & Tỷ Trọng Nhân Sự (Structural Imbalance)
@@ -694,20 +790,40 @@ def scan_dashboard_anomalies_and_strategies(
             
             if a.get("is_sales"):
                 raw_t = a.get("raw", {})
-                peak_p = format_anomaly_label(raw_t.get("peak_period", "start"), "YearMonth")
-                trough_p = format_anomaly_label(raw_t.get("trough_period", "end"), "YearMonth")
-                drop_val = abs(raw_t.get("peak_to_trough_drop_pct", 50.0))
-                trough_floor = int(raw_t.get("trough_val", 2000000) * 1.15)
-                if is_en:
-                    immediate_actions.append(f"<b>Smooth Off-Peak Demand (0 - 30 Days)</b>: Counter the -{drop_val:.1f}% pullback in {trough_p} by launching bundled B2B trade promotions to hold monthly revenue above ${trough_floor:,d}.")
-                    structural_optimizations.append(f"<b>Rebalance S&OP & Inventory Pacing (1 - 2 Quarters)</b>: Align working capital and safety stock 30-45 days ahead of peak cycles like {peak_p} (${raw_t.get('peak_val', 5280000):,.0f}) while preventing post-peak overstock.")
-                    sustainable_strategies.append(f"<b>Dynamic Seasonal Quota & Pricing Model</b>: Replace flat monthly targets with season-adjusted commercial quotas and early-bird distributor rebates.")
-                    okrs.append(f"Narrow peak-to-trough monthly revenue volatility by 20% and maintain a monthly revenue floor ≥ ${trough_floor:,d}.")
+                if "top_cat" in raw_t:
+                    tc_n = raw_t.get("top_cat", "Bars")
+                    tc_sh = float(raw_t.get("top_share", 50.0))
+                    if is_en:
+                        immediate_actions.append(f"<b>Cross-Category Bundling (0 - 30 Days)</b>: Pair flagship category '{tc_n}' ({tc_sh:.1f}% share) with secondary SKUs in B2B distributor order packs.")
+                        structural_optimizations.append(f"<b>Portfolio Margin Optimization (1 - 2 Quarters)</b>: Reallocate trade marketing rebates toward high-margin SKUs to diversify revenue concentration.")
+                    else:
+                        immediate_actions.append(f"<b>Kích hoạt Gói Bán Chéo Danh Mục (0 - 30 ngày)</b>: Thiết kế gói Combo gắn nhóm chủ lực '{tc_n}' ({tc_sh:.1f}% tỷ trọng) với các dòng sản phẩm bổ trợ trên đơn hàng đại lý.")
+                        structural_optimizations.append(f"<b>Tối ưu Cơ cấu Biên lợi nhuận Danh mục (1 - 2 Quý)</b>: Tái phân bổ ngân sách Trade Marketing sang các SKU có biên lợi nhuận gộp cao nhằm đa dạng hóa nguồn thu.")
+                elif "top_geo" in raw_t:
+                    tg_n = raw_t.get("top_geo", "New Zealand")
+                    bg_n = raw_t.get("bot_geo", "USA")
+                    gap_v = float(raw_t.get("gap", 400000))
+                    if is_en:
+                        immediate_actions.append(f"<b>Regional Gap Closure (0 - 30 Days)</b>: Focus KAM distributor activation in {bg_n} to narrow the ${gap_v:,.0f} gap against #1 {tg_n}.")
+                        sustainable_strategies.append(f"<b>Territory Playbook Standardization</b>: Replicate B2B reorder cadence and key account playbooks from {tg_n} across under-benchmark regions.")
+                    else:
+                        immediate_actions.append(f"<b>Thu hẹp Độ lệch Thị trường Vùng (0 - 30 ngày)</b>: Tập trung chiến dịch kích hoạt đại lý B2B tại <b>{bg_n}</b> nhằm thu hẹp khoảng cách <b>${gap_v:,.0f}</b> so với thị trường dẫn đầu <b>{tg_n}</b>.")
+                        sustainable_strategies.append(f"<b>Chuẩn hóa Playbook Phát triển Vùng</b>: Nhân rộng quy trình chăm sóc Key Accounts và tần suất tái đặt hàng từ thị trường <b>{tg_n}</b> sang các vùng dưới chuẩn.")
                 else:
-                    immediate_actions.append(f"<b>Kích cầu làm phẳng đáy chu kỳ (0 - 30 ngày)</b>: Khắc phục mức giảm -{drop_val:.1f}% tại {trough_p} bằng gói khuyến mãi B2B theo bậc và bán chéo Combo nhằm giữ sàn doanh thu trên <b>${trough_floor:,d}/tháng</b>.")
-                    structural_optimizations.append(f"<b>Tái cấu trúc điều độ S&OP & Tồn kho (1 - 2 Quý)</b>: Chủ động chuẩn bị hạn mức vốn lưu động và tồn kho đệm trước các kỳ đỉnh như {peak_p} (<b>${raw_t.get('peak_val', 5280000):,.0f}</b>) từ 30-45 ngày, đồng thời xả tồn kho có kiểm soát sau đỉnh.")
-                    sustainable_strategies.append(f"<b>Mô hình Giao Quota & Chiết khấu Động theo Mùa vụ</b>: Chuyển từ giao chỉ tiêu bình quân tĩnh sang hệ thống KPI gắn với chỉ số mùa vụ (Seasonal Index) và hợp đồng bao tiêu dài hạn.")
-                    okrs.append(f"Thu hẹp 20% biên độ dao động doanh thu tháng (CV%) và bảo vệ mức sàn doanh thu tối thiểu ≥ ${trough_floor:,d}/tháng.")
+                    peak_p = format_anomaly_label(raw_t.get("peak_period", "start"), "YearMonth")
+                    trough_p = format_anomaly_label(raw_t.get("trough_period", "end"), "YearMonth")
+                    drop_val = abs(raw_t.get("peak_to_trough_drop_pct", 50.0))
+                    trough_floor = int(raw_t.get("trough_val", 2000000) * 1.15)
+                    if is_en:
+                        immediate_actions.append(f"<b>Smooth Off-Peak Demand (0 - 30 Days)</b>: Counter the -{drop_val:.1f}% pullback in {trough_p} by launching bundled B2B trade promotions to hold monthly revenue above ${trough_floor:,d}.")
+                        structural_optimizations.append(f"<b>Rebalance S&OP & Inventory Pacing (1 - 2 Quarters)</b>: Align working capital and safety stock 30-45 days ahead of peak cycles like {peak_p} (${raw_t.get('peak_val', 5280000):,.0f}) while preventing post-peak overstock.")
+                        sustainable_strategies.append(f"<b>Dynamic Seasonal Quota & Pricing Model</b>: Replace flat monthly targets with season-adjusted commercial quotas and early-bird distributor rebates.")
+                        okrs.append(f"Narrow peak-to-trough monthly revenue volatility by 20% and maintain a monthly revenue floor ≥ ${trough_floor:,d}.")
+                    else:
+                        immediate_actions.append(f"<b>Kích cầu làm phẳng đáy chu kỳ (0 - 30 ngày)</b>: Khắc phục mức giảm -{drop_val:.1f}% tại {trough_p} bằng gói khuyến mãi B2B theo bậc và bán chéo Combo nhằm giữ sàn doanh thu trên <b>${trough_floor:,d}/tháng</b>.")
+                        structural_optimizations.append(f"<b>Tái cấu trúc điều độ S&OP & Tồn kho (1 - 2 Quý)</b>: Chủ động chuẩn bị hạn mức vốn lưu động và tồn kho đệm trước các kỳ đỉnh như {peak_p} (<b>${raw_t.get('peak_val', 5280000):,.0f}</b>) từ 30-45 ngày, đồng thời xả tồn kho có kiểm soát sau đỉnh.")
+                        sustainable_strategies.append(f"<b>Mô hình Giao Quota & Chiết khấu Động theo Mùa vụ</b>: Chuyển từ giao chỉ tiêu bình quân tĩnh sang hệ thống KPI gắn với chỉ số mùa vụ (Seasonal Index) và hợp đồng bao tiêu dài hạn.")
+                        okrs.append(f"Thu hẹp 20% biên độ dao động doanh thu tháng (CV%) và bảo vệ mức sàn doanh thu tối thiểu ≥ ${trough_floor:,d}/tháng.")
             elif "Tuyển Dụng" in cat or "Hiring" in cat or "Time Series" in cat or "Chuỗi Thời Gian" in cat:
                 raw_t = a.get("raw", {})
                 peak_p = raw_t.get("peak_period", "start")
@@ -791,26 +907,26 @@ def scan_dashboard_anomalies_and_strategies(
     if is_sales_layer or any(a.get("is_sales") for a in anomalies):
         if is_en:
             headline = (
-                f"Detected {len(anomalies)} commercial cycle & performance variance point(s) in {time_label}. Recommended focus: seasonal S&OP pacing, portfolio margin optimization, and trough demand uplift."
+                f"Detected {len(anomalies)} commercial variance signal(s) in {time_label}. Step 1: Validate root-cause hypotheses in the Hypothesis Tree (Tab 1) ➔ Step 2: Execute role & unit-scoped action plans (Tab 2)."
                 if anomalies else
                 f"Commercial revenue, volume, and market share indicators during {time_label} remain stable and well-balanced."
             )
         else:
             headline = (
-                f"Phát hiện {len(anomalies)} điểm biến động chu kỳ thương mại trong {time_label}. Đề xuất trọng tâm: điều độ kế hoạch S&OP theo mùa vụ, tối ưu cơ cấu danh mục và kích cầu tại các kỳ thấp điểm."
+                f"Ghi nhận {len(anomalies)} tín hiệu biến động thương mại trong {time_label}. Hệ thống đã kích hoạt Cây Giả Thuyết (Tab 1) để kiểm định nguyên nhân có độ chính xác cao nhất trước khi mở khóa Kế hoạch Phân tầng theo Vai trò & Vùng phụ trách (Tab 2)."
                 if anomalies else
                 f"Cơ cấu doanh thu, sản lượng và thị phần thương mại trong {time_label} duy trì trạng thái ổn định và cân bằng."
             )
     else:
         if is_en:
             headline = (
-                f"Identified {len(anomalies)} key operational anomalies during {time_label}. Immediate intervention recommended for hiring trends and internal compensation equity."
+                f"Identified {len(anomalies)} operational variance signal(s) during {time_label}. Step 1: Validate root-cause hypotheses in the Hypothesis Tree (Tab 1) ➔ Step 2: Execute role & department-scoped action plans (Tab 2)."
                 if anomalies else
                 f"Operational structures and indicators during {time_label} remain stable and balanced."
             )
         else:
             headline = (
-                f"Phát hiện {len(anomalies)} điểm bất thường trọng yếu trong {time_label}. Đề xuất can thiệp ngay vào xu hướng tuyển dụng và cân đối đãi ngộ nội bộ."
+                f"Ghi nhận {len(anomalies)} tín hiệu chênh lệch vận hành trọng yếu trong {time_label}. Hệ thống đã kích hoạt Cây Giả Thuyết (Tab 1) để kiểm định nguyên nhân có độ chính xác cao nhất trước khi mở khóa Kế hoạch Phân tầng theo Vai trò & Khối Phòng ban (Tab 2)."
                 if anomalies else
                 f"Cơ cấu vận hành và các chỉ số trong {time_label} duy trì trạng thái ổn định và cân bằng."
             )

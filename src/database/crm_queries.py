@@ -1405,12 +1405,26 @@ JOIN geo g ON s.GeoID = g.GeoID
 GROUP BY g.Geo, g.Region
 ORDER BY Revenue DESC;"""
 
+    # 5. SQL Team Breakdown
+    sql_team = f"""SELECT 
+    p.Team AS Team,
+    SUM(s.Amount) AS Revenue,
+    SUM(s.Boxes) AS Boxes,
+    COUNT(DISTINCT p.SPID) AS SalespeopleCount
+FROM sales s
+JOIN people p ON s.SPID = p.SPID
+{where_c}
+{"AND" if where_c else "WHERE"} p.Team IS NOT NULL AND TRIM(p.Team) != ''
+GROUP BY p.Team
+ORDER BY Revenue DESC;"""
+
     try:
         with engine.connect() as conn:
             kpi_df = pd.read_sql(text(sql_kpi), conn)
             trend_df = pd.read_sql(text(sql_trend), conn)
             cat_df = pd.read_sql(text(sql_cat), conn)
             geo_df = pd.read_sql(text(sql_geo), conn)
+            team_df = pd.read_sql(text(sql_team), conn)
 
         total_rev = float(kpi_df["total_revenue"].iloc[0]) if not kpi_df.empty else 0.0
         total_box = int(kpi_df["total_boxes"].iloc[0]) if not kpi_df.empty else 0
@@ -1508,6 +1522,7 @@ ORDER BY Revenue DESC;"""
             "trend_df": trend_df,
             "category_df": cat_df,
             "geo_df": geo_df,
+            "team_df": team_df,
             "anomalies": anomalies,
             "sql": f"{sql_kpi}\n\n{sql_trend}\n\n{sql_cat}",
             "exec_time_ms": round((time.time() - start_t) * 1000, 2)
@@ -1538,6 +1553,7 @@ ORDER BY Revenue DESC;"""
             "trend_df": pd.DataFrame(),
             "category_df": pd.DataFrame(),
             "geo_df": pd.DataFrame(),
+            "team_df": pd.DataFrame(),
             "anomalies": [],
             "sql": str(e),
             "exec_time_ms": 0.0

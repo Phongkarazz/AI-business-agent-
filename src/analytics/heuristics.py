@@ -5982,13 +5982,583 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
     }
 
 
-def generate_persona_action_plan(df: pd.DataFrame, persona: str = "ceo", user_query: str = "", is_en: bool = False) -> dict:
+def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool = False) -> dict:
+    """Trích xuất danh sách các Đơn vị / Vùng / Team / Ngành hàng / Phòng ban cụ thể từ DataFrame
+    để Quản lý Cấp trung (Regional Manager, Team Lead, Category Manager, Department Head)
+    có thể Narrow-Down chọn đúng đơn vị mình phụ trách và nhận Benchmark + Action Plan riêng.
+    """
+    if df is None or df.empty or len(df) < 2:
+        return {"has_units": False, "unit_options": [], "unit_col": None, "entity_type": "general"}
+
+    q_low = (user_query or "").lower()
+    primary_col, label_col = select_primary_insight_columns(df, user_query=user_query)
+    time_col = find_time_column(df)
+
+    if not primary_col:
+        num_cols = [c for c in df.select_dtypes(include="number").columns if not is_id_like(c)]
+        primary_col = num_cols[0] if num_cols else None
+    if not primary_col:
+        return {"has_units": False, "unit_options": [], "unit_col": None, "entity_type": "general"}
+
+    entity_type = detect_analysis_entity_type(df, user_query=user_query, name_col=label_col)
+
+    unit_col = None
+    if label_col and label_col in df.columns and label_col != time_col:
+        unit_col = label_col
+    elif time_col and time_col in df.columns:
+        unit_col = time_col
+        if entity_type not in ["team", "geo", "product", "employee", "department", "title", "gender"]:
+            entity_type = "time_series"
+    else:
+        non_num = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
+        unit_col = non_num[0] if non_num else df.columns[0]
+
+    if not unit_col or unit_col not in df.columns:
+        return {"has_units": False, "unit_options": [], "unit_col": None, "entity_type": entity_type}
+
+    is_money = any(k in str(primary_col).lower() for k in ["sales", "amount", "revenue", "doanh", "salary", "lương", "payroll", "quỹ lương", "tiền", "cost", "pay"])
+    is_avg_or_rate = any(k in str(primary_col).lower() for k in ["avg", "average", "trung bình", "bình quân", "mean", "pct", "percent", "ratio", "tỷ lệ", "rate", "share"])
+    is_count_metric = (
+        not is_money
+        and not is_avg_or_rate
+        and any(k in str(primary_col).lower() + " " + q_low for k in ["count", "headcount", "nhân sự", "nhân viên", "employees", "biên chế", "boxes", "số hộp", "hộp", "orders", "đơn hàng", "số lượng", "quy mô nhân sự"])
+    )
+    prefix = "$" if is_money else ""
+
+    def _fmt(v):
+        if is_count_metric:
+            return f"{int(round(v)):,}"
+        if abs(v) >= 1_000_000:
+            return f"{prefix}{v:,.0f}"
+        if abs(v - round(v)) < 1e-4:
+            return f"{prefix}{int(round(v)):,}"
+        return f"{prefix}{v:,.2f}"
+
+    work_df = df[[unit_col, primary_col]].copy()
+    work_df[primary_col] = pd.to_numeric(work_df[primary_col], errors="coerce")
+    work_df = work_df.dropna(subset=[unit_col, primary_col])
+    if work_df.empty:
+        return {"has_units": False, "unit_options": [], "unit_col": unit_col, "entity_type": entity_type}
+
+    work_df["_clean_unit"] = work_df[unit_col].astype(str).str.strip()
+    valid_mask = ~work_df["_clean_unit"].str.lower().isin(["", "nan", "none", "null", "(chưa xác định)", "(unassigned)", "chưa phân nhóm", "unassigned"])
+    if valid_mask.sum() >= 2:
+        work_df = work_df[valid_mask]
+
+    if is_avg_or_rate:
+        grouped = work_df.groupby("_clean_unit", as_index=False)[primary_col].mean()
+    else:
+        grouped = work_df.groupby("_clean_unit", as_index=False)[primary_col].sum()
+
+    if len(grouped) < 2:
+        return {"has_units": False, "unit_options": [], "unit_col": unit_col, "entity_type": entity_type}
+
+    grouped = grouped.sort_values(primary_col, ascending=False).reset_index(drop=True)
+    # Limit to top 30 selectable units to keep UI dropdown snappy
+    if len(grouped) > 30:
+        grouped = pd.concat([grouped.head(20), grouped.tail(10)]).drop_duplicates(subset=["_clean_unit"]).reset_index(drop=True)
+
+    total_val = float(grouped[primary_col].sum())
+    mean_val = float(grouped[primary_col].mean())
+    n_units = len(grouped)
+    lang_code = "en" if is_en else "vi"
+
+    selector_map_vi = {
+        "geo": "🌍 Chọn Vùng / Thị Trường Phụ Trách (Regional Manager / Country Lead):",
+        "team": "👥 Chọn Đội Ngũ Kinh Doanh Phụ Trách (Team Lead / Sales Manager):",
+        "product": "🍫 Chọn Ngành Hàng / Sản Phẩm Phụ Trách (Category Manager / KAM):",
+        "employee": "👤 Chọn Nhân Sự Kinh Doanh Cần Kèm Cặp (Sales Team Lead):",
+        "department": "🏢 Chọn Phòng Ban / Khối Phụ Trách (Trưởng Phòng / HRBP):",
+        "title": "🎖️ Chọn Ngạch Chức Danh Phụ Trách (HRBP / C&B Lead):",
+        "gender": "⚖️ Chọn Nhóm Đối Tượng Khảo Sát (HRBP / DEI Lead):",
+        "time_series": "🗓️ Chọn Kỳ Hoạt Động Cần Điều Độ Chi Tiết (Quản Lý Vận Hành):",
+    }
+    selector_map_en = {
+        "geo": "🌍 Select Assigned Region / Market (Regional Manager / Country Lead):",
+        "team": "👥 Select Assigned Sales Squad (Team Lead / Sales Manager):",
+        "product": "🍫 Select Assigned Category / SKU (Category Manager / KAM):",
+        "employee": "👤 Select Sales Rep for 1-on-1 Coaching (Sales Team Lead):",
+        "department": "🏢 Select Assigned Department / Division (Department Head / HRBP):",
+        "title": "🎖️ Select Assigned Job Title Cohort (HRBP / C&B Lead):",
+        "gender": "⚖️ Select Workforce Cohort (HRBP / DEI Lead):",
+        "time_series": "🗓️ Select Specific Period for Operational Pacing:",
+    }
+    selector_label = (selector_map_en if is_en else selector_map_vi).get(
+        entity_type,
+        "🎯 Select Specific Assigned Unit / Region:" if is_en else "🎯 Chọn Đơn Vị / Vùng Phụ Trách Cụ Thể:"
+    )
+
+    all_label = (
+        f"🌐 All {n_units} Units Overview (Benchmark Leader #1 vs. Bottom Unit)"
+        if is_en else
+        f"🌐 Tổng hợp toàn bộ {n_units} đơn vị (Đối sánh Top #1 vs. Đơn vị cuối bảng)"
+    )
+
+    unit_options = []
+    for idx, row in grouped.iterrows():
+        raw_u = str(row["_clean_unit"])
+        disp_u = format_entity_label(raw_u, col_name=unit_col, lang=lang_code)
+        val_u = float(row[primary_col])
+        rank_u = idx + 1
+        vs_mean_pct = ((val_u - mean_val) / abs(mean_val) * 100.0) if mean_val != 0 else 0.0
+        share_pct = (val_u / total_val * 100.0) if total_val > 0 else 0.0
+
+        if rank_u == 1:
+            status_tag = "🏆 #1 Leader" if is_en else "🏆 Dẫn đầu #1"
+        elif rank_u == n_units:
+            status_tag = f"🚨 #{rank_u}/{n_units} Priority" if is_en else f"🚨 Hạng #{rank_u}/{n_units} • Cần ưu tiên"
+        elif val_u >= mean_val:
+            status_tag = f"✅ #{rank_u}/{n_units} ({vs_mean_pct:+.1f}% vs Mean)" if is_en else f"✅ Hạng #{rank_u}/{n_units} ({vs_mean_pct:+.1f}% vs Chuẩn TB)"
+        else:
+            status_tag = f"⚠️ #{rank_u}/{n_units} ({vs_mean_pct:+.1f}% vs Mean)" if is_en else f"⚠️ Hạng #{rank_u}/{n_units} ({vs_mean_pct:+.1f}% vs Chuẩn TB)"
+
+        display_str = f"📍 {disp_u} — {_fmt(val_u)} [{status_tag}]"
+        unit_options.append({
+            "value": raw_u,
+            "clean_name": disp_u,
+            "display": display_str,
+            "rank": rank_u,
+            "total_units": n_units,
+            "metric_val": val_u,
+            "metric_fmt": _fmt(val_u),
+            "vs_mean_pct": vs_mean_pct,
+            "share_pct": share_pct,
+        })
+
+    # Mặc định gợi ý đơn vị cuối bảng (cần can thiệp nhất) hoặc đơn vị đầu bảng để Manager thấy ngay tính năng Narrow-down
+    default_unit_val = unit_options[-1]["value"] if unit_options else None
+
+    return {
+        "has_units": True,
+        "unit_col": unit_col,
+        "primary_col": primary_col,
+        "entity_type": entity_type,
+        "selector_label": selector_label,
+        "all_option_label": all_label,
+        "unit_options": unit_options,
+        "default_unit": default_unit_val,
+        "mean_val": mean_val,
+        "mean_val_fmt": _fmt(mean_val),
+        "total_val": total_val,
+        "total_val_fmt": _fmt(total_val),
+    }
+
+
+def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = False) -> dict:
+    """Đính kèm Cổng Kiểm chứng Giả thuyết (Hypothesis Verification Gate) và nhãn nguồn gốc giả thuyết
+    vào từng khuyến nghị trong Action Plan để đảm bảo luồng tư duy:
+    Đặt giả thuyết -> Kiểm định dữ liệu -> Ưu tiên giả thuyết có độ chính xác cao nhất -> Đưa ra chiến lược.
+    """
+    branches = tree.get("branches", [])
+    confirmed_or_partial = [b for b in branches if b.get("status") in ("CONFIRMED", "PARTIAL")]
+    confirmed_or_partial.sort(key=lambda x: (x.get("priority_score", 0), x.get("confidence", 0)), reverse=True)
+
+    h1 = confirmed_or_partial[0] if len(confirmed_or_partial) >= 1 else (branches[0] if branches else {})
+    h2 = confirmed_or_partial[1] if len(confirmed_or_partial) >= 2 else (branches[1] if len(branches) >= 2 else {})
+    rejected = next((b for b in branches if b.get("status") == "REJECTED"), None)
+
+    h1_id = h1.get("id", "H1")
+    h1_conf = h1.get("confidence", 90)
+    h1_imp = h1.get("impact", 92)
+    h1_prio = h1.get("priority_score", 85)
+    h1_title = re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(h1.get("title", "")), flags=re.IGNORECASE).strip()
+
+    h2_id = h2.get("id", "H2")
+    h2_conf = h2.get("confidence", 76)
+    h2_title = re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(h2.get("title", "")), flags=re.IGNORECASE).strip()
+
+    rej_id = rejected.get("id", "H3") if rejected else "H3"
+    rej_conf = rejected.get("confidence", 12) if rejected else 12
+
+    if is_en:
+        gate_badge = f"🔒 DATA-VERIFIED STRATEGY GATE • Prioritized by {h1_id} ({h1_conf}% Accuracy • Impact {h1_prio}/100)"
+        gate_summary = (
+            f"Recommendations below are unlocked ONLY after validating **{h1_id}** ({h1_title} — **{h1_conf}% confidence**) "
+            f"and co-driver **{h2_id}** (**{h2_conf}% confidence**), while ruling out **{rej_id}** ({rej_conf}%)."
+        )
+        tag_h1 = f" `[Verified by {h1_id} • {h1_conf}% Accuracy]`"
+        tag_h2 = f" `[Verified by {h2_id} • {h2_conf}% Co-driver]`"
+        tag_sys = f" `[Governance Standard • {h1_id} & {h2_id}]`"
+    else:
+        gate_badge = f"🔒 CỔNG KIỂM CHỨNG GIẢ THUYẾT • Ưu tiên từ {h1_id} (Độ chính xác {h1_conf}% • Điểm ưu tiên {h1_prio}/100)"
+        gate_summary = (
+            f"Chiến lược dưới đây chỉ được kích hoạt sau khi kiểm chứng dữ liệu xác nhận **{h1_id}** (*{h1_title}* — **Độ chính xác {h1_conf}%**) "
+            f"và nguyên nhân đồng tác động **{h2_id}** (**{h2_conf}%**), đồng thời đã bác bỏ giả thuyết nhiễu **{rej_id}** ({rej_conf}%)."
+        )
+        tag_h1 = f" `[Kiểm chứng từ {h1_id} • {h1_conf}% chính xác]`"
+        tag_h2 = f" `[Kiểm chứng từ {h2_id} • {h2_conf}% đồng tác động]`"
+        tag_sys = f" `[Chuẩn hóa Quản trị • {h1_id} & {h2_id}]`"
+
+    raw_actions = plan_dict.get("actions", [])
+    tagged_actions = []
+    for idx, act in enumerate(raw_actions):
+        if "Kiểm chứng từ H" in act or "Verified by H" in act or "Chuẩn hóa Quản trị" in act:
+            tagged_actions.append(act)
+            continue
+        tag_to_insert = tag_h1 if idx == 0 else (tag_h2 if idx == 1 else tag_sys)
+        if "**:" in act:
+            tagged_act = act.replace("**:", f"**{tag_to_insert}:", 1)
+        else:
+            tagged_act = f"{act}{tag_to_insert}"
+        tagged_actions.append(tagged_act)
+
+    plan_dict["actions"] = tagged_actions
+    plan_dict["hypothesis_gate"] = {
+        "gate_badge": gate_badge,
+        "gate_summary": gate_summary,
+        "h1_id": h1_id,
+        "h1_title": h1_title,
+        "h1_confidence": h1_conf,
+        "h1_impact": h1_imp,
+        "h1_priority_score": h1_prio,
+        "h2_id": h2_id,
+        "h2_title": h2_title,
+        "h2_confidence": h2_conf,
+        "rejected_id": rej_id,
+        "rejected_confidence": rej_conf,
+    }
+    return plan_dict
+
+
+def _generate_unit_scoped_lead_plan(
+    df: pd.DataFrame,
+    target_unit: str,
+    tree: dict,
+    units_info: dict,
+    user_query: str = "",
+    is_en: bool = False
+) -> dict | None:
+    """Sinh bản Chẩn đoán Benchmark & Kế hoạch Hành động Cục bộ (Micro-Scoped Action Plan)
+    dành riêng cho DUY NHẤT 1 Vùng / Team / Ngành hàng / Phòng ban cụ thể mà Manager đang phụ trách.
+    """
+    unit_options = units_info.get("unit_options", [])
+    if not unit_options:
+        return None
+
+    matched_opt = next(
+        (u for u in unit_options if str(u["value"]).strip().lower() == str(target_unit).strip().lower()
+         or str(u["clean_name"]).strip().lower() == str(target_unit).strip().lower()),
+        None
+    )
+    if not matched_opt:
+        return None
+
+    unit_col = units_info.get("unit_col")
+    primary_col = units_info.get("primary_col")
+    entity_type = units_info.get("entity_type", "general")
+    is_hr = tree.get("is_hr", False)
+    is_headcount_metric = tree.get("is_headcount_metric", False)
+
+    u_raw = matched_opt["value"]
+    u_name = matched_opt["clean_name"]
+    u_val = float(matched_opt["metric_val"])
+    u_fmt = matched_opt["metric_fmt"]
+    u_rank = int(matched_opt["rank"])
+    n_units = int(matched_opt["total_units"])
+    u_vs_mean_pct = float(matched_opt["vs_mean_pct"])
+    u_share_pct = float(matched_opt["share_pct"])
+
+    mean_val = float(units_info.get("mean_val", 0.0))
+    mean_fmt = units_info.get("mean_val_fmt", "0")
+    total_val = float(units_info.get("total_val", 0.0))
+    total_fmt = units_info.get("total_val_fmt", "0")
+
+    top_opt = unit_options[0]
+    bot_opt = unit_options[-1]
+    second_opt = unit_options[1] if len(unit_options) >= 2 else top_opt
+
+    top_name = top_opt["clean_name"]
+    top_val = float(top_opt["metric_val"])
+    top_fmt = top_opt["metric_fmt"]
+
+    second_name = second_opt["clean_name"]
+    second_val = float(second_opt["metric_val"])
+    second_fmt = second_opt["metric_fmt"]
+
+    is_money = any(k in str(primary_col).lower() for k in ["sales", "amount", "revenue", "doanh", "salary", "lương", "payroll", "quỹ lương", "tiền", "cost", "pay"])
+    is_avg_or_rate = any(k in str(primary_col).lower() for k in ["avg", "average", "trung bình", "bình quân", "mean", "pct", "percent", "ratio", "tỷ lệ", "rate", "share"])
+    is_count_metric = not is_money and not is_avg_or_rate and any(k in str(primary_col).lower() for k in ["count", "headcount", "nhân sự", "nhân viên", "employees", "boxes", "hộp", "orders", "số lượng"])
+    prefix = "$" if is_money else ""
+
+    def _fmt(v):
+        if is_count_metric:
+            return f"{int(round(v)):,}"
+        if abs(v) >= 1_000_000:
+            return f"{prefix}{v:,.0f}"
+        if abs(v - round(v)) < 1e-4:
+            return f"{prefix}{int(round(v)):,}"
+        return f"{prefix}{v:,.2f}"
+
+    gap_to_mean = abs(u_val - mean_val)
+    gap_to_mean_fmt = _fmt(gap_to_mean)
+    gap_to_top = max(0.0, top_val - u_val)
+    gap_to_top_fmt = _fmt(gap_to_top)
+    lead_over_second = max(0.0, u_val - second_val)
+    lead_over_second_fmt = _fmt(lead_over_second)
+    lead_over_second_pct = ((u_val - second_val) / second_val * 100.0) if second_val > 0 else 0.0
+
+    pct_of_mean = (u_val / mean_val * 100.0) if mean_val > 0 else 100.0
+    pct_of_top = (u_val / top_val * 100.0) if top_val > 0 else 100.0
+
+    # Tính chỉ tiêu kỳ tới (Next-Quarter Target Quota) thực tế cho riêng đơn vị này
+    if u_rank == 1:
+        next_target_val = u_val * 1.08
+        next_target_label_vi = f"Mục tiêu giữ ngôi #1 (+8%): {_fmt(next_target_val)}"
+        next_target_label_en = f"Target to Defend #1 (+8%): {_fmt(next_target_val)}"
+    elif u_val >= mean_val:
+        next_target_val = u_val + 0.5 * (top_val - u_val)
+        next_target_label_vi = f"Mục tiêu bứt phá Top 1 (Thu hẹp 50% gap): {_fmt(next_target_val)}"
+        next_target_label_en = f"Target to Catch #1 (Close 50% gap): {_fmt(next_target_val)}"
+    else:
+        next_target_val = mean_val
+        next_target_label_vi = f"Chỉ tiêu bắt buộc chạm Chuẩn TB: {_fmt(next_target_val)} (+{gap_to_mean_fmt})"
+        next_target_label_en = f"Mandatory Target to Hit Mean: {_fmt(next_target_val)} (+{gap_to_mean_fmt})"
+
+    # Trích xuất thêm các chỉ số phụ trợ của riêng đơn vị này trong bảng (nếu có)
+    sub_df = df[df[unit_col].astype(str).str.strip().str.lower() == str(u_raw).strip().lower()]
+    secondary_metrics = []
+    if not sub_df.empty:
+        for col in df.columns:
+            if col in (unit_col, primary_col) or is_id_like(col):
+                continue
+            c_low = str(col).lower()
+            if pd.api.types.is_numeric_dtype(df[col]):
+                s_vals = pd.to_numeric(sub_df[col], errors="coerce").dropna()
+                if s_vals.empty:
+                    continue
+                if any(k in c_low for k in ["pct", "percent", "share", "tỷ trọng", "tỷ lệ", "margin"]):
+                    sv = float(s_vals.mean())
+                    secondary_metrics.append(f"{col}: {sv:.1f}%")
+                elif any(k in c_low for k in ["avg", "average", "trung bình", "bình quân"]):
+                    sv = float(s_vals.mean())
+                    p_s = "$" if any(k in c_low for k in ["salary", "lương", "amount", "rev", "sales", "cost", "aov"]) else ""
+                    secondary_metrics.append(f"{col}: {p_s}{sv:,.0f}")
+                else:
+                    sv = float(s_vals.sum())
+                    p_s = "$" if any(k in c_low for k in ["salary", "lương", "amount", "rev", "sales", "cost"]) else ""
+                    secondary_metrics.append(f"{col}: {p_s}{sv:,.0f}")
+            elif len(sub_df) == 1:
+                str_v = str(sub_df[col].iloc[0]).strip()
+                if str_v and len(str_v) <= 28:
+                    secondary_metrics.append(f"{col}: {str_v}")
+    secondary_metrics = secondary_metrics[:3]
+
+    # Phân loại trạng thái sức khỏe của đơn vị phụ trách
+    if u_rank == 1:
+        status_color = "#10B981"
+        status_badge = "🏆 ĐƠN VỊ DẪN ĐẦU TOÀN HỆ THỐNG (#1 LEADER)" if not is_en else "🏆 #1 BENCHMARK LEADER"
+    elif u_val >= mean_val:
+        status_color = "#38BDF8"
+        status_badge = f"✅ VƯỢT CHUẨN BENCHMARK ({u_vs_mean_pct:+.1f}% vs TB)" if not is_en else f"✅ ABOVE BENCHMARK ({u_vs_mean_pct:+.1f}% vs Mean)"
+    elif u_rank == n_units:
+        status_color = "#EF4444"
+        status_badge = f"🚨 TRỌNG ĐIỂM CẦN HỖ TRỢ KHẨN CẤP (Hạng #{u_rank}/{n_units})" if not is_en else f"🚨 PRIORITY TURNAROUND UNIT (Rank #{u_rank}/{n_units})"
+    else:
+        status_color = "#F59E0B"
+        status_badge = f"⚠️ DƯỚI CHUẨN BENCHMARK ({u_vs_mean_pct:+.1f}% vs TB)" if not is_en else f"⚠️ BELOW BENCHMARK ({u_vs_mean_pct:+.1f}% vs Mean)"
+
+    role_header_map_vi = {
+        "geo": f"🎯 KẾ HOẠCH HÀNH ĐỘNG ĐÍCH DANH • THỊ TRƯỜNG {u_name.upper()} (GIÁM ĐỐC VÙNG / COUNTRY KAM)",
+        "team": f"🎯 KẾ HOẠCH HÀNH ĐỘNG ĐÍCH DANH • ĐỘI NGŨ {u_name.upper()} (TEAM LEAD / QUẢN LÝ BÁN HÀNG)",
+        "product": f"🎯 KẾ HOẠCH HÀỘNG ĐÍCH DANH • SẢN PHẨM / NGÀNH HÀNG {u_name.upper()} (CATEGORY MANAGER / KAM)",
+        "employee": f"🎯 LỘ TRÌNH KÈM CẶP 1-1 ĐÍCH DANH • NHÂN SỰ {u_name.upper()} (SALES TEAM LEAD)",
+        "department": f"🎯 KẾ HOẠCH ĐIỀU PHỐI ĐÍCH DANH • KHỐI / PHÒNG BAN {u_name.upper()} (TRƯỞNG PHÒNG / HRBP)",
+        "title": f"🎯 KẾ HOẠCH QUẢN TRỊ ĐÍCH DANH • NGẠCH CHỨC DANH {u_name.upper()} (HRBP / C&B LEAD)",
+        "time_series": f"🎯 KẾ HOẠCH ĐIỀU ĐỘ CHI TIẾT • KỲ HOẠT ĐỘNG {u_name.upper()} (QUẢN LÝ VẬN HÀNH)",
+    }
+    role_header_map_en = {
+        "geo": f"🎯 UNIT-SCOPED ACTION PLAN • MARKET: {u_name.upper()} (REGIONAL DIRECTOR / COUNTRY KAM)",
+        "team": f"🎯 UNIT-SCOPED ACTION PLAN • SQUAD: {u_name.upper()} (TEAM LEAD / SALES MANAGER)",
+        "product": f"🎯 UNIT-SCOPED ACTION PLAN • PRODUCT / CATEGORY: {u_name.upper()} (CATEGORY MANAGER / KAM)",
+        "employee": f"🎯 1-ON-1 COACHING PLAN • SALES REP: {u_name.upper()} (SALES TEAM LEAD)",
+        "department": f"🎯 DEPARTMENT EXECUTION PLAN • DIVISION: {u_name.upper()} (DEPARTMENT HEAD / HRBP)",
+        "title": f"🎯 COHORT EXECUTION PLAN • JOB TITLE: {u_name.upper()} (HRBP / C&B LEAD)",
+        "time_series": f"🎯 PERIOD EXECUTION PLAN • INTERVAL: {u_name.upper()} (OPERATIONS LEAD)",
+    }
+    role_title = (role_header_map_en if is_en else role_header_map_vi).get(
+        entity_type,
+        f"🎯 UNIT-SCOPED ACTION PLAN • {u_name.upper()} (OPERATIONAL LEAD)" if is_en else f"🎯 KẾ HOẠCH HÀNH ĐỘNG ĐÍCH DANH • ĐƠN VỊ {u_name.upper()} (QUẢN LÝ TRỰC TIẾP)"
+    ).replace("HÀỘNG", "HÀNH ĐỘNG")
+
+    if is_en:
+        role_focus = (
+            f"Scoped exclusively to **{u_name}** (Rank **#{u_rank}/{n_units}** • Share **{u_share_pct:.1f}%** of company total {total_fmt})"
+            + (f" • Extra metrics: {', '.join(secondary_metrics)}" if secondary_metrics else "")
+        )
+        kpis = [
+            f"{u_name} Actual: {u_fmt} (Rank #{u_rank}/{n_units} • {u_share_pct:.1f}% share)",
+            f"vs. Company Benchmark ({mean_fmt}): {u_vs_mean_pct:+.1f}% ({pct_of_mean:.1f}% of standard)",
+            next_target_label_en if u_rank == 1 else f"Gap to #1 {top_name} ({top_fmt}): -{gap_to_top_fmt} ({pct_of_top:.1f}% of #1)",
+        ]
+    else:
+        role_focus = (
+            f"Phạm vi lọc riêng cho **{u_name}** (Xếp hạng **#{u_rank}/{n_units}** • Đóng góp **{u_share_pct:.1f}%** trên tổng {total_fmt} toàn hệ thống)"
+            + (f" • Chỉ số phụ trợ: {', '.join(secondary_metrics)}" if secondary_metrics else "")
+        )
+        kpis = [
+            f"Số liệu thực tế {u_name}: {u_fmt} (Hạng #{u_rank}/{n_units} • Tỷ trọng {u_share_pct:.1f}%)",
+            f"Đối chuẩn TB Công ty ({mean_fmt}): {u_vs_mean_pct:+.1f}% (Đạt {pct_of_mean:.1f}% mốc chuẩn)",
+            next_target_label_vi if u_rank == 1 else f"Khoảng cách tới Top #1 {top_name} ({top_fmt}): -{gap_to_top_fmt} (Bằng {pct_of_top:.1f}% Top 1)",
+        ]
+
+    # Sinh 3 khuyến nghị hành động cục bộ cho DUY NHẤT đơn vị u_name
+    if is_en:
+        if u_rank == 1:
+            actions = [
+                f"🔴 **[Defend #1 Leadership & Lock Core Accounts in {u_name}]**: **{u_name}** leads the entire organization at **{u_fmt}** (**{u_vs_mean_pct:+.1f}%** above the **{mean_fmt}** company benchmark and **+{lead_over_second_fmt}** ahead of #2 **{second_name}**). Prioritize 100% stock availability, VIP account retention, and key talent protection within **{u_name}**.",
+                f"🟡 **[Expand Margin & Upsell High-Value Portfolio in {u_name}]**: Leverage **{u_name}**'s strong market/operational momentum to pilot premium bundles and raise average output toward the next milestone of **{_fmt(next_target_val)}** (+8%).",
+                f"🟢 **[Codify {u_name}'s Winning Playbook as Benchmark Standard]**: Document **{u_name}**'s workflow, conversion mechanics, and resource allocation into a standard SOP for cross-unit replication."
+            ]
+        elif u_val >= mean_val:
+            actions = [
+                f"🔴 **[Close the -{gap_to_top_fmt} Gap Between {u_name} and #1 {top_name}]**: **{u_name}** is performing solidly at **{u_fmt}** (Rank **#{u_rank}/{n_units}**, **{u_vs_mean_pct:+.1f}%** above company benchmark **{mean_fmt}**), but trails #1 **{top_name}** (**{top_fmt}**) by **{gap_to_top_fmt}**. Benchmark **{top_name}**'s top-performing accounts/SKUs to unlock the next growth tier in **{u_name}**.",
+                f"🟡 **[90-Day Sprint Target for {u_name}: Reach {_fmt(next_target_val)}]**: Set a dedicated quarterly target for **{u_name}** to close 50% of the gap to #1 (**+{_fmt(0.5 * gap_to_top)}** incremental lift) via high-velocity cross-selling and pipeline acceleration.",
+                f"🟢 **[Optimize Local Conversion Efficiency in {u_name}]**: Audit mid-tier accounts/processes inside **{u_name}** to eliminate localized bottlenecks while maintaining above-benchmark momentum."
+            ]
+        else:
+            actions = [
+                f"🔴 **[Immediate Turnaround Diagnosis for {u_name} (Rank #{u_rank}/{n_units})]**: **{u_name}** currently stands at **{u_fmt}**, which is **{u_vs_mean_pct:.1f}%** (**-{gap_to_mean_fmt}**) below the company benchmark (**{mean_fmt}**) and **-{gap_to_top_fmt}** behind #1 **{top_name}** (**{top_fmt}**). Immediately audit local bottlenecks (distributor/account coverage, rep conversion, or SKU mix) inside **{u_name}**.",
+                f"🟡 **[30-to-60 Day Recovery Quota for {u_name}: Hit Benchmark {mean_fmt}]**: Assign a focused recovery roadmap for **{u_name}** to add **+{gap_to_mean_fmt}** and reach the **{mean_fmt}** company baseline by replicating proven playbooks from **{top_name}**.",
+                f"🟢 **[Weekly Pacing & Resource Reallocation Within {u_name}]**: Conduct weekly sprint reviews exclusively for **{u_name}**, concentrating promotional/operational support on top 20% accounts/tasks with the fastest turnaround potential."
+            ]
+    else:
+        if u_rank == 1:
+            if entity_type == "geo":
+                actions = [
+                    f"🔴 **[Bảo vệ Ngôi đầu Thị trường & Khóa chặt Đại lý Chiến lược tại {u_name}]**: Thị trường **{u_name}** đang giữ vị trí **Top #1/{n_units}** toàn hệ thống với **{u_fmt}** (vượt chuẩn bình quân công ty **{mean_fmt}** tới **{u_vs_mean_pct:+.1f}%**, bỏ xa thị trường #2 **{second_name}** khoảng cách **+{lead_over_second_fmt}**). Giám đốc vùng **{u_name}** cần ưu tiên 100% hạn mức tồn kho an toàn (Safety Stock) và chính sách giữ chân các nhà phân phối cấp 1 tại địa bàn.",
+                    f"🟡 **[Tối ưu Biên lợi nhuận & Nâng Giá trị Giỏ hàng tại {u_name}]**: Tận dụng độ phủ thương hiệu sẵn có tại **{u_name}** để đẩy mạnh các dòng sản phẩm cao cấp (High-Margin SKUs), hướng tới chỉ tiêu kỳ tới đạt **{_fmt(next_target_val)}** (+8%).",
+                    f"🟢 **[Đóng gói Playbook Thành công của {u_name} làm Chuẩn Benchmark]**: Chuẩn hóa mô hình vận hành kênh phân phối và tần suất đặt hàng tại **{u_name}** thành quy chuẩn mẫu cho toàn khối kinh doanh."
+                ]
+            elif entity_type == "team":
+                actions = [
+                    f"🔴 **[Giữ vững Vị thế Đội ngũ Số 1 & Bảo vệ Tệp Khách hàng Lõi của Team {u_name}]**: Đội ngũ **{u_name}** đang dẫn đầu toàn công ty (**Hạng #1/{n_units}**) với **{u_fmt}** (cao hơn chuẩn bình quân **{mean_fmt}** là **{u_vs_mean_pct:+.1f}%** và dẫn trước đội #2 **{second_name}** là **+{lead_over_second_fmt}**). Team Lead **{u_name}** cần duy trì nhịp độ chăm sóc nhóm Key Accounts và giữ vững tỷ lệ chốt đơn của các thành viên chủ chốt.",
+                    f"🟡 **[Nâng chuẩn Chỉ tiêu Sprint Kỳ tới của Team {u_name} lên {_fmt(next_target_val)}]**: Giao mục tiêu tăng trưởng thêm **+8%** cho đội **{u_name}** thông qua việc mở rộng bán chéo (Cross-sell) các mặt hàng chủ lực trên mỗi đơn hàng.",
+                    f"🟢 **[Chia sẻ Kịch bản Chốt đơn Điển hình từ Team {u_name}]**: Cử các nhân sự xuất sắc nhất trong đội **{u_name}** làm Mentor chia sẻ kinh nghiệm khai thác khách hàng B2B trong các buổi họp giao ban."
+                ]
+            elif is_hr:
+                actions = [
+                    f"🔴 **[Quản trị Hiệu suất Đầu người & Giữ chân Nhân sự Cốt lõi tại {u_name}]**: Đơn vị **{u_name}** đang đứng **#1/{n_units}** về quy mô khảo sát với **{u_fmt}** (chiếm **{u_share_pct:.1f}%** toàn tổ chức, cao hơn mức bình quân **{mean_fmt}** là **{u_vs_mean_pct:+.1f}%**). Trưởng bộ phận / HRBP phụ trách **{u_name}** cần gắn chặt hạn mức ngân sách/biên chế với chỉ số đầu ra thực tế (Output per Employee) và thực hiện Stay-Interview với nhóm chuyên gia đầu ngành.",
+                    f"🟡 **[Chuẩn hóa Phân bổ Tải Công việc (Workload Balancing) Nội bộ {u_name}]**: Rà soát hiệu suất giữa các tổ/nhóm chuyên môn bên trong **{u_name}**, bảo đảm tốc độ tăng đãi ngộ luôn đi đôi với tăng trưởng năng suất.",
+                    f"🟢 **[Xây dựng Lộ trình Kế cận (Succession Pipeline) tại {u_name}]**: Thiết lập đội ngũ quản lý cấp trung kế cận ngay trong **{u_name}** để giảm thiểu rủi ro phụ thuộc vào cá nhân."
+                ]
+            else:
+                actions = [
+                    f"🔴 **[Bảo vệ Vị thế Dẫn đầu #1 & Tối ưu Nguồn lực tại {u_name}]**: **{u_name}** đang đứng **Hạng #1/{n_units}** toàn hệ thống với **{u_fmt}** (vượt chuẩn bình quân **{mean_fmt}** tới **{u_vs_mean_pct:+.1f}%** và dẫn trước vị trí #2 **{second_name}** là **+{lead_over_second_fmt}**). Ưu tiên bảo đảm 100% nguồn cung, hạn mức vốn và giữ vững tệp khách hàng chủ lực của **{u_name}**.",
+                    f"🟡 **[Mục tiêu Tăng trưởng Kỳ tới cho {u_name}: Đạt {_fmt(next_target_val)} (+8%)]**: Đẩy mạnh khai thác các phân khúc biên lợi nhuận cao tại **{u_name}** để nới rộng khoảng cách dẫn đầu.",
+                    f"🟢 **[Chuẩn hóa Mô hình Vận hành Điển hình của {u_name}]**: Đúc kết quy trình thực thi thực tế của **{u_name}** thành bộ tiêu chuẩn tham chiếu (Benchmark Playbook)."
+                ]
+        elif u_val >= mean_val:
+            if entity_type == "geo":
+                actions = [
+                    f"🔴 **[Tăng tốc Bứt phá Thu hẹp Khoảng cách -{gap_to_top_fmt} so với Thị trường #1 {top_name}]**: Khu vực **{u_name}** hiện đạt **{u_fmt}** (**Hạng #{u_rank}/{n_units}**, đã vượt chuẩn bình quân công ty **{mean_fmt}** là **{u_vs_mean_pct:+.1f}%**, nhưng còn kém thị trường dẫn đầu **{top_name}** khoảng cách **-{gap_to_top_fmt}**). Giám đốc vùng **{u_name}** cần rà soát lại độ phủ tại các đại lý cấp 1 để bổ sung ngay các dòng SKU bán chạy nhất của **{top_name}**.",
+                    f"🟡 **[Chỉ tiêu 90 Ngày Tới cho Thị trường {u_name}: Chạm mốc {_fmt(next_target_val)}]**: Đặt mục tiêu thu hẹp 50% khoảng cách tới ngôi đầu (tăng thêm **+{_fmt(0.5 * gap_to_top)}** tại riêng vùng **{u_name}**) thông qua chương trình chiết khấu sản lượng theo bậc.",
+                    f"🟢 **[Tối ưu Tốc độ Cung ứng & Vòng quay Hàng tồn tại {u_name}]**: Rút ngắn thời gian giao hàng (Lead-time) cho các đơn hàng lặp lại tại khu vực **{u_name}** để nâng tần suất đặt hàng trong quý tới."
+                ]
+            elif entity_type == "team":
+                actions = [
+                    f"🔴 **[Chiến dịch Bứt phá Đưa Team {u_name} Cạnh tranh Ngôi đầu với Team {top_name}]**: Đội ngũ **{u_name}** hiện đạt **{u_fmt}** (**Hạng #{u_rank}/{n_units}**, vượt mức chuẩn trung bình **{mean_fmt}** là **{u_vs_mean_pct:+.1f}%**, chỉ còn cách đội #1 **{top_name}** đúng **-{gap_to_top_fmt}**). Team Lead **{u_name}** cần rà soát danh sách khách hàng tiềm năng để đẩy nhanh tiến độ chốt các hợp đồng B2B quy mô lớn.",
+                    f"🟡 **[Mục tiêu Quý tới cho Team {u_name}: Chạm mốc {_fmt(next_target_val)}]**: Phân bổ chỉ tiêu thu hẹp 50% khoảng cách tới Top 1 (**+{_fmt(0.5 * gap_to_top)}**) xuống từng thành viên trong đội **{u_name}** theo tuần.",
+                    f"🟢 **[Nâng cao Giá trị Trung bình Đơn hàng (AOV) trong Team {u_name}]**: Khuyến khích các thành viên trong đội **{u_name}** kết hợp bán kèm (Upsell/Cross-sell) để gia tăng sản lượng hộp trên mỗi khách hàng."
+                ]
+            else:
+                actions = [
+                    f"🔴 **[Thu hẹp Khoảng cách -{gap_to_top_fmt} Giữa {u_name} và Vị trí Dẫn đầu {top_name}]**: **{u_name}** đang duy trì hiệu suất tốt ở mức **{u_fmt}** (**Hạng #{u_rank}/{n_units}**, vượt chuẩn TB công ty **{mean_fmt}** là **{u_vs_mean_pct:+.1f}%**, bằng **{pct_of_top:.1f}%** quy mô của **{top_name}**). Quản lý phụ trách **{u_name}** cần đối chiếu trực tiếp cơ cấu sản phẩm/quy trình của **{top_name}** để mở khóa dư địa tăng trưởng còn lại.",
+                    f"🟡 **[Chỉ tiêu Kỳ tới cho Riêng {u_name}: Đạt {_fmt(next_target_val)}]**: Thiết lập lộ trình thu hẹp 50% khoảng cách tới vị trí số 1 (tăng thêm **+{_fmt(0.5 * gap_to_top)}** cho **{u_name}**).",
+                    f"🟢 **[Tối ưu Hóa Hiệu suất Chuyển đổi Nội bộ tại {u_name}]**: Rà soát và gỡ bỏ các điểm nghẽn cục bộ trong quy trình vận hành của **{u_name}** để duy trì đà tăng trưởng trên chuẩn."
+                ]
+        else:
+            if entity_type == "geo":
+                actions = [
+                    f"🔴 **[Chẩn đoán Điểm nghẽn & Kích cầu Khẩn cấp tại Thị trường {u_name} (Hạng #{u_rank}/{n_units})]**: Thị trường **{u_name}** hiện chỉ đạt **{u_fmt}**, thấp hơn chuẩn bình quân công ty (**{mean_fmt}**) là **{u_vs_mean_pct:.1f}%** (thiếu hụt **-{gap_to_mean_fmt}**) và kém thị trường dẫn đầu **{top_name}** (**{top_fmt}**) tới **-{gap_to_top_fmt}**. Giám đốc vùng **{u_name}** cần rà soát ngay danh sách nhà phân phối đang sụt giảm đơn hàng và áp dụng cơ cấu Hero SKU từ thị trường **{top_name}**.",
+                    f"🟡 **[Chỉ tiêu Phục hồi 30–60 Ngày cho Riêng Vùng {u_name}: Bắt buộc Chạm Chuẩn {mean_fmt}]**: Thiết lập hạn mức tăng trưởng bù đắp **+{gap_to_mean_fmt}** cho thị trường **{u_name}**, triển khai gói khuyến mãi thương mại (Trade Activation) và chiết khấu đặt hàng theo bậc dành riêng cho đại lý tại **{u_name}**.",
+                    f"🟢 **[Giám sát Tiến độ Bán hàng Hàng tuần (Weekly Pacing) tại {u_name}]**: Theo dõi sát tỷ lệ chuyển đổi đơn hàng và độ phủ điểm bán hàng tuần tại riêng khu vực **{u_name}** cho đến khi vượt ngưỡng **{mean_fmt}**."
+                ]
+            elif entity_type == "team":
+                actions = [
+                    f"🔴 **[Họp Giải cứu Pipeline & Kèm cặp Thực chiến cho Riêng Team {u_name} (Hạng #{u_rank}/{n_units})]**: Đội ngũ **{u_name}** hiện đang ở mức **{u_fmt}**, thấp hơn chuẩn bình quân các đội (**{mean_fmt}**) là **{u_vs_mean_pct:.1f}%** (hụt **-{gap_to_mean_fmt}**) và kém đội dẫn đầu **{top_name}** (**{top_fmt}**) là **-{gap_to_top_fmt}**. Team Lead **{u_name}** cần rà soát 1-1 toàn bộ các báo giá/đơn hàng đang bị treo của từng thành viên trong đội ngay tuần này.",
+                    f"🟡 **[Chỉ tiêu 30 Ngày cho Team {u_name}: Bù đắp +{gap_to_mean_fmt} để Chạm Chuẩn {mean_fmt}]**: Áp dụng kịch bản chốt đơn và danh mục sản phẩm chủ lực từ đội **{top_name}** sang cho đội **{u_name}**, chia nhỏ chỉ tiêu phục hồi **+{gap_to_mean_fmt}** thành mốc sprint theo từng tuần.",
+                    f"🟢 **[Tái phân bổ Tệp Khách hàng & Hỗ trợ Chốt đơn Trọng điểm trong Team {u_name}]**: Trưởng nhóm **{u_name}** trực tiếp tham gia hỗ trợ đàm phán 20% khách hàng B2B lớn nhất của đội để kéo nhanh doanh số bình quân."
+                ]
+            elif entity_type == "product":
+                actions = [
+                    f"🔴 **[Tái cơ cấu Trưng bày & Ghép Gói Combo cho Riêng {u_name} (Hạng #{u_rank}/{n_units})]**: Mặt hàng/nhóm **{u_name}** hiện đạt **{u_fmt}**, thấp hơn mức chuẩn bình quân danh mục (**{mean_fmt}**) là **{u_vs_mean_pct:.1f}%** (hụt **-{gap_to_mean_fmt}**) và kém sản phẩm đầu tàu **{top_name}** (**{top_fmt}**) tới **-{gap_to_top_fmt}**. Category Manager phụ trách **{u_name}** cần triển khai ngay gói bán kèm (Cross-sell Bundle) ghép **{u_name}** với **{top_name}**.",
+                    f"🟡 **[Mục tiêu Kích cầu cho {u_name}: Tăng thêm +{gap_to_mean_fmt} để Đạt Chuẩn {mean_fmt}]**: Điều chỉnh chính sách chiết khấu thương mại cho đại lý khi nhập mặt hàng **{u_name}** và nâng cấp vị trí trưng bày (Planogram) tại các điểm bán chủ lực.",
+                    f"🟢 **[Kiểm soát Định mức Tồn kho (Inventory Calibration) của {u_name}]**: Cân đối lại lượng hàng dự trữ của **{u_name}** theo sát tốc độ tiêu thụ thực tế để tránh ứ đọng vốn lưu động."
+                ]
+            elif is_hr:
+                actions = [
+                    f"🔴 **[Rà soát Định biên & Hiệu suất Vận hành tại Đơn vị {u_name} (Hạng #{u_rank}/{n_units})]**: Đơn vị/ngạch **{u_name}** hiện ghi nhận quy mô **{u_fmt}** (chiếm **{u_share_pct:.1f}%** toàn tổ chức, thấp hơn mức trung bình **{mean_fmt}** là **{u_vs_mean_pct:.1f}%**). Trưởng bộ phận / HRBP phụ trách **{u_name}** cần đánh giá ngay tải công việc thực tế và mức độ cạnh tranh đãi ngộ nội bộ tại riêng **{u_name}**.",
+                    f"🟡 **[Chuẩn hóa Quy trình & Số hóa Tác vụ cho Đội ngũ {u_name}]**: Với quy mô tinh gọn hơn mức chuẩn **{mean_fmt}**, ưu tiên áp dụng công cụ tự động hóa quy trình (ERP/BI) và chuẩn hóa SLA phối hợp liên phòng ban để nhân sự tại **{u_name}** không bị quá tải.",
+                    f"🟢 **[Đào tạo Đa nhiệm (Cross-Skilling) & Giữ chân Nhân sự Chủ chốt tại {u_name}]**: Tổ chức kèm cặp chuyên môn và rà soát khung bậc lương cho các vị trí nòng cốt trong **{u_name}**."
+                ]
+            else:
+                actions = [
+                    f"🔴 **[Chẩn đoán & Tháo gỡ Điểm nghẽn Cục bộ tại {u_name} (Hạng #{u_rank}/{n_units})]**: **{u_name}** hiện đạt **{u_fmt}**, thấp hơn mức chuẩn bình quân hệ thống (**{mean_fmt}**) là **{u_vs_mean_pct:.1f}%** (thiếu hụt **-{gap_to_mean_fmt}**) và kém vị trí dẫn đầu **{top_name}** (**{top_fmt}**) tới **-{gap_to_top_fmt}**. Quản lý trực tiếp của **{u_name}** cần rà soát ngay các nguyên nhân gây nghẽn đầu ra tại đơn vị.",
+                    f"🟡 **[Mục tiêu Phục hồi Ngắn hạn cho {u_name}: Bù đắp +{gap_to_mean_fmt} để Chạm Chuẩn {mean_fmt}]**: Nhân rộng quy trình khai thác hiệu quả từ **{top_name}** sang cho **{u_name}**, đặt chỉ tiêu cụ thể đưa kết quả của **{u_name}** vượt mốc **{mean_fmt}** trong kỳ tới.",
+                    f"🟢 **[Rà soát Tiến độ Cuốn chiếu Hàng tuần tại {u_name}]**: Thiết lập cơ chế kiểm tra tiến độ hàng tuần dành riêng cho **{u_name}** để kịp thời hỗ trợ nguồn lực tại chỗ."
+                ]
+
+    unit_plan = {
+        "role_title": role_title,
+        "role_focus": role_focus,
+        "kpis": kpis,
+        "actions": actions,
+        "unit_diagnostic": {
+            "unit_name": u_name,
+            "raw_unit": u_raw,
+            "rank": u_rank,
+            "total_units": n_units,
+            "rank_str": f"Rank #{u_rank}/{n_units}" if is_en else f"Hạng #{u_rank}/{n_units}",
+            "status_badge": status_badge,
+            "status_color": status_color,
+            "unit_val_fmt": u_fmt,
+            "mean_val_fmt": mean_fmt,
+            "top_name": top_name,
+            "top_val_fmt": top_fmt,
+            "share_pct": u_share_pct,
+            "vs_mean_pct": u_vs_mean_pct,
+            "pct_of_mean": pct_of_mean,
+            "pct_of_top": pct_of_top,
+            "gap_to_mean_fmt": gap_to_mean_fmt,
+            "gap_to_top_fmt": gap_to_top_fmt,
+            "next_target_fmt": _fmt(next_target_val),
+            "secondary_metrics": secondary_metrics,
+        }
+    }
+    return _attach_hypothesis_gate_and_tags(unit_plan, tree, is_en=is_en)
+
+
+def generate_persona_action_plan(
+    df: pd.DataFrame,
+    persona: str = "ceo",
+    user_query: str = "",
+    is_en: bool = False,
+    target_unit: str = None
+) -> dict:
     """Sinh kế hoạch hành động chuyên biệt theo từng đối tượng người đọc (Narrowed Target Persona)
     và ĐÚNG BẢN CHẤT NGHIỆP VỤ (Chuỗi thời gian Năm/Tháng/Quý, Giới tính/ESG, Định biên Phòng ban/Chức danh, Quỹ lương, Sản phẩm SKU, Thị trường, Đội ngũ/Nhân viên):
     - persona='ceo': Góc nhìn CEO / CFO / CHRO (Chiến lược vĩ mô, Phân bổ vốn/định biên ROI, Quản trị chu kỳ & P&L dài hạn).
-    - persona='lead': Góc nhìn Trưởng Phòng / HRBP / FP&A / Category Manager / Quản lý Vùng / Team Lead (Thực thi đúng đối tượng vật lý/thời gian/tổ chức, tuyệt đối không gọi Năm/Tháng là 'đơn vị' hay 'nhóm dẫn đầu').
+    - persona='lead': Góc nhìn Trưởng Phòng / HRBP / FP&A / Category Manager / Quản lý Vùng / Team Lead.
+      Đặc biệt: Khi truyền `target_unit` (VD: 'USA', 'India', 'Delish', 'Jucies', 'Bars', 'Sales'), hàm sẽ narrow-down
+      100% số liệu, Benchmark và 3 khuyến nghị hành động cho DUY NHẤT vùng/đơn vị đó!
     """
     tree = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en)
+    if persona == "lead" and target_unit and str(target_unit).strip().upper() not in ("", "ALL", "NONE"):
+        units_info = extract_selectable_units(df, user_query=user_query, is_en=is_en)
+        if units_info.get("has_units"):
+            scoped_plan = _generate_unit_scoped_lead_plan(
+                df, target_unit=target_unit, tree=tree, units_info=units_info, user_query=user_query, is_en=is_en
+            )
+            if scoped_plan is not None:
+                return scoped_plan
+
+    res_plan = _generate_persona_action_plan_core(df, persona=persona, tree=tree, user_query=user_query, is_en=is_en)
+    return _attach_hypothesis_gate_and_tags(res_plan, tree, is_en=is_en)
+
+
+def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", tree: dict = None, user_query: str = "", is_en: bool = False) -> dict:
+    if tree is None:
+        tree = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en)
     top_ent = tree.get("top_entity", "Top 1")
     bot_ent = tree.get("bot_entity", "Bottom 1")
     top_v = tree.get("top_val_fmt", "0")

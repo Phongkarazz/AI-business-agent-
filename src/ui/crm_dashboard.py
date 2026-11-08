@@ -625,10 +625,14 @@ def render_smart_analyst_anomaly_panel(
     end_year: int,
     key_prefix: str = "analyst"
 ):
-    """Component UI Bảng Chẩn Đoán Hiệu Suất Động 4 Tầng: Điểm nghẽn, Cây Giả Thuyết, Phân Tầng Vai Trò & Lộ Trình (Bilingual)."""
+    """Component UI Bảng Chẩn Đoán Hiệu Suất Động 4 Tầng: Cây Giả Thuyết, Phân Tầng Vai Trò & Đơn Vị, Điểm Nghẽn & Lộ Trình (Bilingual)."""
     import textwrap
     import re
-    from src.analytics.heuristics import generate_hypothesis_tree, generate_persona_action_plan
+    from src.analytics.heuristics import (
+        generate_hypothesis_tree,
+        generate_persona_action_plan,
+        extract_selectable_units,
+    )
     lang = get_current_language()
     is_en = (lang == "en")
     res = scan_dashboard_anomalies_and_strategies(layer_id, data, start_year, end_year, lang=lang)
@@ -657,9 +661,14 @@ def render_smart_analyst_anomaly_panel(
 
     panel_title = t("anomaly_panel_title")
     health_lbl = t("anomaly_health_label")
+    vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+    step1_lbl = "1. Detect Data Signal" if is_en else "1. Phát hiện Tín hiệu Dữ liệu"
+    step2_lbl = "2. Validate Hypothesis Tree (Prioritize H1)" if is_en else "2. Kiểm định Cây Giả Thuyết (Ưu tiên độ chính xác cao nhất)"
+    step3_lbl = "3. Role & Unit-Scoped Strategy" if is_en else "3. Khuyến nghị theo Vai trò & Vùng Phụ trách"
 
     header_html = textwrap.dedent(f"""
-<div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid {border_color}; border-radius: 14px; padding: 16px 20px; margin-top: 14px; margin-bottom: 12px; {glow}">
+<div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid {border_color}; border-radius: 14px; padding: 16px 20px; margin-top: 14px; margin-bottom: 12px; {glow}">
 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
 <div style="display: flex; align-items: center; gap: 8px;">
 <span style="font-size: 1.3rem;">🧠</span>
@@ -676,8 +685,16 @@ def render_smart_analyst_anomaly_panel(
 </span>
 </div>
 </div>
-<div style="font-size: 0.88rem; color: #CBD5E1; line-height: 1.55;">
+<div style="font-size: 0.86rem; color: #CBD5E1; line-height: 1.55; margin-bottom: 10px;">
 {headline}
+</div>
+<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 6px 10px; font-size: 0.74rem;">
+<span style="color: #94A3B8; font-weight: 700; text-transform: uppercase;">{'🔬 Quy trình Chuẩn:' if not is_en else '🔬 Evidence-First Flow:'}</span>
+<span style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #7DD3FC; padding: 2px 8px; border-radius: 5px; font-weight: 600;">{step1_lbl}</span>
+<span style="color: #64748B; font-weight: 800;">➔</span>
+<span style="background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-weight: 700;">{step2_lbl}</span>
+<span style="color: #64748B; font-weight: 800;">➔</span>
+<span style="background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4); color: #FDE68A; padding: 2px 8px; border-radius: 5px; font-weight: 700;">{step3_lbl}</span>
 </div>
 </div>
 """).strip()
@@ -700,71 +717,60 @@ def render_smart_analyst_anomaly_panel(
         )
         s = re.sub(
             r"`([^`]+)`",
-            r"<code style='background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; color: #67E8F9; font-family: inherit;'>\1</code>",
+            r"<code style='background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); padding: 1px 6px; border-radius: 5px; color: #67E8F9; font-size: 0.75rem; font-weight: 700; font-family: inherit;'>\1</code>",
             s
         )
         return s
 
-    vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-
-    # Xác định các tập dữ liệu chẩn đoán hiện có trong Layer để dựng Cây Giả Thuyết & Phân Tầng Vai Trò
+    # Xác định các tập dữ liệu chẩn đoán hiện có trong Layer để dựng Cây Giả Thuyết & Phân Tầng Vai Trò / Đơn vị Phụ trách
     diag_sources = {}
     if isinstance(data.get("geo_df"), pd.DataFrame) and not data["geo_df"].empty:
         diag_sources["🌍 Thị trường Quốc gia (Market Share)" if not is_en else "🌍 Global Markets (Geo)"] = (data["geo_df"], "doanh số theo quốc gia thị trường")
-    if isinstance(data.get("category_df"), pd.DataFrame) and not data["category_df"].empty:
-        diag_sources["🍫 Danh mục Sản phẩm (Product Category)" if not is_en else "🍫 Product Categories"] = (data["category_df"], "doanh số theo danh mục sản phẩm")
+    if isinstance(data.get("region_df"), pd.DataFrame) and not data["region_df"].empty:
+        diag_sources["🌐 Khu vực Chiến lược (Regions)" if not is_en else "🌐 Strategic Regions"] = (data["region_df"], "doanh số theo khu vực vùng")
     if isinstance(data.get("team_df"), pd.DataFrame) and not data["team_df"].empty:
         diag_sources["👥 Đội ngũ Kinh doanh (Sales Teams)" if not is_en else "👥 Sales Teams"] = (data["team_df"], "doanh số theo đội ngũ team")
+    if isinstance(data.get("category_df"), pd.DataFrame) and not data["category_df"].empty:
+        diag_sources["🍫 Danh mục Sản phẩm (Product Category)" if not is_en else "🍫 Product Categories"] = (data["category_df"], "doanh số theo danh mục sản phẩm")
+    elif isinstance(data.get("cat_df"), pd.DataFrame) and not data["cat_df"].empty and "Category" in data["cat_df"].columns:
+        diag_sources["🍫 Danh mục Sản phẩm (Product Category)" if not is_en else "🍫 Product Categories"] = (data["cat_df"], "doanh số theo danh mục sản phẩm")
+    if isinstance(data.get("size_df"), pd.DataFrame) and not data["size_df"].empty:
+        diag_sources["📦 Kích cỡ Đóng gói (Package Size)" if not is_en else "📦 Package Sizes"] = (data["size_df"], "doanh số theo kích cỡ sản phẩm")
+    if isinstance(data.get("top_skus_df"), pd.DataFrame) and not data["top_skus_df"].empty:
+        diag_sources["🍫 Top 10 Sản phẩm (Top SKUs)" if not is_en else "🍫 Top 10 SKUs"] = (data["top_skus_df"], "doanh số theo sản phẩm")
     if isinstance(data.get("dept_df"), pd.DataFrame) and not data["dept_df"].empty:
         diag_sources["🏢 Khối Phòng Ban (Departments)" if not is_en else "🏢 Departments"] = (data["dept_df"], "nhân sự và lương theo phòng ban")
     if isinstance(data.get("dept_sal_df"), pd.DataFrame) and not data["dept_sal_df"].empty:
         diag_sources["💰 Lương theo Phòng Ban (Dept Salary)" if not is_en else "💰 Salary by Department"] = (data["dept_sal_df"], "lương trung bình theo phòng ban")
     if isinstance(data.get("df"), pd.DataFrame) and not data["df"].empty:
-        diag_sources["📊 Bảng dữ liệu chính (Primary Table)" if not is_en else "📊 Primary Layer Dataset"] = (data["df"], layer_id)
+        main_df_cols = [str(c).lower() for c in data["df"].columns]
+        if "geo" in main_df_cols and not isinstance(data.get("geo_df"), pd.DataFrame):
+            df_lbl = "🌍 Thị trường Quốc gia (Market Share)" if not is_en else "🌍 Global Markets (Geo)"
+            df_q = "doanh số theo quốc gia thị trường"
+        elif "salesperson" in main_df_cols:
+            df_lbl = "🧑‍💼 Chuyên viên Kinh doanh (Sales Reps)" if not is_en else "🧑‍💼 Sales Representatives"
+            df_q = "doanh số theo nhân viên bán hàng"
+        elif "product" in main_df_cols:
+            df_lbl = "🍫 Chi tiết Sản phẩm SKU (Product SKUs)" if not is_en else "🍫 Product SKUs"
+            df_q = "doanh số theo sản phẩm"
+        elif any(k in main_df_cols for k in ["month", "yearmonth", "timeperiod"]) and not isinstance(data.get("trend_df"), pd.DataFrame):
+            df_lbl = "📈 Chuỗi thời gian Tháng (Monthly Trend)" if not is_en else "📈 Monthly Time Series"
+            df_q = "xu hướng doanh thu theo từng tháng"
+        else:
+            df_lbl = "📊 Bảng dữ liệu chính (Primary Table)" if not is_en else "📊 Primary Layer Dataset"
+            df_q = layer_id
+        diag_sources[df_lbl] = (data["df"], df_q)
     if isinstance(data.get("trend_df"), pd.DataFrame) and not data["trend_df"].empty:
         diag_sources["📈 Chuỗi thời gian Tháng (Monthly Trend)" if not is_en else "📈 Monthly Time Series"] = (data["trend_df"], "xu hướng doanh thu theo từng tháng")
 
     raw_diag_lbl = str(t('tab_diagnosis', count=len(anomalies))).lstrip("🔍 ").strip()
     raw_strat_lbl = str(t('tab_strategic_plan')).lstrip("🎯 ").strip()
-    diag_tab_label = f"🔍 {raw_diag_lbl}"
-    tree_tab_label = "🌿 Hypothesis Issue Tree" if is_en else "🌿 Cây Giả Thuyết & Kiểm Định"
-    persona_tab_label = "👥 Role-Targeted Plan (CEO vs. KAM)" if is_en else "👥 Phân Tầng Vai Trò (CEO vs. KAM/Lead)"
-    strat_tab_label = f"🎯 {raw_strat_lbl}"
+    tree_tab_label = "🌿 1. Hypothesis Issue Tree" if is_en else "🌿 1. Cây Giả Thuyết & Kiểm Định"
+    persona_tab_label = "👥 2. Role & Unit Scope Plan" if is_en else "👥 2. Phân Tầng Vai Trò & Vùng Phụ Trách"
+    diag_tab_label = f"🔍 3. {raw_diag_lbl}"
+    strat_tab_label = f"🎯 4. {raw_strat_lbl}"
 
-    tab_diag, tab_tree, tab_persona, tab_strat = st.tabs([diag_tab_label, tree_tab_label, persona_tab_label, strat_tab_label])
-    
-    with tab_diag:
-        if not anomalies:
-            st.info(f"✨ All operational indicators remain stable and balanced during {time_label}." if is_en else f"✨ Không phát hiện điểm bất thường nghiêm trọng nào trong {time_label}. Toàn bộ các chỉ số vận hành duy trì trạng thái ổn định và cân bằng.")
-        else:
-            for idx, a in enumerate(anomalies, 1):
-                sev_color = "#EF4444" if "CRITICAL" in a["severity"] else "#F59E0B"
-                act_label = "Actual Metrics:" if is_en else "Số liệu thực tế:"
-                rc_label = "Root Cause Diagnosis:" if is_en else "Chẩn đoán nguyên nhân gốc rễ (Root Cause):"
-                imp_label = "Quantified Risk & Impact:" if is_en else "Lượng hóa rủi ro & tác động (Quantified Impact):"
-
-                card_html = textwrap.dedent(f"""
-<div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.75); border-left: 4px solid {sev_color}; border-top: 1px solid rgba(255,255,255,0.05); border-right: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;">
-<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-<span style="font-size: 0.95rem; font-weight: 700; color: #F8FAFC;">
-#{idx}. {_md_inline_to_html(a['title'])}
-</span>
-<span style="font-size: 0.74rem; font-weight: 700; color: {sev_color}; background: rgba(0,0,0,0.35); padding: 3px 10px; border-radius: 12px; border: 1px solid {sev_color}40;">
-{a['severity']}
-</span>
-</div>
-<div style="font-size: 0.86rem; color: #E2E8F0; margin-bottom: 8px; line-height: 1.55;">
-📊 <b style="color: #67E8F9;">{act_label}</b> {_md_inline_to_html(a['metrics_summary'])}
-</div>
-<div style="font-size: 0.84rem; color: #CBD5E1; margin-bottom: 6px; line-height: 1.5;">
-🔬 <b style="color: #FDE047;">{rc_label}</b> {_md_inline_to_html(a['root_cause'])}
-</div>
-<div style="font-size: 0.84rem; color: #FCA5A5; line-height: 1.5;">
-💥 <b style="color: #F87171;">{imp_label}</b> {_md_inline_to_html(a['quantified_impact'])}
-</div>
-</div>
-""").strip()
-                st.markdown(card_html, unsafe_allow_html=True)
+    tab_tree, tab_persona, tab_diag, tab_strat = st.tabs([tree_tab_label, persona_tab_label, diag_tab_label, strat_tab_label])
 
     # Khởi tạo dữ liệu cây giả thuyết cho các tab chẩn đoán động
     active_diag_df = None
@@ -861,7 +867,7 @@ def render_smart_analyst_anomaly_panel(
     with tab_persona:
         if len(diag_sources) > 1:
             sel_p_src_lbl = st.radio(
-                "Chọn chiều dữ liệu phân tầng hành động:" if not is_en else "Select data dimension for role-targeted action plan:",
+                "1️⃣ Chọn chiều dữ liệu phân tầng hành động & định chuẩn:" if not is_en else "1️⃣ Select data dimension for role-targeted action plan:",
                 options=list(diag_sources.keys()),
                 horizontal=True,
                 key=f"diag_persona_src_{key_prefix}_{layer_id}"
@@ -870,23 +876,99 @@ def render_smart_analyst_anomaly_panel(
         else:
             persona_df, persona_q = active_diag_df, active_diag_q
 
+        # Hiển thị Cổng Kiểm Chứng Giả Thuyết (Hypothesis Verification Gate) trên tab Phân tầng Vai trò
+        if persona_df is not None and not persona_df.empty:
+            p_tree = generate_hypothesis_tree(persona_df, user_query=persona_q, is_en=is_en)
+            p_branches = p_tree.get("branches", [])
+            if p_branches:
+                conf_list = [b for b in p_branches if b.get("status") == "CONFIRMED"]
+                part_list = [b for b in p_branches if b.get("status") == "PARTIAL"]
+                rej_list = [b for b in p_branches if b.get("status") == "REJECTED"]
+                top_b = conf_list[0] if conf_list else p_branches[0]
+                sec_b = part_list[0] if part_list else (conf_list[1] if len(conf_list) > 1 else None)
+                rej_b = rej_list[0] if rej_list else None
+                top_t_clean = _md_inline_to_html(top_b.get("title", "H1"))
+                top_c_pct = int(top_b.get("confidence", 88))
+                top_p_sc = int(top_b.get("priority_score", 85))
+                sec_badge_html = ""
+                if sec_b:
+                    sec_t_clean = _md_inline_to_html(sec_b.get("title", "H2"))
+                    sec_c_pct = int(sec_b.get("confidence", 74))
+                    sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4); color: #FBBF24; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;'>⚡ Đồng tác động: {sec_t_clean} ({sec_c_pct}%)</span>"
+                rej_badge_html = ""
+                if rej_b:
+                    rej_t_clean = _md_inline_to_html(rej_b.get("title", "H3"))
+                    rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.4); color: #94A3B8; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 500;'>❌ Đã loại trừ: {rej_t_clean}</span>"
+                gate_hdr = "🔒 HYPOTHESIS VERIFICATION GATE (EVIDENCE-FIRST: VERIFIED HYPOTHESIS ➔ ROLE & UNIT STRATEGY)" if is_en else "🔒 CỔNG KIỂM CHỨNG GIẢ THUYẾT (ĐÃ KIỂM ĐỊNH DỮ LIỆU TRƯỚC KHI ĐƯA RA KHUYẾN NGHỊ)"
+                gate_body = (
+                    f"Action plans below are anchored directly to the highest-accuracy validated hypothesis: <strong style='color:#34D399;'>{top_t_clean}</strong> (Confidence: <b>{top_c_pct}%</b> • Priority Score: <b>{top_p_sc}/100</b>)."
+                    if is_en else
+                    f"Mọi kế hoạch hành động bên dưới được dẫn xuất trực tiếp từ giả thuyết có độ chính xác kiểm định cao nhất: <strong style='color:#34D399;'>{top_t_clean}</strong> (Độ chính xác: <b>{top_c_pct}%</b> • Điểm ưu tiên: <b>{top_p_sc}/100</b>)."
+                )
+                gate_html = f"""
+                <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(6, 78, 59, 0.28) 0%, rgba(15, 23, 42, 0.92) 100%); border: 1px solid rgba(16, 185, 129, 0.45); border-left: 4px solid #10B981; border-radius: 10px; padding: 10px 14px; margin-bottom: 10px;">
+                    <div style="font-size: 0.71rem; font-weight: 800; color: #34D399; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px;">
+                        {gate_hdr}
+                    </div>
+                    <div style="font-size: 0.81rem; color: #E2E8F0; line-height: 1.48; margin-bottom: 6px;">
+                        {gate_body}
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                        <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.5); color: #6EE7B7; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 700;">✅ Ưu tiên #1: {top_t_clean} ({top_c_pct}%)</span>
+                        {sec_badge_html}
+                        {rej_badge_html}
+                    </div>
+                </div>
+                """
+                st.markdown(re.sub(r'\n\s*', ' ', gate_html).strip(), unsafe_allow_html=True)
+
         persona_opts = [
             "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Vĩ mô & Phân bổ Vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Macro Strategy & Capital Allocation",
             "🎯 Quản lý Trực tiếp (KAM / Team Lead / Quản lý Vùng) — Thực thi Cục bộ" if not is_en else "🎯 Operational Lead (KAM / Team Lead / Regional Manager) — Local Execution",
             "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
         ]
         sel_p = st.radio(
-            "Chọn đối tượng nhận kế hoạch hành động & Benchmark:" if not is_en else "Select target persona for action plan & benchmarks:",
+            "2️⃣ Chọn đối tượng nhận kế hoạch hành động & Benchmark:" if not is_en else "2️⃣ Select target persona for action plan & benchmarks:",
             options=persona_opts,
             index=2,
             horizontal=True,
             key=f"dash_persona_radio_{key_prefix}_{layer_id}"
         )
 
+        # Bộ lọc Cá nhân hóa theo Đơn vị / Vùng / Team / Ngành hàng phụ trách (Unit/Region Narrow-Down Selector)
+        dash_units_info = extract_selectable_units(persona_df, user_query=persona_q, is_en=is_en) if (persona_df is not None and not persona_df.empty) else {"has_units": False}
+        dash_selected_unit = None
+        if sel_p in (persona_opts[1], persona_opts[2]) and dash_units_info.get("has_units"):
+            u_opts = dash_units_info.get("unit_options", [])
+            all_u_lbl = dash_units_info.get("all_option_label", "ALL")
+            lbl_to_val = {u["label"]: u["value"] for u in u_opts}
+            lbl_to_val[all_u_lbl] = "ALL"
+            sel_u_labels = [u["label"] for u in u_opts] + [all_u_lbl]
+            def_u_val = dash_units_info.get("default_unit")
+            def_u_idx = 0
+            for idx_u, u_it in enumerate(u_opts):
+                if u_it["value"] == def_u_val:
+                    def_u_idx = idx_u
+                    break
+            st.markdown(
+                f"""<div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 12px; margin-top: 2px; margin-bottom: 6px; font-size: 0.78rem; color: #A7F3D0; font-weight: 600;">
+                🎛️ {'3️⃣ Cá nhân hóa theo Đơn vị / Vùng phụ trách: Chọn đúng Vùng, Team, Ngành hàng hoặc Phòng ban của bạn để nhận Hồ sơ Định chuẩn & 3 Hành động thực thi riêng biệt.' if not is_en else '3️⃣ Unit-Level Scope Personalization: Select your assigned Region, Team, Category, or Department to receive dedicated benchmarks & 3 tailored execution actions.'}
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            chosen_u_lbl = st.selectbox(
+                dash_units_info.get("selector_label", "Chọn đơn vị phụ trách:"),
+                options=sel_u_labels,
+                index=def_u_idx,
+                key=f"dash_unit_scope_{key_prefix}_{layer_id}_{abs(hash(str(persona_q))) % 10000}"
+            )
+            dash_selected_unit = lbl_to_val.get(chosen_u_lbl, "ALL")
+
         def _render_dash_persona_card(p_code: str, border_col: str, badge_col: str):
             if persona_df is None or persona_df.empty:
                 return
-            p_data = generate_persona_action_plan(persona_df, persona=p_code, user_query=persona_q, is_en=is_en)
+            u_target = dash_selected_unit if p_code == "lead" else None
+            p_data = generate_persona_action_plan(persona_df, persona=p_code, user_query=persona_q, is_en=is_en, target_unit=u_target)
             role_title_clean = _md_inline_to_html(p_data.get("role_title", ""))
             role_focus_clean = _md_inline_to_html(p_data.get("role_focus", ""))
             kpis_html = "".join(
@@ -897,6 +979,57 @@ def render_smart_analyst_anomaly_panel(
                 f"<div style='font-family: {vn_font_stack}; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 9px; line-height: 1.62; font-weight: 400;'>• {_md_inline_to_html(act)}</div>"
                 for act in p_data.get("actions", [])
             )
+            unit_diag = p_data.get("unit_diagnostic")
+            unit_strip_html = ""
+            if unit_diag:
+                u_stat_col = unit_diag.get("status_color", "#10B981")
+                pct_top_bar = max(8.0, min(100.0, float(unit_diag.get("pct_of_top", 50.0))))
+                vs_m = float(unit_diag.get("vs_mean_pct", 0.0))
+                vs_m_col = "#34D399" if vs_m >= 0 else "#FBBF24"
+                sec_m_list = unit_diag.get("secondary_metrics", [])
+                sec_m_html = "".join(
+                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.72rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
+                    for sm in sec_m_list
+                )
+                sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;'>{sec_m_html}</div>" if sec_m_html else ""
+                unit_strip_html = f"""
+                <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+                        <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
+                            🎯 {'HỒ SƠ ĐỊNH CHUẨN ĐƠN VỊ:' if not is_en else 'UNIT BENCHMARK SCORECARD:'} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
+                        </span>
+                        <span style="font-size: 0.72rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
+                            {unit_diag.get('status_badge')}
+                        </span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px;">
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{'Thực tế Đơn vị' if not is_en else 'Unit Actual'}</div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.69rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Chuẩn TB' if not is_en else 'vs. Company Mean'} ({unit_diag.get('mean_val_fmt')})</div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: {vs_m_col};">{vs_m:+.1f}% <span style="font-size: 0.69rem; color: #CBD5E1; font-weight: 500;">({unit_diag.get('pct_of_mean'):.1f}%)</span></div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Top #1' if not is_en else 'vs. #1 Leader'} ({unit_diag.get('top_name')})</div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: #E2E8F0;">{unit_diag.get('pct_of_top'):.1f}% <span style="font-size: 0.69rem; color: #94A3B8; font-weight: 500;">(Δ {unit_diag.get('gap_to_top_fmt')})</span></div>
+                        </div>
+                        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #6EE7B7;">{'Chỉ tiêu Kỳ tới (Target)' if not is_en else 'Next-Period Quota'}</div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: #34D399;">{unit_diag.get('next_target_fmt')}</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.71rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
+                        <span>{'Tiến độ tiệm cận Đơn vị Dẫn đầu (#1' if not is_en else 'Progress toward #1 Leader ('} {unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
+                        <b style="color: #F8FAFC;">{unit_diag.get('pct_of_top'):.1f}%</b>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {pct_top_bar}%; height: 100%; background: linear-gradient(90deg, {u_stat_col}, #00F0FF); border-radius: 3px;"></div>
+                    </div>
+                    {sec_row_html}
+                </div>
+                """
             box_html = f"""
             <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 16px 18px; margin-top: 6px; margin-bottom: 10px;">
                 <div style="font-family: {vn_font_stack}; font-size: 0.92rem; font-weight: 700; color: {badge_col}; margin-bottom: 6px; line-height: 1.45; letter-spacing: 0.01em;">
@@ -905,6 +1038,7 @@ def render_smart_analyst_anomaly_panel(
                 <div style="font-family: {vn_font_stack}; font-size: 0.81rem; color: #94A3B8; margin-bottom: 12px; font-style: normal; font-weight: 500; line-height: 1.5;">
                     {role_focus_clean}
                 </div>
+                {unit_strip_html}
                 <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;">
                     {kpis_html}
                 </div>
@@ -928,6 +1062,39 @@ def render_smart_analyst_anomaly_panel(
                     _render_dash_persona_card("lead", "#10B981", "#34D399")
         else:
             st.info("No dataset available for persona action plan." if is_en else "Chưa có dữ liệu để phân tầng kế hoạch hành động.")
+
+    with tab_diag:
+        if not anomalies:
+            st.info(f"✨ All operational indicators remain stable and balanced during {time_label}." if is_en else f"✨ Không phát hiện điểm bất thường nghiêm trọng nào trong {time_label}. Toàn bộ các chỉ số vận hành duy trì trạng thái ổn định và cân bằng.")
+        else:
+            for idx, a in enumerate(anomalies, 1):
+                sev_color = "#EF4444" if "CRITICAL" in a["severity"] else "#F59E0B"
+                act_label = "Actual Metrics:" if is_en else "Số liệu thực tế:"
+                rc_label = "Root Cause Diagnosis:" if is_en else "Chẩn đoán nguyên nhân gốc rễ (Root Cause):"
+                imp_label = "Quantified Risk & Impact:" if is_en else "Lượng hóa rủi ro & tác động (Quantified Impact):"
+
+                card_html = textwrap.dedent(f"""
+<div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.75); border-left: 4px solid {sev_color}; border-top: 1px solid rgba(255,255,255,0.05); border-right: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+<span style="font-size: 0.95rem; font-weight: 700; color: #F8FAFC;">
+#{idx}. {_md_inline_to_html(a['title'])}
+</span>
+<span style="font-size: 0.74rem; font-weight: 700; color: {sev_color}; background: rgba(0,0,0,0.35); padding: 3px 10px; border-radius: 12px; border: 1px solid {sev_color}40;">
+{a['severity']}
+</span>
+</div>
+<div style="font-size: 0.86rem; color: #E2E8F0; margin-bottom: 8px; line-height: 1.55;">
+📊 <b style="color: #67E8F9;">{act_label}</b> {_md_inline_to_html(a['metrics_summary'])}
+</div>
+<div style="font-size: 0.84rem; color: #CBD5E1; margin-bottom: 6px; line-height: 1.5;">
+🔬 <b style="color: #FDE047;">{rc_label}</b> {_md_inline_to_html(a['root_cause'])}
+</div>
+<div style="font-size: 0.84rem; color: #FCA5A5; line-height: 1.5;">
+💥 <b style="color: #F87171;">{imp_label}</b> {_md_inline_to_html(a['quantified_impact'])}
+</div>
+</div>
+""").strip()
+                st.markdown(card_html, unsafe_allow_html=True)
                 
     with tab_strat:
         imm_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.55;'>🔹 {act}</div>" for act in immediate_actions)

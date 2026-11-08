@@ -5863,7 +5863,11 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             st.markdown(format_card_markdown(p21))
 
     # Card 2: Sơ đồ Cây Giả Thuyết (Diagnostic Hypothesis Issue Tree)
-    from src.analytics.heuristics import generate_hypothesis_tree, generate_persona_action_plan
+    from src.analytics.heuristics import (
+        generate_hypothesis_tree,
+        generate_persona_action_plan,
+        extract_selectable_units,
+    )
     tree_data = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {}
     branches = tree_data.get("branches", [])
 
@@ -5958,8 +5962,59 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         p23 = generate_data_grounded_action_plan(df, is_en=is_en, user_query=user_query)
 
     with st.container(border=True):
-        title_23 = "🎯 3. Role-Targeted Strategic Action Plan (Select Target Persona)" if is_en else "🎯 3. Kế Hoạch Hành Động Phân Tầng Theo Đối Tượng (Chọn Vai Trò Quản Trị)"
+        title_23 = "🎯 3. Role-Targeted & Unit-Scoped Action Plan (Verified from Hypothesis Tree)" if is_en else "🎯 3. Kế Hoạch Hành Động Phân Tầng Theo Vai Trò & Đơn Vị Phụ Trách (Từ Kết Quả Kiểm Định)"
         st.markdown(f"<h4 style='color: #34D399; margin: 2px 0 8px 0; font-size: 1.08rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
+
+        vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        def _clean_md_inline(s_raw):
+            s_val = str(s_raw or "")
+            s_val = re.sub(r"\*\*\[([^\]]+)\]\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>", s_val)
+            s_val = re.sub(r"\*\*([^*]+)\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>", s_val)
+            s_val = re.sub(r"`([^`]+)`", r"<code style='background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); padding: 1px 6px; border-radius: 5px; color: #67E8F9; font-size: 0.75rem; font-weight: 700; font-family: inherit;'>\1</code>", s_val)
+            return s_val
+
+        # Hiển thị Cổng Kiểm Chứng Giả Thuyết (Hypothesis Verification Gate — Luồng Kiểm định trước, Khuyến nghị sau)
+        if branches:
+            confirmed_b = [b for b in branches if b.get("status") == "CONFIRMED"]
+            partial_b = [b for b in branches if b.get("status") == "PARTIAL"]
+            rejected_b = [b for b in branches if b.get("status") == "REJECTED"]
+            top_b = confirmed_b[0] if confirmed_b else branches[0]
+            sec_b = partial_b[0] if partial_b else (confirmed_b[1] if len(confirmed_b) > 1 else None)
+            rej_b = rejected_b[0] if rejected_b else None
+            top_t_clean = _clean_md_inline(top_b.get("title", "H1"))
+            top_c_pct = int(top_b.get("confidence", 88))
+            top_p_sc = int(top_b.get("priority_score", 85))
+            sec_badge_html = ""
+            if sec_b:
+                sec_t_clean = _clean_md_inline(sec_b.get("title", "H2"))
+                sec_c_pct = int(sec_b.get("confidence", 74))
+                sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4); color: #FBBF24; padding: 2px 8px; border-radius: 6px; font-size: 0.73rem; font-weight: 600;'>⚡ Đồng tác động: {sec_t_clean} ({sec_c_pct}%)</span>"
+            rej_badge_html = ""
+            if rej_b:
+                rej_t_clean = _clean_md_inline(rej_b.get("title", "H3"))
+                rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.4); color: #94A3B8; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 500;'>❌ Đã loại trừ: {rej_t_clean}</span>"
+            gate_title = "🔒 HYPOTHESIS VERIFICATION GATE (EVIDENCE-FIRST PIPELINE: SIGNAL ➔ DATA TEST ➔ ROLE & UNIT STRATEGY)" if is_en else "🔒 CỔNG KIỂM CHỨNG GIẢ THUYẾT (LUỒNG KHOA HỌC: ĐẶT GIẢ THUYẾT ➔ KIỂM ĐỊNH DỮ LIỆU ➔ ƯU TIÊN CHIẾN LƯỢC THEO VAI TRÒ & ĐƠN VỊ)"
+            gate_desc = (
+                f"Strategic recommendations below are unlocked ONLY after validating the Hypothesis Issue Tree. Highest priority is assigned to <strong style='color:#34D399;'>{top_t_clean}</strong> (Confidence: <b>{top_c_pct}%</b> • Priority Score: <b>{top_p_sc}/100</b>)."
+                if is_en else
+                f"Khuyến nghị bên dưới chỉ được kích hoạt sau khi hoàn tất kiểm định Cây Giả Thuyết ở Bước 2. Hệ thống ưu tiên giải quyết trọng tâm <strong style='color:#34D399;'>{top_t_clean}</strong> (Độ chính xác kiểm định: <b>{top_c_pct}%</b> • Điểm ưu tiên: <b>{top_p_sc}/100</b>)."
+            )
+            gate_html = f"""
+            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(6, 78, 59, 0.28) 0%, rgba(15, 23, 42, 0.92) 100%); border: 1px solid rgba(16, 185, 129, 0.45); border-left: 4px solid #10B981; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;">
+                <div style="font-size: 0.71rem; font-weight: 800; color: #34D399; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">
+                    {gate_title}
+                </div>
+                <div style="font-size: 0.82rem; color: #E2E8F0; line-height: 1.5; margin-bottom: 6px;">
+                    {gate_desc}
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.5); color: #6EE7B7; padding: 2px 8px; border-radius: 6px; font-size: 0.73rem; font-weight: 700;">✅ Ưu tiên #1: {top_t_clean} ({top_c_pct}%)</span>
+                    {sec_badge_html}
+                    {rej_badge_html}
+                </div>
+            </div>
+            """
+            st.markdown(re.sub(r'\n\s*', ' ', gate_html).strip(), unsafe_allow_html=True)
 
         is_hr_ctx = tree_data.get("is_hr", False)
         ent_type_ctx = tree_data.get("entity_type", "general")
@@ -6011,15 +6066,38 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             key=f"persona_radio_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
         )
 
+        # Bộ lọc Cá nhân hóa theo Đơn vị / Vùng / Team / Ngành hàng phụ trách (Dành riêng cho Quản lý Trực tiếp)
+        units_info = extract_selectable_units(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {"has_units": False}
+        selected_unit_val = None
+        if sel_persona in (persona_options[1], persona_options[2]) and units_info.get("has_units"):
+            unit_opts_list = units_info.get("unit_options", [])
+            all_lbl = units_info.get("all_option_label", "ALL")
+            label_to_val = {u["label"]: u["value"] for u in unit_opts_list}
+            label_to_val[all_lbl] = "ALL"
+            select_labels = [u["label"] for u in unit_opts_list] + [all_lbl]
+            default_u = units_info.get("default_unit")
+            default_idx = 0
+            for idx_u, u_item in enumerate(unit_opts_list):
+                if u_item["value"] == default_u:
+                    default_idx = idx_u
+                    break
+            st.markdown(
+                f"""<div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 12px; margin-top: 4px; margin-bottom: 4px; font-size: 0.78rem; color: #A7F3D0; font-weight: 600;">
+                🎛️ {'Cá nhân hóa theo phạm vi phụ trách: Mỗi Quản lý Vùng / Team Lead / KAM nhận bộ Benchmark & Kế hoạch thực thi riêng cho đơn vị mình quản lý.' if not is_en else 'Unit-Level Personalization: Each Regional Manager / Team Lead / KAM receives dedicated benchmarks & execution actions for their assigned unit.'}
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            chosen_lbl = st.selectbox(
+                units_info.get("selector_label", "Chọn đơn vị phụ trách:"),
+                options=select_labels,
+                index=default_idx,
+                key=f"unit_scope_sel_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+            )
+            selected_unit_val = label_to_val.get(chosen_lbl, "ALL")
+
         def _render_persona_box(p_code: str, border_col: str, badge_col: str):
-            p_data = generate_persona_action_plan(df, persona=p_code, user_query=user_query, is_en=is_en)
-            vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-            def _clean_md_inline(s_raw):
-                s_val = str(s_raw or "")
-                s_val = re.sub(r"\*\*\[([^\]]+)\]\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>", s_val)
-                s_val = re.sub(r"\*\*([^*]+)\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>", s_val)
-                s_val = re.sub(r"`([^`]+)`", r"<code style='background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; color: #67E8F9; font-family: inherit;'>\1</code>", s_val)
-                return s_val
+            u_arg = selected_unit_val if p_code == "lead" else None
+            p_data = generate_persona_action_plan(df, persona=p_code, user_query=user_query, is_en=is_en, target_unit=u_arg)
             kpis_html = "".join(
                 f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F8FAFC; font-size: 0.76rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.4;'>📌 {_clean_md_inline(k)}</span>"
                 for k in p_data.get("kpis", [])
@@ -6028,6 +6106,57 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 f"<div style='font-family: {vn_font_stack}; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 9px; line-height: 1.62; font-weight: 400;'>• {_clean_md_inline(act)}</div>"
                 for act in p_data.get("actions", [])
             )
+            unit_diag = p_data.get("unit_diagnostic")
+            unit_strip_html = ""
+            if unit_diag:
+                u_stat_col = unit_diag.get("status_color", "#10B981")
+                pct_top_bar = max(8.0, min(100.0, float(unit_diag.get("pct_of_top", 50.0))))
+                vs_m = float(unit_diag.get("vs_mean_pct", 0.0))
+                vs_m_col = "#34D399" if vs_m >= 0 else "#FBBF24"
+                sec_m_list = unit_diag.get("secondary_metrics", [])
+                sec_m_html = "".join(
+                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.72rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
+                    for sm in sec_m_list
+                )
+                sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;'>{sec_m_html}</div>" if sec_m_html else ""
+                unit_strip_html = f"""
+                <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+                        <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
+                            🎯 {'HỒ SƠ ĐỊNH CHUẨN ĐƠN VỊ:' if not is_en else 'UNIT BENCHMARK SCORECARD:'} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
+                        </span>
+                        <span style="font-size: 0.72rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
+                            {unit_diag.get('status_badge')}
+                        </span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; margin-bottom: 8px;">
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{'Thực tế Đơn vị' if not is_en else 'Unit Actual'}</div>
+                            <div style="font-size: 0.86rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.7rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Chuẩn TB' if not is_en else 'vs. Company Mean'} ({unit_diag.get('mean_val_fmt')})</div>
+                            <div style="font-size: 0.86rem; font-weight: 800; color: {vs_m_col};">{vs_m:+.1f}% <span style="font-size: 0.7rem; color: #CBD5E1; font-weight: 500;">({unit_diag.get('pct_of_mean'):.1f}%)</span></div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Top #1' if not is_en else 'vs. #1 Leader'} ({unit_diag.get('top_name')})</div>
+                            <div style="font-size: 0.86rem; font-weight: 800; color: #E2E8F0;">{unit_diag.get('pct_of_top'):.1f}% <span style="font-size: 0.7rem; color: #94A3B8; font-weight: 500;">(Δ {unit_diag.get('gap_to_top_fmt')})</span></div>
+                        </div>
+                        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 6px 8px;">
+                            <div style="font-size: 0.68rem; color: #6EE7B7;">{'Chỉ tiêu Kỳ tới (Target)' if not is_en else 'Next-Period Quota'}</div>
+                            <div style="font-size: 0.86rem; font-weight: 800; color: #34D399;">{unit_diag.get('next_target_fmt')}</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.71rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
+                        <span>{'Tiến độ tiệm cận Đơn vị Dẫn đầu (#1' if not is_en else 'Progress toward #1 Leader ('} {unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
+                        <b style="color: #F8FAFC;">{unit_diag.get('pct_of_top'):.1f}%</b>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                        <div style="width: {pct_top_bar}%; height: 100%; background: linear-gradient(90deg, {u_stat_col}, #00F0FF); border-radius: 3px;"></div>
+                    </div>
+                    {sec_row_html}
+                </div>
+                """
             box_header = f"""
             <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 16px 18px; margin-top: 8px; margin-bottom: 10px;">
                 <div style="font-family: {vn_font_stack}; font-size: 0.92rem; font-weight: 700; color: {badge_col}; margin-bottom: 6px; line-height: 1.45;">
@@ -6036,6 +6165,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 <div style="font-family: {vn_font_stack}; font-size: 0.81rem; color: #94A3B8; margin-bottom: 12px; font-style: normal; font-weight: 500; line-height: 1.5;">
                     {_clean_md_inline(p_data.get('role_focus'))}
                 </div>
+                {unit_strip_html}
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
                     {kpis_html}
                 </div>

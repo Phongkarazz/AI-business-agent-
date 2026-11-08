@@ -28,15 +28,17 @@ except ImportError:
 import importlib
 import src.i18n
 import src.database.crm_queries
+import src.analytics.heuristics
 import src.analytics.anomaly
 import src.ui.components
 import src.ui.crm_dashboard
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261105_dynamic_diagnostic_dashboard_v203"
+CACHE_BUILD_ID = "20261108_unit_scope_hypothesis_gate_v204"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
+    importlib.reload(src.analytics.heuristics)
     importlib.reload(src.analytics.anomaly)
     importlib.reload(src.ui.components)
     importlib.reload(src.ui.crm_dashboard)
