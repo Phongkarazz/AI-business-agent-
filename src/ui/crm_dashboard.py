@@ -570,13 +570,22 @@ def _render_diagnostic_kpi_card(
     status_level: str = "good",
     fill_color: str = ""
 ):
-    """Render thẻ KPI chẩn đoán hiệu suất động với kích thước đồng nhất 100%, thanh Benchmark và huy hiệu trạng thái."""
+    """Render thẻ KPI chẩn đoán hiệu suất động với bố cục 5 tầng thông thoáng, hiển thị đầy đủ 100% chữ & số không bị cắt cụt."""
+    import re
     resolved_class = color_class or card_class or "kpi-card-cyan"
     resolved_val = value_html or val_html or ""
-    if delta_str and "kpi-delta-tag" not in resolved_val:
+
+    # Tách riêng thẻ delta (▲ +X.X%) ra khỏi dòng số lớn để cả con số chính lẫn huy hiệu tăng trưởng đều hiển thị trọn vẹn 100%
+    delta_match = re.search(r"<span\s+class=['\"]kpi-delta-tag['\"][^>]*>(.*?)</span>", resolved_val)
+    extracted_delta = ""
+    if delta_match:
+        extracted_delta = delta_match.group(1).strip()
+        resolved_val = re.sub(r"<span\s+class=['\"]kpi-delta-tag['\"][^>]*>.*?</span>", "", resolved_val).strip()
+    elif delta_str:
         arrow = "▲ " if delta_dir == "up" and not delta_str.startswith(("▲", "▼")) else ("▼ " if delta_dir == "down" and not delta_str.startswith(("▲", "▼")) else "")
-        resolved_val = f"<span>{resolved_val}</span><span class='kpi-delta-tag'>{arrow}{delta_str}</span>"
-    elif "kpi-delta-tag" not in resolved_val and not resolved_val.strip().startswith("<span"):
+        extracted_delta = f"{arrow}{delta_str}"
+
+    if not resolved_val.strip().startswith("<span"):
         resolved_val = f"<span>{resolved_val}</span>"
 
     resolved_pill = status_pill or status_text or "🟢 OPTIMAL"
@@ -594,13 +603,22 @@ def _render_diagnostic_kpi_card(
         pill_bg = "rgba(239, 68, 68, 0.36)"
         pill_border = "rgba(252, 165, 165, 0.75)"
 
+    delta_badge_html = f"<span class='kpi-delta-tag'>{extracted_delta}</span>" if extracted_delta else ""
+
     st.markdown(f"""
     <div class="{resolved_class}" style="{extra_style}">
-        <div class="kpi-title">
-            <span class="kpi-title-text" title="{title}">{title}</span>
+        <div class="kpi-top-row">
+            <span class="kpi-badge">{badge_text}</span>
             <span class="kpi-status-pill" style="background:{pill_bg}; border:1px solid {pill_border};">{resolved_pill}</span>
         </div>
+        <div class="kpi-title" title="{title}">
+            <span class="kpi-title-text">{title}</span>
+        </div>
         <div class="kpi-val">{resolved_val}</div>
+        <div class="kpi-sub">
+            {delta_badge_html}
+            <span class="kpi-sub-text" title="{sub_text}">{sub_text}</span>
+        </div>
         <div class="kpi-bench-wrap">
             <div class="kpi-bench-header">
                 <span title="{bench_label}">🎯 {bench_label}</span>
@@ -609,10 +627,6 @@ def _render_diagnostic_kpi_card(
             <div class="kpi-bench-track">
                 <div class="kpi-bench-fill" style="width: {fill_w:.1f}%; background: {bar_bg};"></div>
             </div>
-        </div>
-        <div class="kpi-sub">
-            <span class="kpi-badge">{badge_text}</span>
-            <span class="kpi-sub-text" title="{sub_text}">{sub_text}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1316,15 +1330,15 @@ def render_crm_dashboard():
             -webkit-font-smoothing: antialiased;
         }
         
-        /* High-Contrast Neon Gradient Metric KPI Cards (100% Uniform Diagnostic Dimensions) */
+        /* High-Contrast Neon Gradient Metric KPI Cards (100% Uniform Diagnostic Dimensions & Zero Truncation) */
         .kpi-card-cyan, .kpi-card-purple, .kpi-card-emerald, .kpi-card-amber {
             border-radius: 18px;
-            padding: 15px 18px !important;
+            padding: 14px 16px !important;
             color: #FFFFFF !important;
-            border: 1px solid rgba(255, 255, 255, 0.26);
-            height: 186px !important;
-            min-height: 186px !important;
-            max-height: 186px !important;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            height: 208px !important;
+            min-height: 208px !important;
+            max-height: 208px !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
             display: flex !important;
@@ -1353,32 +1367,37 @@ def render_crm_dashboard():
             box-shadow: 0 14px 36px rgba(0, 240, 255, 0.35);
         }
 
-        .kpi-title {
-            font-size: 0.75rem !important;
-            font-weight: 800 !important;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: rgba(255, 255, 255, 0.96);
+        .kpi-top-row {
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            gap: 6px;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            height: 24px !important;
+            gap: 6px !important;
+            width: 100% !important;
             flex-shrink: 0 !important;
         }
-        .kpi-title > span:first-child, .kpi-title-text {
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            white-space: nowrap !important;
-            min-width: 0;
-            flex: 1;
+        .kpi-title {
+            font-size: 0.77rem !important;
+            font-weight: 800 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: rgba(255, 255, 255, 0.98);
+            line-height: 1.26 !important;
+            width: 100% !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            margin: 2px 0 0 0 !important;
+            flex-shrink: 0 !important;
+        }
+        .kpi-title-text {
+            display: block !important;
+            white-space: normal !important;
+            word-break: break-word !important;
+            overflow: visible !important;
         }
         .kpi-status-pill {
-            font-size: 0.66rem !important;
+            font-size: 0.65rem !important;
             font-weight: 800 !important;
-            padding: 2px 7px !important;
+            padding: 2px 8px !important;
             border-radius: 999px !important;
             color: #FFFFFF !important;
             white-space: nowrap !important;
@@ -1387,36 +1406,34 @@ def render_crm_dashboard():
             backdrop-filter: blur(6px);
         }
         .kpi-val {
-            font-size: clamp(1.28rem, 1.68vw, 1.78rem) !important;
+            font-size: clamp(1.24rem, 1.48vw, 1.62rem) !important;
             font-weight: 900 !important;
             color: #FFFFFF !important;
-            letter-spacing: -0.025em;
+            letter-spacing: -0.02em;
             line-height: 1.15 !important;
-            margin: 2px 0 !important;
-            text-shadow: 0 3px 12px rgba(0, 0, 0, 0.38);
+            margin: 1px 0 !important;
+            text-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
             white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
+            overflow: visible !important;
             display: flex !important;
             align-items: baseline !important;
-            justify-content: space-between !important;
             gap: 6px;
             flex-shrink: 0 !important;
         }
         .kpi-delta-tag {
-            font-size: 0.70rem !important;
+            font-size: 0.69rem !important;
             font-weight: 800 !important;
             padding: 2px 6px !important;
             border-radius: 6px !important;
-            background: rgba(0, 0, 0, 0.26) !important;
+            background: rgba(0, 0, 0, 0.28) !important;
             color: #ECFDF5 !important;
-            border: 1px solid rgba(255, 255, 255, 0.32) !important;
+            border: 1px solid rgba(255, 255, 255, 0.36) !important;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
         }
         .kpi-bench-wrap {
             width: 100% !important;
-            margin: 2px 0 !important;
+            margin-top: 2px !important;
             flex-shrink: 0 !important;
         }
         .kpi-bench-header {
@@ -1426,14 +1443,11 @@ def render_crm_dashboard():
             gap: 6px;
             font-size: 0.70rem !important;
             font-weight: 700 !important;
-            color: rgba(255, 255, 255, 0.94) !important;
+            color: rgba(255, 255, 255, 0.96) !important;
             margin-bottom: 4px !important;
             white-space: nowrap !important;
-            overflow: hidden !important;
         }
         .kpi-bench-header > span:first-child {
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
             white-space: nowrap !important;
             min-width: 0;
             flex: 1;
@@ -1452,31 +1466,29 @@ def render_crm_dashboard():
             box-shadow: 0 0 8px rgba(255, 255, 255, 0.65) !important;
         }
         .kpi-sub {
-            font-size: 0.75rem !important;
+            font-size: 0.74rem !important;
             font-weight: 600 !important;
-            color: rgba(255, 255, 255, 0.95) !important;
+            color: rgba(255, 255, 255, 0.96) !important;
             display: flex !important;
             align-items: center !important;
             gap: 6px !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            height: 24px !important;
+            flex-wrap: nowrap !important;
+            width: 100% !important;
             flex-shrink: 0 !important;
         }
-        .kpi-sub > span:last-child, .kpi-sub-text {
+        .kpi-sub-text {
+            white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            white-space: nowrap !important;
             min-width: 0;
             flex: 1;
         }
         .kpi-badge {
-            background: rgba(255, 255, 255, 0.26) !important;
+            background: rgba(255, 255, 255, 0.24) !important;
             backdrop-filter: blur(8px);
-            padding: 2px 7px !important;
+            padding: 2px 8px !important;
             border-radius: 6px !important;
-            font-size: 0.69rem !important;
+            font-size: 0.67rem !important;
             font-weight: 800 !important;
             color: #FFFFFF !important;
             letter-spacing: 0.02em;
