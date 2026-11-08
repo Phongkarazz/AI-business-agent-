@@ -6116,6 +6116,7 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
         unit_options.append({
             "value": raw_u,
             "clean_name": disp_u,
+            "label": display_str,
             "display": display_str,
             "rank": rank_u,
             "total_units": n_units,

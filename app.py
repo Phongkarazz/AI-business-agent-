@@ -34,7 +34,7 @@ import src.ui.components
 import src.ui.crm_dashboard
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261108_unit_scope_hypothesis_gate_v204"
+CACHE_BUILD_ID = "20261108_unit_scope_hypothesis_gate_v205"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)

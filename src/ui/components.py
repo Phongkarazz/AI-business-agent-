@@ -6072,9 +6072,9 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         if sel_persona in (persona_options[1], persona_options[2]) and units_info.get("has_units"):
             unit_opts_list = units_info.get("unit_options", [])
             all_lbl = units_info.get("all_option_label", "ALL")
-            label_to_val = {u["label"]: u["value"] for u in unit_opts_list}
+            label_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in unit_opts_list}
             label_to_val[all_lbl] = "ALL"
-            select_labels = [u["label"] for u in unit_opts_list] + [all_lbl]
+            select_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in unit_opts_list] + [all_lbl]
             default_u = units_info.get("default_unit")
             default_idx = 0
             for idx_u, u_item in enumerate(unit_opts_list):

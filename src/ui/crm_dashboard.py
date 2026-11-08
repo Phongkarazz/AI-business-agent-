@@ -941,9 +941,9 @@ def render_smart_analyst_anomaly_panel(
         if sel_p in (persona_opts[1], persona_opts[2]) and dash_units_info.get("has_units"):
             u_opts = dash_units_info.get("unit_options", [])
             all_u_lbl = dash_units_info.get("all_option_label", "ALL")
-            lbl_to_val = {u["label"]: u["value"] for u in u_opts}
+            lbl_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in u_opts}
             lbl_to_val[all_u_lbl] = "ALL"
-            sel_u_labels = [u["label"] for u in u_opts] + [all_u_lbl]
+            sel_u_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in u_opts] + [all_u_lbl]
             def_u_val = dash_units_info.get("default_unit")
             def_u_idx = 0
             for idx_u, u_it in enumerate(u_opts):
