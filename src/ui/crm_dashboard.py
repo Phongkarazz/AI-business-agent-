@@ -677,38 +677,26 @@ def render_smart_analyst_anomaly_panel(
     health_lbl = t("anomaly_health_label")
     vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
 
-    step1_lbl = "1. Detect Data Signal" if is_en else "1. Phát hiện Tín hiệu Dữ liệu"
-    step2_lbl = "2. Validate Hypothesis Tree (Prioritize H1)" if is_en else "2. Kiểm định Cây Giả Thuyết (Ưu tiên độ chính xác cao nhất)"
-    step3_lbl = "3. Role & Unit-Scoped Strategy" if is_en else "3. Khuyến nghị theo Vai trò & Vùng Phụ trách"
-
     header_html = textwrap.dedent(f"""
-<div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid {border_color}; border-radius: 14px; padding: 16px 20px; margin-top: 14px; margin-bottom: 12px; {glow}">
-<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+<div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid {border_color}; border-radius: 14px; padding: 14px 18px; margin-top: 14px; margin-bottom: 10px; {glow}">
+<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
 <div style="display: flex; align-items: center; gap: 8px;">
-<span style="font-size: 1.3rem;">🧠</span>
-<span style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; letter-spacing: 0.3px;">
+<span style="font-size: 1.25rem;">🧠</span>
+<span style="font-size: 1.02rem; font-weight: 800; color: #FFFFFF; letter-spacing: 0.2px;">
 {panel_title}
 </span>
 </div>
 <div style="display: flex; align-items: center; gap: 8px;">
-<span style="{badge_bg} font-size: 0.78rem; font-weight: 700; padding: 4px 12px; border-radius: 20px;">
+<span style="{badge_bg} font-size: 0.76rem; font-weight: 700; padding: 3px 11px; border-radius: 20px;">
 {health_lbl}: {health_status} ({health_score}/100)
 </span>
-<span style="background: rgba(0, 240, 255, 0.15); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.3); font-size: 0.78rem; font-weight: 600; padding: 4px 12px; border-radius: 20px;">
+<span style="background: rgba(0, 240, 255, 0.14); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.3); font-size: 0.76rem; font-weight: 600; padding: 3px 11px; border-radius: 20px;">
 {time_label}
 </span>
 </div>
 </div>
-<div style="font-size: 0.86rem; color: #CBD5E1; line-height: 1.55; margin-bottom: 10px;">
+<div style="font-size: 0.84rem; color: #CBD5E1; line-height: 1.45;">
 {headline}
-</div>
-<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 6px 10px; font-size: 0.74rem;">
-<span style="color: #94A3B8; font-weight: 700; text-transform: uppercase;">{'🔬 Quy trình Chuẩn:' if not is_en else '🔬 Evidence-First Flow:'}</span>
-<span style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #7DD3FC; padding: 2px 8px; border-radius: 5px; font-weight: 600;">{step1_lbl}</span>
-<span style="color: #64748B; font-weight: 800;">➔</span>
-<span style="background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-weight: 700;">{step2_lbl}</span>
-<span style="color: #64748B; font-weight: 800;">➔</span>
-<span style="background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4); color: #FDE68A; padding: 2px 8px; border-radius: 5px; font-weight: 700;">{step3_lbl}</span>
 </div>
 </div>
 """).strip()
@@ -777,120 +765,82 @@ def render_smart_analyst_anomaly_panel(
     if isinstance(data.get("trend_df"), pd.DataFrame) and not data["trend_df"].empty:
         diag_sources["📈 Chuỗi thời gian Tháng (Monthly Trend)" if not is_en else "📈 Monthly Time Series"] = (data["trend_df"], "xu hướng doanh thu theo từng tháng")
 
-    raw_diag_lbl = str(t('tab_diagnosis', count=len(anomalies))).lstrip("🔍 ").strip()
-    raw_strat_lbl = str(t('tab_strategic_plan')).lstrip("🎯 ").strip()
-    tree_tab_label = "🌿 1. Hypothesis Issue Tree" if is_en else "🌿 1. Cây Giả Thuyết & Kiểm Định"
-    persona_tab_label = "👥 2. Role & Unit Scope Plan" if is_en else "👥 2. Phân Tầng Vai Trò & Vùng Phụ Trách"
-    diag_tab_label = f"🔍 3. {raw_diag_lbl}"
-    strat_tab_label = f"🎯 4. {raw_strat_lbl}"
+    # Hạng mục 1: Tinh giản 4 Tab chồng chéo thành 3 Bước Trực quan ("Slide-to-Unlock" Flow)
+    persona_tab_label = "🎯 1. Role & Unit Action Plan" if is_en else "🎯 1. Hành Động Theo Vai Trò & Đơn Vị"
+    tree_tab_label = f"🔬 2. Root-Cause Verification ({len(anomalies)})" if is_en else f"🔬 2. Kiểm Định Nguyên Nhân ({len(anomalies)})"
+    strat_tab_label = "🗺️ 3. 30-90-365 Roadmap & OKRs" if is_en else "🗺️ 3. Lộ Trình 30-90-365 Ngày & OKRs"
 
-    tab_tree, tab_persona, tab_diag, tab_strat = st.tabs([tree_tab_label, persona_tab_label, diag_tab_label, strat_tab_label])
+    tab_persona, tab_tree, tab_strat = st.tabs([persona_tab_label, tree_tab_label, strat_tab_label])
 
-    # Khởi tạo dữ liệu cây giả thuyết cho các tab chẩn đoán động
+    # Khởi tạo dữ liệu cây giả thuyết mặc định
     active_diag_df = None
     active_diag_q = layer_id
     if diag_sources:
         first_src_k = list(diag_sources.keys())[0]
         active_diag_df, active_diag_q = diag_sources[first_src_k]
 
-    with tab_tree:
-        if len(diag_sources) > 1:
-            sel_src_lbl = st.radio(
-                "Chọn chiều dữ liệu kiểm định giả thuyết:" if not is_en else "Select diagnostic dimension for hypothesis testing:",
-                options=list(diag_sources.keys()),
-                horizontal=True,
-                key=f"diag_tree_src_{key_prefix}_{layer_id}"
-            )
-            tree_df, tree_q = diag_sources[sel_src_lbl]
-        else:
-            tree_df, tree_q = active_diag_df, active_diag_q
-
-        if tree_df is not None and not tree_df.empty:
-            tree_data = generate_hypothesis_tree(tree_df, user_query=tree_q, is_en=is_en)
-            branches = tree_data.get("branches", [])
-            prob_stmt = _md_inline_to_html(tree_data.get("problem_statement", ""))
-            if branches:
-                st.markdown(f"""
-                <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 10px; padding: 12px 16px; margin-bottom: 12px;">
-                    <div style="font-size: 0.72rem; font-weight: 700; color: #00F0FF; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">
-                        {'🎯 ROOT PROBLEM STATEMENT (BÀI TOÁN TRỌNG TÂM CẦN KIỂM ĐỊNH)' if not is_en else '🎯 ROOT PROBLEM STATEMENT'}
-                    </div>
-                    <div style="font-size: 0.92rem; font-weight: 700; color: #F8FAFC; line-height: 1.48;">
-                        {prob_stmt}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                for b in branches:
-                    status = b.get("status", "PARTIAL")
-                    if status == "CONFIRMED":
-                        border_c, bg_c, badge_bg_c, badge_c = "#10B981", "rgba(16, 185, 129, 0.08)", "rgba(16, 185, 129, 0.2)", "#34D399"
-                    elif status == "PARTIAL":
-                        border_c, bg_c, badge_bg_c, badge_c = "#F59E0B", "rgba(245, 158, 11, 0.07)", "rgba(245, 158, 11, 0.2)", "#FBBF24"
-                    else:
-                        border_c, bg_c, badge_bg_c, badge_c = "#64748B", "rgba(100, 116, 139, 0.06)", "rgba(100, 116, 139, 0.2)", "#94A3B8"
-
-                    conf_pct = b.get("confidence", 50)
-                    imp_pct = b.get("impact", 50)
-                    prio_score = b.get("priority_score", 50)
-                    conf_lbl = "Độ chính xác" if not is_en else "Confidence"
-                    imp_lbl = "Mức tác động" if not is_en else "Impact"
-                    prio_lbl = "Điểm ưu tiên" if not is_en else "Priority Score"
-                    b_title_clean = _md_inline_to_html(b.get("title", ""))
-                    b_evid_clean = _md_inline_to_html(b.get("evidence", ""))
-
-                    branch_html = f"""
-                    <div style="font-family: {vn_font_stack}; margin-left: 12px; border-left: 3px solid {border_c}; padding-left: 12px; margin-bottom: 10px;">
-                        <div style="background: {bg_c}; border: 1px solid {border_c}55; border-radius: 9px; padding: 10px 14px;">
-                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
-                                <span style="font-size: 0.88rem; font-weight: 700; color: #F8FAFC;">├─ {b_title_clean}</span>
-                                <span style="font-size: 0.7rem; font-weight: 700; color: {badge_c}; background: {badge_bg_c}; border: 1px solid {border_c}88; padding: 2px 8px; border-radius: 6px;">{b.get('status_label')}</span>
-                            </div>
-                            <div style="font-size: 0.83rem; color: #CBD5E1; margin-bottom: 8px; line-height: 1.52;">
-                                🔬 <strong style="color: #F8FAFC; font-weight: 700;">{'Bằng chứng kiểm định:' if not is_en else 'Data Evidence:'}</strong> {b_evid_clean}
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 0.75rem; color: #94A3B8;">
-                                <div style="flex: 1; min-width: 140px;">
-                                    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-                                        <span>🎯 {conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
-                                        <span>⚡ {imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
-                                    </div>
-                                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
-                                        <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
-                                    </div>
-                                </div>
-                                <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 6px; font-weight: 700;">
-                                    🏆 {prio_lbl}: {prio_score}/100
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    """
-                    st.markdown(re.sub(r'\n\s*', ' ', branch_html).strip(), unsafe_allow_html=True)
-
-                concl = _md_inline_to_html(tree_data.get("conclusion", ""))
-                if concl:
-                    st.markdown(f"""
-                    <div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.12); border-left: 4px solid #10B981; border-radius: 6px; padding: 10px 14px; margin-top: 6px; font-size: 0.85rem; color: #ECFDF5; line-height: 1.52;">
-                        💡 <strong style="font-weight: 700;">{concl}</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
-        else:
-            st.info("No dataset available for hypothesis testing in this period." if is_en else "Chưa có dữ liệu chi tiết để kiểm định cây giả thuyết trong kỳ này.")
-
     with tab_persona:
+        persona_opts = [
+            "🎯 Quản lý Vùng / Team / KAM (Thực thi Cục bộ)" if not is_en else "🎯 Regional / Team / KAM Lead (Local Execution)",
+            "🏛️ Ban Điều Hành CEO / CFO (Chiến lược Vĩ mô)" if not is_en else "🏛️ C-Level CEO / CFO (Macro Strategy)",
+            "⚖️ Đối chiếu song song 2 góc nhìn (CEO & Quản lý)" if not is_en else "⚖️ Side-by-Side Dual View (CEO & Lead)"
+        ]
+
+        # Hạng mục 2: Gom bộ lọc Chiều dữ liệu, Vai trò và Đơn vị phụ trách lên 1 Hàng Ngang Duy Nhất (1-Line Control Bar)
         if len(diag_sources) > 1:
-            sel_p_src_lbl = st.radio(
-                "1️⃣ Chọn chiều dữ liệu phân tầng hành động & định chuẩn:" if not is_en else "1️⃣ Select data dimension for role-targeted action plan:",
-                options=list(diag_sources.keys()),
-                horizontal=True,
-                key=f"diag_persona_src_{key_prefix}_{layer_id}"
-            )
+            ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([1.15, 1.35, 1.25])
+            with ctrl_c1:
+                sel_p_src_lbl = st.selectbox(
+                    "📂 Chiều dữ liệu phân tích:" if not is_en else "📂 Diagnostic Dimension:",
+                    options=list(diag_sources.keys()),
+                    key=f"diag_persona_src_{key_prefix}_{layer_id}"
+                )
             persona_df, persona_q = diag_sources[sel_p_src_lbl]
         else:
+            ctrl_c2, ctrl_c3 = st.columns([1.35, 1.25])
             persona_df, persona_q = active_diag_df, active_diag_q
 
-        # Hiển thị Cổng Kiểm Chứng Giả Thuyết (Hypothesis Verification Gate) trên tab Phân tầng Vai trò
+        dash_units_info = extract_selectable_units(persona_df, user_query=persona_q, is_en=is_en) if (persona_df is not None and not persona_df.empty) else {"has_units": False}
+        has_selectable_units = bool(dash_units_info.get("has_units"))
+
+        with ctrl_c2:
+            sel_p = st.selectbox(
+                "👤 Vai trò nhận khuyến nghị:" if not is_en else "👤 Target Persona:",
+                options=persona_opts,
+                index=0 if has_selectable_units else 1,
+                key=f"dash_persona_radio_{key_prefix}_{layer_id}"
+            )
+
+        dash_selected_unit = None
+        with ctrl_c3:
+            if sel_p in (persona_opts[0], persona_opts[2]) and has_selectable_units:
+                u_opts = dash_units_info.get("unit_options", [])
+                all_u_lbl = dash_units_info.get("all_option_label", "ALL")
+                lbl_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in u_opts}
+                lbl_to_val[all_u_lbl] = "ALL"
+                sel_u_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in u_opts] + [all_u_lbl]
+                def_u_val = dash_units_info.get("default_unit")
+                def_u_idx = 0
+                for idx_u, u_it in enumerate(u_opts):
+                    if u_it["value"] == def_u_val:
+                        def_u_idx = idx_u
+                        break
+                chosen_u_lbl = st.selectbox(
+                    "📍 Đơn vị / Vùng phụ trách:" if not is_en else "📍 Assigned Unit / Region:",
+                    options=sel_u_labels,
+                    index=def_u_idx,
+                    key=f"dash_unit_scope_{key_prefix}_{layer_id}_{abs(hash(str(persona_q))) % 10000}"
+                )
+                dash_selected_unit = lbl_to_val.get(chosen_u_lbl, "ALL")
+            else:
+                st.selectbox(
+                    "📍 Phạm vi điều hành:" if not is_en else "📍 Governance Scope:",
+                    options=["🌐 Toàn hệ thống (Macro P&L)" if not is_en else "🌐 Enterprise-Wide (Macro P&L)"],
+                    disabled=True,
+                    key=f"dash_unit_macro_{key_prefix}_{layer_id}"
+                )
+
+        # Dải Status Pill 1 dòng siêu gọn cho Cổng Kiểm Chứng Giả Thuyết (thay cho hộp văn bản 4 dòng cũ)
         if persona_df is not None and not persona_df.empty:
             p_tree = generate_hypothesis_tree(persona_df, user_query=persona_q, is_en=is_en)
             p_branches = p_tree.get("branches", [])
@@ -901,83 +851,37 @@ def render_smart_analyst_anomaly_panel(
                 top_b = conf_list[0] if conf_list else p_branches[0]
                 sec_b = part_list[0] if part_list else (conf_list[1] if len(conf_list) > 1 else None)
                 rej_b = rej_list[0] if rej_list else None
-                top_t_clean = _md_inline_to_html(top_b.get("title", "H1"))
+                top_t_clean = _md_inline_to_html(re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(top_b.get("title", "H1")), flags=re.IGNORECASE))
                 top_c_pct = int(top_b.get("confidence", 88))
-                top_p_sc = int(top_b.get("priority_score", 85))
                 sec_badge_html = ""
                 if sec_b:
-                    sec_t_clean = _md_inline_to_html(sec_b.get("title", "H2"))
+                    sec_id = sec_b.get("id", "H2")
                     sec_c_pct = int(sec_b.get("confidence", 74))
-                    sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4); color: #FBBF24; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600;'>⚡ Đồng tác động: {sec_t_clean} ({sec_c_pct}%)</span>"
+                    sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.38); color: #FBBF24; padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;'>⚡ {sec_id} ({sec_c_pct}%)</span>"
                 rej_badge_html = ""
                 if rej_b:
-                    rej_t_clean = _md_inline_to_html(rej_b.get("title", "H3"))
-                    rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.4); color: #94A3B8; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 500;'>❌ Đã loại trừ: {rej_t_clean}</span>"
-                gate_hdr = "🔒 HYPOTHESIS VERIFICATION GATE (EVIDENCE-FIRST: VERIFIED HYPOTHESIS ➔ ROLE & UNIT STRATEGY)" if is_en else "🔒 CỔNG KIỂM CHỨNG GIẢ THUYẾT (ĐÃ KIỂM ĐỊNH DỮ LIỆU TRƯỚC KHI ĐƯA RA KHUYẾN NGHỊ)"
-                gate_body = (
-                    f"Action plans below are anchored directly to the highest-accuracy validated hypothesis: <strong style='color:#34D399;'>{top_t_clean}</strong> (Confidence: <b>{top_c_pct}%</b> • Priority Score: <b>{top_p_sc}/100</b>)."
-                    if is_en else
-                    f"Mọi kế hoạch hành động bên dưới được dẫn xuất trực tiếp từ giả thuyết có độ chính xác kiểm định cao nhất: <strong style='color:#34D399;'>{top_t_clean}</strong> (Độ chính xác: <b>{top_c_pct}%</b> • Điểm ưu tiên: <b>{top_p_sc}/100</b>)."
-                )
-                gate_html = f"""
-                <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(6, 78, 59, 0.28) 0%, rgba(15, 23, 42, 0.92) 100%); border: 1px solid rgba(16, 185, 129, 0.45); border-left: 4px solid #10B981; border-radius: 10px; padding: 10px 14px; margin-bottom: 10px;">
-                    <div style="font-size: 0.71rem; font-weight: 800; color: #34D399; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px;">
-                        {gate_hdr}
-                    </div>
-                    <div style="font-size: 0.81rem; color: #E2E8F0; line-height: 1.48; margin-bottom: 6px;">
-                        {gate_body}
-                    </div>
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                        <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.5); color: #6EE7B7; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 700;">✅ Ưu tiên #1: {top_t_clean} ({top_c_pct}%)</span>
+                    rej_id = rej_b.get("id", "H3")
+                    rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.35); color: #94A3B8; padding: 2px 8px; border-radius: 5px; font-size: 0.71rem; font-weight: 500;'>❌ {'Loại trừ' if not is_en else 'Ruled out'} {rej_id}</span>"
+                gate_pill_html = f"""
+                <div style="font-family: {vn_font_stack}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: rgba(6, 78, 59, 0.22); border: 1px solid rgba(16, 185, 129, 0.38); border-left: 3px solid #10B981; border-radius: 8px; padding: 6px 12px; margin-top: 2px; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span style="font-size: 0.72rem; font-weight: 800; color: #34D399; text-transform: uppercase;">
+                            🔒 {'Căn cứ kiểm định:' if not is_en else 'Verified Root Cause:'}
+                        </span>
+                        <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">
+                            ✅ {top_b.get('id', 'H1')}: {top_t_clean} ({top_c_pct}%)
+                        </span>
                         {sec_badge_html}
                         {rej_badge_html}
                     </div>
+                    <span style="font-size: 0.7rem; color: #94A3B8;">
+                        {'Xem bằng chứng số liệu tại Tab 🔬 2' if not is_en else 'See full proof in Tab 🔬 2'}
+                    </span>
                 </div>
                 """
-                st.markdown(re.sub(r'\n\s*', ' ', gate_html).strip(), unsafe_allow_html=True)
+                st.markdown(re.sub(r'\n\s*', ' ', gate_pill_html).strip(), unsafe_allow_html=True)
 
-        persona_opts = [
-            "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Vĩ mô & Phân bổ Vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Macro Strategy & Capital Allocation",
-            "🎯 Quản lý Trực tiếp (KAM / Team Lead / Quản lý Vùng) — Thực thi Cục bộ" if not is_en else "🎯 Operational Lead (KAM / Team Lead / Regional Manager) — Local Execution",
-            "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
-        ]
-        sel_p = st.radio(
-            "2️⃣ Chọn đối tượng nhận kế hoạch hành động & Benchmark:" if not is_en else "2️⃣ Select target persona for action plan & benchmarks:",
-            options=persona_opts,
-            index=2,
-            horizontal=True,
-            key=f"dash_persona_radio_{key_prefix}_{layer_id}"
-        )
-
-        # Bộ lọc Cá nhân hóa theo Đơn vị / Vùng / Team / Ngành hàng phụ trách (Unit/Region Narrow-Down Selector)
-        dash_units_info = extract_selectable_units(persona_df, user_query=persona_q, is_en=is_en) if (persona_df is not None and not persona_df.empty) else {"has_units": False}
-        dash_selected_unit = None
-        if sel_p in (persona_opts[1], persona_opts[2]) and dash_units_info.get("has_units"):
-            u_opts = dash_units_info.get("unit_options", [])
-            all_u_lbl = dash_units_info.get("all_option_label", "ALL")
-            lbl_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in u_opts}
-            lbl_to_val[all_u_lbl] = "ALL"
-            sel_u_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in u_opts] + [all_u_lbl]
-            def_u_val = dash_units_info.get("default_unit")
-            def_u_idx = 0
-            for idx_u, u_it in enumerate(u_opts):
-                if u_it["value"] == def_u_val:
-                    def_u_idx = idx_u
-                    break
-            st.markdown(
-                f"""<div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 12px; margin-top: 2px; margin-bottom: 6px; font-size: 0.78rem; color: #A7F3D0; font-weight: 600;">
-                🎛️ {'3️⃣ Cá nhân hóa theo Đơn vị / Vùng phụ trách: Chọn đúng Vùng, Team, Ngành hàng hoặc Phòng ban của bạn để nhận Hồ sơ Định chuẩn & 3 Hành động thực thi riêng biệt.' if not is_en else '3️⃣ Unit-Level Scope Personalization: Select your assigned Region, Team, Category, or Department to receive dedicated benchmarks & 3 tailored execution actions.'}
-                </div>""",
-                unsafe_allow_html=True,
-            )
-            chosen_u_lbl = st.selectbox(
-                dash_units_info.get("selector_label", "Chọn đơn vị phụ trách:"),
-                options=sel_u_labels,
-                index=def_u_idx,
-                key=f"dash_unit_scope_{key_prefix}_{layer_id}_{abs(hash(str(persona_q))) % 10000}"
-            )
-            dash_selected_unit = lbl_to_val.get(chosen_u_lbl, "ALL")
-
+        # Hạng mục 3: Render Thẻ Hành Động theo chuẩn "Micro-Action Card" (Tách Số liệu khỏi Câu văn + Progressive Disclosure)
         def _render_dash_persona_card(p_code: str, border_col: str, badge_col: str):
             if persona_df is None or persona_df.empty:
                 return
@@ -985,16 +889,11 @@ def render_smart_analyst_anomaly_panel(
             p_data = generate_persona_action_plan(persona_df, persona=p_code, user_query=persona_q, is_en=is_en, target_unit=u_target)
             role_title_clean = _md_inline_to_html(p_data.get("role_title", ""))
             role_focus_clean = _md_inline_to_html(p_data.get("role_focus", ""))
-            kpis_html = "".join(
-                f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F8FAFC; font-size: 0.76rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.4;'>📌 {_md_inline_to_html(k)}</span>"
-                for k in p_data.get("kpis", [])
-            )
-            acts_html = "".join(
-                f"<div style='font-family: {vn_font_stack}; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 9px; line-height: 1.62; font-weight: 400;'>• {_md_inline_to_html(act)}</div>"
-                for act in p_data.get("actions", [])
-            )
             unit_diag = p_data.get("unit_diagnostic")
+
+            # Nếu đã có Unit Benchmark Scorecard 4 cột thì KHÔNG lặp lại 3 chip KPI trùng số liệu ở dưới
             unit_strip_html = ""
+            kpis_row_html = ""
             if unit_diag:
                 u_stat_col = unit_diag.get("status_color", "#10B981")
                 pct_top_bar = max(8.0, min(100.0, float(unit_diag.get("pct_of_top", 50.0))))
@@ -1002,21 +901,21 @@ def render_smart_analyst_anomaly_panel(
                 vs_m_col = "#34D399" if vs_m >= 0 else "#FBBF24"
                 sec_m_list = unit_diag.get("secondary_metrics", [])
                 sec_m_html = "".join(
-                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.72rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
+                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.71rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
                     for sm in sec_m_list
                 )
-                sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;'>{sec_m_html}</div>" if sec_m_html else ""
+                sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;'>{sec_m_html}</div>" if sec_m_html else ""
                 unit_strip_html = f"""
                 <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
                         <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
-                            🎯 {'HỒ SƠ ĐỊNH CHUẨN ĐƠN VỊ:' if not is_en else 'UNIT BENCHMARK SCORECARD:'} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
+                            🎯 {'ĐỊNH CHUẨN ĐƠN VỊ:' if not is_en else 'UNIT SCORECARD:'} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
                         </span>
-                        <span style="font-size: 0.72rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
+                        <span style="font-size: 0.71rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
                             {unit_diag.get('status_badge')}
                         </span>
                     </div>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 8px; margin-bottom: 8px;">
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
                             <div style="font-size: 0.68rem; color: #94A3B8;">{'Thực tế Đơn vị' if not is_en else 'Unit Actual'}</div>
                             <div style="font-size: 0.85rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.69rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
@@ -1034,29 +933,81 @@ def render_smart_analyst_anomaly_panel(
                             <div style="font-size: 0.85rem; font-weight: 800; color: #34D399;">{unit_diag.get('next_target_fmt')}</div>
                         </div>
                     </div>
-                    <div style="font-size: 0.71rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
-                        <span>{'Tiến độ tiệm cận Đơn vị Dẫn đầu (#1' if not is_en else 'Progress toward #1 Leader ('} {unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
+                    <div style="font-size: 0.7rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
+                        <span>{'Tỷ lệ tiệm cận Top #1 (' if not is_en else 'Ratio vs. #1 ('}{unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
                         <b style="color: #F8FAFC;">{unit_diag.get('pct_of_top'):.1f}%</b>
                     </div>
-                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                    <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
                         <div style="width: {pct_top_bar}%; height: 100%; background: linear-gradient(90deg, {u_stat_col}, #00F0FF); border-radius: 3px;"></div>
                     </div>
                     {sec_row_html}
                 </div>
                 """
+            else:
+                kpis_chips = "".join(
+                    f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.35;'>📌 {_md_inline_to_html(k)}</span>"
+                    for k in p_data.get("kpis", [])
+                )
+                kpis_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;'>{kpis_chips}</div>"
+
+            micro_list = p_data.get("micro_actions", [])
+            if micro_list:
+                cards_list_html = []
+                for ma in micro_list:
+                    p_col = ma.get("priority_color", "#38BDF8")
+                    p_lbl = ma.get("priority_label", "")
+                    p_icon = ma.get("priority_icon", "🔹")
+                    hl_html = _md_inline_to_html(ma.get("headline", ""))
+                    brief_html = _md_inline_to_html(ma.get("brief_action", ""))
+                    det_html = _md_inline_to_html(ma.get("detail_note", ""))
+                    t_pill = _md_inline_to_html(ma.get("target_pill", ""))
+                    l_pill = _md_inline_to_html(ma.get("lever_pill", ""))
+                    e_pill = _md_inline_to_html(ma.get("evidence_pill", ""))
+                    det_label = "▸ Xem số liệu đối chiếu & hướng dẫn chi tiết" if not is_en else "▸ View full comparative metrics & execution details"
+                    cards_list_html.append(f"""
+                    <div style="background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(255,255,255,0.08); border-left: 3.5px solid {p_col}; border-radius: 9px; padding: 10px 14px; margin-bottom: 8px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
+                            <div style="font-size: 0.87rem; font-weight: 700; color: #F8FAFC; line-height: 1.4;">
+                                {p_icon} {hl_html}
+                            </div>
+                            <span style="font-size: 0.67rem; font-weight: 800; color: {p_col}; background: {p_col}1A; border: 1px solid {p_col}55; padding: 1px 7px; border-radius: 5px; letter-spacing: 0.03em;">
+                                {p_lbl}
+                            </span>
+                        </div>
+                        <div style="font-size: 0.81rem; color: #CBD5E1; line-height: 1.48; margin-bottom: 7px;">
+                            {brief_html}
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <span style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #6EE7B7; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 5px;">{t_pill}</span>
+                            <span style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.32); color: #7DD3FC; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{l_pill}</span>
+                            <span style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.28); color: #CBD5E1; font-size: 0.71rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{e_pill}</span>
+                        </div>
+                        <details style="margin-top: 6px; font-size: 0.75rem; color: #94A3B8;">
+                            <summary style="cursor: pointer; color: #38BDF8; font-weight: 600; outline: none; user-select: none;">{det_label}</summary>
+                            <div style="margin-top: 5px; padding: 7px 10px; background: rgba(15, 23, 42, 0.85); border-left: 2px solid #38BDF8; border-radius: 5px; color: #E2E8F0; line-height: 1.52; font-size: 0.79rem;">
+                                {det_html}
+                            </div>
+                        </details>
+                    </div>
+                    """)
+                acts_html = "".join(cards_list_html)
+            else:
+                acts_html = "".join(
+                    f"<div style='font-family: {vn_font_stack}; font-size: 0.84rem; color: #E2E8F0; margin-bottom: 8px; line-height: 1.55;'>• {_md_inline_to_html(act)}</div>"
+                    for act in p_data.get("actions", [])
+                )
+
             box_html = f"""
-            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 16px 18px; margin-top: 6px; margin-bottom: 10px;">
-                <div style="font-family: {vn_font_stack}; font-size: 0.92rem; font-weight: 700; color: {badge_col}; margin-bottom: 6px; line-height: 1.45; letter-spacing: 0.01em;">
+            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 14px 16px; margin-top: 4px; margin-bottom: 10px;">
+                <div style="font-family: {vn_font_stack}; font-size: 0.9rem; font-weight: 800; color: {badge_col}; margin-bottom: 3px; line-height: 1.4;">
                     {role_title_clean}
                 </div>
-                <div style="font-family: {vn_font_stack}; font-size: 0.81rem; color: #94A3B8; margin-bottom: 12px; font-style: normal; font-weight: 500; line-height: 1.5;">
+                <div style="font-family: {vn_font_stack}; font-size: 0.78rem; color: #94A3B8; margin-bottom: 10px; font-weight: 500; line-height: 1.45;">
                     {role_focus_clean}
                 </div>
                 {unit_strip_html}
-                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;">
-                    {kpis_html}
-                </div>
-                <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                {kpis_row_html}
+                <div>
                     {acts_html}
                 </div>
             </div>
@@ -1065,9 +1016,9 @@ def render_smart_analyst_anomaly_panel(
 
         if persona_df is not None and not persona_df.empty:
             if sel_p == persona_opts[0]:
-                _render_dash_persona_card("ceo", "#00F0FF", "#38BDF8")
-            elif sel_p == persona_opts[1]:
                 _render_dash_persona_card("lead", "#10B981", "#34D399")
+            elif sel_p == persona_opts[1]:
+                _render_dash_persona_card("ceo", "#00F0FF", "#38BDF8")
             else:
                 cp1, cp2 = st.columns(2)
                 with cp1:
@@ -1077,87 +1028,159 @@ def render_smart_analyst_anomaly_panel(
         else:
             st.info("No dataset available for persona action plan." if is_en else "Chưa có dữ liệu để phân tầng kế hoạch hành động.")
 
-    with tab_diag:
-        if not anomalies:
-            st.info(f"✨ All operational indicators remain stable and balanced during {time_label}." if is_en else f"✨ Không phát hiện điểm bất thường nghiêm trọng nào trong {time_label}. Toàn bộ các chỉ số vận hành duy trì trạng thái ổn định và cân bằng.")
-        else:
+    # Hạng mục 4 (Phần A): Tab 2 — Kiểm Định Nguyên Nhân (3-Column Issue Tree + Compact Anomaly Grid)
+    with tab_tree:
+        tree_df, tree_q = (diag_sources[sel_p_src_lbl] if (len(diag_sources) > 1 and 'sel_p_src_lbl' in locals()) else (active_diag_df, active_diag_q))
+
+        if tree_df is not None and not tree_df.empty:
+            tree_data = generate_hypothesis_tree(tree_df, user_query=tree_q, is_en=is_en)
+            branches = tree_data.get("branches", [])
+            prob_stmt = _md_inline_to_html(tree_data.get("problem_statement", ""))
+            if branches:
+                st.markdown(f"""
+                <div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 9px; padding: 10px 14px; margin-bottom: 10px;">
+                    <span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; margin-right: 6px;">
+                        {'🎯 BÀI TOÁN KIỂM ĐỊNH:' if not is_en else '🎯 ROOT PROBLEM:'}
+                    </span>
+                    <span style="font-size: 0.86rem; font-weight: 700; color: #F8FAFC;">
+                        {prob_stmt}
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                b_cards_html = []
+                for b in branches:
+                    status = b.get("status", "PARTIAL")
+                    if status == "CONFIRMED":
+                        border_c, bg_c, badge_bg_c, badge_c = "#10B981", "rgba(16, 185, 129, 0.08)", "rgba(16, 185, 129, 0.2)", "#34D399"
+                    elif status == "PARTIAL":
+                        border_c, bg_c, badge_bg_c, badge_c = "#F59E0B", "rgba(245, 158, 11, 0.07)", "rgba(245, 158, 11, 0.2)", "#FBBF24"
+                    else:
+                        border_c, bg_c, badge_bg_c, badge_c = "#64748B", "rgba(100, 116, 139, 0.06)", "rgba(100, 116, 139, 0.2)", "#94A3B8"
+
+                    conf_pct = b.get("confidence", 50)
+                    imp_pct = b.get("impact", 50)
+                    prio_score = b.get("priority_score", 50)
+                    conf_lbl = "Độ chính xác" if not is_en else "Confidence"
+                    imp_lbl = "Tác động" if not is_en else "Impact"
+                    prio_lbl = "Ưu tiên" if not is_en else "Priority"
+                    b_title_clean = _md_inline_to_html(b.get("title", ""))
+                    b_evid_clean = _md_inline_to_html(b.get("evidence", ""))
+                    ev_summary_lbl = "▸ Xem bằng chứng số liệu kiểm định" if not is_en else "▸ View quantitative test evidence"
+
+                    b_cards_html.append(f"""
+                    <div style="background: {bg_c}; border: 1px solid {border_c}55; border-top: 3px solid {border_c}; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
+                                <span style="font-size: 0.69rem; font-weight: 800; color: {badge_c}; background: {badge_bg_c}; border: 1px solid {border_c}88; padding: 2px 7px; border-radius: 5px;">{b.get('status_label')}</span>
+                                <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.28); padding: 1px 7px; border-radius: 5px; font-size: 0.69rem; font-weight: 700;">🏆 {prio_lbl}: {prio_score}/100</span>
+                            </div>
+                            <div style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC; line-height: 1.42; margin-bottom: 8px;">
+                                {b_title_clean}
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display: flex; justify-content: space-between; font-size: 0.73rem; color: #94A3B8; margin-bottom: 3px;">
+                                <span>🎯 {conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
+                                <span>⚡ {imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
+                            </div>
+                            <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
+                                <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
+                            </div>
+                            <details style="font-size: 0.74rem; color: #94A3B8;">
+                                <summary style="cursor: pointer; color: #7DD3FC; font-weight: 600; outline: none; user-select: none;">{ev_summary_lbl}</summary>
+                                <div style="margin-top: 5px; padding: 6px 8px; background: rgba(15, 23, 42, 0.8); border-radius: 5px; color: #CBD5E1; line-height: 1.48; font-size: 0.76rem;">
+                                    {b_evid_clean}
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                    """)
+
+                grid_tree_html = f"""
+                <div style="font-family: {vn_font_stack}; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                    {''.join(b_cards_html)}
+                </div>
+                """
+                st.markdown(re.sub(r'\n\s*', ' ', grid_tree_html).strip(), unsafe_allow_html=True)
+
+                concl = _md_inline_to_html(tree_data.get("conclusion", ""))
+                if concl:
+                    st.markdown(f"""
+                    <div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10B981; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.81rem; color: #ECFDF5; line-height: 1.45;">
+                        💡 <strong style="font-weight: 700;">{concl}</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # Hiển thị các Điểm Bất Thường Hệ Thống dạng Grid 2 cột tinh gọn ngay bên dưới Cây Giả Thuyết
+        if anomalies:
+            anom_cards_html = []
             for idx, a in enumerate(anomalies, 1):
                 sev_color = "#EF4444" if "CRITICAL" in a["severity"] else "#F59E0B"
-                act_label = "Actual Metrics:" if is_en else "Số liệu thực tế:"
-                rc_label = "Root Cause Diagnosis:" if is_en else "Chẩn đoán nguyên nhân gốc rễ (Root Cause):"
-                imp_label = "Quantified Risk & Impact:" if is_en else "Lượng hóa rủi ro & tác động (Quantified Impact):"
+                rc_lbl = "Nguyên nhân gốc:" if not is_en else "Root Cause:"
+                imp_lbl = "Tác động:" if not is_en else "Impact:"
+                more_lbl = "▸ Xem nguyên nhân gốc & tác động lượng hóa" if not is_en else "▸ View root cause & quantified impact"
+                anom_cards_html.append(f"""
+                <div style="background: rgba(15, 23, 42, 0.78); border: 1px solid rgba(255,255,255,0.07); border-left: 3.5px solid {sev_color}; border-radius: 9px; padding: 10px 13px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px;">
+                        <span style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC;">#{idx}. {_md_inline_to_html(a['title'])}</span>
+                        <span style="font-size: 0.68rem; font-weight: 700; color: {sev_color}; background: rgba(0,0,0,0.35); padding: 2px 8px; border-radius: 10px; border: 1px solid {sev_color}44;">{a['severity']}</span>
+                    </div>
+                    <div style="font-size: 0.79rem; color: #E2E8F0; line-height: 1.45; margin-bottom: 5px;">
+                        📊 {_md_inline_to_html(a['metrics_summary'])}
+                    </div>
+                    <details style="font-size: 0.74rem; color: #94A3B8;">
+                        <summary style="cursor: pointer; color: #FDE047; font-weight: 600; outline: none; user-select: none;">{more_lbl}</summary>
+                        <div style="margin-top: 5px; padding: 6px 9px; background: rgba(15, 23, 42, 0.9); border-radius: 5px; line-height: 1.45;">
+                            <div style="color: #CBD5E1; margin-bottom: 4px;">🔬 <b style="color: #FDE047;">{rc_lbl}</b> {_md_inline_to_html(a['root_cause'])}</div>
+                            <div style="color: #FCA5A5;">💥 <b style="color: #F87171;">{imp_lbl}</b> {_md_inline_to_html(a['quantified_impact'])}</div>
+                        </div>
+                    </details>
+                </div>
+                """)
+            anom_grid_html = f"""
+            <div style="font-family: {vn_font_stack}; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 4px; margin-bottom: 8px;">
+                {''.join(anom_cards_html)}
+            </div>
+            """
+            st.markdown(re.sub(r'\n\s*', ' ', anom_grid_html).strip(), unsafe_allow_html=True)
 
-                card_html = textwrap.dedent(f"""
-<div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.75); border-left: 4px solid {sev_color}; border-top: 1px solid rgba(255,255,255,0.05); border-right: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;">
-<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-<span style="font-size: 0.95rem; font-weight: 700; color: #F8FAFC;">
-#{idx}. {_md_inline_to_html(a['title'])}
-</span>
-<span style="font-size: 0.74rem; font-weight: 700; color: {sev_color}; background: rgba(0,0,0,0.35); padding: 3px 10px; border-radius: 12px; border: 1px solid {sev_color}40;">
-{a['severity']}
-</span>
-</div>
-<div style="font-size: 0.86rem; color: #E2E8F0; margin-bottom: 8px; line-height: 1.55;">
-📊 <b style="color: #67E8F9;">{act_label}</b> {_md_inline_to_html(a['metrics_summary'])}
-</div>
-<div style="font-size: 0.84rem; color: #CBD5E1; margin-bottom: 6px; line-height: 1.5;">
-🔬 <b style="color: #FDE047;">{rc_label}</b> {_md_inline_to_html(a['root_cause'])}
-</div>
-<div style="font-size: 0.84rem; color: #FCA5A5; line-height: 1.5;">
-💥 <b style="color: #F87171;">{imp_label}</b> {_md_inline_to_html(a['quantified_impact'])}
-</div>
-</div>
-""").strip()
-                st.markdown(card_html, unsafe_allow_html=True)
-                
+    # Hạng mục 4 (Phần B): Tab 3 — Lộ Trình 30-90-365 Ngày & OKRs (Ma trận 3 Cột Ngang + Thanh OKRs)
     with tab_strat:
-        imm_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.55;'>🔹 {act}</div>" for act in immediate_actions)
-        str_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.55;'>🔹 {act}</div>" for act in structural_optimizations)
-        sus_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.55;'>🔹 {act}</div>" for act in sustainable_strategies)
-        okr_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.55;'>🎯 {okr}</div>" for okr in okrs)
-        
-        strat_html = textwrap.dedent(f"""
-<div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 12px; padding: 16px 18px; margin-bottom: 12px;">
+        imm_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.48; font-size: 0.8rem;'>⚡ {_md_inline_to_html(act)}</div>" for act in immediate_actions)
+        str_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.48; font-size: 0.8rem;'>🚀 {_md_inline_to_html(act)}</div>" for act in structural_optimizations)
+        sus_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.48; font-size: 0.8rem;'>🏛️ {_md_inline_to_html(act)}</div>" for act in sustainable_strategies)
+        okr_items = "".join(f"<span style='background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); color: #FEF08A; font-size: 0.78rem; font-weight: 600; padding: 4px 10px; border-radius: 6px;'>🎯 {_md_inline_to_html(okr)}</span>" for okr in okrs)
 
-<div style="background: rgba(0, 240, 255, 0.08); border-left: 3px solid #00F0FF; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px;">
-<div style="font-size: 0.88rem; font-weight: 800; color: #00F0FF; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
-{t('plan_tier1_title')}
-</div>
-<div style="font-size: 0.85rem; color: #E2E8F0;">
-{imm_items}
-</div>
-</div>
-
-<div style="background: rgba(232, 121, 249, 0.08); border-left: 3px solid #E879F9; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px;">
-<div style="font-size: 0.88rem; font-weight: 800; color: #E879F9; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
-{t('plan_tier2_title')}
-</div>
-<div style="font-size: 0.85rem; color: #E2E8F0;">
-{str_items}
-</div>
-</div>
-
-<div style="background: rgba(52, 211, 153, 0.08); border-left: 3px solid #34D399; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px;">
-<div style="font-size: 0.88rem; font-weight: 800; color: #34D399; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
-{t('plan_tier3_title')}
-</div>
-<div style="font-size: 0.85rem; color: #E2E8F0;">
-{sus_items}
-</div>
-</div>
-
-<div style="background: rgba(251, 191, 36, 0.08); border-left: 3px solid #FBBF24; border-radius: 6px; padding: 10px 14px;">
-<div style="font-size: 0.88rem; font-weight: 800; color: #FBBF24; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
-{t('plan_okr_title')}
-</div>
-<div style="font-size: 0.85rem; color: #FEF08A;">
-{okr_items}
-</div>
-</div>
-
-</div>
-""").strip()
-        st.markdown(strat_html, unsafe_allow_html=True)
+        strat_html = f"""
+        <div style="font-family: {vn_font_stack}; margin-bottom: 10px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                <div style="background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.25); border-top: 3px solid #00F0FF; border-radius: 9px; padding: 11px 13px;">
+                    <div style="font-size: 0.78rem; font-weight: 800; color: #00F0FF; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.4px;">
+                        {t('plan_tier1_title')}
+                    </div>
+                    <div style="color: #E2E8F0;">{imm_items}</div>
+                </div>
+                <div style="background: rgba(232, 121, 249, 0.06); border: 1px solid rgba(232, 121, 249, 0.25); border-top: 3px solid #E879F9; border-radius: 9px; padding: 11px 13px;">
+                    <div style="font-size: 0.78rem; font-weight: 800; color: #E879F9; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.4px;">
+                        {t('plan_tier2_title')}
+                    </div>
+                    <div style="color: #E2E8F0;">{str_items}</div>
+                </div>
+                <div style="background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.25); border-top: 3px solid #34D399; border-radius: 9px; padding: 11px 13px;">
+                    <div style="font-size: 0.78rem; font-weight: 800; color: #34D399; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.4px;">
+                        {t('plan_tier3_title')}
+                    </div>
+                    <div style="color: #E2E8F0;">{sus_items}</div>
+                </div>
+            </div>
+            <div style="background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.3); border-left: 3.5px solid #FBBF24; border-radius: 8px; padding: 9px 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 0.76rem; font-weight: 800; color: #FBBF24; text-transform: uppercase;">{t('plan_okr_title')}:</span>
+                {okr_items}
+            </div>
+        </div>
+        """
+        st.markdown(re.sub(r'\n\s*', ' ', strat_html).strip(), unsafe_allow_html=True)
 
     col_act1, col_act2 = st.columns([1.2, 1])
     with col_act1:

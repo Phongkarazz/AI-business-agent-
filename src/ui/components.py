@@ -5871,81 +5871,91 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
     tree_data = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {}
     branches = tree_data.get("branches", [])
 
+    vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    def _clean_md_inline(s_raw):
+        s_val = str(s_raw or "")
+        s_val = re.sub(r"\*\*\[([^\]]+)\]\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>", s_val)
+        s_val = re.sub(r"\*\*([^*]+)\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>", s_val)
+        s_val = re.sub(r"`([^`]+)`", r"<code style='background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); padding: 1px 6px; border-radius: 5px; color: #67E8F9; font-size: 0.75rem; font-weight: 700; font-family: inherit;'>\1</code>", s_val)
+        return s_val
+
     with st.container(border=True):
-        title_22 = "🌿 2. Diagnostic Hypothesis Issue Tree (Hypothesis → Data Test → Verdict)" if is_en else "🌿 2. Sơ đồ Cây Giả Thuyết & Kiểm Định Dữ Liệu (Đặt Giả Thuyết → Kiểm Định → Kết Luận)"
-        st.markdown(f"<h4 style='color: #38BDF8; margin: 2px 0 8px 0; font-size: 1.08rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
+        title_22 = "🔬 2. Diagnostic Hypothesis Issue Tree (Hypothesis → Data Test → Verdict)" if is_en else "🔬 2. Sơ đồ Cây Giả Thuyết & Kiểm Định Nguyên Nhân (3 Giả Thuyết Đối Chứng)"
+        st.markdown(f"<h4 style='color: #38BDF8; margin: 2px 0 8px 0; font-size: 1.05rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
 
         if branches:
-            prob_stmt = tree_data.get("problem_statement", "")
+            prob_stmt = _clean_md_inline(tree_data.get("problem_statement", ""))
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.85) 100%); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;">
-                <div style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px;">
-                    {'🎯 ROOT PROBLEM STATEMENT (BÀI TOÁN TRỌNG TÂM CẦN KIỂM ĐỊNH)' if not is_en else '🎯 ROOT PROBLEM STATEMENT'}
-                </div>
-                <div style="font-size: 0.9rem; font-weight: 700; color: #F8FAFC; line-height: 1.4;">
+            <div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 9px; padding: 9px 14px; margin-bottom: 10px;">
+                <span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; margin-right: 6px;">
+                    {'🎯 BÀI TOÁN KIỂM ĐỊNH:' if not is_en else '🎯 ROOT PROBLEM:'}
+                </span>
+                <span style="font-size: 0.86rem; font-weight: 700; color: #F8FAFC;">
                     {prob_stmt}
-                </div>
+                </span>
             </div>
             """, unsafe_allow_html=True)
 
+            b_cards_html = []
             for b in branches:
                 status = b.get("status", "PARTIAL")
                 if status == "CONFIRMED":
-                    border_c = "#10B981"
-                    bg_c = "rgba(16, 185, 129, 0.08)"
-                    badge_bg = "rgba(16, 185, 129, 0.2)"
-                    badge_c = "#34D399"
+                    border_c, bg_c, badge_bg, badge_c = "#10B981", "rgba(16, 185, 129, 0.08)", "rgba(16, 185, 129, 0.2)", "#34D399"
                 elif status == "PARTIAL":
-                    border_c = "#F59E0B"
-                    bg_c = "rgba(245, 158, 11, 0.07)"
-                    badge_bg = "rgba(245, 158, 11, 0.2)"
-                    badge_c = "#FBBF24"
+                    border_c, bg_c, badge_bg, badge_c = "#F59E0B", "rgba(245, 158, 11, 0.07)", "rgba(245, 158, 11, 0.2)", "#FBBF24"
                 else:
-                    border_c = "#64748B"
-                    bg_c = "rgba(100, 116, 139, 0.06)"
-                    badge_bg = "rgba(100, 116, 139, 0.2)"
-                    badge_c = "#94A3B8"
+                    border_c, bg_c, badge_bg, badge_c = "#64748B", "rgba(100, 116, 139, 0.06)", "rgba(100, 116, 139, 0.2)", "#94A3B8"
 
                 conf_pct = b.get("confidence", 50)
                 imp_pct = b.get("impact", 50)
                 prio_score = b.get("priority_score", 50)
                 conf_lbl = "Độ chính xác" if not is_en else "Confidence"
-                imp_lbl = "Mức tác động" if not is_en else "Impact"
-                prio_lbl = "Điểm ưu tiên" if not is_en else "Priority Score"
+                imp_lbl = "Tác động" if not is_en else "Impact"
+                prio_lbl = "Ưu tiên" if not is_en else "Priority"
+                b_title_clean = _clean_md_inline(b.get("title", ""))
+                b_evid_clean = _clean_md_inline(b.get("evidence", ""))
+                ev_summary_lbl = "▸ Xem bằng chứng số liệu kiểm định" if not is_en else "▸ View quantitative test evidence"
 
-                branch_html = f"""
-                <div style="margin-left: 14px; border-left: 3px solid {border_c}; padding-left: 12px; margin-bottom: 10px;">
-                    <div style="background: {bg_c}; border: 1px solid {border_c}55; border-radius: 9px; padding: 10px 14px;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
-                            <span style="font-size: 0.88rem; font-weight: 800; color: #F8FAFC;">├─ {b.get('title')}</span>
-                            <span style="font-size: 0.7rem; font-weight: 800; color: {badge_c}; background: {badge_bg}; border: 1px solid {border_c}88; padding: 2px 8px; border-radius: 6px;">{b.get('status_label')}</span>
+                b_cards_html.append(f"""
+                <div style="background: {bg_c}; border: 1px solid {border_c}55; border-top: 3px solid {border_c}; border-radius: 10px; padding: 11px 13px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
+                            <span style="font-size: 0.69rem; font-weight: 800; color: {badge_c}; background: {badge_bg}; border: 1px solid {border_c}88; padding: 2px 7px; border-radius: 5px;">{b.get('status_label')}</span>
+                            <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.28); padding: 1px 7px; border-radius: 5px; font-size: 0.69rem; font-weight: 700;">🏆 {prio_lbl}: {prio_score}/100</span>
                         </div>
-                        <div style="font-size: 0.82rem; color: #CBD5E1; margin-bottom: 8px; line-height: 1.45;">
-                            🔬 <b>{'Bằng chứng dữ liệu:' if not is_en else 'Data Evidence:'}</b> {b.get('evidence')}
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 0.75rem; color: #94A3B8;">
-                            <div style="flex: 1; min-width: 140px;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-                                    <span>🎯 {conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
-                                    <span>⚡ {imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
-                                </div>
-                                <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
-                                    <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
-                                </div>
-                            </div>
-                            <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.3); padding: 2px 8px; border-radius: 6px; font-weight: 700;">
-                                🏆 {prio_lbl}: {prio_score}/100
-                            </span>
+                        <div style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC; line-height: 1.42; margin-bottom: 8px;">
+                            {b_title_clean}
                         </div>
                     </div>
+                    <div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.73rem; color: #94A3B8; margin-bottom: 3px;">
+                            <span>🎯 {conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
+                            <span>⚡ {imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
+                        </div>
+                        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
+                            <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
+                        </div>
+                        <details style="font-size: 0.74rem; color: #94A3B8;">
+                            <summary style="cursor: pointer; color: #7DD3FC; font-weight: 600; outline: none; user-select: none;">{ev_summary_lbl}</summary>
+                            <div style="margin-top: 5px; padding: 6px 8px; background: rgba(15, 23, 42, 0.85); border-radius: 5px; color: #CBD5E1; line-height: 1.48; font-size: 0.76rem;">
+                                {b_evid_clean}
+                            </div>
+                        </details>
+                    </div>
                 </div>
-                """
-                st.markdown(re.sub(r'\n\s*', ' ', branch_html).strip(), unsafe_allow_html=True)
+                """)
 
-            concl = tree_data.get("conclusion", "")
+            grid_tree_html = f"""
+            <div style="font-family: {vn_font_stack}; display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                {''.join(b_cards_html)}
+            </div>
+            """
+            st.markdown(re.sub(r'\n\s*', ' ', grid_tree_html).strip(), unsafe_allow_html=True)
+
+            concl = _clean_md_inline(tree_data.get("conclusion", ""))
             if concl:
                 st.markdown(f"""
-                <div style="background: rgba(16, 185, 129, 0.12); border-left: 4px solid #10B981; border-radius: 6px; padding: 10px 14px; margin-top: 6px; font-size: 0.85rem; color: #ECFDF5; line-height: 1.5;">
+                <div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10B981; border-radius: 6px; padding: 8px 12px; margin-top: 4px; font-size: 0.81rem; color: #ECFDF5; line-height: 1.45;">
                     💡 <b>{concl}</b>
                 </div>
                 """, unsafe_allow_html=True)
@@ -5962,18 +5972,58 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         p23 = generate_data_grounded_action_plan(df, is_en=is_en, user_query=user_query)
 
     with st.container(border=True):
-        title_23 = "🎯 3. Role-Targeted & Unit-Scoped Action Plan (Verified from Hypothesis Tree)" if is_en else "🎯 3. Kế Hoạch Hành Động Phân Tầng Theo Vai Trò & Đơn Vị Phụ Trách (Từ Kết Quả Kiểm Định)"
-        st.markdown(f"<h4 style='color: #34D399; margin: 2px 0 8px 0; font-size: 1.08rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
+        title_23 = "🎯 3. Role-Targeted & Unit-Scoped Action Plan" if is_en else "🎯 3. Kế Hoạch Hành Động Theo Vai Trò & Đơn Vị Phụ Trách"
+        st.markdown(f"<h4 style='color: #34D399; margin: 2px 0 8px 0; font-size: 1.05rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
 
-        vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-        def _clean_md_inline(s_raw):
-            s_val = str(s_raw or "")
-            s_val = re.sub(r"\*\*\[([^\]]+)\]\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>", s_val)
-            s_val = re.sub(r"\*\*([^*]+)\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>", s_val)
-            s_val = re.sub(r"`([^`]+)`", r"<code style='background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); padding: 1px 6px; border-radius: 5px; color: #67E8F9; font-size: 0.75rem; font-weight: 700; font-family: inherit;'>\1</code>", s_val)
-            return s_val
+        units_info = extract_selectable_units(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {"has_units": False}
+        has_units_chat = bool(units_info.get("has_units"))
 
-        # Hiển thị Cổng Kiểm Chứng Giả Thuyết (Hypothesis Verification Gate — Luồng Kiểm định trước, Khuyến nghị sau)
+        persona_options = [
+            "🎯 Quản lý Trực tiếp (Vùng / Team / KAM) — Thực thi Cục bộ" if not is_en else "🎯 Operational Lead (Region / Team / KAM) — Local Execution",
+            "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Vĩ mô & Nguồn vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Macro Strategy & Capital Allocation",
+            "⚖️ Đối chiếu song song 2 góc nhìn (CEO & Quản lý)" if not is_en else "⚖️ Side-by-Side Dual View (CEO & Lead)"
+        ]
+
+        # Thanh điều khiển 1 hàng ngang (1-Line Control Bar: Vai trò | Đơn vị phụ trách)
+        chat_c1, chat_c2 = st.columns([1.35, 1.25])
+        with chat_c1:
+            sel_persona = st.selectbox(
+                "👤 Vai trò nhận khuyến nghị:" if not is_en else "👤 Target Persona:",
+                options=persona_options,
+                index=0 if has_units_chat else 1,
+                key=f"persona_radio_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+            )
+
+        selected_unit_val = None
+        with chat_c2:
+            if sel_persona in (persona_options[0], persona_options[2]) and has_units_chat:
+                unit_opts_list = units_info.get("unit_options", [])
+                all_lbl = units_info.get("all_option_label", "ALL")
+                label_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in unit_opts_list}
+                label_to_val[all_lbl] = "ALL"
+                select_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in unit_opts_list] + [all_lbl]
+                default_u = units_info.get("default_unit")
+                default_idx = 0
+                for idx_u, u_item in enumerate(unit_opts_list):
+                    if u_item["value"] == default_u:
+                        default_idx = idx_u
+                        break
+                chosen_lbl = st.selectbox(
+                    "📍 Đơn vị / Vùng phụ trách:" if not is_en else "📍 Assigned Unit / Region:",
+                    options=select_labels,
+                    index=default_idx,
+                    key=f"unit_scope_sel_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+                )
+                selected_unit_val = label_to_val.get(chosen_lbl, "ALL")
+            else:
+                st.selectbox(
+                    "📍 Phạm vi điều hành:" if not is_en else "📍 Governance Scope:",
+                    options=["🌐 Toàn hệ thống (Macro P&L)" if not is_en else "🌐 Enterprise-Wide (Macro P&L)"],
+                    disabled=True,
+                    key=f"unit_scope_macro_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+                )
+
+        # Dải Status Pill 1 dòng cho Cổng Kiểm Chứng Giả Thuyết
         if branches:
             confirmed_b = [b for b in branches if b.get("status") == "CONFIRMED"]
             partial_b = [b for b in branches if b.get("status") == "PARTIAL"]
@@ -5981,34 +6031,26 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             top_b = confirmed_b[0] if confirmed_b else branches[0]
             sec_b = partial_b[0] if partial_b else (confirmed_b[1] if len(confirmed_b) > 1 else None)
             rej_b = rejected_b[0] if rejected_b else None
-            top_t_clean = _clean_md_inline(top_b.get("title", "H1"))
+            top_t_clean = _clean_md_inline(re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(top_b.get("title", "H1")), flags=re.IGNORECASE))
             top_c_pct = int(top_b.get("confidence", 88))
-            top_p_sc = int(top_b.get("priority_score", 85))
             sec_badge_html = ""
             if sec_b:
-                sec_t_clean = _clean_md_inline(sec_b.get("title", "H2"))
+                sec_id = sec_b.get("id", "H2")
                 sec_c_pct = int(sec_b.get("confidence", 74))
-                sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4); color: #FBBF24; padding: 2px 8px; border-radius: 6px; font-size: 0.73rem; font-weight: 600;'>⚡ Đồng tác động: {sec_t_clean} ({sec_c_pct}%)</span>"
+                sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.38); color: #FBBF24; padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;'>⚡ {sec_id} ({sec_c_pct}%)</span>"
             rej_badge_html = ""
             if rej_b:
-                rej_t_clean = _clean_md_inline(rej_b.get("title", "H3"))
-                rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.4); color: #94A3B8; padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 500;'>❌ Đã loại trừ: {rej_t_clean}</span>"
-            gate_title = "🔒 HYPOTHESIS VERIFICATION GATE (EVIDENCE-FIRST PIPELINE: SIGNAL ➔ DATA TEST ➔ ROLE & UNIT STRATEGY)" if is_en else "🔒 CỔNG KIỂM CHỨNG GIẢ THUYẾT (LUỒNG KHOA HỌC: ĐẶT GIẢ THUYẾT ➔ KIỂM ĐỊNH DỮ LIỆU ➔ ƯU TIÊN CHIẾN LƯỢC THEO VAI TRÒ & ĐƠN VỊ)"
-            gate_desc = (
-                f"Strategic recommendations below are unlocked ONLY after validating the Hypothesis Issue Tree. Highest priority is assigned to <strong style='color:#34D399;'>{top_t_clean}</strong> (Confidence: <b>{top_c_pct}%</b> • Priority Score: <b>{top_p_sc}/100</b>)."
-                if is_en else
-                f"Khuyến nghị bên dưới chỉ được kích hoạt sau khi hoàn tất kiểm định Cây Giả Thuyết ở Bước 2. Hệ thống ưu tiên giải quyết trọng tâm <strong style='color:#34D399;'>{top_t_clean}</strong> (Độ chính xác kiểm định: <b>{top_c_pct}%</b> • Điểm ưu tiên: <b>{top_p_sc}/100</b>)."
-            )
+                rej_id = rej_b.get("id", "H3")
+                rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.35); color: #94A3B8; padding: 2px 8px; border-radius: 5px; font-size: 0.71rem; font-weight: 500;'>❌ {'Loại trừ' if not is_en else 'Ruled out'} {rej_id}</span>"
             gate_html = f"""
-            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(6, 78, 59, 0.28) 0%, rgba(15, 23, 42, 0.92) 100%); border: 1px solid rgba(16, 185, 129, 0.45); border-left: 4px solid #10B981; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;">
-                <div style="font-size: 0.71rem; font-weight: 800; color: #34D399; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">
-                    {gate_title}
-                </div>
-                <div style="font-size: 0.82rem; color: #E2E8F0; line-height: 1.5; margin-bottom: 6px;">
-                    {gate_desc}
-                </div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                    <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.5); color: #6EE7B7; padding: 2px 8px; border-radius: 6px; font-size: 0.73rem; font-weight: 700;">✅ Ưu tiên #1: {top_t_clean} ({top_c_pct}%)</span>
+            <div style="font-family: {vn_font_stack}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: rgba(6, 78, 59, 0.22); border: 1px solid rgba(16, 185, 129, 0.38); border-left: 3px solid #10B981; border-radius: 8px; padding: 6px 12px; margin-top: 2px; margin-bottom: 10px;">
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <span style="font-size: 0.72rem; font-weight: 800; color: #34D399; text-transform: uppercase;">
+                        🔒 {'Căn cứ kiểm định:' if not is_en else 'Verified Root Cause:'}
+                    </span>
+                    <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">
+                        ✅ {top_b.get('id', 'H1')}: {top_t_clean} ({top_c_pct}%)
+                    </span>
                     {sec_badge_html}
                     {rej_badge_html}
                 </div>
@@ -6016,98 +6058,12 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             """
             st.markdown(re.sub(r'\n\s*', ' ', gate_html).strip(), unsafe_allow_html=True)
 
-        is_hr_ctx = tree_data.get("is_hr", False)
-        ent_type_ctx = tree_data.get("entity_type", "general")
-        is_multi_entity_ts = tree_data.get("is_multi_entity_time_series", False)
-        is_ts_ctx = (tree_data.get("is_time_series", False) or ent_type_ctx == "time_series") and not is_multi_entity_ts
-        if is_multi_entity_ts:
-            ent_label_vi = {"team": "Đội ngũ", "geo": "Thị trường", "product": "Sản phẩm", "employee": "Nhân sự", "department": "Phòng ban", "title": "Chức danh"}.get(ent_type_ctx, "Đơn vị")
-            ent_label_en = {"team": "Teams", "geo": "Markets", "product": "Products", "employee": "Salespeople", "department": "Departments", "title": "Job Titles"}.get(ent_type_ctx, "Units")
-            persona_options = [
-                f"🏛️ Ban Điều Hành (CEO / CFO) — Quản trị Hiệu quả {ent_label_vi} & Chu kỳ Doanh số" if not is_en else f"🏛️ C-Level (CEO / CFO) — {ent_label_en} Performance & Cycle Governance",
-                f"🎯 Quản lý Vận hành (Giám đốc Kinh doanh / Trưởng nhóm) — Điều phối {ent_label_vi} & Kỳ Hoạt động" if not is_en else f"🎯 Operational Lead (Sales Director / Team Lead) — {ent_label_en} Execution & Periodic Pacing",
-                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
-            ]
-        elif is_ts_ctx and is_hr_ctx:
-            persona_options = [
-                "🏛️ Ban Điều Hành (CEO / CFO / CHRO) — Hoạch định Ngân sách & Chu kỳ Dài hạn" if not is_en else "🏛️ C-Level (CEO / CFO / CHRO) — Multi-Year Budget & Cycle Planning",
-                "🎯 Quản lý Thực thi (HRBP / FP&A / Trưởng Bộ phận) — Điều phối Kế hoạch Năm & Kỳ Lương" if not is_en else "🎯 Execution Lead (HRBP / FP&A / Dept Head) — Annual Plan & Payroll Cut-off",
-                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
-            ]
-        elif is_ts_ctx:
-            persona_options = [
-                "🏛️ Ban Điều Hành (CEO / CFO) — Quản trị Chu kỳ Kinh doanh & Dòng tiền" if not is_en else "🏛️ C-Level (CEO / CFO) — Business Cycle & Cashflow Governance",
-                "🎯 Quản lý Vận hành (Giám đốc Kinh doanh / Chuỗi cung ứng / KAM) — Điều độ Theo Kỳ" if not is_en else "🎯 Operational Lead (Sales Director / Supply Chain / KAM) — Period Pacing Execution",
-                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
-            ]
-        elif is_hr_ctx:
-            persona_options = [
-                "🏛️ Ban Điều Hành (CEO / CFO / CHRO) — Cấu trúc Tổ chức & Ngân sách Vĩ mô" if not is_en else "🏛️ C-Level (CEO / CFO / CHRO) — Org Design & Macro Governance",
-                "🎯 Quản lý Khối & HRBP (Giám đốc Khối / Trưởng Phòng / HRBP) — Điều phối Định biên & Quy trình" if not is_en else "🎯 Division Head & HRBP (Department Head / HRBP) — Workforce & Process Execution",
-                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
-            ]
-        elif ent_type_ctx == "product":
-            persona_options = [
-                "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Danh mục & Phân bổ Vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Portfolio Strategy & Capital Allocation",
-                "🎯 Quản lý Ngành hàng (Category Manager / Trade Marketing / KAM) — Tối ưu SKU & Combo" if not is_en else "🎯 Category Lead (Category Manager / Trade Marketing / KAM) — SKU & Bundling Execution",
-                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
-            ]
-        else:
-            persona_options = [
-                "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Vĩ mô & Phân bổ Vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Macro Strategy & Capital Allocation",
-                "🎯 Quản lý Trực tiếp (Giám đốc Vùng / Team Lead / KAM) — Thực thi Cục bộ" if not is_en else "🎯 Operational Lead (Regional Director / Team Lead / KAM) — Local Execution",
-                "📋 Xem đồng thời cả 2 góc nhìn (Dual-Perspective Matrix)" if not is_en else "📋 View Both Perspectives (Dual-Perspective Matrix)"
-            ]
-        sel_persona = st.radio(
-            "Chọn đối tượng nhận báo cáo khuyến nghị:" if not is_en else "Select target audience for recommendations:",
-            options=persona_options,
-            index=0,
-            horizontal=True,
-            key=f"persona_radio_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
-        )
-
-        # Bộ lọc Cá nhân hóa theo Đơn vị / Vùng / Team / Ngành hàng phụ trách (Dành riêng cho Quản lý Trực tiếp)
-        units_info = extract_selectable_units(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {"has_units": False}
-        selected_unit_val = None
-        if sel_persona in (persona_options[1], persona_options[2]) and units_info.get("has_units"):
-            unit_opts_list = units_info.get("unit_options", [])
-            all_lbl = units_info.get("all_option_label", "ALL")
-            label_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in unit_opts_list}
-            label_to_val[all_lbl] = "ALL"
-            select_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in unit_opts_list] + [all_lbl]
-            default_u = units_info.get("default_unit")
-            default_idx = 0
-            for idx_u, u_item in enumerate(unit_opts_list):
-                if u_item["value"] == default_u:
-                    default_idx = idx_u
-                    break
-            st.markdown(
-                f"""<div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 12px; margin-top: 4px; margin-bottom: 4px; font-size: 0.78rem; color: #A7F3D0; font-weight: 600;">
-                🎛️ {'Cá nhân hóa theo phạm vi phụ trách: Mỗi Quản lý Vùng / Team Lead / KAM nhận bộ Benchmark & Kế hoạch thực thi riêng cho đơn vị mình quản lý.' if not is_en else 'Unit-Level Personalization: Each Regional Manager / Team Lead / KAM receives dedicated benchmarks & execution actions for their assigned unit.'}
-                </div>""",
-                unsafe_allow_html=True,
-            )
-            chosen_lbl = st.selectbox(
-                units_info.get("selector_label", "Chọn đơn vị phụ trách:"),
-                options=select_labels,
-                index=default_idx,
-                key=f"unit_scope_sel_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
-            )
-            selected_unit_val = label_to_val.get(chosen_lbl, "ALL")
-
         def _render_persona_box(p_code: str, border_col: str, badge_col: str):
             u_arg = selected_unit_val if p_code == "lead" else None
             p_data = generate_persona_action_plan(df, persona=p_code, user_query=user_query, is_en=is_en, target_unit=u_arg)
-            kpis_html = "".join(
-                f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F8FAFC; font-size: 0.76rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.4;'>📌 {_clean_md_inline(k)}</span>"
-                for k in p_data.get("kpis", [])
-            )
-            acts_html = "".join(
-                f"<div style='font-family: {vn_font_stack}; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 9px; line-height: 1.62; font-weight: 400;'>• {_clean_md_inline(act)}</div>"
-                for act in p_data.get("actions", [])
-            )
             unit_diag = p_data.get("unit_diagnostic")
             unit_strip_html = ""
+            kpis_row_html = ""
             if unit_diag:
                 u_stat_col = unit_diag.get("status_color", "#10B981")
                 pct_top_bar = max(8.0, min(100.0, float(unit_diag.get("pct_of_top", 50.0))))
@@ -6115,61 +6071,113 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 vs_m_col = "#34D399" if vs_m >= 0 else "#FBBF24"
                 sec_m_list = unit_diag.get("secondary_metrics", [])
                 sec_m_html = "".join(
-                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.72rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
+                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.71rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
                     for sm in sec_m_list
                 )
-                sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;'>{sec_m_html}</div>" if sec_m_html else ""
+                sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;'>{sec_m_html}</div>" if sec_m_html else ""
                 unit_strip_html = f"""
                 <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
                         <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
-                            🎯 {'HỒ SƠ ĐỊNH CHUẨN ĐƠN VỊ:' if not is_en else 'UNIT BENCHMARK SCORECARD:'} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
+                            🎯 {'ĐỊNH CHUẨN ĐƠN VỊ:' if not is_en else 'UNIT SCORECARD:'} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
                         </span>
-                        <span style="font-size: 0.72rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
+                        <span style="font-size: 0.71rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
                             {unit_diag.get('status_badge')}
                         </span>
                     </div>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; margin-bottom: 8px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 8px; margin-bottom: 8px;">
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
                             <div style="font-size: 0.68rem; color: #94A3B8;">{'Thực tế Đơn vị' if not is_en else 'Unit Actual'}</div>
-                            <div style="font-size: 0.86rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.7rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.69rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
                         </div>
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
                             <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Chuẩn TB' if not is_en else 'vs. Company Mean'} ({unit_diag.get('mean_val_fmt')})</div>
-                            <div style="font-size: 0.86rem; font-weight: 800; color: {vs_m_col};">{vs_m:+.1f}% <span style="font-size: 0.7rem; color: #CBD5E1; font-weight: 500;">({unit_diag.get('pct_of_mean'):.1f}%)</span></div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: {vs_m_col};">{vs_m:+.1f}% <span style="font-size: 0.69rem; color: #CBD5E1; font-weight: 500;">({unit_diag.get('pct_of_mean'):.1f}%)</span></div>
                         </div>
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
                             <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Top #1' if not is_en else 'vs. #1 Leader'} ({unit_diag.get('top_name')})</div>
-                            <div style="font-size: 0.86rem; font-weight: 800; color: #E2E8F0;">{unit_diag.get('pct_of_top'):.1f}% <span style="font-size: 0.7rem; color: #94A3B8; font-weight: 500;">(Δ {unit_diag.get('gap_to_top_fmt')})</span></div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: #E2E8F0;">{unit_diag.get('pct_of_top'):.1f}% <span style="font-size: 0.69rem; color: #94A3B8; font-weight: 500;">(Δ {unit_diag.get('gap_to_top_fmt')})</span></div>
                         </div>
                         <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 6px 8px;">
                             <div style="font-size: 0.68rem; color: #6EE7B7;">{'Chỉ tiêu Kỳ tới (Target)' if not is_en else 'Next-Period Quota'}</div>
-                            <div style="font-size: 0.86rem; font-weight: 800; color: #34D399;">{unit_diag.get('next_target_fmt')}</div>
+                            <div style="font-size: 0.85rem; font-weight: 800; color: #34D399;">{unit_diag.get('next_target_fmt')}</div>
                         </div>
                     </div>
-                    <div style="font-size: 0.71rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
-                        <span>{'Tiến độ tiệm cận Đơn vị Dẫn đầu (#1' if not is_en else 'Progress toward #1 Leader ('} {unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
+                    <div style="font-size: 0.7rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
+                        <span>{'Tỷ lệ tiệm cận Top #1 (' if not is_en else 'Ratio vs. #1 ('}{unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
                         <b style="color: #F8FAFC;">{unit_diag.get('pct_of_top'):.1f}%</b>
                     </div>
-                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+                    <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
                         <div style="width: {pct_top_bar}%; height: 100%; background: linear-gradient(90deg, {u_stat_col}, #00F0FF); border-radius: 3px;"></div>
                     </div>
                     {sec_row_html}
                 </div>
                 """
+            else:
+                kpis_chips = "".join(
+                    f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.35;'>📌 {_clean_md_inline(k)}</span>"
+                    for k in p_data.get("kpis", [])
+                )
+                kpis_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;'>{kpis_chips}</div>"
+
+            micro_list = p_data.get("micro_actions", [])
+            if micro_list:
+                cards_list_html = []
+                for ma in micro_list:
+                    p_col = ma.get("priority_color", "#38BDF8")
+                    p_lbl = ma.get("priority_label", "")
+                    p_icon = ma.get("priority_icon", "🔹")
+                    hl_html = _clean_md_inline(ma.get("headline", ""))
+                    brief_html = _clean_md_inline(ma.get("brief_action", ""))
+                    det_html = _clean_md_inline(ma.get("detail_note", ""))
+                    t_pill = _clean_md_inline(ma.get("target_pill", ""))
+                    l_pill = _clean_md_inline(ma.get("lever_pill", ""))
+                    e_pill = _clean_md_inline(ma.get("evidence_pill", ""))
+                    det_label = "▸ Xem số liệu đối chiếu & hướng dẫn chi tiết" if not is_en else "▸ View full comparative metrics & execution details"
+                    cards_list_html.append(f"""
+                    <div style="background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(255,255,255,0.08); border-left: 3.5px solid {p_col}; border-radius: 9px; padding: 10px 14px; margin-bottom: 8px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
+                            <div style="font-size: 0.87rem; font-weight: 700; color: #F8FAFC; line-height: 1.4;">
+                                {p_icon} {hl_html}
+                            </div>
+                            <span style="font-size: 0.67rem; font-weight: 800; color: {p_col}; background: {p_col}1A; border: 1px solid {p_col}55; padding: 1px 7px; border-radius: 5px; letter-spacing: 0.03em;">
+                                {p_lbl}
+                            </span>
+                        </div>
+                        <div style="font-size: 0.81rem; color: #CBD5E1; line-height: 1.48; margin-bottom: 7px;">
+                            {brief_html}
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <span style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #6EE7B7; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 5px;">{t_pill}</span>
+                            <span style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.32); color: #7DD3FC; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{l_pill}</span>
+                            <span style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.28); color: #CBD5E1; font-size: 0.71rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{e_pill}</span>
+                        </div>
+                        <details style="margin-top: 6px; font-size: 0.75rem; color: #94A3B8;">
+                            <summary style="cursor: pointer; color: #38BDF8; font-weight: 600; outline: none; user-select: none;">{det_label}</summary>
+                            <div style="margin-top: 5px; padding: 7px 10px; background: rgba(15, 23, 42, 0.85); border-left: 2px solid #38BDF8; border-radius: 5px; color: #E2E8F0; line-height: 1.52; font-size: 0.79rem;">
+                                {det_html}
+                            </div>
+                        </details>
+                    </div>
+                    """)
+                acts_html = "".join(cards_list_html)
+            else:
+                acts_html = "".join(
+                    f"<div style='font-family: {vn_font_stack}; font-size: 0.84rem; color: #E2E8F0; margin-bottom: 8px; line-height: 1.55;'>• {_clean_md_inline(act)}</div>"
+                    for act in p_data.get("actions", [])
+                )
+
             box_header = f"""
-            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 16px 18px; margin-top: 8px; margin-bottom: 10px;">
-                <div style="font-family: {vn_font_stack}; font-size: 0.92rem; font-weight: 700; color: {badge_col}; margin-bottom: 6px; line-height: 1.45;">
+            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 14px 16px; margin-top: 6px; margin-bottom: 10px;">
+                <div style="font-family: {vn_font_stack}; font-size: 0.9rem; font-weight: 800; color: {badge_col}; margin-bottom: 3px; line-height: 1.4;">
                     {_clean_md_inline(p_data.get('role_title'))}
                 </div>
-                <div style="font-family: {vn_font_stack}; font-size: 0.81rem; color: #94A3B8; margin-bottom: 12px; font-style: normal; font-weight: 500; line-height: 1.5;">
+                <div style="font-family: {vn_font_stack}; font-size: 0.78rem; color: #94A3B8; margin-bottom: 10px; font-weight: 500; line-height: 1.45;">
                     {_clean_md_inline(p_data.get('role_focus'))}
                 </div>
                 {unit_strip_html}
-                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;">
-                    {kpis_html}
-                </div>
-                <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                {kpis_row_html}
+                <div>
                     {acts_html}
                 </div>
             </div>
@@ -6178,9 +6186,9 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
 
         if df is not None and not df.empty:
             if sel_persona == persona_options[0]:
-                _render_persona_box("ceo", "#00F0FF", "#38BDF8")
-            elif sel_persona == persona_options[1]:
                 _render_persona_box("lead", "#10B981", "#34D399")
+            elif sel_persona == persona_options[1]:
+                _render_persona_box("ceo", "#00F0FF", "#38BDF8")
             else:
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:

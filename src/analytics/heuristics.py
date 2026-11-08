@@ -5209,7 +5209,7 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
     def _fmt(v):
         if is_count_metric:
             return f"{int(round(v)):,}"
-        if abs(v) >= 1_000_000:
+        if abs(v) >= 100:
             return f"{prefix}{v:,.0f}"
         if abs(v - round(v)) < 1e-4:
             return f"{prefix}{int(round(v)):,}"
@@ -6028,7 +6028,7 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
     def _fmt(v):
         if is_count_metric:
             return f"{int(round(v)):,}"
-        if abs(v) >= 1_000_000:
+        if abs(v) >= 100:
             return f"{prefix}{v:,.0f}"
         if abs(v - round(v)) < 1e-4:
             return f"{prefix}{int(round(v)):,}"
@@ -6145,10 +6145,35 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
     }
 
 
+def _extract_clean_brief_action(body_text: str) -> str:
+    """Rút gọn phần thân khuyến nghị thành 1 câu chỉ dẫn hành động trực diện (<22 từ),
+    tách bỏ các cụm liệt kê số liệu rườm rà trong ngoặc đơn theo nguyên lý Tối giản của Vương Quang Khải.
+    """
+    if not body_text:
+        return ""
+    s = str(body_text).strip()
+    s = re.sub(r"`\[(?:Kiểm chứng từ|Verified by|Chuẩn hóa Quản trị|Governance Standard)[^\]]+\]`\s*:?\s*", "", s).strip()
+    # Nếu có từ 2 câu trở lên và câu đầu chỉ nhắc lại thực trạng số liệu, ưu tiên lấy câu mệnh lệnh hành động phía sau
+    sentences = [seg.strip() for seg in re.split(r"(?<=\.)\s+(?=[A-ZĐÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴ])", s) if seg.strip()]
+    if len(sentences) >= 2:
+        s0_low = sentences[0].lower()
+        metric_recap_starters = (
+            "thị trường ", "đội ngũ ", "đơn vị ", "khu vực ", "mặt hàng", "khối ", "tỷ trọng ",
+            "quy mô ", "khoảng cách giữa ", "nhóm top ", "thực thể dẫn đầu",
+            "the spread between", "top 3 entities", "leading entity", "division ", "compensation distribution"
+        )
+        if any(s0_low.startswith(p) for p in metric_recap_starters) or ("hiện đạt" in s0_low) or ("hiện chỉ đạt" in s0_low) or ("đang giữ vị trí" in s0_low) or ("đang dẫn đầu" in s0_low) or ("đang đứng" in s0_low) or ("currently stands at" in s0_low) or ("leads the entire" in s0_low) or ("is performing solidly" in s0_low):
+            s = " ".join(sentences[1:]).strip()
+    # Lược bỏ các cụm ngoặc đơn chứa số liệu lặp lại (VD: (**$7,012,523**), (đạt đỉnh **$5,280,919**))
+    s = re.sub(r"\s*\([^()]*\*\*[^()]*\*\*[^()]*\)", "", s)
+    s = re.sub(r"\s*\([^()]*\$[\d,\.]+[^()]*\)", "", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    return s
+
+
 def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = False) -> dict:
-    """Đính kèm Cổng Kiểm chứng Giả thuyết (Hypothesis Verification Gate) và nhãn nguồn gốc giả thuyết
-    vào từng khuyến nghị trong Action Plan để đảm bảo luồng tư duy:
-    Đặt giả thuyết -> Kiểm định dữ liệu -> Ưu tiên giả thuyết có độ chính xác cao nhất -> Đưa ra chiến lược.
+    """Đính kèm Cổng Kiểm chứng Giả thuyết (Hypothesis Verification Gate), nhãn nguồn gốc giả thuyết
+    và cấu trúc Micro-Action Cards (tối giản theo nguyên lý Vương Quang Khải: Tách bạch Số liệu & Hành động).
     """
     branches = tree.get("branches", [])
     confirmed_or_partial = [b for b in branches if b.get("status") in ("CONFIRMED", "PARTIAL")]
@@ -6180,6 +6205,11 @@ def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = 
         tag_h1 = f" `[Verified by {h1_id} • {h1_conf}% Accuracy]`"
         tag_h2 = f" `[Verified by {h2_id} • {h2_conf}% Co-driver]`"
         tag_sys = f" `[Governance Standard • {h1_id} & {h2_id}]`"
+        evid_pills = [
+            f"🔬 Verified: {h1_id} ({h1_conf}% accuracy)",
+            f"🔬 Co-driver: {h2_id} ({h2_conf}% accuracy)",
+            f"🔬 Standard: {h1_id} & {h2_id} Governance",
+        ]
     else:
         gate_badge = f"🔒 CỔNG KIỂM CHỨNG GIẢ THUYẾT • Ưu tiên từ {h1_id} (Độ chính xác {h1_conf}% • Điểm ưu tiên {h1_prio}/100)"
         gate_summary = (
@@ -6189,21 +6219,141 @@ def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = 
         tag_h1 = f" `[Kiểm chứng từ {h1_id} • {h1_conf}% chính xác]`"
         tag_h2 = f" `[Kiểm chứng từ {h2_id} • {h2_conf}% đồng tác động]`"
         tag_sys = f" `[Chuẩn hóa Quản trị • {h1_id} & {h2_id}]`"
+        evid_pills = [
+            f"🔬 Căn cứ: {h1_id} ({h1_conf}% chính xác)",
+            f"🔬 Căn cứ: {h2_id} ({h2_conf}% đồng tác động)",
+            f"🔬 Căn cứ: Chuẩn Quản trị ({h1_id} & {h2_id})",
+        ]
+
+    # Xây dựng bộ nhãn Mục tiêu (Target Pill) & Đòn bẩy (Lever Pill) tách biệt khỏi câu văn
+    unit_diag = plan_dict.get("unit_diagnostic")
+    entity_type = tree.get("entity_type", "general")
+    is_ts = tree.get("is_time_series", False)
+    is_hr = tree.get("is_hr", False)
+    top_ent = tree.get("top_entity", "Top 1")
+    bot_ent = tree.get("bot_entity", "Bottom 1")
+    top_v = tree.get("top_val_fmt", "0")
+    bot_v = tree.get("bot_val_fmt", "0")
+    mean_v = tree.get("mean_val_fmt", "0")
+
+    if unit_diag:
+        u_rank = int(unit_diag.get("rank", 1))
+        u_val_fmt = unit_diag.get("unit_val_fmt", "")
+        u_mean_fmt = unit_diag.get("mean_val_fmt", mean_v)
+        u_gap_mean = unit_diag.get("gap_to_mean_fmt", "")
+        u_gap_top = unit_diag.get("gap_to_top_fmt", "")
+        u_top_name = unit_diag.get("top_name", top_ent)
+        u_next_target = unit_diag.get("next_target_fmt", "")
+        u_vs_mean = float(unit_diag.get("vs_mean_pct", 0.0))
+        if is_en:
+            t_p0 = f"🎯 Goal: Defend #1 ({u_val_fmt})" if u_rank == 1 else (f"🎯 Goal: Close -{u_gap_top} gap vs #1 {u_top_name}" if u_vs_mean >= 0 else f"🎯 Goal: Recover +{u_gap_mean} to Mean")
+            t_p1 = f"🎯 Next Quota: {u_next_target}"
+            t_p2 = f"🎯 Benchmark: Standardize #1 SOP" if u_rank == 1 else f"🎯 Pacing: Beat Mean ({u_mean_fmt})"
+        else:
+            t_p0 = f"🎯 Mục tiêu: Giữ vững #1 ({u_val_fmt})" if u_rank == 1 else (f"🎯 Mục tiêu: Thu hẹp -{u_gap_top} vs #1 {u_top_name}" if u_vs_mean >= 0 else f"🎯 Mục tiêu: Bù đắp +{u_gap_mean} chạm TB")
+            t_p1 = f"🎯 Chỉ tiêu kỳ tới: {u_next_target}"
+            t_p2 = f"🎯 Chuẩn hóa: Nhân bản mẫu #1" if u_rank == 1 else f"🎯 Nhịp kiểm soát: Vượt mốc {u_mean_fmt}"
+        target_pills = [t_p0, t_p1, t_p2]
+    else:
+        if is_en:
+            target_pills = [
+                f"🎯 Anchor: {top_ent} ({top_v})",
+                f"🎯 Baseline Target: {mean_v}",
+                f"🎯 Focus Floor: {bot_ent} ({bot_v})",
+            ]
+        else:
+            target_pills = [
+                f"🎯 Mũi nhọn: {top_ent} ({top_v})",
+                f"🎯 Mốc chuẩn TB: {mean_v}",
+                f"🎯 Vùng cần nâng: {bot_ent} ({bot_v})",
+            ]
+
+    if is_ts:
+        lever_pills = (
+            ["🛠️ Lever: Peak Working Capital & Buffer", "🛠️ Lever: Off-Peak Early-Bird Rebates", "🛠️ Lever: Seasonal Index Budgeting"]
+            if is_en else
+            ["🛠️ Đòn bẩy: Vốn lưu động & Tồn kho Đón đỉnh", "🛠️ Đòn bẩy: Chiết khấu Đặt hàng sớm B2B", "🛠️ Đòn bẩy: Ngân sách Động theo Mùa vụ"]
+        )
+    elif is_hr:
+        lever_pills = (
+            ["🛠️ Lever: Output/Employee & Retention", "🛠️ Lever: Workflow Automation & Equity", "🛠️ Lever: Cross-Skilling & Succession"]
+            if is_en else
+            ["🛠️ Đòn bẩy: Định mức Output/Người & Giữ chân", "🛠️ Đòn bẩy: Tự động hóa Quy trình & Lương", "🛠️ Đòn bẩy: Đào tạo Đa nhiệm & Kế cận"]
+        )
+    elif entity_type == "geo":
+        lever_pills = (
+            ["🛠️ Lever: B2B Distributor & Hero SKU", "🛠️ Lever: Tiered Rebate & Assortment", "🛠️ Lever: Weekly Pacing & Regional SLA"]
+            if is_en else
+            ["🛠️ Đòn bẩy: Độ phủ Đại lý B2B & Hero SKU", "🛠️ Đòn bẩy: Chiết khấu Bậc thang & Danh mục", "🛠️ Đòn bẩy: Weekly Pacing & Chuỗi cung ứng"]
+        )
+    elif entity_type in ("team", "employee"):
+        lever_pills = (
+            ["🛠️ Lever: Pipeline Unblocking & Coaching", "🛠️ Lever: Weekly Sprint Quota & Upsell", "🛠️ Lever: Key Account Reallocation"]
+            if is_en else
+            ["🛠️ Đòn bẩy: Rà soát Pipeline & Kèm cặp 1-1", "🛠️ Đòn bẩy: Chia nhỏ Quota Tuần & Bán chéo", "🛠️ Đòn bẩy: Tái phân bổ Key Accounts"]
+        )
+    elif entity_type == "product":
+        lever_pills = (
+            ["🛠️ Lever: Combo Bundling & Planogram", "🛠️ Lever: 100% Fill-Rate & Safety Stock", "🛠️ Lever: Trade Spend & Price Elasticity"]
+            if is_en else
+            ["🛠️ Đòn bẩy: Gói Combo Bán kèm & Planogram", "🛠️ Đòn bẩy: Tồn kho An toàn (Fill-rate 100%)", "🛠️ Đòn bẩy: Tối ưu Trade Marketing & Giá"]
+        )
+    else:
+        lever_pills = (
+            ["🛠️ Lever: Capital & Buffer Prioritization", "🛠️ Lever: Portfolio De-risking", "🛠️ Lever: Margin & ROI Rationalization"]
+            if is_en else
+            ["🛠️ Đòn bẩy: Ưu tiên Vốn lưu động & Tồn kho", "🛠️ Đòn bẩy: Đa dạng hóa Trụ cột Thu", "🛠️ Đòn bẩy: Kiểm toán ROI & Tái cơ cấu"]
+        )
+
+    prio_meta = [
+        ("🔴", "PRIORITY 1 • IMMEDIATE" if is_en else "ƯU TIÊN 1 • CẤP BÁCH", "#EF4444"),
+        ("🟡", "PRIORITY 2 • CORE LEVER" if is_en else "ƯU TIÊN 2 • TRỌNG TÂM", "#F59E0B"),
+        ("🟢", "PRIORITY 3 • GOVERNANCE" if is_en else "ƯU TIÊN 3 • BỀN VỮNG", "#10B981"),
+    ]
 
     raw_actions = plan_dict.get("actions", [])
     tagged_actions = []
+    micro_actions = []
+
     for idx, act in enumerate(raw_actions):
-        if "Kiểm chứng từ H" in act or "Verified by H" in act or "Chuẩn hóa Quản trị" in act:
-            tagged_actions.append(act)
+        raw_str = str(act).strip()
+        # Tách tiêu đề trong **[...]** và phần thân
+        m_title = re.search(r"\*\*\[([^\]]+)\]\*\*", raw_str)
+        if m_title:
+            clean_headline = m_title.group(1).strip()
+            body_part = raw_str[m_title.end():].lstrip(": ").strip()
+        else:
+            clean_headline = re.sub(r"^[🔴🟡🟢\s•]+", "", raw_str).split(":")[0].replace("**", "").strip()
+            body_part = ":".join(raw_str.split(":")[1:]).strip() if ":" in raw_str else raw_str
+
+        body_untagged = re.sub(r"`\[(?:Kiểm chứng từ|Verified by|Chuẩn hóa Quản trị|Governance Standard)[^\]]+\]`\s*:?\s*", "", body_part).strip()
+        brief_verdict = _extract_clean_brief_action(body_untagged)
+
+        p_icon, p_lbl, p_col = prio_meta[min(idx, 2)]
+        micro_actions.append({
+            "priority_icon": p_icon,
+            "priority_label": p_lbl,
+            "priority_color": p_col,
+            "headline": clean_headline,
+            "brief_action": brief_verdict,
+            "target_pill": target_pills[min(idx, len(target_pills) - 1)],
+            "lever_pill": lever_pills[min(idx, len(lever_pills) - 1)],
+            "evidence_pill": evid_pills[min(idx, len(evid_pills) - 1)],
+            "detail_note": body_untagged,
+        })
+
+        if "Kiểm chứng từ H" in raw_str or "Verified by H" in raw_str or "Chuẩn hóa Quản trị" in raw_str:
+            tagged_actions.append(raw_str)
             continue
         tag_to_insert = tag_h1 if idx == 0 else (tag_h2 if idx == 1 else tag_sys)
-        if "**:" in act:
-            tagged_act = act.replace("**:", f"**{tag_to_insert}:", 1)
+        if "**:" in raw_str:
+            tagged_act = raw_str.replace("**:", f"**{tag_to_insert}:", 1)
         else:
-            tagged_act = f"{act}{tag_to_insert}"
+            tagged_act = f"{raw_str}{tag_to_insert}"
         tagged_actions.append(tagged_act)
 
     plan_dict["actions"] = tagged_actions
+    plan_dict["micro_actions"] = micro_actions
     plan_dict["hypothesis_gate"] = {
         "gate_badge": gate_badge,
         "gate_summary": gate_summary,
@@ -6284,7 +6434,7 @@ def _generate_unit_scoped_lead_plan(
     def _fmt(v):
         if is_count_metric:
             return f"{int(round(v)):,}"
-        if abs(v) >= 1_000_000:
+        if abs(v) >= 100:
             return f"{prefix}{v:,.0f}"
         if abs(v - round(v)) < 1e-4:
             return f"{prefix}{int(round(v)):,}"

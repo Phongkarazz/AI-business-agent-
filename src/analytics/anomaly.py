@@ -907,26 +907,26 @@ def scan_dashboard_anomalies_and_strategies(
     if is_sales_layer or any(a.get("is_sales") for a in anomalies):
         if is_en:
             headline = (
-                f"Detected {len(anomalies)} commercial variance signal(s) in {time_label}. Step 1: Validate root-cause hypotheses in the Hypothesis Tree (Tab 1) ➔ Step 2: Execute role & unit-scoped action plans (Tab 2)."
+                f"Detected {len(anomalies)} key commercial variance signal(s) in {time_label} — root causes verified with ready-to-execute action plans."
                 if anomalies else
                 f"Commercial revenue, volume, and market share indicators during {time_label} remain stable and well-balanced."
             )
         else:
             headline = (
-                f"Ghi nhận {len(anomalies)} tín hiệu biến động thương mại trong {time_label}. Hệ thống đã kích hoạt Cây Giả Thuyết (Tab 1) để kiểm định nguyên nhân có độ chính xác cao nhất trước khi mở khóa Kế hoạch Phân tầng theo Vai trò & Vùng phụ trách (Tab 2)."
+                f"Phát hiện {len(anomalies)} điểm lệch thương mại trọng yếu trong {time_label} — đã kiểm định nguyên nhân gốc và sẵn sàng kịch bản hành động."
                 if anomalies else
                 f"Cơ cấu doanh thu, sản lượng và thị phần thương mại trong {time_label} duy trì trạng thái ổn định và cân bằng."
             )
     else:
         if is_en:
             headline = (
-                f"Identified {len(anomalies)} operational variance signal(s) during {time_label}. Step 1: Validate root-cause hypotheses in the Hypothesis Tree (Tab 1) ➔ Step 2: Execute role & department-scoped action plans (Tab 2)."
+                f"Identified {len(anomalies)} key operational variance signal(s) in {time_label} — root causes verified with role-targeted action plans."
                 if anomalies else
                 f"Operational structures and indicators during {time_label} remain stable and balanced."
             )
         else:
             headline = (
-                f"Ghi nhận {len(anomalies)} tín hiệu chênh lệch vận hành trọng yếu trong {time_label}. Hệ thống đã kích hoạt Cây Giả Thuyết (Tab 1) để kiểm định nguyên nhân có độ chính xác cao nhất trước khi mở khóa Kế hoạch Phân tầng theo Vai trò & Khối Phòng ban (Tab 2)."
+                f"Phát hiện {len(anomalies)} điểm lệch vận hành trọng yếu trong {time_label} — đã kiểm định nguyên nhân gốc và sẵn sàng kịch bản điều phối."
                 if anomalies else
                 f"Cơ cấu vận hành và các chỉ số trong {time_label} duy trì trạng thái ổn định và cân bằng."
             )
