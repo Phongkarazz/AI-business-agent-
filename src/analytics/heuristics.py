@@ -85,8 +85,11 @@ def detect_query_language(query: str) -> str:
 
 
 def is_id_like(col_name: str) -> bool:
-    """True nếu tên cột trông giống định danh (emp_no, GeoID, product_code...)."""
-    return bool(ID_LIKE_REGEX.search(str(col_name).strip()))
+    """True nếu tên cột trông giống định danh (emp_no, GeoID, SupplierID, ProductCode...)."""
+    s = str(col_name).strip()
+    if ID_LIKE_REGEX.search(s):
+        return True
+    return bool(re.search(r'[a-z0-9](?:ID|Id|Code|Key|No)$', s))
 
 
 def find_time_column(df: pd.DataFrame):
@@ -2288,9 +2291,64 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
         if is_gen_col or raw_vals_upper.issubset({"M", "F", "MALE", "FEMALE", "NAM", "NỮ", "NU"}):
             return "gender"
 
-    # 5. Nhận diện Nhân sự / Nhân viên bán hàng cá nhân (pe.Salesperson / Individual Employees)
-    is_emp_col = any(k in ncol_low for k in ["fullname", "full_name", "họ và tên", "name", "tên", "salesperson", "sales_person", "sales person", "nhân viên", "nhân sự", "người bán", "emp_no", "first_name", "last_name", "rep", "spid"])
-    
+    # 5. Nhận diện Thị trường / Quốc gia / Khu vực / Thành phố (Geo / Country / City / Region / Market)
+    is_geo_col = any(k in ncol_low for k in [
+        "geo", "country", "quốc gia", "thị trường", "market", "nation",
+        "city", "thành phố", "tỉnh", "state", "province", "region", "khu vực", "vùng",
+        "location", "địa điểm", "airport", "sân bay", "zone", "territory", "shipcountry", "shipcity"
+    ])
+    is_geo_query = any(k in q_low for k in ["thị trường", "quốc gia", "các nước", "từng nước", "country", "market", "geo", "thành phố", "khu vực", "city", "region"])
+
+    known_geos = ["usa", "united states", "india", "uk", "united kingdom", "canada", "australia", "new zealand", "ấn độ", "mỹ", "úc"]
+    is_geo_values = False
+    if df is not None and not df.empty and name_col and name_col in df.columns:
+        sample_vals = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
+        if any(v in known_geos for v in sample_vals):
+            is_geo_values = True
+
+    if is_geo_col or is_geo_values or (is_geo_query and not any(k in ncol_low for k in ["team", "đội ngũ", "product", "sản phẩm", "sku", "salesperson", "nhân viên", "salesrep"])):
+        return "geo"
+
+    # 6. Nhận diện Đội ngũ / Chi nhánh / Kênh / Team kinh doanh (Team / Branch / Channel / Store)
+    is_team_col = any(k in ncol_low for k in ["team", "đội ngũ", "đội", "chinhanh", "chi nhánh", "branch", "store", "cửa hàng", "channel", "kênh"])
+    is_team_query = any(k in q_low for k in ["team", "đội ngũ", "các đội", "từng đội", "chi nhánh", "branch", "giữa các team", "từng team", "các team"])
+
+    is_team_values = False
+    if df is not None and not df.empty and name_col and name_col in df.columns:
+        sample_vals = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
+        if any(v in ["delish", "jucies", "yummies"] for v in sample_vals):
+            is_team_values = True
+
+    if is_team_col or is_team_values or (is_team_query and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "salesperson", "nhân viên", "nhân sự", "salesrep"])):
+        return "team"
+
+    # 7. Nhận diện Sản phẩm / Danh mục / Hàng hóa / Dịch vụ / Khóa học (Product / Category / SKU / Service)
+    is_prod_col = any(k in ncol_low for k in [
+        "product", "sản phẩm", "category", "danh mục", "sku", "item", "hàng hóa", "pid", "mặt hàng",
+        "brand", "thương hiệu", "size", "kích cỡ", "package", "course", "khóa học", "service", "dịch vụ", "seatclass", "hạng ghế"
+    ])
+    is_prod_query = any(k in q_low for k in ["sản phẩm", "mặt hàng", "hàng hóa", "chocolate", "kẹo", "sku", "hộp", "thùng", "combo", "bao bì", "sản phẩm bán chạy", "danh mục"])
+    is_prod_metric = any(k in cols_str for k in ["cost_per_box", "profit_per_box", "profitperbox", "unitmargin", "listprice", "standardcost"])
+    if is_prod_col or is_prod_metric or (is_prod_query and not any(k in ncol_low for k in ["customer", "company", "supplier", "salesperson", "salesrep", "nhân viên", "khách hàng", "nhà cung cấp"])):
+        return "product"
+
+    # 8. Nhận diện Nhân sự / Chuyên viên bán hàng cá nhân (Salesperson / Individual Employees)
+    # Lưu ý: Tuyệt đối KHÔNG khớp từ khóa chung 'name'/'tên' nếu thuộc về CustomerName, CompanyName, SupplierName, AirlineName...
+    non_emp_entity_keywords = [
+        "customer", "company", "client", "supplier", "vendor", "shipper", "carrier", "shipvia",
+        "airline", "airport", "flight", "ticket", "payment", "status", "type", "account", "project",
+        "khách hàng", "doanh nghiệp", "công ty", "nhà cung cấp", "đối tác", "hãng bay", "thanh toán", "trạng thái", "loại"
+    ]
+    is_non_emp_col = any(k in ncol_low for k in non_emp_entity_keywords)
+    is_emp_col = (not is_non_emp_col) and (
+        any(k in ncol_low for k in [
+            "fullname", "full_name", "họ và tên", "employeename", "emp_name", "salesperson", "sales_person",
+            "sales person", "salesrep", "sales_rep", "nhân viên", "nhân sự", "người bán", "emp_no",
+            "first_name", "last_name", "spid", "managername", "tên quản lý", "tên nhân viên", "doctor", "bác sĩ", "giảng viên"
+        ])
+        or (ncol_low in ("name", "tên", "rep") and not any(k in cols_str for k in non_emp_entity_keywords))
+    )
+
     known_salespeople = [
         "andria kimpton", "barr faughny", "benny karolovsky", "beverie moffet", "brien boise",
         "camilla castle", "ches bonnell", "curtice advani", "dennison crosswaite", "dotty strutley",
@@ -2306,47 +2364,13 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
         if any(v in known_salespeople for v in sample_vals):
             is_emp_values = True
 
-    is_emp_query = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai là", "top 5 nhân sự", "top nhân sự", "top nhân viên"])
+    is_emp_query = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "salesrep", "người bán", "ai là", "top 5 nhân sự", "top nhân sự", "top nhân viên"])
 
-    if is_emp_col or is_emp_values or (is_emp_query and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "team", "đội ngũ", "dept", "department", "phòng"])):
+    if is_emp_col or is_emp_values or (is_emp_query and not is_non_emp_col and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "team", "đội ngũ", "dept", "department", "phòng"])):
         return "employee"
 
-    # 6. Nhận diện Thị trường / Quốc gia (Geo / Country / Market) - TUYỆT ĐỐI KHÔNG gộp với Team
-    is_geo_col = any(k in ncol_low for k in ["geo", "country", "quốc gia", "thị trường", "market", "nation"])
-    is_geo_query = any(k in q_low for k in ["thị trường", "quốc gia", "các nước", "từng nước", "country", "market", "geo"])
-    
-    known_geos = ["usa", "united states", "india", "uk", "united kingdom", "canada", "australia", "new zealand", "ấn độ", "mỹ", "úc"]
-    is_geo_values = False
-    if df is not None and not df.empty and name_col and name_col in df.columns:
-        sample_vals = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
-        if any(v in known_geos for v in sample_vals):
-            is_geo_values = True
-
-    if is_geo_col or is_geo_values or (is_geo_query and not any(k in ncol_low for k in ["team", "đội ngũ", "product", "sản phẩm", "sku", "salesperson", "nhân viên"])):
-        return "geo"
-
-    # 7. Nhận diện Đội ngũ / Chi nhánh / Team kinh doanh (pe.Team)
-    is_team_col = any(k in ncol_low for k in ["team", "đội ngũ", "đội", "chinhanh", "chi nhánh", "branch"])
-    is_team_query = any(k in q_low for k in ["team", "đội ngũ", "các đội", "từng đội", "chi nhánh", "branch", "giữa các team", "từng team", "các team"])
-
-    is_team_values = False
-    if df is not None and not df.empty and name_col and name_col in df.columns:
-        sample_vals = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
-        if any(v in ["delish", "jucies", "yummies"] for v in sample_vals):
-            is_team_values = True
-
-    if is_team_col or is_team_values or (is_team_query and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "salesperson", "nhân viên", "nhân sự"])):
-        return "team"
-
-    # 8. Nhận diện Sản phẩm / Hàng hóa
-    is_prod_col = any(k in ncol_low for k in ["product", "sản phẩm", "category", "danh mục", "sku", "item", "hàng hóa", "pid", "mặt hàng"])
-    is_prod_query = any(k in q_low for k in ["sản phẩm", "mặt hàng", "hàng hóa", "chocolate", "kẹo", "sku", "hộp", "thùng", "combo", "bao bì", "sản phẩm bán chạy"])
-    is_prod_metric = any(k in cols_str for k in ["cost_per_box", "profit_per_box", "profitperbox"])
-    if is_prod_col or is_prod_metric or is_prod_query:
-        return "product"
-
-    # Fallback cho CSDL thương mại: nếu có Amount / Boxes
-    if any(k in cols_str for k in ["box", "hộp", "thùng", "product"]):
+    # Fallback cho CSDL thương mại: nếu có Boxes / Product và không phải cột Khách hàng / Nhà cung cấp
+    if not is_non_emp_col and any(k in cols_str for k in ["box", "hộp", "thùng", "product"]):
         return "product"
 
     return "general"
@@ -5157,6 +5181,90 @@ def split_insight_sections(markdown_text: str, df: pd.DataFrame = None, user_que
     }
 
 
+def normalize_diagnostic_dataframe(df: pd.DataFrame, user_query: str = "") -> pd.DataFrame:
+    """Chuẩn hóa mọi DataFrame (kể cả bảng giao dịch thô `SELECT * FROM table` hoặc bảng danh mục chỉ chứa văn bản
+    từ BẤT KỲ cơ sở dữ liệu nào) thành bảng thực thể phân tích chuẩn để `generate_hypothesis_tree`,
+    `extract_selectable_units` và `generate_persona_action_plan` hoạt động 100% động trên mọi schema.
+    """
+    if df is None or df.empty:
+        return df
+
+    primary_col, label_col = select_primary_insight_columns(df, user_query=user_query)
+    time_col = find_time_column(df)
+
+    if primary_col and is_id_like(primary_col):
+        primary_col = None
+    if not primary_col:
+        num_cols = [c for c in df.select_dtypes(include="number").columns if not is_id_like(c)]
+        primary_col = num_cols[0] if num_cols else None
+
+    # Trường hợp 1: Bảng chỉ chứa văn bản / danh mục (VD: Customers, Suppliers, Directory) chưa có cột số phi-ID
+    if not primary_col:
+        best_cat = None
+        best_score = -1
+        for col in df.columns:
+            if is_id_like(col) or _is_status_or_eval_column(df, col):
+                continue
+            s_clean = df[col].dropna().astype(str).str.strip()
+            s_clean = s_clean[~s_clean.str.lower().isin(["", "nan", "none", "null"])]
+            if s_clean.empty:
+                continue
+            n_uniq = s_clean.nunique()
+            if 2 <= n_uniq <= max(30, len(df) - 1):
+                c_low = str(col).lower()
+                score = 10
+                if any(k in c_low for k in ["country", "region", "city", "category", "type", "department", "team", "status", "title", "role", "segment", "industry", "airline", "hospital", "branch", "store", "channel"]):
+                    score += 50
+                if n_uniq < len(s_clean):
+                    score += 35
+                if score > best_score:
+                    best_score = score
+                    best_cat = col
+        if best_cat is None:
+            best_cat = label_col or df.columns[0]
+        grouped = (
+            df.dropna(subset=[best_cat])
+            .assign(_grp_val=lambda x: x[best_cat].astype(str).str.strip())
+            .query("_grp_val != '' and _grp_val.str.lower() not in ['nan', 'none', 'null']")
+            .groupby("_grp_val", as_index=False)
+            .size()
+            .rename(columns={"_grp_val": best_cat, "size": "RecordCount"})
+            .sort_values("RecordCount", ascending=False)
+            .reset_index(drop=True)
+        )
+        return grouped if not grouped.empty else df
+
+    # Trường hợp 2: Bảng giao dịch thô nhiều dòng lặp lại theo chiều phân loại (VD: Orders, Transactions, Logs)
+    if label_col and label_col in df.columns:
+        s_lbl = df[label_col].dropna().astype(str).str.strip()
+        n_uniq = s_lbl.nunique()
+        is_multi_ts = bool(
+            time_col and time_col != label_col and get_row_identity_column(df) is None and len(df.columns) <= 5
+        )
+        if 2 <= n_uniq < len(df) and n_uniq <= max(35, int(len(df) * 0.8)) and not is_multi_ts:
+            agg_spec = {}
+            for col in df.columns:
+                if col == label_col or is_id_like(col):
+                    continue
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    c_low = str(col).lower()
+                    if any(k in c_low for k in ["avg", "average", "trung bình", "bình quân", "mean", "pct", "percent", "ratio", "tỷ lệ", "rate", "share", "margin", "price", "unitprice"]):
+                        agg_spec[col] = "mean"
+                    else:
+                        agg_spec[col] = "sum"
+            if primary_col in agg_spec:
+                work = df.dropna(subset=[label_col]).copy()
+                work[label_col] = work[label_col].astype(str).str.strip()
+                work = work[~work[label_col].str.lower().isin(["", "nan", "none", "null"])]
+                if not work.empty:
+                    grouped = work.groupby(label_col, as_index=False).agg(agg_spec)
+                    if len(grouped) >= 2:
+                        grouped = grouped.sort_values(primary_col, ascending=False).reset_index(drop=True)
+                        return grouped
+
+    return df
+
+
 def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool = False) -> dict:
     """Xây dựng Sơ đồ Cây Giả Thuyết (McKinsey Issue Tree / Diagnostic Hypothesis Framework)
     trực tiếp từ dữ liệu thực tế:
@@ -5172,6 +5280,8 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             "branches": [],
             "conclusion": ""
         }
+
+    df = normalize_diagnostic_dataframe(df, user_query=user_query)
 
     cols_low = [str(c).lower() for c in df.columns]
     primary_col, label_col = select_primary_insight_columns(df, user_query=user_query)
@@ -5990,6 +6100,10 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
     if df is None or df.empty or len(df) < 2:
         return {"has_units": False, "unit_options": [], "unit_col": None, "entity_type": "general"}
 
+    df = normalize_diagnostic_dataframe(df, user_query=user_query)
+    if df is None or df.empty or len(df) < 2:
+        return {"has_units": False, "unit_options": [], "unit_col": None, "entity_type": "general"}
+
     q_low = (user_query or "").lower()
     primary_col, label_col = select_primary_insight_columns(df, user_query=user_query)
     time_col = find_time_column(df)
@@ -6083,9 +6197,11 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
         "gender": "⚖️ Select Workforce Cohort (HRBP / DEI Lead):",
         "time_series": "🗓️ Select Specific Period for Operational Pacing:",
     }
+    col_disp_vi = humanize_name_vi(unit_col) if unit_col else "Đơn Vị / Vùng"
+    col_disp_en = humanize_name_en(unit_col) if unit_col else "Assigned Unit / Region"
     selector_label = (selector_map_en if is_en else selector_map_vi).get(
         entity_type,
-        "🎯 Select Specific Assigned Unit / Region:" if is_en else "🎯 Chọn Đơn Vị / Vùng Phụ Trách Cụ Thể:"
+        f"🎯 Select Assigned {col_disp_en} (Operational Lead):" if is_en else f"🎯 Chọn {col_disp_vi} Phụ Trách Cụ Thể (Quản Lý Trực Tiếp):"
     )
 
     all_label = (
@@ -6737,9 +6853,11 @@ def _generate_unit_scoped_lead_plan(
         "title": f"🎯 COHORT EXECUTION PLAN • JOB TITLE: {u_name.upper()} (HRBP / C&B LEAD)",
         "time_series": f"🎯 PERIOD EXECUTION PLAN • INTERVAL: {u_name.upper()} (OPERATIONS LEAD)",
     }
+    col_disp_vi = humanize_name_vi(unit_col) if unit_col else "Đơn Vị"
+    col_disp_en = humanize_name_en(unit_col) if unit_col else "Unit"
     role_title = (role_header_map_en if is_en else role_header_map_vi).get(
         entity_type,
-        f"🎯 UNIT-SCOPED ACTION PLAN • {u_name.upper()} (OPERATIONAL LEAD)" if is_en else f"🎯 KẾ HOẠCH HÀNH ĐỘNG ĐÍCH DANH • ĐƠN VỊ {u_name.upper()} (QUẢN LÝ TRỰC TIẾP)"
+        f"🎯 UNIT-SCOPED ACTION PLAN • {col_disp_en.upper()}: {u_name.upper()} (OPERATIONAL LEAD)" if is_en else f"🎯 KẾ HOẠCH HÀNH ĐỘNG ĐÍCH DANH • {col_disp_vi.upper()} {u_name.upper()} (QUẢN LÝ TRỰC TIẾP)"
     ).replace("HÀỘNG", "HÀNH ĐỘNG")
 
     if is_en:
@@ -6929,6 +7047,7 @@ def generate_persona_action_plan(
       Đặc biệt: Khi truyền `target_unit` (VD: 'USA', 'India', 'Delish', 'Jucies', 'Bars', 'Sales'), hàm sẽ narrow-down
       100% số liệu, Benchmark và 3 khuyến nghị hành động cho DUY NHẤT vùng/đơn vị đó!
     """
+    df = normalize_diagnostic_dataframe(df, user_query=user_query)
     tree = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en)
     if persona == "lead" and target_unit and str(target_unit).strip().upper() not in ("", "ALL", "NONE"):
         units_info = extract_selectable_units(df, user_query=user_query, is_en=is_en)
@@ -6945,7 +7064,8 @@ def generate_persona_action_plan(
 
 def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", tree: dict = None, user_query: str = "", is_en: bool = False) -> dict:
     if tree is None:
-        tree = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en)
+        df = normalize_diagnostic_dataframe(df, user_query=user_query)
+    tree = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en)
     top_ent = tree.get("top_entity", "Top 1")
     bot_ent = tree.get("bot_entity", "Bottom 1")
     top_v = tree.get("top_val_fmt", "0")

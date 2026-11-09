@@ -773,6 +773,125 @@ def scan_dashboard_anomalies_and_strategies(
                 })
 
     # -------------------------------------------------------------
+    # 5. Quét Phổ Quát Đa CSDL (Universal Multi-DB Concentration & Dispersion Scanner)
+    # Tự động chẩn đoán cho Northwind, E-commerce, Logistics, Healthcare, Finance & Custom DBs
+    # -------------------------------------------------------------
+    if len(anomalies) < 2:
+        from src.analytics.heuristics import (
+            normalize_diagnostic_dataframe,
+            select_primary_insight_columns,
+            humanize_name_vi,
+            humanize_name_en,
+            format_entity_label,
+            is_id_like,
+        )
+        cand_keys = ["top_products_df", "cat_dist_df", "cat_df", "geo_df", "title_sal_df", "top10_df", "df", "sample_df"]
+        seen_signatures = set()
+        for ck in cand_keys:
+            if len(anomalies) >= 3:
+                break
+            raw_cand = data.get(ck)
+            if not isinstance(raw_cand, pd.DataFrame) or raw_cand.empty:
+                continue
+            norm_df = normalize_diagnostic_dataframe(raw_cand, user_query=layer_id)
+            if norm_df is None or norm_df.empty or len(norm_df) < 2:
+                continue
+            p_col, l_col = select_primary_insight_columns(norm_df, user_query=layer_id)
+            if not p_col:
+                num_c = [c for c in norm_df.select_dtypes(include="number").columns if not is_id_like(c)]
+                p_col = num_c[0] if num_c else None
+            if not l_col:
+                non_num_c = [c for c in norm_df.columns if not pd.api.types.is_numeric_dtype(norm_df[c])]
+                l_col = non_num_c[0] if non_num_c else norm_df.columns[0]
+            if not p_col or not l_col or p_col == l_col:
+                continue
+
+            sig = f"{l_col}::{p_col}"
+            if sig in seen_signatures:
+                continue
+            seen_signatures.add(sig)
+
+            w_df = norm_df[[l_col, p_col]].copy()
+            w_df[p_col] = pd.to_numeric(w_df[p_col], errors="coerce")
+            w_df = w_df.dropna(subset=[l_col, p_col])
+            if len(w_df) < 2:
+                continue
+            w_df = w_df.sort_values(p_col, ascending=False).reset_index(drop=True)
+            tot_v = float(w_df[p_col].sum())
+            mean_v = float(w_df[p_col].mean())
+            if tot_v <= 0 or mean_v <= 0:
+                continue
+
+            top_r = w_df.iloc[0]
+            bot_r = w_df.iloc[-1]
+            top_v = float(top_r[p_col])
+            bot_v = float(bot_r[p_col])
+            gap_v = top_v - bot_v
+            gap_ratio = top_v / max(1e-6, bot_v) if bot_v > 0 else top_v
+            top_sh = (top_v / tot_v) * 100.0
+            top3_sh = (float(w_df.head(min(3, len(w_df)))[p_col].sum()) / tot_v) * 100.0
+
+            is_money_col = any(k in str(p_col).lower() for k in ["sales", "amount", "revenue", "doanh", "salary", "lương", "payroll", "cost", "price", "freight", "tiền"])
+            pfx = "$" if is_money_col else ""
+            fmt_v = lambda x: f"{pfx}{x:,.0f}" if abs(x) >= 100 or abs(x - round(x)) < 1e-4 else f"{pfx}{x:,.2f}"
+
+            lang_c = "en" if is_en else "vi"
+            top_lbl = format_entity_label(top_r[l_col], col_name=l_col, lang=lang_c)
+            bot_lbl = format_entity_label(bot_r[l_col], col_name=l_col, lang=lang_c)
+            dim_vi = humanize_name_vi(l_col)
+            dim_en = humanize_name_en(l_col)
+            met_vi = humanize_name_vi(p_col)
+            met_en = humanize_name_en(p_col)
+
+            sev_u = "CRITICAL 🚨" if (top_sh >= 35.0 or gap_ratio >= 4.0) else "WARNING ⚠️"
+            if is_en:
+                anomalies.append({
+                    "severity": sev_u,
+                    "category": f"{dim_en} Concentration & Dispersion",
+                    "title": f"{dim_en} Skew: #1 '{top_lbl}' accounts for {top_sh:.1f}% ({gap_ratio:.1f}x vs '{bot_lbl}')",
+                    "metrics_summary": f"Across <b>{len(w_df)}</b> units in <b>{dim_en}</b>, leader <b>{top_lbl}</b> reached <b>{fmt_v(top_v)}</b> (<b>{top_sh:.1f}%</b> share; Top 3 = <b>{top3_sh:.1f}%</b>), while <b>{bot_lbl}</b> recorded <b>{fmt_v(bot_v)}</b> (benchmark mean: <b>{fmt_v(mean_v)}</b>).",
+                    "root_cause": f"Structural Pareto concentration in {met_en} where top-tier {dim_en} entities capture the majority of volume/value.",
+                    "quantified_impact": f"Lifting below-average {dim_en} units to the {fmt_v(mean_v)} benchmark unlocks significant incremental capacity and reduces concentration risk.",
+                    "raw": {
+                        "universal_diag": True,
+                        "top_lbl": top_lbl,
+                        "bot_lbl": bot_lbl,
+                        "top_fmt": fmt_v(top_v),
+                        "bot_fmt": fmt_v(bot_v),
+                        "mean_fmt": fmt_v(mean_v),
+                        "gap_fmt": fmt_v(gap_v),
+                        "top_sh": top_sh,
+                        "dim_vi": dim_vi,
+                        "dim_en": dim_en,
+                        "met_vi": met_vi,
+                        "met_en": met_en,
+                    },
+                })
+            else:
+                anomalies.append({
+                    "severity": sev_u,
+                    "category": f"Phân Hóa & Tập Trung Theo {dim_vi}",
+                    "title": f"Độ lệch {dim_vi}: Top #1 '{top_lbl}' chiếm {top_sh:.1f}% (gấp {gap_ratio:.1f}x so với '{bot_lbl}')",
+                    "metrics_summary": f"Trên tổng số <b>{len(w_df)}</b> đơn vị theo <b>{dim_vi}</b>, vị trí dẫn đầu <b>{top_lbl}</b> đạt <b>{fmt_v(top_v)}</b> (chiếm <b>{top_sh:.1f}%</b> tỷ trọng; Top 3 chiếm <b>{top3_sh:.1f}%</b>), trong khi <b>{bot_lbl}</b> đạt <b>{fmt_v(bot_v)}</b> (chuẩn bình quân: <b>{fmt_v(mean_v)}</b>).",
+                    "root_cause": f"Sự tập trung Pareto trong chỉ số {met_vi} khi nhóm dẫn đầu theo {dim_vi} chiếm phần lớn quy mô vận hành, tạo khoảng hụt <b>{fmt_v(gap_v)}</b> với nhóm cuối bảng.",
+                    "quantified_impact": f"Nếu nâng các đơn vị dưới chuẩn lên tiệm cận mức bình quân (<b>{fmt_v(mean_v)}</b>), hệ thống sẽ giảm rủi ro phụ thuộc cục bộ và mở khóa dư địa tăng trưởng rõ rệt.",
+                    "raw": {
+                        "universal_diag": True,
+                        "top_lbl": top_lbl,
+                        "bot_lbl": bot_lbl,
+                        "top_fmt": fmt_v(top_v),
+                        "bot_fmt": fmt_v(bot_v),
+                        "mean_fmt": fmt_v(mean_v),
+                        "gap_fmt": fmt_v(gap_v),
+                        "top_sh": top_sh,
+                        "dim_vi": dim_vi,
+                        "dim_en": dim_en,
+                        "met_vi": met_vi,
+                        "met_en": met_en,
+                    },
+                })
+
+    # -------------------------------------------------------------
     # TỔNG HỢP CHIẾN LƯỢC 3 TẦNG CHUẨN SENIOR DATA ANALYST
     # -------------------------------------------------------------
     has_critical = any(a["severity"].startswith("CRITICAL") for a in anomalies)
@@ -891,6 +1010,27 @@ def scan_dashboard_anomalies_and_strategies(
                     structural_optimizations.append(f"<b>Tái thiết lập Cấu trúc Quản lý Cấp Trung (1 - 2 Quý)</b>: Chia tách {dept_m} thành các Sub-units hoặc Plant/Division độc lập với Span of Control chuẩn (1 Quản lý / 500 - 1,000 công nhân).")
                     sustainable_strategies.append(f"<b>Chương trình Đào tạo Lãnh đạo Kế cận (Leadership Pipeline)</b>: Đào tạo định kỳ 50+ cán bộ quản lý cấp trung hàng năm để đảm bảo khả năng mở rộng quy mô bền vững.")
                     okrs.append(f"Hoàn tất phân bổ 100% định biên Trưởng nhóm/Phó phòng ban tại {dept_m} trong vòng 6 tháng tới.")
+
+            elif a.get("raw", {}).get("universal_diag"):
+                ru = a["raw"]
+                top_l = ru.get("top_lbl", "Top 1")
+                bot_l = ru.get("bot_lbl", "Bottom 1")
+                top_f = ru.get("top_fmt", "")
+                mean_f = ru.get("mean_fmt", "")
+                gap_f = ru.get("gap_fmt", "")
+                top_s = float(ru.get("top_sh", 30.0))
+                dim_v = ru.get("dim_vi", "Đơn vị")
+                dim_e = ru.get("dim_en", "Unit")
+                if is_en:
+                    immediate_actions.append(f"<b>Protect #1 Anchor & Unblock {bot_l} (0 - 30 Days)</b>: Lock 100% capacity for #1 <b>{top_l}</b> ({top_f} • {top_s:.1f}% share) while auditing bottlenecks in <b>{bot_l}</b> to close the {gap_f} spread.")
+                    structural_optimizations.append(f"<b>Rebalance {dim_e} Portfolio (1 - 2 Quarters)</b>: Lift below-benchmark {dim_e} units toward the <b>{mean_f}</b> baseline via cross-unit resource reallocation.")
+                    sustainable_strategies.append(f"<b>Standardize {top_l} Operating Playbook (1 - 3 Years)</b>: Codify best practices from <b>{top_l}</b> into a repeatable governance standard across all {dim_e} units.")
+                    okrs.append(f"Bring 100% of below-average {dim_e} units to ≥ 85% of the {mean_f} benchmark within 2 quarters.")
+                else:
+                    immediate_actions.append(f"<b>Bảo vệ Trụ cột #{1} & Tháo gỡ Điểm nghẽn tại {bot_l} (0 - 30 ngày)</b>: Đảm bảo 100% nguồn lực cho <b>{top_l}</b> ({top_f} • chiếm {top_s:.1f}%) đồng thời rà soát điểm nghẽn tại <b>{bot_l}</b> để thu hẹp khoảng chênh <b>{gap_f}</b>.")
+                    structural_optimizations.append(f"<b>Tái cân bằng Cơ cấu {dim_v} (1 - 2 Quý)</b>: Nâng các đơn vị dưới chuẩn tiệm cận mốc bình quân <b>{mean_f}</b> thông qua tái phân bổ nguồn lực và nhân rộng mô hình hiệu quả.")
+                    sustainable_strategies.append(f"<b>Chuẩn hóa Playbook Vận hành từ {top_l} (1 - 3 Năm)</b>: Đóng gói quy trình thực thi của <b>{top_l}</b> thành bộ tiêu chuẩn quản trị chung cho toàn bộ các đơn vị theo {dim_v}.")
+                    okrs.append(f"Đưa tối thiểu 80% các đơn vị dưới chuẩn chạm ngưỡng ≥ 85% mốc bình quân ({mean_f}) trong 2 quý tới.")
 
     else:
         if is_en:

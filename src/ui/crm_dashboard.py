@@ -724,7 +724,16 @@ def render_smart_analyst_anomaly_panel(
         )
         return s
 
-    # Xác định các tập dữ liệu chẩn đoán hiện có trong Layer để dựng Cây Giả Thuyết & Phân Tầng Vai Trò / Đơn vị Phụ trách
+    # Xác định các tập dữ liệu chẩn đoán hiện có trong Layer để dựng Cây Giả Thuyết & Phân Tầng Vai Trò / Đơn vị Phụ trách (100% Động trên mọi CSDL)
+    from src.analytics.heuristics import (
+        normalize_diagnostic_dataframe,
+        select_primary_insight_columns,
+        humanize_name_vi,
+        humanize_name_en,
+        is_id_like,
+        _is_status_or_eval_column,
+        find_time_column,
+    )
     diag_sources = {}
     if isinstance(data.get("geo_df"), pd.DataFrame) and not data["geo_df"].empty:
         diag_sources["🌍 Thị trường Quốc gia (Market Share)" if not is_en else "🌍 Global Markets (Geo)"] = (data["geo_df"], "doanh số theo quốc gia thị trường")
@@ -734,36 +743,107 @@ def render_smart_analyst_anomaly_panel(
         diag_sources["👥 Đội ngũ Kinh doanh (Sales Teams)" if not is_en else "👥 Sales Teams"] = (data["team_df"], "doanh số theo đội ngũ team")
     if isinstance(data.get("category_df"), pd.DataFrame) and not data["category_df"].empty:
         diag_sources["🍫 Danh mục Sản phẩm (Product Category)" if not is_en else "🍫 Product Categories"] = (data["category_df"], "doanh số theo danh mục sản phẩm")
-    elif isinstance(data.get("cat_df"), pd.DataFrame) and not data["cat_df"].empty and "Category" in data["cat_df"].columns:
-        diag_sources["🍫 Danh mục Sản phẩm (Product Category)" if not is_en else "🍫 Product Categories"] = (data["cat_df"], "doanh số theo danh mục sản phẩm")
+    elif isinstance(data.get("cat_dist_df"), pd.DataFrame) and not data["cat_dist_df"].empty:
+        diag_sources["📦 Cơ cấu Ngành hàng (Categories)" if not is_en else "📦 Product Categories"] = (data["cat_dist_df"], "doanh số theo danh mục sản phẩm")
+    elif isinstance(data.get("cat_df"), pd.DataFrame) and not data["cat_df"].empty:
+        cat_col_0 = str(data["cat_df"].columns[0])
+        cat_lbl_vi = f"📊 Phân bổ theo {humanize_name_vi(cat_col_0)}"
+        cat_lbl_en = f"📊 Distribution by {humanize_name_en(cat_col_0)}"
+        diag_sources[cat_lbl_en if is_en else cat_lbl_vi] = (data["cat_df"], f"phân tích theo {cat_col_0}")
     if isinstance(data.get("size_df"), pd.DataFrame) and not data["size_df"].empty:
         diag_sources["📦 Kích cỡ Đóng gói (Package Size)" if not is_en else "📦 Package Sizes"] = (data["size_df"], "doanh số theo kích cỡ sản phẩm")
     if isinstance(data.get("top_skus_df"), pd.DataFrame) and not data["top_skus_df"].empty:
         diag_sources["🍫 Top 10 Sản phẩm (Top SKUs)" if not is_en else "🍫 Top 10 SKUs"] = (data["top_skus_df"], "doanh số theo sản phẩm")
+    if isinstance(data.get("top_products_df"), pd.DataFrame) and not data["top_products_df"].empty:
+        diag_sources["🏆 Top Sản phẩm Chủ lực (Top Products)" if not is_en else "🏆 Top Flagship Products"] = (data["top_products_df"], "doanh số theo sản phẩm")
     if isinstance(data.get("dept_df"), pd.DataFrame) and not data["dept_df"].empty:
         diag_sources["🏢 Khối Phòng Ban (Departments)" if not is_en else "🏢 Departments"] = (data["dept_df"], "nhân sự và lương theo phòng ban")
     if isinstance(data.get("dept_sal_df"), pd.DataFrame) and not data["dept_sal_df"].empty:
         diag_sources["💰 Lương theo Phòng Ban (Dept Salary)" if not is_en else "💰 Salary by Department"] = (data["dept_sal_df"], "lương trung bình theo phòng ban")
-    if isinstance(data.get("df"), pd.DataFrame) and not data["df"].empty:
-        main_df_cols = [str(c).lower() for c in data["df"].columns]
+    if isinstance(data.get("title_sal_df"), pd.DataFrame) and not data["title_sal_df"].empty:
+        diag_sources["🎖️ Lương theo Chức Danh (Title Salary)" if not is_en else "🎖️ Salary by Job Title"] = (data["title_sal_df"], "lương trung bình theo chức danh")
+    if isinstance(data.get("top10_df"), pd.DataFrame) and not data["top10_df"].empty:
+        diag_sources["🏅 Top Nhân Sự Lương Cao Nhất" if not is_en else "🏅 Top 10 Earners"] = (data["top10_df"], "top nhân sự lương cao nhất")
+
+    base_table_df = data.get("df") if isinstance(data.get("df"), pd.DataFrame) and not data["df"].empty else (
+        data.get("sample_df") if isinstance(data.get("sample_df"), pd.DataFrame) and not data["sample_df"].empty else None
+    )
+    if base_table_df is not None:
+        main_df_cols = [str(c).lower() for c in base_table_df.columns]
+        norm_main_df = normalize_diagnostic_dataframe(base_table_df, user_query=layer_id)
         if "geo" in main_df_cols and not isinstance(data.get("geo_df"), pd.DataFrame):
             df_lbl = "🌍 Thị trường Quốc gia (Market Share)" if not is_en else "🌍 Global Markets (Geo)"
             df_q = "doanh số theo quốc gia thị trường"
-        elif "salesperson" in main_df_cols:
+        elif any(k in main_df_cols for k in ["salesperson", "salesrep", "employeename"]):
             df_lbl = "🧑‍💼 Chuyên viên Kinh doanh (Sales Reps)" if not is_en else "🧑‍💼 Sales Representatives"
             df_q = "doanh số theo nhân viên bán hàng"
-        elif "product" in main_df_cols:
+        elif any(k in main_df_cols for k in ["product", "productname"]):
             df_lbl = "🍫 Chi tiết Sản phẩm SKU (Product SKUs)" if not is_en else "🍫 Product SKUs"
             df_q = "doanh số theo sản phẩm"
+        elif any(k in main_df_cols for k in ["companyname", "customername", "customer"]):
+            df_lbl = "🏢 Khách hàng / Đối tác (Accounts)" if not is_en else "🏢 Corporate Accounts"
+            df_q = "doanh số theo khách hàng"
         elif any(k in main_df_cols for k in ["month", "yearmonth", "timeperiod"]) and not isinstance(data.get("trend_df"), pd.DataFrame):
             df_lbl = "📈 Chuỗi thời gian Tháng (Monthly Trend)" if not is_en else "📈 Monthly Time Series"
             df_q = "xu hướng doanh thu theo từng tháng"
         else:
-            df_lbl = "📊 Bảng dữ liệu chính (Primary Table)" if not is_en else "📊 Primary Layer Dataset"
-            df_q = layer_id
-        diag_sources[df_lbl] = (data["df"], df_q)
+            p_c0, l_c0 = select_primary_insight_columns(norm_main_df, user_query=layer_id)
+            if l_c0:
+                df_lbl = f"📊 Phân tích theo {humanize_name_vi(l_c0)} ({l_c0})" if not is_en else f"📊 Analysis by {humanize_name_en(l_c0)} ({l_c0})"
+                df_q = f"{layer_id} {l_c0}"
+            else:
+                df_lbl = "📊 Bảng dữ liệu chính (Primary Table)" if not is_en else "📊 Primary Layer Dataset"
+                df_q = layer_id
+        diag_sources[df_lbl] = (norm_main_df, df_q)
+
+        # Tự động bóc tách thêm các chiều phân tích ảo (Virtual Grouped Dimensions) từ mọi cột phân loại hợp lệ trong bảng
+        p_metric, primary_lbl_col = select_primary_insight_columns(base_table_df, user_query=layer_id)
+        if not p_metric:
+            num_cands = [c for c in base_table_df.select_dtypes(include="number").columns if not is_id_like(c)]
+            p_metric = num_cands[0] if num_cands else None
+        t_col_base = find_time_column(base_table_df)
+        for col in base_table_df.columns:
+            if col in (primary_lbl_col, p_metric, t_col_base) or is_id_like(col) or _is_status_or_eval_column(base_table_df, col):
+                continue
+            if pd.api.types.is_numeric_dtype(base_table_df[col]):
+                continue
+            s_clean = base_table_df[col].dropna().astype(str).str.strip()
+            s_clean = s_clean[~s_clean.str.lower().isin(["", "nan", "none", "null"])]
+            n_uniq = s_clean.nunique()
+            if 2 <= n_uniq <= min(35, max(2, len(base_table_df) - 1)):
+                if p_metric and p_metric in base_table_df.columns:
+                    w_grp = base_table_df[[col, p_metric]].copy()
+                    w_grp[p_metric] = pd.to_numeric(w_grp[p_metric], errors="coerce")
+                    w_grp = w_grp.dropna(subset=[col, p_metric])
+                    w_grp[col] = w_grp[col].astype(str).str.strip()
+                    w_grp = w_grp[~w_grp[col].str.lower().isin(["", "nan", "none", "null"])]
+                    if len(w_grp) >= 2:
+                        is_avg_m = any(k in str(p_metric).lower() for k in ["avg", "average", "mean", "pct", "rate", "margin", "price"])
+                        v_df = (
+                            w_grp.groupby(col, as_index=False)[p_metric].mean()
+                            if is_avg_m else
+                            w_grp.groupby(col, as_index=False)[p_metric].sum()
+                        ).sort_values(p_metric, ascending=False).reset_index(drop=True)
+                    else:
+                        v_df = pd.DataFrame()
+                else:
+                    v_df = (
+                        base_table_df.dropna(subset=[col])
+                        .assign(_g=lambda x: x[col].astype(str).str.strip())
+                        .query("_g != '' and _g.str.lower() not in ['nan', 'none', 'null']")
+                        .groupby("_g", as_index=False)
+                        .size()
+                        .rename(columns={"_g": col, "size": "RecordCount"})
+                        .sort_values("RecordCount", ascending=False)
+                        .reset_index(drop=True)
+                    )
+                if not v_df.empty and len(v_df) >= 2:
+                    v_lbl = f"🔎 Theo {humanize_name_vi(col)} ({col})" if not is_en else f"🔎 By {humanize_name_en(col)} ({col})"
+                    if v_lbl not in diag_sources:
+                        diag_sources[v_lbl] = (v_df, f"phân tích theo {col}")
+
     if isinstance(data.get("trend_df"), pd.DataFrame) and not data["trend_df"].empty:
-        diag_sources["📈 Chuỗi thời gian Tháng (Monthly Trend)" if not is_en else "📈 Monthly Time Series"] = (data["trend_df"], "xu hướng doanh thu theo từng tháng")
+        diag_sources["📈 Chuỗi thời gian (Time Trend)" if not is_en else "📈 Time Series Trend"] = (data["trend_df"], "xu hướng theo thời gian")
 
     # Hạng mục 1: Tinh giản 4 Tab chồng chéo thành 3 Bước Trực quan ("Slide-to-Unlock" Flow)
     persona_tab_label = "🎯 1. Role & Unit Action Plan" if is_en else "🎯 1. Hành Động Theo Vai Trò & Đơn Vị"
@@ -3824,6 +3904,14 @@ def _render_northwind_layer_products(engine, min_year: int, max_year: int):
 
     _render_sql_modal("Products & Catalog" if is_en else "Danh Mục & Sản Phẩm", data["sql"], data["exec_time_ms"], "nw_prod_sql")
 
+    render_smart_analyst_anomaly_panel(
+        layer_id="northwind_products",
+        data=data,
+        start_year=start_year,
+        end_year=end_year,
+        key_prefix="nw_prod"
+    )
+
 
 def _render_northwind_layer_orders(engine, min_year: int, max_year: int):
     """Layer 2: Phân tích Đơn hàng & Vận chuyển (Orders & Fulfillment Operations)."""
@@ -3855,6 +3943,14 @@ def _render_northwind_layer_orders(engine, min_year: int, max_year: int):
     st.markdown("</div>", unsafe_allow_html=True)
 
     _render_sql_modal("Orders & Shipping" if is_en else "Đơn Hàng & Vận Chuyển", data["sql"], data["exec_time_ms"], "nw_ord_sql")
+
+    render_smart_analyst_anomaly_panel(
+        layer_id="northwind_orders",
+        data=data,
+        start_year=start_year,
+        end_year=end_year,
+        key_prefix="nw_ord"
+    )
 
 
 def _render_northwind_layer_employees(engine, min_year: int, max_year: int):
@@ -3899,6 +3995,14 @@ def _render_northwind_layer_employees(engine, min_year: int, max_year: int):
 
     _render_sql_modal("Sales Representatives" if is_en else "Đại Diện Bán Hàng", data["sql"], data["exec_time_ms"], "nw_emp_sql")
 
+    render_smart_analyst_anomaly_panel(
+        layer_id="northwind_employees",
+        data=data,
+        start_year=start_year,
+        end_year=end_year,
+        key_prefix="nw_emp"
+    )
+
 
 def _render_northwind_layer_customers(engine, min_year: int, max_year: int):
     """Layer 4: Phân tích Khách hàng & Thị trường (Global Customers Intelligence)."""
@@ -3931,6 +4035,14 @@ def _render_northwind_layer_customers(engine, min_year: int, max_year: int):
 
     _render_sql_modal("Customers & Markets" if is_en else "Khách Hàng & Thị Trường", data["sql"], data["exec_time_ms"], "nw_cust_sql")
 
+    render_smart_analyst_anomaly_panel(
+        layer_id="northwind_customers",
+        data=data,
+        start_year=start_year,
+        end_year=end_year,
+        key_prefix="nw_cust"
+    )
+
 
 def _render_northwind_layer_suppliers(engine):
     """Layer 5: Phân tích Nhà cung ứng & Nhập hàng (Suppliers & Purchasing)."""
@@ -3961,6 +4073,14 @@ def _render_northwind_layer_suppliers(engine):
     st.markdown("</div>", unsafe_allow_html=True)
 
     _render_sql_modal("Suppliers & Sourcing" if is_en else "Nhà Cung Ứng", data["sql"], data["exec_time_ms"], "nw_sup_sql")
+
+    render_smart_analyst_anomaly_panel(
+        layer_id="northwind_suppliers",
+        data=data,
+        start_year=None,
+        end_year=None,
+        key_prefix="nw_sup"
+    )
 
 
 # =========================================================================

@@ -31,7 +31,10 @@ TIME_KEYWORDS = ["date", "month", "thang", "tháng", "quy", "quý", "quarter", "
 BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "tháng", "quy", "quý", "quarter"]
 
 # ID-like column pattern (excluded from statistical Y-axes and forecasting)
-ID_LIKE_REGEX = re.compile(r'(^|_)(id|no|code|key|num|sn)$', re.IGNORECASE)
+ID_LIKE_REGEX = re.compile(
+    r'(?:^|_)(?:id|no|code|key|num|sn)$|(?:supplier|product|customer|order|employee|category|shipper|region|territory|geo|dept|department|user|account|transaction|invoice|ticket|patient|flight|hospital|store|branch|item|sku|postal|zip|tax|phone|fax|emp|cust|prod|ord|sup|cat|mgr|manager|role|status|type|group|org|company|vendor|client|member|student|course|doctor|airline|airport)_?(?:id|code|no|key)$',
+    re.IGNORECASE
+)
 
 # Business name-like column pattern (prioritized for X-axis labels)
 NAME_LIKE_REGEX = re.compile(
