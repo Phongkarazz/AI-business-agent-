@@ -127,3 +127,31 @@ class DatasetExporter:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
 
         return manifest
+
+    @classmethod
+    def inject_into_memory_bank(cls, samples: List[SyntheticSample]) -> int:
+        """Nạp trực tiếp các mẫu dữ liệu đã qua kiểm định APIGen vào Ngân hàng Tri thức Động của Veraxus (agent_memory.db).
+        
+        Giúp Veraxus lập tức 'thông minh lên' ngay tại chỗ mà KHÔNG CẦN train lại mô hình!
+        Các câu hỏi tiếp theo của người dùng trên Chat/Dashboard sẽ tự động trích xuất các mẫu này làm Dynamic Few-Shot Exemplars.
+        """
+        try:
+            from src.llm.dynamic_memory import save_learned_case, infer_domain_from_context
+            count = 0
+            for s in samples:
+                if s.sample_type == "tool_sql" and s.target_sql and s.verification and s.verification.is_valid:
+                    domain = infer_domain_from_context(s.query_vi, s.target_sql)
+                    save_learned_case(
+                        user_query=s.query_vi,
+                        sql_query=s.target_sql,
+                        intent_explanation=f"APIGen Verified ({s.category})",
+                        domain=domain,
+                        source="apigen_datagen",
+                        evaluator_score=100,
+                        rating=1
+                    )
+                    count += 1
+            return count
+        except Exception:
+            return 0
+

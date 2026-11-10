@@ -136,6 +136,11 @@ def render_evolution_dashboard():
                 value=True,
                 help="Tạo thêm các cặp mẫu DPO cho When2Call để Agent biết chủ động hỏi lại khi thiếu dữ liệu."
             )
+            auto_inject_mem = st.checkbox(
+                "⚡ Tự động nạp vào Bộ Nhớ Động Veraxus" if not is_en else "⚡ Auto-inject into Veraxus Memory",
+                value=True,
+                help="Nạp các mẫu SQL chuẩn mực trực tiếp vào agent_memory.db để Veraxus thông minh hơn ngay lập tức mà không cần train lại mô hình!"
+            )
 
         if st.button("🚀 Khởi Chạy Pipeline Data Gen Ngay" if not is_en else "🚀 Launch Data Gen Pipeline", type="primary", use_container_width=True, key="btn_run_datagen"):
             active_engine = st.session_state.get("engine")
@@ -161,16 +166,24 @@ def render_evolution_dashboard():
                 n_dpo = DatasetExporter.export_dpo_preference(samples, dpo_path)
                 manifest = DatasetExporter.export_summary_manifest(samples, output_dir, execution_time_sec=elapsed)
 
+                injected_n = 0
+                if auto_inject_mem:
+                    injected_n = DatasetExporter.inject_into_memory_bank(samples)
+
                 st.session_state["datagen_manifest"] = manifest
                 st.session_state["datagen_samples"] = samples
                 st.session_state["datagen_sft_path"] = sft_path
                 st.session_state["datagen_dpo_path"] = dpo_path
+                st.session_state["datagen_injected_count"] = injected_n
 
         # Hiển thị kết quả kiểm định & Nút tải về nếu đã có dữ liệu
         if "datagen_manifest" in st.session_state:
             m = st.session_state["datagen_manifest"]
             samples = st.session_state["datagen_samples"]
             st.success(f"🎉 Hoàn tất sinh & kiểm định **{m['total_samples']} mẫu dữ liệu** trong **{m['generation_time_sec']}s**!")
+
+            if st.session_state.get("datagen_injected_count", 0) > 0:
+                st.info(f"🧠 **Đã tự động nạp thành công {st.session_state['datagen_injected_count']} mẫu SQL chuẩn mực vào Ngân hàng Tri thức Động của Veraxus!** Veraxus giờ đây sẽ tự động sử dụng các mẫu này làm ví dụ tham chiếu (Dynamic Few-Shots) cho các câu hỏi tiếp theo trong phần Chat.")
 
             m_col1, m_col2, m_col3, m_col4 = st.columns(4)
             with m_col1:
