@@ -35,7 +35,7 @@ import src.ui.sidebar
 import src.ui.crm_dashboard
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_minimalist_clean_v210"
+CACHE_BUILD_ID = "20261110_kpi_contrast_fix_v211"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)

@@ -591,17 +591,17 @@ def _render_diagnostic_kpi_card(
     resolved_pill = status_pill or status_text or "🟢 OPTIMAL"
     fill_w = min(100.0, max(8.0, float(bench_pct)))
     if bench_pct >= 98.0 or status_level == "good":
-        bar_bg = fill_color or "linear-gradient(90deg, #FFFFFF 0%, #6EE7B7 100%)"
-        pill_bg = "rgba(16, 185, 129, 0.34)"
-        pill_border = "rgba(167, 243, 208, 0.72)"
+        bar_bg = fill_color or "linear-gradient(90deg, #34D399 0%, #10B981 100%)"
+        pill_bg = "rgba(16, 185, 129, 0.36)"
+        pill_border = "rgba(167, 243, 208, 0.75)"
     elif bench_pct >= 85.0 or status_level == "warn":
-        bar_bg = fill_color or "linear-gradient(90deg, #FFFFFF 0%, #FDE047 100%)"
-        pill_bg = "rgba(245, 158, 11, 0.34)"
-        pill_border = "rgba(253, 230, 138, 0.72)"
+        bar_bg = fill_color or "linear-gradient(90deg, #FBBF24 0%, #F59E0B 100%)"
+        pill_bg = "rgba(245, 158, 11, 0.36)"
+        pill_border = "rgba(253, 230, 138, 0.75)"
     else:
-        bar_bg = fill_color or "linear-gradient(90deg, #FFFFFF 0%, #FCA5A5 100%)"
-        pill_bg = "rgba(239, 68, 68, 0.36)"
-        pill_border = "rgba(252, 165, 165, 0.75)"
+        bar_bg = fill_color or "linear-gradient(90deg, #F87171 0%, #EF4444 100%)"
+        pill_bg = "rgba(239, 68, 68, 0.38)"
+        pill_border = "rgba(252, 165, 165, 0.78)"
 
     delta_badge_html = f"<span class='kpi-delta-tag'>{extracted_delta}</span>" if extracted_delta else ""
 
@@ -621,8 +621,8 @@ def _render_diagnostic_kpi_card(
         </div>
         <div class="kpi-bench-wrap">
             <div class="kpi-bench-header">
-                <span title="{bench_label}">🎯 {bench_label}</span>
-                <span><b>{bench_pct:.1f}%</b></span>
+                <span class="kpi-bench-lbl" title="{bench_label}">🎯 {bench_label}</span>
+                <span class="kpi-bench-pct"><b>{bench_pct:.1f}%</b></span>
             </div>
             <div class="kpi-bench-track">
                 <div class="kpi-bench-fill" style="width: {fill_w:.1f}%; background: {bar_bg};"></div>
@@ -1435,13 +1435,12 @@ def render_crm_dashboard():
         
         /* High-Contrast Neon Gradient Metric KPI Cards (100% Uniform Diagnostic Dimensions & Zero Truncation) */
         .kpi-card-cyan, .kpi-card-purple, .kpi-card-emerald, .kpi-card-amber {
-            border-radius: 18px;
-            padding: 14px 16px !important;
+            border-radius: 16px;
+            padding: 12px 14px !important;
             color: #FFFFFF !important;
-            border: 1px solid rgba(255, 255, 255, 0.28);
-            height: 208px !important;
-            min-height: 208px !important;
-            max-height: 208px !important;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            height: auto !important;
+            min-height: 198px !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
             display: flex !important;
@@ -1450,20 +1449,24 @@ def render_crm_dashboard():
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         .kpi-card-cyan {
-            background: linear-gradient(135deg, #0052D4 0%, #4364F7 50%, #6FB1FC 100%);
-            box-shadow: 0 10px 30px rgba(0, 82, 212, 0.45);
+            background: linear-gradient(145deg, #0A2968 0%, #1142A6 50%, #1A5BD8 100%) !important;
+            border: 1px solid rgba(56, 189, 248, 0.45) !important;
+            box-shadow: 0 8px 24px rgba(10, 41, 104, 0.4) !important;
         }
         .kpi-card-purple {
-            background: linear-gradient(135deg, #8A2387 0%, #E94057 50%, #F27121 100%);
-            box-shadow: 0 10px 30px rgba(233, 64, 87, 0.45);
+            background: linear-gradient(145deg, #4A0E4E 0%, #7E1546 50%, #A81B4B 100%) !important;
+            border: 1px solid rgba(244, 114, 182, 0.45) !important;
+            box-shadow: 0 8px 24px rgba(126, 21, 70, 0.4) !important;
         }
         .kpi-card-emerald {
-            background: linear-gradient(135deg, #0BA360 0%, #3CBA92 100%);
-            box-shadow: 0 10px 30px rgba(11, 163, 96, 0.45);
+            background: linear-gradient(145deg, #023325 0%, #06553F 50%, #0A7456 100%) !important;
+            border: 1px solid rgba(52, 211, 153, 0.45) !important;
+            box-shadow: 0 8px 24px rgba(2, 51, 37, 0.4) !important;
         }
         .kpi-card-amber {
-            background: linear-gradient(135deg, #F7971E 0%, #FFD200 100%);
-            box-shadow: 0 10px 30px rgba(247, 151, 30, 0.45);
+            background: linear-gradient(145deg, #422006 0%, #713F12 50%, #8D4F13 100%) !important;
+            border: 1px solid rgba(251, 191, 36, 0.5) !important;
+            box-shadow: 0 8px 24px rgba(66, 32, 6, 0.4) !important;
         }
         .kpi-card-cyan:hover, .kpi-card-purple:hover, .kpi-card-emerald:hover, .kpi-card-amber:hover {
             transform: translateY(-3px);
@@ -1474,22 +1477,24 @@ def render_crm_dashboard():
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            gap: 6px !important;
+            gap: 4px !important;
             width: 100% !important;
             flex-shrink: 0 !important;
+            margin-bottom: 2px !important;
         }
         .kpi-title {
-            font-size: 0.77rem !important;
+            font-size: 0.74rem !important;
             font-weight: 800 !important;
             text-transform: uppercase;
-            letter-spacing: 0.03em;
-            color: rgba(255, 255, 255, 0.98);
-            line-height: 1.26 !important;
+            letter-spacing: 0.02em;
+            color: rgba(255, 255, 255, 0.98) !important;
+            line-height: 1.24 !important;
             width: 100% !important;
             white-space: normal !important;
             overflow: visible !important;
-            margin: 2px 0 0 0 !important;
+            margin: 2px 0 1px 0 !important;
             flex-shrink: 0 !important;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.4);
         }
         .kpi-title-text {
             display: block !important;
@@ -1498,24 +1503,28 @@ def render_crm_dashboard():
             overflow: visible !important;
         }
         .kpi-status-pill {
-            font-size: 0.65rem !important;
+            font-size: 0.63rem !important;
             font-weight: 800 !important;
-            padding: 2px 8px !important;
+            padding: 2px 7px !important;
             border-radius: 999px !important;
             color: #FFFFFF !important;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.01em;
             backdrop-filter: blur(6px);
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 3px !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
         .kpi-val {
-            font-size: clamp(1.24rem, 1.48vw, 1.62rem) !important;
+            font-size: clamp(1.22rem, 1.45vw, 1.55rem) !important;
             font-weight: 900 !important;
             color: #FFFFFF !important;
             letter-spacing: -0.02em;
             line-height: 1.15 !important;
-            margin: 1px 0 !important;
-            text-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
+            margin: 2px 0 !important;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
             white-space: nowrap !important;
             overflow: visible !important;
             display: flex !important;
@@ -1524,79 +1533,101 @@ def render_crm_dashboard():
             flex-shrink: 0 !important;
         }
         .kpi-delta-tag {
-            font-size: 0.69rem !important;
+            font-size: 0.68rem !important;
             font-weight: 800 !important;
-            padding: 2px 6px !important;
+            padding: 1px 6px !important;
             border-radius: 6px !important;
-            background: rgba(0, 0, 0, 0.28) !important;
-            color: #ECFDF5 !important;
-            border: 1px solid rgba(255, 255, 255, 0.36) !important;
+            background: rgba(0, 0, 0, 0.4) !important;
+            color: #FFFFFF !important;
+            border: 1px solid rgba(255, 255, 255, 0.35) !important;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
         .kpi-bench-wrap {
             width: 100% !important;
-            margin-top: 2px !important;
+            margin-top: 3px !important;
             flex-shrink: 0 !important;
         }
         .kpi-bench-header {
             display: flex !important;
             justify-content: space-between !important;
             align-items: center !important;
-            gap: 6px;
+            gap: 6px !important;
             font-size: 0.70rem !important;
             font-weight: 700 !important;
-            color: rgba(255, 255, 255, 0.96) !important;
-            margin-bottom: 4px !important;
-            white-space: nowrap !important;
+            color: rgba(255, 255, 255, 0.98) !important;
+            margin-bottom: 3px !important;
+            width: 100% !important;
         }
-        .kpi-bench-header > span:first-child {
+        .kpi-bench-lbl {
             white-space: nowrap !important;
-            min-width: 0;
-            flex: 1;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            min-width: 0 !important;
+            flex: 1 1 0% !important;
+            display: block !important;
+            color: rgba(255, 255, 255, 0.95) !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        }
+        .kpi-bench-pct {
+            white-space: nowrap !important;
+            flex: 0 0 auto !important;
+            text-align: right !important;
+            padding-left: 4px !important;
+            font-size: 0.72rem !important;
+            font-weight: 800 !important;
+            color: #FFFFFF !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
         }
         .kpi-bench-track {
             width: 100% !important;
             height: 6px !important;
-            background: rgba(0, 0, 0, 0.28) !important;
+            background: rgba(0, 0, 0, 0.35) !important;
             border-radius: 999px !important;
             overflow: hidden !important;
-            border: 1px solid rgba(255, 255, 255, 0.22) !important;
+            border: 1px solid rgba(255, 255, 255, 0.25) !important;
         }
         .kpi-bench-fill {
             height: 100% !important;
             border-radius: 999px !important;
-            box-shadow: 0 0 8px rgba(255, 255, 255, 0.65) !important;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.7) !important;
         }
         .kpi-sub {
-            font-size: 0.74rem !important;
+            font-size: 0.71rem !important;
             font-weight: 600 !important;
-            color: rgba(255, 255, 255, 0.96) !important;
+            color: rgba(255, 255, 255, 0.95) !important;
             display: flex !important;
             align-items: center !important;
-            gap: 6px !important;
+            gap: 5px !important;
             flex-wrap: nowrap !important;
             width: 100% !important;
             flex-shrink: 0 !important;
+            margin: 2px 0 !important;
         }
         .kpi-sub-text {
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            min-width: 0;
-            flex: 1;
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+            color: rgba(255, 255, 255, 0.92) !important;
+            font-weight: 600 !important;
+            font-size: 0.70rem !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
         }
         .kpi-badge {
-            background: rgba(255, 255, 255, 0.24) !important;
-            backdrop-filter: blur(8px);
-            padding: 2px 8px !important;
+            background: rgba(255, 255, 255, 0.18) !important;
+            border: 1px solid rgba(255, 255, 255, 0.3) !important;
+            padding: 2px 7px !important;
             border-radius: 6px !important;
-            font-size: 0.67rem !important;
+            font-size: 0.65rem !important;
             font-weight: 800 !important;
             color: #FFFFFF !important;
             letter-spacing: 0.02em;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
         }
 
         /* Dark Glassmorphism Card Containers */
@@ -2941,7 +2972,7 @@ def _render_sales_layer_overview(engine, min_y: int = 2021, max_y: int = 2022):
             color_class="kpi-card-cyan",
             title=t("sales_kpi_revenue"),
             value_html=f"<span>${data['total_revenue']:,.0f}</span><span class='kpi-delta-tag'>{rev_d_str}</span>",
-            status_pill="🟢 OPTIMAL" if is_en else "🟢 VƯỢT CHUẨN",
+            status_pill="🟢 OPTIMAL" if is_en else "🟢 VƯỢT MỨC",
             bench_label=f"Target ${rev_tgt_m:.1f}M" if is_en else f"Mục tiêu ${rev_tgt_m:.1f}M",
             bench_pct=float(data.get("rev_bench_pct", 108.9)),
             badge_text="Net Sales" if is_en else "Doanh thu",
@@ -2959,10 +2990,10 @@ def _render_sales_layer_overview(engine, min_y: int = 2021, max_y: int = 2022):
             title=t("sales_kpi_boxes"),
             value_html=f"<span>{data['total_boxes']:,} <small style='font-size:0.88rem;font-weight:700;'>{boxes_unit}</small></span><span class='kpi-delta-tag'>{box_d_str}</span>",
             status_pill="🟢 HIGH VOL" if is_en else "🟢 TỐI ƯU",
-            bench_label=f"Quota {box_tgt_m:.2f}M {boxes_unit}" if is_en else f"Định mức {box_tgt_m:.2f}M {boxes_unit}",
+            bench_label=f"Quota {box_tgt_m:.2f}M" if is_en else f"Định mức {box_tgt_m:.2f}M",
             bench_pct=float(data.get("box_bench_pct", 108.1)),
             badge_text="Volume" if is_en else "Sản lượng",
-            sub_text=f"Avg {avg_bx_ord:,.0f} {boxes_unit}/order" if is_en else f"TB {avg_bx_ord:,.0f} {boxes_unit}/đơn"
+            sub_text=f"Avg {avg_bx_ord:,.0f} boxes/ord" if is_en else f"TB {avg_bx_ord:,.0f} hộp/đơn"
         )
 
     with col_kpi3:
@@ -2974,11 +3005,11 @@ def _render_sales_layer_overview(engine, min_y: int = 2021, max_y: int = 2022):
             color_class="kpi-card-emerald",
             title=t("sales_kpi_customers"),
             value_html=f"<span>{data['total_customers']:,}</span><span class='kpi-delta-tag'>{cust_d_str}</span>",
-            status_pill="🟢 ACTIVE" if is_en else "🟢 TĂNG TRƯỞNG",
+            status_pill="🟢 ACTIVE" if is_en else "🟢 TĂNG TỐC",
             bench_label=f"KPI {cust_tgt_m:.2f}M visits" if is_en else f"Chuẩn {cust_tgt_m:.2f}M lượt",
             bench_pct=float(data.get("cust_bench_pct", 107.0)),
             badge_text="Traffic" if is_en else "Lưu lượng",
-            sub_text=f"Avg {avg_cu_ord:,.0f} buyers/order" if is_en else f"TB {avg_cu_ord:,.0f} khách/đơn"
+            sub_text=f"Avg {avg_cu_ord:,.0f} buyers/ord" if is_en else f"TB {avg_cu_ord:,.0f} khách/đơn"
         )
 
     with col_kpi4:
@@ -2988,13 +3019,13 @@ def _render_sales_layer_overview(engine, min_y: int = 2021, max_y: int = 2022):
         tot_ords = int(data.get("total_orders", 7617))
         _render_diagnostic_kpi_card(
             color_class="kpi-card-amber",
-            title="Avg Order Value" if is_en else "GIÁ TRỊ ĐƠN BÌNH QUÂN",
+            title="Avg Order Value (AOV)" if is_en else "GIÁ TRỊ ĐƠN (AOV)",
             value_html=f"<span>${data['avg_order_value']:,.0f}</span><span class='kpi-delta-tag'>{aov_d_str}</span>",
-            status_pill="🟢 HIGH YIELD" if is_en else "🟢 VƯỢT NGƯỠNG",
-            bench_label=f"Industry Bench ${aov_tgt:,.0f}" if is_en else f"Chuẩn ngành ${aov_tgt:,.0f}",
+            status_pill="🟢 HIGH YIELD" if is_en else "🟢 VƯỢT MỨC",
+            bench_label=f"Industry ${aov_tgt:,.0f}" if is_en else f"Chuẩn ${aov_tgt:,.0f}",
             bench_pct=float(data.get("aov_bench_pct", 108.9)),
             badge_text="AOV",
-            sub_text=f"Across {tot_ords:,} orders" if is_en else f"Quy mô {tot_ords:,} đơn hàng"
+            sub_text=f"{tot_ords:,} orders" if is_en else f"{tot_ords:,} đơn hàng"
         )
 
     # Thanh Chẩn Đoán Tương Quan Nhanh (Dynamic Benchmark & Diagnostic Strip)

@@ -225,9 +225,9 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "sales_layer_trends": "📈 Xu hướng Doanh thu (Trends)",
         "sales_layer_top_performers": "🏆 Xếp hạng Ngôi sao Bán hàng (Top Performers)",
         "sales_kpi_revenue": "Tổng Doanh Thu",
-        "sales_kpi_boxes": "Tổng Số Hộp Bán Ra",
+        "sales_kpi_boxes": "Tổng Số Hộp Bán",
         "sales_kpi_orders": "Tổng Số Giao Dịch",
-        "sales_kpi_customers": "Tổng Lượt Khách Mua",
+        "sales_kpi_customers": "Tổng Lượt Khách",
 
         # --- Northwind ERP Dashboard ---
         "northwind_dash_title": "📦 Global Supply Chain & Sales Intelligence Dashboard",
