@@ -41,7 +41,7 @@ import src.llm.agent
 import src.llm
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_fix_headcount_scoping_v222"
+CACHE_BUILD_ID = "20261110_fix_entity_type_phrasing_v224"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
@@ -870,6 +870,15 @@ else:
                         _turn["explanation"] = None
                         _turn["anomalies_info"] = analyze_data_anomalies(_df_new)
                         _sec = split_insight_sections("", df=_df_new, user_query=_q, is_en=(_turn.get("lang") == "en"))
+                        _turn["insights"] = (
+                            f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{_sec['anomaly']}\n\n"
+                            f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{_sec['hypothesis']}\n\n"
+                            f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec['action_plan']}"
+                        )
+                else:
+                    _ins = _turn.get("insights") or ""
+                    if ("Đơn vị/ngạch" in _ins or "cho từng thành viên trong" in _ins) and _turn.get("df") is not None and not _turn["df"].empty:
+                        _sec = split_insight_sections("", df=_turn["df"], user_query=_q, is_en=(_turn.get("lang") == "en"))
                         _turn["insights"] = (
                             f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{_sec['anomaly']}\n\n"
                             f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{_sec['hypothesis']}\n\n"

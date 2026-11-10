@@ -985,11 +985,13 @@ def render_smart_analyst_anomaly_panel(
                     for sm in sec_m_list
                 )
                 sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;'>{sec_m_html}</div>" if sec_m_html else ""
+                u_lbl_vi = unit_diag.get("entity_label_vi", "Đơn vị")
+                u_lbl_en = unit_diag.get("entity_label_en", "Unit")
                 unit_strip_html = f"""
                 <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
                         <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
-                            🎯 {'ĐỊNH CHUẨN ĐƠN VỊ:' if not is_en else 'UNIT SCORECARD:'} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
+                            🎯 {f"ĐỊNH CHUẨN {u_lbl_vi.upper()}:" if not is_en else f"{u_lbl_en.upper()} SCORECARD:"} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
                         </span>
                         <span style="font-size: 0.71rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
                             {unit_diag.get('status_badge')}
@@ -997,7 +999,7 @@ def render_smart_analyst_anomaly_panel(
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 8px; margin-bottom: 8px;">
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
-                            <div style="font-size: 0.68rem; color: #94A3B8;">{'Thực tế Đơn vị' if not is_en else 'Unit Actual'}</div>
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{f"Thực tế {u_lbl_vi}" if not is_en else f"{u_lbl_en} Actual"}</div>
                             <div style="font-size: 0.85rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.69rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
                         </div>
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
