@@ -41,7 +41,7 @@ import src.llm.agent
 import src.llm
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_nogatekeeper_v217"
+CACHE_BUILD_ID = "20261110_fix_nondata_conversational_v220"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
@@ -65,7 +65,11 @@ if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
 from src.i18n import t, get_current_language, set_current_language
 from src.config_store import load_saved_config
 from src.database.schema import get_table_names
-from src.analytics.heuristics import generate_starter_prompts, generate_categorized_starter_prompts
+from src.analytics.heuristics import (
+    generate_starter_prompts,
+    generate_categorized_starter_prompts,
+    is_non_data_conversational
+)
 from src.ui.state import init_session_state
 from src.ui.onboarding import render_onboarding
 from src.ui.sidebar import perform_connection, render_main_sidebar
@@ -77,6 +81,39 @@ if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
     st.session_state["_cache_build_id"] = CACHE_BUILD_ID
     st.session_state["query_cache"] = {}
     st.session_state["_needs_history_heal"] = True
+
+    # Tự động chữa lành các lượt hội thoại phi dữ liệu trong history (xóa bỏ bảng, biểu đồ, SQL ảo)
+    if "history" in st.session_state and st.session_state["history"]:
+        cleaned_history = []
+        for h in st.session_state["history"]:
+            if not isinstance(h, dict):
+                continue
+            q_text = str(h.get("query", ""))
+            if is_non_data_conversational(q_text):
+                h["df"] = None
+                h["sql"] = None
+                h["insights"] = None
+                h["anomalies_info"] = None
+                h["agent_trace"] = None
+                q_low = q_text.lower()
+                if any(k in q_low for k in ["ốm", "sốt", "mệt", "đau", "bệnh", "sick", "tired"]):
+                    h["explanation"] = (
+                        "Tôi rất tiếc khi biết bạn không được khỏe! Bạn hãy nghỉ ngơi nhiều, giữ ấm và uống đủ nước ấm để mau hồi phục nhé. "
+                        "Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus — khi nào bạn khỏe lại và cần tra cứu, phân tích số liệu, tôi luôn sẵn sàng hỗ trợ bạn!"
+                    )
+                elif any(k in q_low for k in ["chào", "xin chào", "hello", "hi", "hey"]):
+                    h["explanation"] = "Xin chào bạn! Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus. Bạn cần tra cứu, phân tích hay lập báo cáo số liệu nào hôm nay?"
+                elif any(k in q_low for k in ["bạn là ai", "tên gì", "who are you"]):
+                    h["explanation"] = "Tôi là Veraxus — AI Data Analyst & Trợ lý Dữ liệu Kinh doanh. Tôi có thể hỗ trợ bạn truy vấn tự động, vẽ biểu đồ và phân tích chuyên sâu các số liệu từ cơ sở dữ liệu doanh nghiệp!"
+                else:
+                    h["explanation"] = (
+                        "💡 **Thông báo từ Trợ lý:** Câu hỏi của bạn nằm ngoài phạm vi cơ sở dữ liệu doanh nghiệp hiện tại. "
+                        "Tôi là Trợ lý Dữ liệu Kinh doanh, chuyên hỗ trợ phân tích các thông tin về bán hàng, sản phẩm, nhân sự, đơn hàng và khách hàng.\n\n"
+                        "👉 Bạn có thể thử các câu hỏi về doanh số, sản phẩm hoặc thị trường để tôi hỗ trợ nhé!"
+                    )
+            cleaned_history.append(h)
+        st.session_state["history"] = cleaned_history
+
     try:
         st.cache_data.clear()
     except Exception:
@@ -809,6 +846,13 @@ else:
                 _sql_orig = str(_turn.get("sql") or "")
                 if not _q:
                     continue
+                if is_non_data_conversational(_q):
+                    _turn["df"] = None
+                    _turn["sql"] = None
+                    _turn["insights"] = None
+                    _turn["anomalies_info"] = None
+                    _turn["agent_trace"] = None
+                    continue
                 _sql_new = _sql_orig
                 _sql_new = auto_fix_chocolates_half_year_comparison_query(_sql_new, _q, dialect=_dial)
                 _sql_new = auto_fix_chocolates_consecutive_growth_streak_query(_sql_new, _q, dialect=_dial)
@@ -1080,6 +1124,10 @@ else:
 
         cache_key = prompt_to_run.strip().lower()
         cached = st.session_state.get("query_cache", {}).get(cache_key)
+
+        # Nếu là câu hỏi giao tiếp phi dữ liệu hoặc cache cũ vô tình dính df/sql, bỏ qua cache cũ
+        if is_non_data_conversational(prompt_to_run) or (cached and is_non_data_conversational(cached.get("query", "")) and cached.get("df") is not None):
+            cached = None
 
         if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
             result = cached

@@ -36,6 +36,69 @@ def has_keyword(text: str, keywords: list[str]) -> bool:
     return False
 
 
+def is_non_data_conversational(query: str, schema_context: str = "") -> bool:
+    """Nhận diện các câu hỏi phi dữ liệu: chào hỏi, chia sẻ sức khỏe/cảm xúc cá nhân (như 'Tôi bị ốm'),
+    đố vui, thời tiết hoặc các chủ đề ngoài phạm vi CSDL kinh doanh."""
+    if not query or not query.strip():
+        return True
+    q_low = query.strip().lower()
+
+    # 1. Nhóm tín hiệu sức khỏe và cảm xúc cá nhân (Personal health & feelings) -> 100% Conversational
+    personal_health_signals = [
+        "ốm", "bị ốm", "sốt", "bị sốt", "mệt", "mệt mỏi", "đau đầu", "đau bụng", "đau họng",
+        "đau lưng", "chóng mặt", "buồn nôn", "bệnh", "không khỏe", "buồn ngủ", "buồn quá",
+        "vui quá", "uống thuốc", "khám bệnh", "bác sĩ", "bệnh viện",
+        "sick", "ill", "tired", "headache", "fever", "unwell", "not feeling well", "exhausted"
+    ]
+    if any(re.search(rf"\b{k}\b", q_low) for k in personal_health_signals):
+        return True
+
+    # 2. Nhóm từ khóa dữ liệu kinh doanh (Data Actions & Entities)
+    data_signals = [
+        "doanh thu", "doanh số", "bán hàng", "đơn hàng", "sản phẩm", "mặt hàng",
+        "hộp", "boxes", "tiền", "lương", "thu nhập", "quỹ lương", "nhân viên",
+        "nhân sự", "phòng ban", "quản lý", "thị trường", "quốc gia", "geo",
+        "team", "ticket", "film", "phim", "rental", "actor", "khách hàng",
+        "customer", "top", "bao nhiêu", "tổng", "trung bình", "cao nhất", "thấp nhất",
+        "tăng trưởng", "so sánh", "thống kê", "danh sách", "liệt kê", "báo cáo",
+        "revenue", "sales", "order", "product", "quantity", "salary", "employee",
+        "department", "how many", "how much", "highest", "lowest", "count", "sum", "avg",
+        "lợi nhuận", "chi phí", "margin", "tồn kho", "kho hàng", "chiết khấu", "giảm giá"
+    ]
+    has_data_signal = any(k in q_low for k in data_signals)
+
+    # 3. Nếu không có từ khóa dữ liệu nào, kiểm tra các chủ đề đời sống/giao tiếp
+    if not has_data_signal:
+        non_data_topics = [
+            "thời tiết", "mưa", "nắng", "nhiệt độ", "khí hậu", "bão", "weather", "rain", "forecast", "sunny",
+            "chào", "xin chào", "hello", "hi", "hey", "alo", "chúc buổi", "chúc ngủ ngon", "tạm biệt", "bye",
+            "bạn là ai", "tên gì", "who are you", "what is your name", "what can you do", "bạn có thể làm gì", "mày là ai",
+            "công thức", "nấu ăn", "món ăn", "ăn gì", "cách nấu", "recipe", "cook", "food",
+            "giá vàng", "bitcoin", "crypto", "tiền ảo", "xổ số", "lô đề",
+            "làm thơ", "bài thơ", "kể chuyện", "truyện cười", "joke", "poem", "hát", "bài hát",
+            "viết code", "viết chương trình", "thuật toán", "dijkstra", "python", "lập trình",
+            "mấy giờ", "what time", "thủ đô", "ai là", "who is", "cảm ơn", "thanks", "thank you",
+            "giỏi quá", "hay quá", "tuyệt vời", "khen"
+        ]
+        if any(re.search(rf"\b{k}\b", q_low) for k in non_data_topics):
+            return True
+
+        # Nếu câu nói ngắn (<= 8 từ) mà không chứa bất kỳ từ khóa dữ liệu nào -> Coi là giao tiếp tự nhiên
+        words = q_low.split()
+        if len(words) <= 8:
+            return True
+
+        # Nếu có schema_context, kiểm tra xem câu hỏi có chứa tên bảng hoặc cột nào không
+        if schema_context:
+            s_low = schema_context.lower()
+            schema_tokens = re.findall(r"\b[a-zA-Z_]{3,}\b", s_low)
+            has_schema_overlap = any(re.search(rf"\b{tok}\b", q_low) for tok in set(schema_tokens) if tok not in ["table", "column", "null", "type", "integer", "varchar", "datetime"])
+            if not has_schema_overlap:
+                return True
+
+    return False
+
+
 def has_matching_col(cols: list, keywords: list[str]) -> bool:
     """Kiểm tra danh sách tên cột có cột nào chứa bất kỳ từ khóa nào hay không."""
     for c in cols:

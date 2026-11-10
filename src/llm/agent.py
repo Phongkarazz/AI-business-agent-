@@ -16,6 +16,7 @@ from src.database.query_runner import read_sql_capped, sanitize_error
 from src.database.schema import get_table_names
 from src.analytics.heuristics import (
     is_id_like,
+    is_non_data_conversational,
     detect_query_language,
     sanitize_insight_markdown,
     sanitize_followup_question,
@@ -9668,19 +9669,41 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
     is_chocolates_db = False
     is_sakila_db = False
 
-    # Nếu người dùng hỏi chủ đề ngoài phạm vi CSDL (thời tiết, làm thơ, công thức nấu ăn, crypto...)
-    if any(k in user_query_low for k in [
-        "thời tiết", "dự báo thời tiết", "có mưa không", "có mưa ko", "trời mưa", "trời nắng", "nhiệt độ",
-        "làm thơ", "bài thơ", "thơ tình", "công thức nấu", "cách nấu", "món ăn", "giá vàng", "bitcoin", "crypto"
-    ]):
-        result["explanation"] = (
-            "💡 **Thông báo từ Trợ lý:** Câu hỏi của bạn nằm ngoài phạm vi cơ sở dữ liệu doanh nghiệp hiện tại. "
-            "Tôi là Trợ lý Dữ liệu Kinh doanh, chỉ hỗ trợ truy vấn các thông tin về bán hàng, sản phẩm, nhân sự, đơn hàng và khách hàng.\n\n"
-            "👉 Bạn có thể thử các câu hỏi về doanh số, sản phẩm hoặc thị trường để tôi hỗ trợ nhé!"
-            if lang != "en" else
-            "💡 **Notice:** Your query is outside the scope of this business database. "
-            "Please ask questions related to sales, products, employees, or customers!"
-        )
+    # 0.08 Nhận diện câu nói giao tiếp tự nhiên / sức khỏe / ngoài phạm vi CSDL
+    if is_non_data_conversational(user_query, schema_context=schema_context):
+        personal_health_keys = [
+            "ốm", "bị ốm", "sốt", "bị sốt", "mệt", "đau đầu", "đau bụng", "đau họng",
+            "bệnh", "không khỏe", "buồn ngủ", "buồn quá", "vui quá", "uống thuốc", "sick", "ill", "tired", "headache", "fever", "unwell"
+        ]
+        if any(re.search(rf"\b{k}\b", user_query_low) for k in personal_health_keys):
+            result["explanation"] = (
+                "Tôi rất tiếc khi biết bạn không được khỏe! Bạn hãy nghỉ ngơi nhiều, giữ ấm và uống đủ nước ấm để mau hồi phục nhé. "
+                "Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus — khi nào bạn khỏe lại và cần tra cứu, phân tích số liệu, tôi luôn sẵn sàng hỗ trợ bạn!"
+                if lang != "en" else
+                "I'm sorry to hear that you are not feeling well! Please take some rest, stay hydrated, and get well soon. "
+                "I am your Veraxus Business Data Assistant — whenever you feel better and need data analysis, I'm always here to help!"
+            )
+        elif any(re.search(rf"\b{k}\b", user_query_low) for k in ["chào", "xin chào", "hello", "hi", "hey"]):
+            result["explanation"] = (
+                "Xin chào bạn! Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus. Bạn cần tra cứu, phân tích hay lập báo cáo số liệu nào hôm nay?"
+                if lang != "en" else
+                "Hello! I am Veraxus, your Business Data Assistant. What business metrics or reports would you like to explore today?"
+            )
+        elif any(re.search(rf"\b{k}\b", user_query_low) for k in ["bạn là ai", "tên gì", "who are you", "what is your name"]):
+            result["explanation"] = (
+                "Tôi là Veraxus — AI Data Analyst & Trợ lý Dữ liệu Kinh doanh. Tôi có thể hỗ trợ bạn truy vấn tự động, vẽ biểu đồ và phân tích chuyên sâu các số liệu từ cơ sở dữ liệu doanh nghiệp!"
+                if lang != "en" else
+                "I am Veraxus — your AI Data Analyst & Business Intelligence Assistant, ready to help you analyze and visualize enterprise data!"
+            )
+        else:
+            result["explanation"] = (
+                "💡 **Thông báo từ Trợ lý:** Câu hỏi của bạn nằm ngoài phạm vi cơ sở dữ liệu doanh nghiệp hiện tại. "
+                "Tôi là Trợ lý Dữ liệu Kinh doanh, chuyên hỗ trợ phân tích các thông tin về bán hàng, sản phẩm, nhân sự, đơn hàng và khách hàng.\n\n"
+                "👉 Bạn có thể thử các câu hỏi về doanh số, sản phẩm hoặc thị trường để tôi hỗ trợ nhé!"
+                if lang != "en" else
+                "💡 **Notice:** Your query is outside the scope of this business database. "
+                "Please ask questions related to sales, products, employees, or customers!"
+            )
         result["df"] = None
         result["sql"] = None
         return result

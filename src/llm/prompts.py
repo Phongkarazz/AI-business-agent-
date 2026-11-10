@@ -8464,8 +8464,9 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
 1. TUÂN THỦ SCHEMA TUYỆT ĐỐI & THÍCH ỨNG NGHIỆP VỤ (PURE SCHEMA GROUNDING & ADAPTATION):
    - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ở trên.
    - Tuyệt đối KHÔNG tự ý bịa đặt hoặc gọi các bảng từ CSDL khác (như departments, salaries, employees, sales, film...).
-   - NẾU CÂU HỎI ĐỀ CẬP ĐẾN CHỈ SỐ KHÔNG CÓ TRỰC TIẾP TRONG CSDL (ví dụ hỏi 'mức lương' trong CSDL bán hàng/sản phẩm):
+   - NẾU CÂU HỎI THUỘC LĨNH VỰC KINH DOANH NHƯNG ĐỀ CẬP ĐẾN CHỈ SỐ KHÔNG CÓ TRỰC TIẾP TRONG CSDL (ví dụ hỏi 'mức lương' trong CSDL bán hàng/sản phẩm):
      HÃY THÍCH ỨNG NGHIỆP VỤ THÔNG MINH (SMART ADAPTATION): Phân tích chỉ số tài chính/giá trị tương đương gần nhất của CSDL này (ví dụ: giá bán lẻ `gia_ban_le`, doanh thu `tong_tien`/`thanh_tien`, đơn giá, số lượng) theo nhóm thực thể tương ứng (`danh_muc`, `loai_khach`, nhóm sản phẩm) để luôn trả về câu lệnh SQL hợp lệ, có dữ liệu thực tế và giải quyết trọn vẹn bài toán so sánh/chênh lệch cho người dùng!
+   - NẾU CÂU HỎI HOÀN TOÀN NGOÀI PHẠM VI DỮ LIỆU KINH DOANH (ví dụ: chào hỏi, sức khỏe, thời tiết, lập trình chung, thơ ca): TUYỆT ĐỐI KHÔNG sinh câu lệnh SQL hoặc cố tình truy vấn các bảng không liên quan.
    - Với câu hỏi đơn giản: dùng SELECT đơn trực tiếp. Với bài toán đa bước: dùng CTE (`WITH ... AS`) theo Quy tắc Phân rã Nghiệp vụ ở trên!
 {db_specific_rules}
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
