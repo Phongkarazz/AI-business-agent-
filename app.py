@@ -41,7 +41,7 @@ import src.llm.agent
 import src.llm
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_fix_nondata_conversational_v220"
+CACHE_BUILD_ID = "20261110_fix_quarterly_growth_v221"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
@@ -833,6 +833,7 @@ else:
                 auto_fix_chocolates_consecutive_growth_streak_query,
                 auto_fix_chocolates_new_products_query,
                 auto_fix_chocolates_monthly_spread_query,
+                auto_fix_chocolates_quarterly_growth_comparison_query,
             )
             from src.database.query_runner import read_sql_capped
             from src.analytics.anomaly import analyze_data_anomalies
@@ -858,6 +859,7 @@ else:
                 _sql_new = auto_fix_chocolates_consecutive_growth_streak_query(_sql_new, _q, dialect=_dial)
                 _sql_new = auto_fix_chocolates_new_products_query(_sql_new, _q, dialect=_dial)
                 _sql_new = auto_fix_chocolates_monthly_spread_query(_sql_new, _q, dialect=_dial)
+                _sql_new = auto_fix_chocolates_quarterly_growth_comparison_query(_sql_new, _q, dialect=_dial)
                 if _sql_new and _sql_new != _sql_orig:
                     _df_new, _ = read_sql_capped(_sql_new, _eng)
                     if _df_new is not None and not _df_new.empty:

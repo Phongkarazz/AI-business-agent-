@@ -5878,6 +5878,111 @@ WHERE Q1_Revenue > {thresh_val}
 ORDER BY TotalAnnualRevenue DESC;""".strip()
 
 
+def auto_fix_chocolates_quarterly_growth_comparison_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
+    """Tự động chuẩn hóa câu truy vấn so sánh tốc độ tăng trưởng doanh thu giữa 2 quý (QoQ)
+    của các Quốc gia (Geo), Sản phẩm (Product), Team hoặc Nhân viên trên CSDL Awesome Chocolates.
+    Ví dụ: 'Top 3 quốc gia có mức tăng trưởng doanh thu mạnh nhất giữa quý 1 và quý 2 năm 2022'
+    hoặc 'So sánh tăng trưởng doanh số quý 4/2021 so với quý 3/2021 của từng thị trường'."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+
+    # Nhận diện bài toán so sánh tăng trưởng giữa 2 quý (QoQ)
+    has_growth = any(k in q_low for k in [
+        "tăng trưởng", "tốc độ tăng", "tỷ lệ tăng", "tỉ lệ tăng", "tăng hơn", "tăng trên", 
+        "tăng ít nhất", "growth", "cải thiện", "mạnh nhất"
+    ])
+    has_qtr = any(k in q_low for k in ["quý", "quarter", "q1", "q2", "q3", "q4"])
+    has_pair = (
+        any(k in q_low for k in ["giữa", "so với", "vs", "so voi", "từ", "và", "qua 2 quý", "hai quý"])
+        or len(re.findall(r"(?:quý|q)\s*[1-4]", q_low)) >= 2
+    )
+
+    if not (has_growth and has_qtr and has_pair):
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower()
+
+    # Trích xuất 2 quý
+    qtr_matches = re.findall(r"(?:quý|q)\s*([1-4])(?:[/\s]*(?:năm\s*)?(20\d{2}))?", q_low)
+    if len(qtr_matches) < 2:
+        return sql
+
+    q1_val = int(qtr_matches[0][0])
+    q2_val = int(qtr_matches[1][0])
+
+    # Nếu câu hỏi dạng "giữa quý 1 và quý 2" hoặc "từ quý 1 đến quý 2": quý gốc là q1, quý so sánh là q2
+    if any(k in q_low for k in ["giữa", "từ"]) or q1_val < q2_val:
+        base_q = min(q1_val, q2_val)
+        target_q = max(q1_val, q2_val)
+    else:
+        # Nếu dạng "quý 2 so với quý 1"
+        target_q = q1_val
+        base_q = q2_val
+
+    # Năm
+    year_match = re.search(r"\b(20\d{2})\b", q_low)
+    year_val = year_match.group(1) if year_match else "2021"
+
+    # Top N
+    top_match = re.search(r"top\s*(\d+)", q_low)
+    limit_clause = f"\nLIMIT {top_match.group(1)}" if top_match else ""
+
+    # Thực thể: Geo, Product, Team, Person
+    is_geo = any(k in q_low for k in ["quốc gia", "thị trường", "geo", "country", "nước"])
+    is_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "kẹo", "socola"]) and not is_geo
+    is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"]) and not is_geo and not is_product
+
+    if is_geo:
+        entity_cols = "g.Geo AS Country"
+        entity_dim = "Country"
+        join_clause = "JOIN geo g ON s.GeoID = g.GeoID"
+        group_clause = "g.GeoID, g.Geo"
+    elif is_product:
+        entity_cols = "pr.Product AS Product, pr.Category AS Category"
+        entity_dim = "Product, Category"
+        join_clause = "JOIN products pr ON s.PID = pr.PID"
+        group_clause = "pr.PID, pr.Product, pr.Category"
+    elif is_team:
+        entity_cols = "pe.Team AS Team"
+        entity_dim = "Team"
+        join_clause = "JOIN people pe ON s.SPID = pe.SPID\n    WHERE pe.Team != '' AND pe.Team IS NOT NULL"
+        group_clause = "pe.Team"
+    else:
+        entity_cols = "pe.Salesperson AS Salesperson, pe.Team AS Team"
+        entity_dim = "Salesperson, Team"
+        join_clause = "JOIN people pe ON s.SPID = pe.SPID"
+        group_clause = "pe.SPID, pe.Salesperson, pe.Team"
+
+    q_base_col = f"Q{base_q}_Sales"
+    q_target_col = f"Q{target_q}_Sales"
+
+    if is_sqlite:
+        base_case = f"ROUND(SUM(CASE WHEN strftime('%Y', s.SaleDate) = '{year_val}' AND ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = {base_q} THEN s.Amount ELSE 0 END), 2)"
+        target_case = f"ROUND(SUM(CASE WHEN strftime('%Y', s.SaleDate) = '{year_val}' AND ((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = {target_q} THEN s.Amount ELSE 0 END), 2)"
+    else:
+        base_case = f"ROUND(SUM(CASE WHEN YEAR(s.SaleDate) = {year_val} AND QUARTER(s.SaleDate) = {base_q} THEN s.Amount ELSE 0 END), 2)"
+        target_case = f"ROUND(SUM(CASE WHEN YEAR(s.SaleDate) = {year_val} AND QUARTER(s.SaleDate) = {target_q} THEN s.Amount ELSE 0 END), 2)"
+
+    return f"""WITH QuarterlySales AS (
+    SELECT 
+        {entity_cols},
+        {base_case} AS {q_base_col},
+        {target_case} AS {q_target_col}
+    FROM sales s
+    {join_clause}
+    GROUP BY {group_clause}
+)
+SELECT 
+    {entity_dim},
+    {q_base_col},
+    {q_target_col},
+    ROUND({q_target_col} - {q_base_col}, 2) AS AbsoluteGrowth,
+    ROUND((({q_target_col} - {q_base_col}) / NULLIF({q_base_col}, 0)) * 100.0, 2) AS GrowthPct
+FROM QuarterlySales
+ORDER BY GrowthPct DESC{limit_clause}"""
+
+
 def auto_fix_chocolates_quarterly_sales_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo quý (theo Quốc gia, Sản phẩm, Team, hoặc Toàn công ty)
     trên CSDL Awesome Chocolates. Đảm bảo GROUP BY đúng Quarter và ORDER BY Quarter ASC để vẽ biểu đồ đường xu hướng."""
@@ -5886,6 +5991,12 @@ def auto_fix_chocolates_quarterly_sales_query(sql: str, user_query: str, dialect
 
     q_low = user_query.lower()
     sql_low = sql.lower()
+
+    # Guard 0: Không can thiệp nếu là câu hỏi so sánh tăng trưởng giữa 2 quý (QoQ), Top tăng trưởng, hoặc so sánh theo thực thể giữa các quý (đã có auto_fix_chocolates_quarterly_growth_comparison_query xử lý)
+    if any(k in q_low for k in ["tăng trưởng", "growth", "tốc độ", "tỷ lệ tăng", "tỉ lệ tăng", "cải thiện", "mạnh nhất"]):
+        return sql
+    if any(k in q_low for k in ["giữa quý", "từ quý", "so với quý", "vs quý", "qua 2 quý", "hai quý"]):
+        return sql
 
     # Guard: Nếu câu hỏi về tìm/lọc/danh sách sản phẩm mới hoặc sản phẩm theo quý hoặc độ nhất quán qua các quý -> Tuyệt đối không đè thành doanh thu toàn công ty!
     if any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "sku"]):
@@ -6070,7 +6181,12 @@ GROUP BY Quarter
 ORDER BY Quarter ASC"""
 
     # 6. Doanh thu toàn công ty / tổng hợp theo từng quý
-    if not is_multi_team and not specific_team and any(k in q_low for k in ["doanh thu", "doanh số", "sales", "số lượng", "hộp", "thùng"]):
+    if (
+        not is_multi_team 
+        and not specific_team 
+        and not any(k in q_low for k in ["quốc gia", "country", "thị trường", "sản phẩm", "product", "nhân viên", "salesperson", "top", "xếp hạng", "thứ hạng"])
+        and any(k in q_low for k in ["doanh thu", "doanh số", "sales", "số lượng", "hộp", "thùng"])
+    ):
         where_clause = f"WHERE {year_cond}\n" if year_cond else ""
         needs_fix = "with " in sql_low or "max(" in sql_low or "group by quarter" not in sql_low
         if needs_fix:
@@ -9874,6 +9990,7 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             sql_cur = auto_fix_chocolates_monthly_sales_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_product_quarterly_consistency_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_product_quarterly_rankings_query(sql_cur, user_query, dialect=dialect)
+            sql_cur = auto_fix_chocolates_quarterly_growth_comparison_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_quarterly_sales_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_chocolates_dominant_market_top_product_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_contribution_percentage_query(sql_cur, user_query, dialect=dialect)
@@ -10240,6 +10357,29 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             df = ensure_efficiency_columns_if_requested(df, user_query)
             result["df"] = df
             result["sql"] = sql_query
+
+            # Cảnh báo ranh giới dữ liệu nếu người dùng truy vấn kỳ tương lai chưa có số liệu trong CSDL
+            if df is not None and not df.empty:
+                q_cols = [c for c in df.columns if re.match(r"^Q[1-4]_Sales$", str(c))]
+                if len(q_cols) >= 2 and any(k in user_query.lower() for k in ["2022", "quý 2", "q2"]):
+                    second_q_col = q_cols[1]
+                    if pd.to_numeric(df[second_q_col], errors="coerce").fillna(0).sum() == 0:
+                        is_vn = (lang != "en")
+                        advisory_note = (
+                            "💡 **Lưu ý ranh giới dữ liệu:** Cơ sở dữ liệu hiện tại ghi nhận giao dịch cuối cùng vào ngày **31/03/2022** (hết Quý 1/2022), "
+                            "nên Quý 2/2022 chưa phát sinh doanh thu (đạt $0). Dưới đây là bảng trích xuất và xếp hạng chuẩn theo tiêu chí của bạn.\n\n"
+                            "👉 *Để xem tăng trưởng thực tế đầy đủ giữa Quý 1 và Quý 2, bạn có thể xem số liệu của **năm 2021** (năm có đầy đủ cả 4 quý)!*"
+                            if is_vn else
+                            "💡 **Data Boundary Notice:** The database transaction logs end on **2022-03-31** (end of Q1/2022), "
+                            "meaning Q2/2022 has no sales data yet ($0). Below is the exact comparison table based on your criteria.\n\n"
+                            "👉 *To analyze real QoQ growth between Q1 and Q2, please query for **2021** (which contains full 4 quarters of data)!*"
+                        )
+                        result["explanation"] = advisory_note
+                        result["followups"] = [
+                            "Top 3 quốc gia có mức tăng trưởng doanh thu mạnh nhất giữa quý 1 và quý 2 năm 2021",
+                            "Tốc độ tăng trưởng doanh số theo từng Quý của các Team năm 2021",
+                            "Doanh số bán hàng phân bổ theo từng quốc gia năm 2021"
+                        ]
 
             # Đồng bộ lại kết quả Thẩm định của Auditor nếu DataFrame sau khi được bù đắp chuẩn mực đã đạt tiêu chí
             if eval_res.get("score", 100) < 100:

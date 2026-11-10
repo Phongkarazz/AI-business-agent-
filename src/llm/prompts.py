@@ -3639,22 +3639,32 @@ ORDER BY `Đội Ngũ`, `Quý` ASC;
 
         # 0.078 So sánh tăng trưởng doanh số theo Quý giữa 2 mốc quý cụ thể (Quarter-over-Quarter Growth Comparison)
         elif (
-            any(k in q_low for k in ["tăng trưởng", "tốc độ tăng", "tỷ lệ tăng", "tỉ lệ tăng", "tăng hơn", "tăng trên", "tăng ít nhất", "growth"])
+            any(k in q_low for k in ["tăng trưởng", "tốc độ tăng", "tỷ lệ tăng", "tỉ lệ tăng", "tăng hơn", "tăng trên", "tăng ít nhất", "growth", "cải thiện", "mạnh nhất"])
             and any(k in q_low for k in ["quý", "quarter", "q1", "q2", "q3", "q4"])
-            and any(k in q_low for k in ["so với", "vs", "so voi"])
+            and (
+                any(k in q_low for k in ["so với", "vs", "so voi", "giữa", "từ", "và", "qua 2 quý", "hai quý"])
+                or len(re.findall(r'(?:quý|q)\s*[1-4]', q_low)) >= 2
+            )
         ):
-            # Trích xuất 2 quý và năm: VD "quý 4/2021", "quý 3/2021"
+            # Trích xuất 2 quý và năm: VD "quý 4/2021", "quý 3/2021" hoặc "giữa quý 1 và quý 2 năm 2022"
             qtr_matches = re.findall(r'(?:quý|q)\s*([1-4])(?:[/\s]*(?:năm\s*)?(20\d{2}))?', q_low)
-            target_q = int(qtr_matches[0][0]) if len(qtr_matches) >= 1 else 4
-            target_yr = qtr_matches[0][1] if len(qtr_matches) >= 1 and qtr_matches[0][1] else None
+            q1_val = int(qtr_matches[0][0]) if len(qtr_matches) >= 1 else 1
+            q2_val = int(qtr_matches[1][0]) if len(qtr_matches) >= 2 else 2
 
-            base_q = int(qtr_matches[1][0]) if len(qtr_matches) >= 2 else 3
-            base_yr = qtr_matches[1][1] if len(qtr_matches) >= 2 and qtr_matches[1][1] else (target_yr if target_yr else "2021")
+            # Nếu câu hỏi dạng "giữa quý 1 và quý 2" hoặc "từ quý 1 đến quý 2" hoặc q1 < q2: quý gốc là q1, quý so sánh là q2
+            if any(k in q_low for k in ["giữa", "từ"]) or q1_val < q2_val:
+                base_q = min(q1_val, q2_val)
+                target_q = max(q1_val, q2_val)
+            else:
+                target_q = q1_val
+                base_q = q2_val
 
-            if not target_yr:
-                target_yr = base_yr if base_yr else "2021"
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            target_yr = yr_match.group(1) if yr_match else "2021"
+            base_yr = target_yr
 
-            # Ngưỡng tăng trưởng %: VD "tăng trưởng trên 20%"
+            # Top N hoặc Ngưỡng tăng trưởng %
+            top_m = re.search(r'top\s*(\d+)', q_low)
             pct_m = re.search(r'(?:trên|hơn|vượt|ít nhất|tối thiểu|>|>=)?\s*(\d+(?:\.\d+)?)\s*%', q_low)
             threshold_val = float(pct_m.group(1)) if pct_m else 20.0
 
@@ -3704,8 +3714,18 @@ ORDER BY `Đội Ngũ`, `Quý` ASC;
                 base_case = f"ROUND(SUM(CASE WHEN YEAR(s.SaleDate) = {base_yr} AND QUARTER(s.SaleDate) = {base_q} THEN s.Amount ELSE 0 END), 2)"
                 target_case = f"ROUND(SUM(CASE WHEN YEAR(s.SaleDate) = {target_yr} AND QUARTER(s.SaleDate) = {target_q} THEN s.Amount ELSE 0 END), 2)"
 
+            if top_m:
+                limit_num = int(top_m.group(1))
+                where_clause = ""
+                order_clause = f"ORDER BY GrowthPct DESC LIMIT {limit_num}"
+                intent_header = f"TOP {limit_num} {entity_label} CÓ TĂNG TRƯỞNG DOANH SỐ MẠNH NHẤT GIỮA QUÝ {base_q} VÀ QUÝ {target_q} NĂM {target_yr}"
+            else:
+                where_clause = f"WHERE {q_base_col} > 0 \n  AND (({q_target_col} - {q_base_col}) / {q_base_col}) * 100.0 {op} {threshold_val}\n"
+                order_clause = "ORDER BY GrowthPct DESC"
+                intent_header = f"{entity_label} CÓ DOANH SỐ QUÝ {target_q}/{target_yr} TĂNG TRƯỞNG {op} {threshold_val}% SO VỚI QUÝ {base_q}/{base_yr}"
+
             return f"""
-⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI ({entity_label} CÓ DOANH SỐ QUÝ {target_q}/{target_yr} TĂNG TRƯỞNG {op} {threshold_val}% SO VỚI QUÝ {base_q}/{base_yr}):
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI ({intent_header}):
 WITH QuarterlySales AS (
     SELECT 
         {entity_cols},
@@ -3722,14 +3742,12 @@ SELECT
     ROUND({q_target_col} - {q_base_col}, 2) AS AbsoluteGrowth,
     ROUND((({q_target_col} - {q_base_col}) / NULLIF({q_base_col}, 0)) * 100.0, 2) AS GrowthPct
 FROM QuarterlySales
-WHERE {q_base_col} > 0 
-  AND (({q_target_col} - {q_base_col}) / {q_base_col}) * 100.0 {op} {threshold_val}
-ORDER BY GrowthPct DESC;
+{where_clause}{order_clause};
 (CẢNH BÁO BẮT BUỘC:
 1. ĐÂY LÀ BÀI TOÁN TÌM {entity_label} CÓ TĂNG TRƯỞNG GIỮA 2 KỲ QUÝ CỤ THỂ, TUYỆT ĐỐI CẤM GROUP BY MỖI CỘT Quarter ĐỂ TÍNH DOANH THU TOÀN CÔNG TY!
 2. Tuân thủ CTE tính doanh thu của từng thực thể ở 2 quý: Quý {base_q}/{base_yr} ({q_base_col}) và Quý {target_q}/{target_yr} ({q_target_col})!
 3. Tính mức tăng tuyệt đối AbsoluteGrowth = ({q_target_col} - {q_base_col}) và tỷ lệ phần trăm GrowthPct = (({q_target_col} - {q_base_col}) / {q_base_col}) * 100.0!
-4. BẮT BUỘC lọc {q_base_col} > 0 VÀ GrowthPct {op} {threshold_val}, sắp xếp ORDER BY GrowthPct DESC!)
+4. Sắp xếp ORDER BY GrowthPct DESC!)
 """
 
         # 0.078 Tìm sản phẩm luôn đạt doanh số trên ngưỡng X USD trong tất cả các quý của năm Y
