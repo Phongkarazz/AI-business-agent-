@@ -30,8 +30,10 @@ from .few_shot_selector import (
     select_dynamic_few_shots,
     format_few_shots_for_prompt,
 )
+from .gatekeeper import classify_action_gate
 
 __all__ = [
+    "classify_action_gate",
     "get_llm_client",
     "call_llm",
     "invoke_llm",

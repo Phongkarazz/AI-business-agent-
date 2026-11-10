@@ -1,10 +1,10 @@
 {
-  "created_at": "2026-11-10T15:21:32.447386",
+  "created_at": "2026-11-10T15:39:35.472406",
   "pipeline": "Veraxus APIGen 3-Tier + Hammer Masking Engine",
-  "total_samples": 14,
+  "total_samples": 23,
   "distribution_by_type": {
-    "ask_missing_info": 3,
-    "abstain": 3,
+    "abstain": 8,
+    "ask_missing_info": 7,
     "tool_sql": 8
   },
   "verification_metrics": {
@@ -12,5 +12,5 @@
     "tier2_execution_pass_rate": "100.0%",
     "tier3_semantic_pass_rate": "100.0%"
   },
-  "generation_time_sec": 0.02
+  "generation_time_sec": 0.17
 }

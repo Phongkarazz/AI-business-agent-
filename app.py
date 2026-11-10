@@ -35,7 +35,7 @@ import src.ui.sidebar
 import src.ui.crm_dashboard
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_datagen_apigen_hammer_v213"
+CACHE_BUILD_ID = "20261110_when2call_gatekeeper_v214"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)

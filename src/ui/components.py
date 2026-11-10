@@ -6270,16 +6270,20 @@ def render_result(result: dict, turn_id: str):
     # 1. Hiển thị giải thích tự nhiên / Cố vấn nghiệp vụ từ AI (Zero-Red-Error Advisory Mode)
     has_df = result.get("df") is not None and not result.get("df").empty
     if result.get("explanation"):
-        title_exp = "💡 **Notice from AI Assistant:**" if is_en else "💡 **Thông báo & Cố vấn từ Trợ lý Veraxus AI:**"
-        st.info(f"{title_exp}\n\n{result['explanation']}")
+        exp_text = str(result['explanation']).strip()
+        if exp_text.startswith("💡") or exp_text.startswith("🛡️") or exp_text.startswith("⚠️"):
+            st.info(exp_text)
+        else:
+            title_exp = "💡 **Notice from AI Assistant:**" if is_en else "💡 **Thông báo & Cố vấn từ Trợ lý Veraxus AI:**"
+            st.info(f"{title_exp}\n\n{exp_text}")
 
         # Chỉ hiển thị danh sách câu hỏi gợi ý tương thích và dừng lại nếu KHÔNG có dữ liệu bảng để vẽ biểu đồ
         if not has_df:
             followups = result.get("followups", [])
             if followups:
                 st.markdown("##### 🚀 " + ("Compatible Suggested Queries:" if is_en else "Câu hỏi gợi ý tương thích:"))
-                cols = st.columns(min(len(followups), 3))
-                for idx, (col_f, q_text) in enumerate(zip(cols, followups[:3])):
+                cols = st.columns(min(len(followups), 4))
+                for idx, (col_f, q_text) in enumerate(zip(cols, followups[:4])):
                     with col_f:
                         clean_q = sanitize_followup_question(q_text)
                         if st.button(f"💬 {clean_q}", key=f"btn_exp_followup_{turn_id}_{idx}", use_container_width=True):
