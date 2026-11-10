@@ -67,6 +67,20 @@ SPORTS_POLITICS_PATTERNS = [
     r"\bworld\s*cup\s*winner\b", r"\bwho\s*is\s*president\b", r"\bcurrent\s*president\s*of\b"
 ]
 
+TIME_CLOCK_PATTERNS = [
+    r"\bmấy\s*giờ\b", r"\bbây\s*giờ\s*là\s*mấy\s*giờ\b", r"\bthời\s*gian\s*hiện\s*tại\b",
+    r"\bhôm\s*nay\s*là\s*ngày\s*mấy\b", r"\bhôm\s*nay\s*thứ\s*mấy\b",
+    r"\bwhat\s*time\s*is\s*it\b", r"\bcurrent\s*time\b", r"\btoday\s*date\b"
+]
+
+GENERAL_TRIVIA_PATTERNS = [
+    r"\bthủ\s*đô\s*của\b", r"\bcapital\s*of\b", r"\bdân\s*số\s*thế\s*giới\b",
+    r"\bdân\s*số\s*của\b", r"\bpopulation\s*of\b", r"\bai\s*phát\s*minh\b",
+    r"\bwho\s*invented\b", r"\bdịch\s*đoạn\s*văn\b", r"\bdịch\s*câu\s*này\b",
+    r"\btranslate\s*this\b", r"\bhôm\s*nay\s*ăn\s*gì\b", r"\bgợi\s*ý\s*món\s*ăn\b",
+    r"\băn\s*trưa\s*gì\b", r"\bwhat\s*should\s*i\s*eat\b"
+]
+
 
 # =========================================================================
 # 2. HÀM KIỂM TRA ACTION GATEKEEPER
@@ -222,6 +236,42 @@ def classify_action_gate(
             "followups": [
                 "Doanh số bán hàng phân bổ theo từng quốc gia" if not is_en else "Sales distribution by country",
                 "Hiệu suất doanh số của các Team kinh doanh" if not is_en else "Sales performance by business team"
+            ]
+        }
+
+    # Kiểm tra Thời gian / Đồng hồ / Lịch ngày
+    if any(re.search(pat, q_low) for pat in TIME_CLOCK_PATTERNS):
+        return {
+            "action": "abstain",
+            "category": "out_of_domain_time",
+            "explanation": (
+                f"🛡️ **Thông báo từ Trợ lý Dữ liệu Veraxus (When2Call Gatekeeper):**\n\n"
+                f"Tôi là Trợ lý Dữ liệu Doanh nghiệp và không cung cấp dịch vụ đồng hồ/lịch thời gian thực. Tôi hỗ trợ phân tích dữ liệu lịch sử các năm theo chuỗi thời gian (Time-series) trong CSDL."
+                if not is_en else
+                f"🛡️ **Notice from Veraxus AI Assistant (When2Call Gatekeeper):**\n\n"
+                f"I am an Enterprise Data Assistant and do not provide real-time clock or calendar services. I support historical time-series analytics in your database."
+            ),
+            "followups": [
+                "Doanh thu trung bình mỗi tháng trong năm 2022" if not is_en else "Average monthly revenue in 2022",
+                "Tổng doanh thu và tổng số hộp bán ra toàn hệ thống" if not is_en else "Total revenue and total boxes sold"
+            ]
+        }
+
+    # Kiểm tra Kiến thức bách khoa / Dịch thuật / Ẩm thực ăn uống đại chúng
+    if any(re.search(pat, q_low) for pat in GENERAL_TRIVIA_PATTERNS):
+        return {
+            "action": "abstain",
+            "category": "out_of_domain_trivia",
+            "explanation": (
+                f"🛡️ **Thông báo từ Trợ lý Dữ liệu Veraxus (When2Call Gatekeeper):**\n\n"
+                f"Câu hỏi của bạn mang tính chất kiến thức tổng quát hoặc trò chuyện thông thường, nằm ngoài phạm vi phân tích số liệu kinh doanh CSDL."
+                if not is_en else
+                f"🛡️ **Notice from Veraxus AI Assistant (When2Call Gatekeeper):**\n\n"
+                f"Your query is general knowledge or casual conversation, outside enterprise database analytics."
+            ),
+            "followups": [
+                "Top 5 sản phẩm có doanh thu cao nhất" if not is_en else "Top 5 products by revenue",
+                "Doanh số bán hàng phân bổ theo từng quốc gia" if not is_en else "Sales distribution by country"
             ]
         }
 
