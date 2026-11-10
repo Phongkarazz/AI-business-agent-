@@ -33,7 +33,6 @@ import src.analytics.anomaly
 import src.ui.components
 import src.ui.sidebar
 import src.ui.crm_dashboard
-import src.llm.gatekeeper
 import src.llm.prompts
 import src.llm.few_shot_selector
 import src.llm.router_planner
@@ -42,13 +41,12 @@ import src.llm.agent
 import src.llm
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_when2call_gatekeeper_v216"
+CACHE_BUILD_ID = "20261110_nogatekeeper_v217"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
     importlib.reload(src.analytics.heuristics)
     importlib.reload(src.analytics.anomaly)
-    importlib.reload(src.llm.gatekeeper)
     importlib.reload(src.llm.prompts)
     importlib.reload(src.llm.few_shot_selector)
     importlib.reload(src.llm.router_planner)
@@ -79,22 +77,6 @@ if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
     st.session_state["_cache_build_id"] = CACHE_BUILD_ID
     st.session_state["query_cache"] = {}
     st.session_state["_needs_history_heal"] = True
-    # Tự động rà soát và chữa lành các turn cũ trong history nếu là câu hỏi out-of-domain
-    if "history" in st.session_state and st.session_state["history"]:
-        cleaned_history = []
-        for h in st.session_state["history"]:
-            q_text = h.get("query", "")
-            g = src.llm.gatekeeper.classify_action_gate(q_text)
-            if g.get("action") in ("abstain", "ask_missing_info"):
-                is_ab = (g.get("action") == "abstain")
-                h["df"] = None
-                h["sql"] = None
-                h["is_out_of_domain"] = is_ab
-                h["is_clarification"] = not is_ab
-                h["explanation"] = g.get("explanation")
-                h["followups"] = g.get("followups", [])
-            cleaned_history.append(h)
-        st.session_state["history"] = cleaned_history
     try:
         st.cache_data.clear()
     except Exception:
@@ -1096,76 +1078,47 @@ else:
         st.session_state["focused_turn_idx"] = None
         st.session_state["view_mode"] = "chat"
 
-        active_lang = get_current_language()
-        current_engine = st.session_state.get("engine")
-        current_schema = st.session_state.get("schema_context", "")
+        cache_key = prompt_to_run.strip().lower()
+        cached = st.session_state.get("query_cache", {}).get(cache_key)
 
-        # 0. CỔNG KIỂM SOÁT HÀNH VI TRỰC TIẾP TẠI APP (WHEN2CALL ACTION GATEKEEPER)
-        gate_quick = src.llm.gatekeeper.classify_action_gate(prompt_to_run, schema_context=current_schema, lang=active_lang)
-        if gate_quick.get("action") in ("abstain", "ask_missing_info"):
-            is_ab = (gate_quick.get("action") == "abstain")
-            result = {
-                "query": prompt_to_run,
-                "lang": active_lang,
-                "df": None,
-                "sql": None,
-                "logs": [],
-                "attempts": 0,
-                "error": None,
-                "explanation": gate_quick.get("explanation"),
-                "followups": gate_quick.get("followups", []),
-                "is_out_of_domain": is_ab,
-                "is_clarification": not is_ab,
-                "category": gate_quick.get("category"),
-                "agent_trace": {
-                    "router": {
-                        "complexity": "ABSTAIN" if is_ab else "ASK_MISSING_INFO",
-                        "intent": "Out of domain - Refuse safely" if is_ab else "Clarify missing dimensions",
-                        "target_entities": [],
-                        "target_metrics": [],
-                        "time_horizon": "N/A"
-                    }
-                }
-            }
+        if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
+            result = cached
         else:
-            cache_key = prompt_to_run.strip().lower()
-            cached = st.session_state.get("query_cache", {}).get(cache_key)
-
-            if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
-                result = cached
-            else:
-                st.chat_message("user").write(_format_user_chat_display(prompt_to_run))
-                with st.chat_message("assistant"):
-                    status_placeholder = st.empty()
-                    def update_status(text: str):
-                        status_placeholder.markdown(
-                            render_veraxus_loading_html(text),
-                            unsafe_allow_html=True
-                        )
-
-                    loading_msg = "Analyzing business data & executing query..." if active_lang == "en" else "Đang phân tích câu hỏi & đối chiếu dữ liệu doanh nghiệp..."
-                    update_status(loading_msg)
-                    if current_engine and (not current_schema or not current_schema.strip()):
-                        current_schema = auto_extract_schema(current_engine)
-                        st.session_state["schema_context"] = current_schema
-
-                    result = src.llm.agent.run_agent(
-                        user_query=prompt_to_run,
-                        client=st.session_state.get("client"),
-                        provider=st.session_state.get("provider"),
-                        model_name=st.session_state.get("model_name"),
-                        engine=current_engine,
-                        schema_context=current_schema,
-                        dialect=st.session_state.get("db_dialect", "SQLite"),
-                        db_pass=st.session_state.get("_db_pass_for_sanitize", ""),
-                        enable_self_check=st.session_state.get("enable_self_check", True),
-                        enable_auto_insights=st.session_state.get("enable_auto_insights", True),
-                        status_callback=update_status,
-                        lang=active_lang
+            st.chat_message("user").write(_format_user_chat_display(prompt_to_run))
+            with st.chat_message("assistant"):
+                status_placeholder = st.empty()
+                def update_status(text: str):
+                    status_placeholder.markdown(
+                        render_veraxus_loading_html(text),
+                        unsafe_allow_html=True
                     )
-                    status_placeholder.empty()
-                    if not result.get("error"):
-                        st.session_state.setdefault("query_cache", {})[cache_key] = result
+
+                active_lang = get_current_language()
+                loading_msg = "Analyzing business data & executing query..." if active_lang == "en" else "Đang phân tích câu hỏi & đối chiếu dữ liệu doanh nghiệp..."
+                update_status(loading_msg)
+                current_engine = st.session_state.get("engine")
+                current_schema = st.session_state.get("schema_context", "")
+                if current_engine and (not current_schema or not current_schema.strip()):
+                    current_schema = auto_extract_schema(current_engine)
+                    st.session_state["schema_context"] = current_schema
+
+                result = src.llm.agent.run_agent(
+                    user_query=prompt_to_run,
+                    client=st.session_state.get("client"),
+                    provider=st.session_state.get("provider"),
+                    model_name=st.session_state.get("model_name"),
+                    engine=current_engine,
+                    schema_context=current_schema,
+                    dialect=st.session_state.get("db_dialect", "SQLite"),
+                    db_pass=st.session_state.get("_db_pass_for_sanitize", ""),
+                    enable_self_check=st.session_state.get("enable_self_check", True),
+                    enable_auto_insights=st.session_state.get("enable_auto_insights", True),
+                    status_callback=update_status,
+                    lang=active_lang
+                )
+                status_placeholder.empty()
+                if not result.get("error"):
+                    st.session_state.setdefault("query_cache", {})[cache_key] = result
 
         st.session_state["history"].append(result)
         st.rerun()

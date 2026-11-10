@@ -41,7 +41,6 @@ from .prompts import (
 from .few_shot_selector import select_dynamic_few_shots
 from .schema_linker import link_schema_for_query
 from .sql_sanitizer import sanitize_sql_for_live_db
-from .gatekeeper import classify_action_gate
 
 
 def strip_comments_and_literals(sql: str) -> str:
@@ -9661,45 +9660,6 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             result["is_strategic_report"] = True
             return result
 
-    # 0.05 CỔNG KIỂM SOÁT HÀNH VI (WHEN2CALL & BFCL ACTION GATEKEEPER)
-    # Ngăn chặn hoàn toàn việc gọi nhầm Tool SQL cho các câu hỏi ngoài phạm vi (Abstain) hoặc mơ hồ (Clarify)
-    gate_res = classify_action_gate(user_query, schema_context=schema_context, lang=lang)
-    if gate_res.get("action") == "abstain":
-        result["explanation"] = gate_res.get("explanation")
-        result["followups"] = gate_res.get("followups", [])
-        result["df"] = None
-        result["sql"] = None
-        result["is_out_of_domain"] = True
-        result["category"] = gate_res.get("category")
-        result["agent_trace"]["router"] = {
-            "complexity": "ABSTAIN",
-            "intent": "Out of domain - Refuse safely",
-            "target_entities": [],
-            "target_metrics": [],
-            "time_horizon": "N/A"
-        }
-        if status_callback:
-            status_callback("🛡️ [When2Call Gatekeeper] Câu hỏi ngoài phạm vi CSDL - Đã kích hoạt cơ chế từ chối an toàn (Safe Abstain)...")
-        return result
-
-    if gate_res.get("action") == "ask_missing_info":
-        result["explanation"] = gate_res.get("explanation")
-        result["followups"] = gate_res.get("followups", [])
-        result["df"] = None
-        result["sql"] = None
-        result["is_clarification"] = True
-        result["category"] = gate_res.get("category")
-        result["agent_trace"]["router"] = {
-            "complexity": "ASK_MISSING_INFO",
-            "intent": "Clarify missing dimensions",
-            "target_entities": [],
-            "target_metrics": [],
-            "time_horizon": "N/A"
-        }
-        if status_callback:
-            status_callback("💡 [When2Call Gatekeeper] Câu hỏi cần làm rõ chiều phân tích - Đã gửi đề xuất làm rõ (Proactive Clarification)...")
-        return result
-
     # 0.1 Kiểm tra sự tương thích giữa câu hỏi và CSDL hiện tại (Domain Mismatch Pre-check)
     valid_tables = get_table_names(engine)
     valid_tbls_low = [t.lower() for t in valid_tables]
@@ -9707,6 +9667,23 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
     is_employees_db = False
     is_chocolates_db = False
     is_sakila_db = False
+
+    # Nếu người dùng hỏi chủ đề ngoài phạm vi CSDL (thời tiết, làm thơ, công thức nấu ăn, crypto...)
+    if any(k in user_query_low for k in [
+        "thời tiết", "dự báo thời tiết", "có mưa không", "có mưa ko", "trời mưa", "trời nắng", "nhiệt độ",
+        "làm thơ", "bài thơ", "thơ tình", "công thức nấu", "cách nấu", "món ăn", "giá vàng", "bitcoin", "crypto"
+    ]):
+        result["explanation"] = (
+            "💡 **Thông báo từ Trợ lý:** Câu hỏi của bạn nằm ngoài phạm vi cơ sở dữ liệu doanh nghiệp hiện tại. "
+            "Tôi là Trợ lý Dữ liệu Kinh doanh, chỉ hỗ trợ truy vấn các thông tin về bán hàng, sản phẩm, nhân sự, đơn hàng và khách hàng.\n\n"
+            "👉 Bạn có thể thử các câu hỏi về doanh số, sản phẩm hoặc thị trường để tôi hỗ trợ nhé!"
+            if lang != "en" else
+            "💡 **Notice:** Your query is outside the scope of this business database. "
+            "Please ask questions related to sales, products, employees, or customers!"
+        )
+        result["df"] = None
+        result["sql"] = None
+        return result
 
     if any(k in valid_tbls_low for k in ["order_details", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in valid_tbls_low or "product" in valid_tbls_low) and ("orders" in valid_tbls_low or "customers" in valid_tbls_low)):
         is_northwind_db = True
@@ -9967,25 +9944,6 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
 
     initial_prompt = build_sql_prompt(effective_schema, dialect, user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=2048)
-    if sql_query and any(k in sql_query.upper() for k in ["CANNOT_ANSWER_OUT_OF_DOMAIN", "OUT_OF_DOMAIN", "OUT-OF-DOMAIN", "ABSTAIN"]):
-        result["explanation"] = (
-            f"🛡️ **Thông báo từ Trợ lý Dữ liệu Veraxus (When2Call Gatekeeper):**\n\n"
-            f"Tôi là **AI Business Analyst & Trợ lý Dữ liệu Doanh nghiệp**. Tôi chỉ hỗ trợ truy vấn, thống kê và phân tích các chỉ số trong cơ sở dữ liệu nội bộ của doanh nghiệp (như doanh số, sản phẩm, nhân sự, đơn hàng).\n\n"
-            f"👉 Câu hỏi: *\"{user_query}\"* nằm ngoài phạm vi CSDL vận hành doanh nghiệp. Vui lòng đặt câu hỏi liên quan đến dữ liệu kinh doanh để tôi hỗ trợ bạn tốt nhất nhé!"
-            if lang != "en" else
-            f"🛡️ **Notice from Veraxus AI Assistant (When2Call Gatekeeper):**\n\n"
-            f"I am an Enterprise Data Assistant and only support querying business metrics (sales, products, HR, orders). The query: *\"{user_query}\"* is outside internal business databases."
-        )
-        result["followups"] = [
-            "Tổng doanh thu và tổng số hộp bán ra toàn hệ thống" if lang != "en" else "Total revenue and total boxes sold",
-            "Top 5 sản phẩm có doanh thu cao nhất năm 2022" if lang != "en" else "Top 5 products by revenue in 2022",
-            "Doanh số bán hàng phân bổ theo từng quốc gia" if lang != "en" else "Sales distribution by country"
-        ]
-        result["df"] = None
-        result["sql"] = None
-        result["is_out_of_domain"] = True
-        return result
-
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
@@ -10024,9 +9982,11 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
         result["logs"].append(f"[Lần {attempt}] SQL: {sql_query}")
 
         if not is_safe_select(sql_query):
-            # Nếu AI trả về câu giải thích hợp lệ sau khi đã thử tự sửa
-            if is_conversational_explanation(sql_query) and attempt == 3:
+            # Nếu AI trả về câu giải thích hợp lệ tự nhiên
+            if is_conversational_explanation(sql_query):
                 result["explanation"] = sql_query
+                result["df"] = None
+                result["sql"] = None
                 return result
 
             result["logs"].append("⚠️ Phản hồi chưa phải câu lệnh SQL SELECT/WITH hợp lệ. Đang tự động yêu cầu AI tạo câu lệnh SQL chuẩn xác...")
