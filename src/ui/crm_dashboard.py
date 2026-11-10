@@ -1818,47 +1818,10 @@ def _render_hr_dashboard(engine):
 # =========================================================================
 
 def _render_layer_overview(engine):
-    """Trang chủ Overview: Thanh trượt thời gian linh hoạt, 6 Thẻ chủ đề, 4 KPI tóm tắt, Biểu đồ phân bổ & Biểu đồ Trend sóng kép (Bilingual)."""
+    """Trang chủ Overview: Thanh trượt thời gian linh hoạt, 4 KPI tóm tắt, Biểu đồ phân bổ & Biểu đồ Trend sóng kép (Bilingual)."""
     is_en = (get_current_language() == "en")
 
-    # 1. 6 THẺ CHỦ ĐỀ KHÁM PHÁ THEO LAYER (1-CLICK UNIFIED CARDS)
-    st.markdown(f"""
-    <div style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-        <span>🎯</span> <span><b>{t('hr_nav_header')}</b></span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    nav_cols1 = st.columns(3)
-    with nav_cols1[0]:
-        if st.button(f"🏢 **{t('card_dept_title')}**\n\n{t('card_dept_desc')}", key="btn_nav_dept", use_container_width=True):
-            _set_layer("dept_mgmt")
-
-    with nav_cols1[1]:
-        if st.button(f"👥 **{t('card_emp_title')}**\n\n{t('card_emp_desc')}", key="btn_nav_emp", use_container_width=True):
-            _set_layer("employee_dir")
-
-    with nav_cols1[2]:
-        if st.button(f"💰 **{t('card_sal_title')}**\n\n{t('card_sal_desc')}", key="btn_nav_sal", use_container_width=True):
-            _set_layer("salary_analysis")
-
-    st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
-
-    nav_cols2 = st.columns(3)
-    with nav_cols2[0]:
-        if st.button(f"🌳 **{t('card_org_title')}**\n\n{t('card_org_desc')}", key="btn_nav_org", use_container_width=True):
-            _set_layer("org_structure")
-
-    with nav_cols2[1]:
-        if st.button(f"🎓 **{t('card_title_title')}**\n\n{t('card_title_desc')}", key="btn_nav_title", use_container_width=True):
-            _set_layer("title_positions")
-
-    with nav_cols2[2]:
-        if st.button(f"👔 **{t('card_mgr_title')}**\n\n{t('card_mgr_desc')}", key="btn_nav_mgr", use_container_width=True):
-            _set_layer("dept_managers")
-
-    st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
-
-    # 2. THANH TRƯỢT THỜI GIAN & TIÊU CHÍ PHÂN TÍCH
+    # 1. THANH TRƯỢT THỜI GIAN & TIÊU CHÍ PHÂN TÍCH
     start_year, end_year = _render_timeline_slider("overview")
 
     if is_en:
@@ -2960,101 +2923,10 @@ def _render_sales_dashboard(engine):
 
 
 def _render_sales_layer_overview(engine, min_y: int = 2021, max_y: int = 2022):
-    """Trang chủ Doanh số & Thương mại: 6 Thẻ chủ đề, 4 KPI Neon, Sóng kép Doanh số & Số hộp, Donut Category, Bar Quốc gia (Bilingual)."""
+    """Trang chủ Doanh số & Thương mại: Timeline Slider, 4 KPI Neon, Sóng kép Doanh số & Số hộp, Donut Category, Bar Quốc gia (Bilingual)."""
     is_en = (get_current_language() == "en")
 
-    # 1. 6 THẺ CHỦ ĐỀ KHÁM PHÁ THEO LAYER
-    hub_title = "🎯 Select Commercial Domain (Explore by Layer):" if is_en else "🎯 Chọn Chủ Đề Phân Tích Thương Mại (Khám Phá Theo Layer):"
-    st.markdown(f"""
-    <div style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-        <span>🎯</span> <span><b>{hub_title}</b></span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    nav_cols1 = st.columns(3)
-    with nav_cols1[0]:
-        with st.container():
-            c1_t = "1. Markets & Geography" if is_en else "1. Thị Trường & Địa Lý"
-            c1_d = "Analyze revenue across 6 global markets (India, USA, UK...) and regional APAC, Americas, Europe." if is_en else "Phân tích doanh số 6 thị trường quốc tế (Ấn Độ, Mỹ, Anh, Úc...) & thị phần theo vùng APAC, Americas, Europe."
-            st.markdown(f"""
-            <div class="nav-hub-title"><span>🌍</span> {c1_t}</div>
-            <div class="nav-hub-desc">{c1_d}</div>
-            """, unsafe_allow_html=True)
-            btn1_l = "Explore Markets ➔" if is_en else "Khám phá Thị trường ➔"
-            if st.button(btn1_l, key="btn_nav_s_geo", use_container_width=True):
-                _set_layer("geo", domain_key="sales")
-
-    with nav_cols1[1]:
-        with st.container():
-            c2_t = "2. Sales Teams & Reps" if is_en else "2. Đội Ngũ & Team Sales"
-            c2_d = "Track productivity of 18 sales reps across Yummies, Delish, and Jucies teams." if is_en else "Hiệu suất 18 Sales Reps, so sánh năng suất các Team (Yummies, Delish, Jucies) và định biên nhân sự."
-            st.markdown(f"""
-            <div class="nav-hub-title"><span>👥</span> {c2_t}</div>
-            <div class="nav-hub-desc">{c2_d}</div>
-            """, unsafe_allow_html=True)
-            btn2_l = "Explore Teams ➔" if is_en else "Khám phá Đội ngũ ➔"
-            if st.button(btn2_l, key="btn_nav_s_people", use_container_width=True):
-                _set_layer("people", domain_key="sales")
-
-    with nav_cols1[2]:
-        with st.container():
-            c3_t = "3. Product Catalog & Margins" if is_en else "3. Danh Mục Sản Phẩm"
-            c3_d = "Evaluate 22 chocolate SKUs (Bars, Bites, Other), unit costs, and gross margins." if is_en else "Phân tích 22 dòng sản phẩm (Bars, Bites, Other), kích thước đóng gói, giá vốn & biên lợi nhuận gộp."
-            st.markdown(f"""
-            <div class="nav-hub-title"><span>🍫</span> {c3_t}</div>
-            <div class="nav-hub-desc">{c3_d}</div>
-            """, unsafe_allow_html=True)
-            btn3_l = "Explore Products ➔" if is_en else "Khám phá Sản phẩm ➔"
-            if st.button(btn3_l, key="btn_nav_s_products", use_container_width=True):
-                _set_layer("products", domain_key="sales")
-
-    nav_cols2 = st.columns(3)
-    with nav_cols2[0]:
-        with st.container():
-            c4_t = "4. Revenue Trends & Seasonality" if is_en else "4. Xu Hướng & Mùa Vụ"
-            c4_d = "Track monthly revenue time series, peak anomaly periods, and business cycles." if is_en else "Theo dõi chuỗi thời gian doanh thu tháng/quý, giải mã các đỉnh tăng trưởng đột biến và tính chu kỳ kinh doanh."
-            st.markdown(f"""
-            <div class="nav-hub-title"><span>📈</span> {c4_t}</div>
-            <div class="nav-hub-desc">{c4_d}</div>
-            """, unsafe_allow_html=True)
-            btn4_l = "Explore Trends ➔" if is_en else "Khám phá Xu hướng ➔"
-            if st.button(btn4_l, key="btn_nav_s_trends", use_container_width=True):
-                _set_layer("trends", domain_key="sales")
-
-    with nav_cols2[1]:
-        with st.container():
-            c5_t = "5. Top Performers & SKUs" if is_en else "5. Top Bán Hàng & Khách Hàng"
-            c5_d = "Leaderboard ranking of top 10 sales specialists and best-selling chocolate SKUs." if is_en else "Bảng xếp hạng Top 10 cá nhân & SKU xuất sắc nhất mang lại dòng tiền đột phá cho doanh nghiệp."
-            st.markdown(f"""
-            <div class="nav-hub-title"><span>🏆</span> {c5_t}</div>
-            <div class="nav-hub-desc">{c5_d}</div>
-            """, unsafe_allow_html=True)
-            btn5_l = "View Leaderboard ➔" if is_en else "Xem Top Hiệu Suất ➔"
-            if st.button(btn5_l, key="btn_nav_s_top", use_container_width=True):
-                _set_layer("top_performers", domain_key="sales")
-
-    with nav_cols2[2]:
-        with st.container():
-            c6_t = "6. Diagnostics & AI Copilot" if is_en else "6. Chẩn Đoán & AI Copilot"
-            c6_d = "Detect market share deviations, volume spikes, and generate C-Level recommendations." if is_en else "Tự động phát hiện điểm lệch pha thị phần, đột biến doanh số và đưa ra khuyến nghị điều hành cấp cao."
-            st.markdown(f"""
-            <div class="nav-hub-title"><span>🧠</span> {c6_t}</div>
-            <div class="nav-hub-desc">{c6_d}</div>
-            """, unsafe_allow_html=True)
-            btn6_l = "Ask Copilot Assistant 💬" if is_en else "Hỏi Trợ Lý Copilot 💬"
-            if st.button(btn6_l, key="btn_nav_s_copilot", type="primary", use_container_width=True):
-                ctx_quick = {
-                    "layer_title": "Sales & Commercial Overview" if is_en else "Tổng quan Doanh số & Thương mại",
-                    "time_label": f"{min_y} — {max_y}",
-                    "anomalies": [],
-                    "kpis_summary": "Analyzing commercial data from Awesome Chocolates DB." if is_en else "Đang phân tích tổng quan doanh số CSDL Awesome Chocolates.",
-                    "data_summary": "User opened Copilot from Sales Overview hub." if is_en else "Người dùng mở Copilot từ Thẻ điều hành Trang chủ."
-                }
-                show_dashboard_copilot_dialog(ctx_quick)
-
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-
-    # 2. THANH TRƯỢT THỜI GIAN
+    # 1. THANH TRƯỢT THỜI GIAN
     start_year, end_year = _render_timeline_slider("sales_overview", min_year=min_y, max_year=max_y, domain_key="sales")
     data = fetch_sales_overview_data(engine, start_year=start_year, end_year=end_year)
 
@@ -3674,48 +3546,10 @@ def _render_northwind_dashboard(engine):
 
 
 def _render_northwind_layer_overview(engine, min_year: int, max_year: int):
-    """Trang chủ Tổng quan Northwind: 6 Thẻ chủ đề, Timeline Slider, 4 KPI Neon, Sóng kép Trend, Donut Category, Bar Top Products, Data Preview & Anomaly Diagnostics."""
+    """Trang chủ Tổng quan Northwind: Timeline Slider, 4 KPI Neon, Sóng kép Trend, Donut Category, Bar Top Products, Data Preview & Anomaly Diagnostics."""
     is_en = (get_current_language() == "en")
 
-    # 1. 6 THẺ CHỦ ĐỀ KHÁM PHÁ THEO LAYER
-    hub_title = "🎯 Select Supply Chain & Sales Domain (Explore by Layer):" if is_en else "🎯 Chọn Chủ Đề Phân Tích Chuỗi Cung Ứng & Bán Hàng (Khám Phá Theo Layer):"
-    st.markdown(f"""
-    <div style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-        <span>🎯</span> <span><b>{hub_title}</b></span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c_c1, c_c2, c_c3 = st.columns(3)
-    with c_c1:
-        if st.button("📦 Products & Catalog ➔\n" + ("Product margins & inventory status" if is_en else "Danh mục sản phẩm, cơ cấu giá và biên lợi nhuận"), key="btn_nw_hub_prod", use_container_width=True):
-            _set_layer("products", domain_key="northwind")
-        st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
-        if st.button("👥 Sales Reps & Team ➔\n" + ("Sales representative performance & deal size" if is_en else "Đội ngũ đại diện kinh doanh & doanh số đóng góp"), key="btn_nw_hub_emp", use_container_width=True):
-            _set_layer("employees", domain_key="northwind")
-
-    with c_c2:
-        if st.button("🛒 Orders & Fulfillment ➔\n" + ("Order status, shipping carriers & freight" if is_en else "Quản lý đơn hàng, tiến độ giao vận & phí vận chuyển"), key="btn_nw_hub_ord", use_container_width=True):
-            _set_layer("orders", domain_key="northwind")
-        st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
-        if st.button("🌍 Global Customers ➔\n" + ("Corporate clients, countries & purchasing power" if is_en else "Mạng lưới khách hàng doanh nghiệp theo quốc gia"), key="btn_nw_hub_cust", use_container_width=True):
-            _set_layer("customers", domain_key="northwind")
-
-    with c_c3:
-        if st.button("🏭 Suppliers & Purchasing ➔\n" + ("Supplier directory & purchase orders" if is_en else "Nhà cung ứng, đơn nhập hàng & nguồn nguyên liệu"), key="btn_nw_hub_sup", use_container_width=True):
-            _set_layer("suppliers", domain_key="northwind")
-        st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
-        if st.button("🤖 AI Supply Chain Copilot ➔\n" + ("Autonomous diagnostic insights & forecasting" if is_en else "Trợ lý AI chẩn đoán nút thắt chuỗi cung ứng"), key="btn_nw_hub_copilot", use_container_width=True):
-            show_dashboard_copilot_dialog({
-                "layer_title": "Northwind Overview",
-                "time_label": f"{min_year} - {max_year}",
-                "anomalies": [],
-                "kpis_summary": "Northwind Supply Chain Executive Intelligence",
-                "data_summary": "Comprehensive overview of orders, products, customers and sales reps."
-            })
-
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-
-    # 2. TIMELINE SLIDER
+    # 1. TIMELINE SLIDER
     start_year, end_year = _render_timeline_slider("nw_ov", min_year=min_year, max_year=max_year, domain_key="northwind")
     data = fetch_northwind_overview_data(engine, start_year=start_year, end_year=end_year)
 
@@ -4162,41 +3996,10 @@ def _render_generic_dashboard(engine):
 
 
 def _render_generic_layer_overview(engine, schema_meta: dict):
-    """Trang chủ Tổng quan cho CSDL mới: 4 KPI, Dynamic Topic Cards, Biểu đồ phân phối tự động & Bảng dữ liệu (Bilingual)."""
+    """Trang chủ Tổng quan cho CSDL mới: 4 KPI, Biểu đồ phân phối tự động & Bảng dữ liệu (Bilingual)."""
     is_en = (get_current_language() == "en")
     min_year = schema_meta.get("min_year", 2020)
     max_year = schema_meta.get("max_year", 2024)
-    tables = schema_meta.get("tables", [])
-
-    # Dynamic Topic Cards
-    hub_title = "🎯 Explore Schema Tables (1-Click Hub):" if is_en else "🎯 Khám Phá Danh Mục Bảng Dữ Liệu Trong CSDL (1-Click Hub):"
-    st.markdown(f"""
-    <div style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-        <span>🎯</span> <span><b>{hub_title}</b></span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    sorted_hub_tables = sorted(tables, key=lambda t: schema_meta.get("meta", {}).get(t, {}).get("row_count", 0), reverse=True)
-    if sorted_hub_tables:
-        t_chunks = [sorted_hub_tables[i:i+3] for i in range(0, min(len(sorted_hub_tables), 6), 3)]
-        for chunk_idx, chunk in enumerate(t_chunks):
-            cols = st.columns(len(chunk))
-            for c_idx, t_name in enumerate(chunk):
-                with cols[c_idx]:
-                    r_c = schema_meta.get("meta", {}).get(t_name, {}).get("row_count", 0)
-                    col_c = len(schema_meta.get("meta", {}).get(t_name, {}).get("columns", []))
-                    tbl_lbl = "Table" if is_en else "Bảng"
-                    desc_str = f"{r_c:,} records • {col_c} schema attributes." if is_en else f"{r_c:,} dòng dữ liệu • {col_c} trường thông tin cấu trúc."
-                    open_btn_l = f"Open Table {t_name} ➔" if is_en else f"Mở Bảng {t_name} ➔"
-                    with st.container():
-                        st.markdown(f"""
-                        <div class="nav-hub-title"><span>📊</span> {tbl_lbl}: {t_name}</div>
-                        <div class="nav-hub-desc">{desc_str}</div>
-                        """, unsafe_allow_html=True)
-                        if st.button(open_btn_l, key=f"btn_nav_gen_{chunk_idx}_{c_idx}", use_container_width=True):
-                            _set_layer(f"tbl_{t_name}", domain_key="generic")
-
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
     start_year, end_year = _render_timeline_slider("generic_ov", min_year=min_year, max_year=max_year, domain_key="generic")
     data = fetch_generic_overview_data(engine, schema_meta, start_year=start_year, end_year=end_year)

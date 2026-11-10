@@ -31,16 +31,18 @@ import src.database.crm_queries
 import src.analytics.heuristics
 import src.analytics.anomaly
 import src.ui.components
+import src.ui.sidebar
 import src.ui.crm_dashboard
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261109_universal_multidb_v209"
+CACHE_BUILD_ID = "20261110_minimalist_clean_v210"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
     importlib.reload(src.analytics.heuristics)
     importlib.reload(src.analytics.anomaly)
     importlib.reload(src.ui.components)
+    importlib.reload(src.ui.sidebar)
     importlib.reload(src.ui.crm_dashboard)
     try:
         st.cache_data.clear()
@@ -888,14 +890,10 @@ else:
 
         curr_lang = get_current_language()
 
-        # Hero Header - Tối giản & Thẩm mỹ (Chuẩn Zalo/CPO)
-        badge_text = t("hero_badge_demo") if is_demo else t("hero_badge_ready")
+        # Hero Header - Tối giản & Thẩm mỹ (Chuẩn Zalo/CPO Minimalist)
         st.markdown(textwrap.dedent(f"""
-        <div class="hero-container">
-            <div class="hero-badge">
-                <span class="hero-badge-dot"></span> <span>{badge_text}</span>
-            </div>
-            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 6px 0;">
+        <div class="hero-container" style="padding-top: 6px; padding-bottom: 12px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin: 0 0 6px 0;">
                 <svg width="44" height="44" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 6px 16px rgba(0, 104, 255, 0.32)); flex-shrink: 0;">
                     <defs>
                         <linearGradient id="heroFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
@@ -933,9 +931,6 @@ else:
                     {t("hero_title")}
                 </div>
             </div>
-            <div class="hero-subtitle">
-                {t("app_subtitle")}
-            </div>
         </div>
         """).strip(), unsafe_allow_html=True)
 
@@ -959,26 +954,6 @@ else:
 
             # Tích hợp Micro giọng nói trực tiếp bên trong thanh tìm kiếm
             render_voice_input_button(compact=True)
-
-        # Dải Nhận diện Tin cậy Vi mô (Micro-Trust Ribbon)
-        st.markdown(textwrap.dedent(f"""
-        <div class="micro-trust-ribbon">
-            <span class="micro-trust-pill">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:4px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                {t("hero_pill_security")}
-            </span>
-            <span style="color: rgba(255,255,255,0.25);">•</span>
-            <span class="micro-trust-pill">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:4px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-                {t("hero_pill_realtime")}
-            </span>
-            <span style="color: rgba(255,255,255,0.25);">•</span>
-            <span class="micro-trust-pill">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A855F7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:4px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
-                {t("hero_pill_instant")}
-            </span>
-        </div>
-        """).strip(), unsafe_allow_html=True)
 
         # Khám phá câu hỏi theo 3 lăng kính điều hành (Categorized Smart Prompts Tabs)
         categorized = generate_categorized_starter_prompts(

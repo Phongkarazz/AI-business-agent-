@@ -201,22 +201,11 @@ def render_main_sidebar():
         </style>
         """, unsafe_allow_html=True)
 
-        # --- PHẦN 1: TOP BRANDING, LANGUAGE SWITCHER & STATUS ---
+        # --- PHẦN 1: TOP BRANDING & LANGUAGE SWITCHER ---
         is_en = (get_current_language() == "en")
-        db_badge = ("Demo DB (SQLite)" if is_en else "Dữ liệu Mẫu (Demo)") if is_demo else ("Enterprise DB" if is_en else "CSDL Doanh Nghiệp")
-        if "qwen" in model_name.lower() or "ollama" in provider.lower():
-            engine_badge = "Local Engine"
-        elif "deepseek" in model_name.lower():
-            engine_badge = "DeepSeek V3"
-        elif "gemini" in model_name.lower():
-            engine_badge = "Gemini 3.7"
-        elif "claude" in model_name.lower():
-            engine_badge = "Claude 3.5"
-        else:
-            engine_badge = "AI Engine"
 
         st.markdown(textwrap.dedent(f"""
-        <div style="padding: 4px 4px 10px 4px;">
+        <div style="padding: 4px 4px 6px 4px;">
             <div style="font-size: 1.35rem; font-weight: 900; color: #FFFFFF; display: flex; align-items: center; gap: 10px;">
                 <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 12px rgba(0, 104, 255, 0.45)); flex-shrink: 0;">
                     <defs>
@@ -252,12 +241,6 @@ def render_main_sidebar():
                     <polygon points="38,58 50,54 62,58 50,88" fill="url(#sbFacetCenterGlow)"/>
                 </svg>
                 <span style="color: #FFFFFF !important; letter-spacing: -0.025em; font-weight: 900;">VERAXUS</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; padding-left: 2px;">
-                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00DF8F; box-shadow: 0 0 8px rgba(0, 223, 143, 0.7);"></span>
-                <span style="font-size: 0.8rem; font-weight: 750; color: #00DF8F;">{db_badge}</span>
-                <span style="font-size: 0.72rem; color: #64748B;">•</span>
-                <span style="font-size: 0.78rem; color: #CBD5E1; font-weight: 600;">{engine_badge}</span>
             </div>
         </div>
         """).strip(), unsafe_allow_html=True)
