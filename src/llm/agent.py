@@ -7161,6 +7161,13 @@ def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "My
         any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "sales person", "người bán", "sales rep", "sales reps"])
         and any(k in q_low for k in ["số lượng", "quy mô", "bao nhiêu", "đếm", "phân bổ", "cơ cấu", "phân chia", "mỗi team có", "từng team có", "từng đội có"])
     )
+    # Nếu câu hỏi về hiệu suất bán hàng, số lượng hộp, top nhân sự bán hàng xuất sắc thì tuyệt đối không can thiệp (đã có auto_fix_chocolates_top_rankings_query xử lý)
+    if any(k in q_low for k in [
+        "hộp", "boxes", "thùng", "sản lượng", "top", "xuất sắc", "bán chạy", "nhiều nhất", 
+        "cao nhất", "thấp nhất", "dẫn đầu", "hiệu suất", "xếp hạng", "thứ hạng"
+    ]):
+        return sql
+
     # Nếu câu hỏi hỏi về doanh số, doanh thu, tiền bán thì không can thiệp
     if not is_headcount or any(k in q_low for k in ["doanh số", "doanh thu", "tiền bán", "bán được bao nhiêu tiền", "doanh thu bao nhiêu", "tháng", "quý"]):
         return sql
@@ -10211,6 +10218,7 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                 sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
                 continue
 
+            uq_low_ag = user_query.lower()
             dup_warning = detect_duplicate_entity_warning(df)
             if dup_warning:
                 # Chỉ drop duplicates nếu KHÔNG có chiều thời gian trong dữ liệu hoặc câu hỏi
@@ -10230,7 +10238,6 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                         df = df.drop_duplicates(subset=[name_cols[0]]).reset_index(drop=True)
 
             # 2.25 TRUY VẤN 1 (CHO KPI TOÀN CÔNG TY): Ngăn ngừa Data Distortion do LIMIT 10
-            uq_low_ag = user_query.lower()
             is_raises_cohort_ag = (
                 any(k in uq_low_ag for k in ["tăng lương", "lần tăng", "được tăng"])
                 and any(k in uq_low_ag for k in ["nhân viên", "ai", "danh sách", "những", "người", "top"])

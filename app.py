@@ -41,7 +41,7 @@ import src.llm.agent
 import src.llm
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_fix_quarterly_growth_v221"
+CACHE_BUILD_ID = "20261110_fix_headcount_scoping_v222"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
@@ -834,6 +834,7 @@ else:
                 auto_fix_chocolates_new_products_query,
                 auto_fix_chocolates_monthly_spread_query,
                 auto_fix_chocolates_quarterly_growth_comparison_query,
+                auto_fix_chocolates_top_rankings_query,
             )
             from src.database.query_runner import read_sql_capped
             from src.analytics.anomaly import analyze_data_anomalies
@@ -860,11 +861,13 @@ else:
                 _sql_new = auto_fix_chocolates_new_products_query(_sql_new, _q, dialect=_dial)
                 _sql_new = auto_fix_chocolates_monthly_spread_query(_sql_new, _q, dialect=_dial)
                 _sql_new = auto_fix_chocolates_quarterly_growth_comparison_query(_sql_new, _q, dialect=_dial)
+                _sql_new = auto_fix_chocolates_top_rankings_query(_sql_new, _q, dialect=_dial)
                 if _sql_new and _sql_new != _sql_orig:
                     _df_new, _ = read_sql_capped(_sql_new, _eng)
                     if _df_new is not None and not _df_new.empty:
                         _turn["sql"] = _sql_new
                         _turn["df"] = _df_new
+                        _turn["explanation"] = None
                         _turn["anomalies_info"] = analyze_data_anomalies(_df_new)
                         _sec = split_insight_sections("", df=_df_new, user_query=_q, is_en=(_turn.get("lang") == "en"))
                         _turn["insights"] = (
