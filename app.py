@@ -35,7 +35,7 @@ import src.ui.sidebar
 import src.ui.crm_dashboard
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_kpi_contrast_fix_v211"
+CACHE_BUILD_ID = "20261110_claude_gemini_center_v212"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
@@ -394,13 +394,14 @@ st.markdown("""
         line-height: 1.35;
     }
 
-    /* Trục Tìm kiếm Trung tâm Hero Search - Tỷ lệ Vàng Căn giữa 760px */
+    /* Trục Tìm kiếm Trung tâm Hero Search - Tỷ lệ Chuẩn Claude & Gemini (860px) */
     form[data-testid="stForm"] {
         border: none !important;
         padding: 0 !important;
         background: transparent !important;
-        margin: 20px auto 16px auto !important;
-        max-width: 760px !important;
+        margin: 16px auto 20px auto !important;
+        max-width: 860px !important;
+        width: 100% !important;
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] {
         margin-bottom: 0 !important;
@@ -409,18 +410,19 @@ st.markdown("""
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"] {
         border-radius: 16px !important;
         background-color: #151A30 !important;
-        border: 1.5px solid rgba(0, 240, 255, 0.3) !important;
-        box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5) !important;
+        border: 1.5px solid rgba(0, 240, 255, 0.32) !important;
+        box-shadow: 0 6px 24px -2px rgba(0, 0, 0, 0.55), 0 0 16px rgba(0, 240, 255, 0.08) !important;
         transition: all 0.25s ease !important;
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"]:hover,
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"]:hover {
         border-color: #00F0FF !important;
+        box-shadow: 0 8px 28px -2px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.2) !important;
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within,
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"]:focus-within {
         border-color: #00F0FF !important;
-        box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.25), 0 8px 24px -4px rgba(0, 240, 255, 0.3) !important;
+        box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.25), 0 10px 32px -4px rgba(0, 240, 255, 0.35) !important;
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] input {
         height: 52px !important;
@@ -439,24 +441,31 @@ st.markdown("""
         border-radius: 16px !important;
         font-size: 0.98rem !important;
         font-weight: 700 !important;
-        background: linear-gradient(135deg, #0052D4 0%, #0068FF 100%) !important;
+        background: linear-gradient(135deg, #0052D4 0%, #0068FF 60%, #00F0FF 100%) !important;
         border: 1px solid rgba(255, 255, 255, 0.2) !important;
         color: #FFFFFF !important;
         white-space: nowrap !important;
-        box-shadow: 0 4px 16px rgba(0, 104, 255, 0.35) !important;
+        box-shadow: 0 4px 18px rgba(0, 104, 255, 0.4) !important;
         transition: all 0.2s ease !important;
     }
     form[data-testid="stForm"] .stButton > button:hover {
         background: linear-gradient(135deg, #0068FF 0%, #00F0FF 100%) !important;
         color: #090D1A !important;
-        box-shadow: 0 6px 22px rgba(0, 240, 255, 0.5) !important;
+        box-shadow: 0 6px 24px rgba(0, 240, 255, 0.6) !important;
         transform: translateY(-2px) !important;
     }
+    /* Ẩn dòng chữ watermark submit instructions của Streamlit để thanh search đạt độ tinh gọn tuyệt đối */
+    div[data-testid="InputInstructions"],
+    span[data-testid="stFormSubmitInstructions"] {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0px !important;
+    }
 
-    /* Khám phá Theo Lăng Kính Điều Hành (Tabs) - Nhẹ nhàng, Ngăn nắp */
+    /* Khám phá Theo Lăng Kính Điều Hành (Tabs) - Nhẹ nhàng, Ngăn nắp, Căn giữa 860px */
     .prompt-tab-intro {
         margin: 18px auto 10px auto;
-        max-width: 880px;
+        max-width: 860px;
         font-size: 0.9rem;
         font-weight: 700;
         color: #FFFFFF !important;
@@ -465,7 +474,7 @@ st.markdown("""
         gap: 6px;
     }
     .stTabs {
-        max-width: 880px;
+        max-width: 860px;
         margin: 0 auto;
     }
     .stTabs [data-baseweb="tab-list"] {
@@ -890,11 +899,50 @@ else:
 
         curr_lang = get_current_language()
 
-        # Hero Header - Tối giản & Thẩm mỹ (Chuẩn Zalo/CPO Minimalist)
+        # Cấu hình phong cách Model AI (Claude / Gemini): Căn giữa chính giữa màn hình (Vertical & Horizontal Centering)
+        st.markdown("""
+        <style>
+        /* Toàn bộ vùng hiển thị được căn giữa hoàn hảo theo chuẩn Claude & Gemini */
+        .main .block-container {
+            min-height: calc(100vh - 4.5rem) !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            align-items: center !important;
+            padding-top: 1rem !important;
+            padding-bottom: 2.5rem !important;
+            max-width: 900px !important;
+        }
+        .main .block-container > div[data-testid="stVerticalBlock"] {
+            margin-top: auto !important;
+            margin-bottom: auto !important;
+            width: 100% !important;
+            max-width: 860px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+        }
+        .hero-container {
+            text-align: center !important;
+            padding: 8px 0 14px 0 !important;
+            width: 100% !important;
+            margin: 0 auto !important;
+        }
+        .hero-title {
+            font-size: clamp(2.5rem, 4vw, 3.4rem) !important;
+            font-weight: 900 !important;
+            color: #FFFFFF !important;
+            letter-spacing: -0.03em !important;
+            text-shadow: 0 4px 24px rgba(0, 104, 255, 0.45) !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # Hero Header - Chữ Veraxus & Logo Kim Cương Chính Giữa Khung Hình (Chuẩn Claude / Gemini)
         st.markdown(textwrap.dedent(f"""
-        <div class="hero-container" style="padding-top: 6px; padding-bottom: 12px;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin: 0 0 6px 0;">
-                <svg width="44" height="44" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 6px 16px rgba(0, 104, 255, 0.32)); flex-shrink: 0;">
+        <div class="hero-container">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 16px; margin: 0 0 4px 0;">
+                <svg width="48" height="48" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 8px 22px rgba(0, 104, 255, 0.45)); flex-shrink: 0;">
                     <defs>
                         <linearGradient id="heroFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
                             <stop offset="0%" stop-color="#38BDF8"/>
@@ -927,33 +975,31 @@ else:
                     <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
                     <polygon points="38,58 50,54 62,58 50,88" fill="url(#heroFacetCenterGlow)"/>
                 </svg>
-                <div class="hero-title" style="margin-bottom: 0; color: #FFFFFF !important; font-weight: 900; letter-spacing: -0.025em;">
+                <div class="hero-title" style="margin-bottom: 0;">
                     {t("hero_title")}
                 </div>
             </div>
         </div>
         """).strip(), unsafe_allow_html=True)
 
-        # Trục tương tác chính: Thanh Tìm kiếm Lớn tại Trung tâm (Spotlight Search)
-        col_sp_l, col_center_search, col_sp_r = st.columns([1.1, 5.8, 1.1])
-        with col_center_search:
-            with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
-                c_in, c_btn = st.columns([4.4, 1.3], gap="small", vertical_alignment="center")
-                with c_in:
-                    hero_query = st.text_input(
-                        "Search",
-                        placeholder=f" {t('hero_input_placeholder')}",
-                        label_visibility="collapsed",
-                        key="hero_search_input"
-                    )
-                with c_btn:
-                    hero_submit = st.form_submit_button(t("hero_btn_analyze"), type="primary", use_container_width=True)
-                if hero_submit and hero_query.strip():
-                    st.session_state["pending_prompt"] = hero_query.strip()
-                    st.rerun()
+        # Trục tương tác chính: Thanh Button Đặt Câu Hỏi Chuẩn Claude & Gemini
+        with st.form(key="center_hero_search_form", clear_on_submit=True, border=False):
+            c_in, c_btn = st.columns([5.2, 1.2], gap="small", vertical_alignment="center")
+            with c_in:
+                hero_query = st.text_input(
+                    "Search",
+                    placeholder=f" {t('hero_input_placeholder')}",
+                    label_visibility="collapsed",
+                    key="hero_search_input"
+                )
+            with c_btn:
+                hero_submit = st.form_submit_button(t("hero_btn_analyze"), type="primary", use_container_width=True)
+            if hero_submit and hero_query.strip():
+                st.session_state["pending_prompt"] = hero_query.strip()
+                st.rerun()
 
-            # Tích hợp Micro giọng nói trực tiếp bên trong thanh tìm kiếm
-            render_voice_input_button(compact=True)
+        # Tích hợp Micro giọng nói trực tiếp bên trong thanh tìm kiếm
+        render_voice_input_button(compact=True)
 
         # Khám phá câu hỏi theo 3 lăng kính điều hành (Categorized Smart Prompts Tabs)
         categorized = generate_categorized_starter_prompts(
