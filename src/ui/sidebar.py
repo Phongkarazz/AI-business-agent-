@@ -5,8 +5,7 @@ Allows clicking on any historical question to view its result directly.
 
 import textwrap
 import streamlit as st
-from src.database.connection import try_connect
-from src.database.demo_data import build_demo_engine
+from src.database.business_upload import compose_connection_schema, resolve_database_connection
 from src.database.schema import (
     auto_extract_schema,
     get_table_names,
@@ -32,24 +31,27 @@ def perform_connection(
     custom_base_url: str,
     selected_model: str,
     schema_context_input: str,
+    custom_workspace_dir: str = "",
 ) -> tuple[bool, str]:
     """Thực hiện kết nối tới Database và AI Provider, trích xuất schema và cập nhật session state."""
     try:
-        if use_demo:
-            demo_type = "yen_sao" if "yen" in (db_name or "").lower() else "chocolate"
-            engine = build_demo_engine(demo_type=demo_type)
-        else:
-            engine = try_connect(
-                db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
-            )
+        engine, knowledge, dialect, _db_desc, resolved_is_demo = resolve_database_connection(
+            use_demo=use_demo,
+            db_host=db_host,
+            db_port=db_port,
+            db_user=db_user,
+            db_pass=db_pass,
+            db_name=db_name,
+            use_ssl=use_ssl,
+            run_local=run_local,
+            custom_workspace_dir=custom_workspace_dir,
+        )
 
         client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
         extracted_schema = auto_extract_schema(engine, force_refresh=True)
-        custom_notes = (schema_context_input or "").strip()
-        if custom_notes and not custom_notes.startswith("Cơ sở dữ liệu bao gồm") and custom_notes != extracted_schema:
-            final_schema = f"{extracted_schema}\n\n=== GHI CHÚ NGHIỆP VỤ BỔ SUNG ===\n{custom_notes}"
-        else:
-            final_schema = extracted_schema
+        final_schema = compose_connection_schema(
+            extracted_schema, schema_context_input, knowledge
+        )
 
         final_model_name = selected_model
         if effective_provider == "OpenRouter":
@@ -61,10 +63,12 @@ def perform_connection(
             "provider": effective_provider,
             "model_name": final_model_name,
             "schema_context": final_schema,
+            "datamate_knowledge": knowledge,
+            "custom_workspace_dir": (custom_workspace_dir or "").strip(),
             "connected": True,
             "_db_pass_for_sanitize": db_pass,
-            "is_demo": use_demo,
-            "db_dialect": "SQLite" if use_demo else "MySQL",
+            "is_demo": resolved_is_demo,
+            "db_dialect": dialect,
             "history": [],
             "query_cache": {},
             "focused_turn_idx": None,

@@ -4,6 +4,7 @@ Featuring standalone Onboarding, interactive Explorer Sidebar, direct History In
 Smart Starter Cards (1-Click), and Follow-up Question Suggestions.
 """
 
+import pathlib
 import re
 import sys
 import textwrap
@@ -28,6 +29,7 @@ except ImportError:
 import importlib
 import src.i18n
 import src.database.crm_queries
+import src.database.business_upload
 import src.analytics.heuristics
 import src.analytics.anomaly
 import src.ui.components
@@ -37,20 +39,23 @@ import src.llm.prompts
 import src.llm.few_shot_selector
 import src.llm.router_planner
 import src.llm.evaluator
+import src.llm.datamate_bridge
 import src.llm.agent
 import src.llm
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261110_fix_entity_type_phrasing_v224"
+CACHE_BUILD_ID = "20261114_datamate_veraxus_step1_v225"
 if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
     importlib.reload(src.i18n)
     importlib.reload(src.database.crm_queries)
+    importlib.reload(src.database.business_upload)
     importlib.reload(src.analytics.heuristics)
     importlib.reload(src.analytics.anomaly)
     importlib.reload(src.llm.prompts)
     importlib.reload(src.llm.few_shot_selector)
     importlib.reload(src.llm.router_planner)
     importlib.reload(src.llm.evaluator)
+    importlib.reload(src.llm.datamate_bridge)
     importlib.reload(src.llm.agent)
     importlib.reload(src.llm)
     importlib.reload(src.ui.components)
@@ -741,6 +746,8 @@ if (
             api_key = saved.get("api_key_openrouter", "")
         elif provider == "Gemini (Google)":
             api_key = saved.get("api_key_gemini", "")
+        elif provider == "Ollama (Local AI Offline)":
+            api_key = saved.get("api_key_ollama", "") or "ollama"
         else:
             api_key = saved.get("api_key_qwen", "")
 
@@ -748,43 +755,64 @@ if (
         is_openrouter_key = clean_api_key.startswith("sk-or-v1-")
         effective_provider = "OpenRouter" if is_openrouter_key else provider
 
-        use_demo = saved.get("data_mode_index", 0) == 0
+        saved_mode_idx = saved.get("data_mode_index", 0)
+        custom_workspace_dir = (saved.get("custom_workspace_dir", "") or "").strip() if saved_mode_idx == 2 else ""
+        has_custom_ws = bool(custom_workspace_dir and pathlib.Path(custom_workspace_dir).is_dir())
+        use_demo = (saved_mode_idx == 0)
+        is_mysql_mode = (not use_demo) and (not has_custom_ws)
+
         db_host = (saved.get("db_host", "") or "").strip()
         db_user = (saved.get("db_user", "") or "").strip()
         db_name = (saved.get("db_name", "") or "").strip()
         run_local = saved.get("run_local", True) or (db_host in ("localhost", "127.0.0.1", ""))
 
-        if run_local and not db_host:
+        if is_mysql_mode and run_local and not db_host:
             db_host = "localhost"
 
-        can_connect = clean_api_key and (use_demo or bool(db_user and db_name and (db_host or run_local)))
+        if effective_provider == "Ollama (Local AI Offline)" and not clean_api_key:
+            clean_api_key = "ollama"
+        has_provider_auth = bool(clean_api_key) or (effective_provider == "Ollama (Local AI Offline)")
+        can_connect = has_provider_auth and (use_demo or has_custom_ws or bool(db_user and db_name and (db_host or run_local)))
 
         if can_connect:
-            custom_base_url = saved.get("openrouter_base_url" if effective_provider == "OpenRouter" else "qwen_base_url", "")
-            default_model_for_p = "gemini-3.7-flash" if effective_provider == "Gemini (Google)" else ("deepseek/deepseek-chat" if effective_provider == "OpenRouter" else "qwen-plus")
+            if effective_provider == "OpenRouter":
+                custom_base_url = saved.get("openrouter_base_url", "")
+                default_model_for_p = "deepseek/deepseek-chat"
+            elif effective_provider == "Gemini (Google)":
+                custom_base_url = ""
+                default_model_for_p = "gemini-3.7-flash"
+            elif effective_provider == "Ollama (Local AI Offline)":
+                custom_base_url = saved.get("ollama_base_url", "")
+                default_model_for_p = "qwen2.5-coder:3b"
+            else:
+                custom_base_url = saved.get("qwen_base_url", "")
+                default_model_for_p = "qwen-plus"
+
             target_model = saved.get("model_name") or default_model_for_p
             if effective_provider == "Gemini (Google)" and "deepseek" in target_model.lower():
                 target_model = "gemini-3.7-flash"
 
-            with st.spinner(f"⚡ Đang tự động kết nối lại {effective_provider} & {'SQLite Demo' if use_demo else 'MySQL'}..."):
+            mode_label = "DataMate Workspace" if has_custom_ws else ("SQLite Demo" if use_demo else "MySQL")
+            with st.spinner(f"⚡ Đang tự động kết nối lại {effective_provider} & {mode_label}..."):
                 success, detail = perform_connection(
                     use_demo=use_demo,
-                    db_host=db_host,
+                    db_host=db_host if is_mysql_mode else "",
                     db_port=saved.get("db_port", "3306"),
-                    db_user=db_user,
-                    db_pass=saved.get("db_pass", ""),
+                    db_user=db_user if is_mysql_mode else "",
+                    db_pass=saved.get("db_pass", "") if is_mysql_mode else "",
                     db_name=db_name,
-                    use_ssl=saved.get("use_ssl", False) if not run_local else False,
-                    run_local=run_local,
+                    use_ssl=saved.get("use_ssl", False) if (is_mysql_mode and not run_local) else False,
+                    run_local=run_local if is_mysql_mode else False,
                     effective_provider=effective_provider,
                     clean_api_key=clean_api_key,
                     custom_base_url=custom_base_url,
                     selected_model=target_model,
                     schema_context_input="",
+                    custom_workspace_dir=custom_workspace_dir,
                 )
                 if success:
                     st.session_state["view_mode"] = "chat"
-                    st.toast(f"⚡ Đã tự động kết nối {effective_provider} & {'SQLite Demo' if use_demo else 'MySQL'}!", icon="⚡")
+                    st.toast(f"⚡ Đã tự động kết nối {effective_provider} & {mode_label}!", icon="⚡")
                     st.rerun()
                 else:
                     st.session_state["_auto_connect_error"] = detail
@@ -843,6 +871,8 @@ else:
             _dial = st.session_state.get("db_dialect", "MySQL")
             for _turn in history:
                 if not isinstance(_turn, dict):
+                    continue
+                if st.session_state.get("datamate_knowledge") is not None or _turn.get("is_datamate_turn"):
                     continue
                 _q = str(_turn.get("query") or "")
                 _sql_orig = str(_turn.get("sql") or "")
@@ -1176,7 +1206,8 @@ else:
                     enable_self_check=st.session_state.get("enable_self_check", True),
                     enable_auto_insights=st.session_state.get("enable_auto_insights", True),
                     status_callback=update_status,
-                    lang=active_lang
+                    lang=active_lang,
+                    datamate_knowledge=st.session_state.get("datamate_knowledge"),
                 )
                 status_placeholder.empty()
                 if not result.get("error"):

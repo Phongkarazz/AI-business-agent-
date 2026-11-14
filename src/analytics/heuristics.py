@@ -63,7 +63,11 @@ def is_non_data_conversational(query: str, schema_context: str = "") -> bool:
         "tăng trưởng", "so sánh", "thống kê", "danh sách", "liệt kê", "báo cáo",
         "revenue", "sales", "order", "product", "quantity", "salary", "employee",
         "department", "how many", "how much", "highest", "lowest", "count", "sum", "avg",
-        "lợi nhuận", "chi phí", "margin", "tồn kho", "kho hàng", "chiết khấu", "giảm giá"
+        "lợi nhuận", "chi phí", "margin", "tồn kho", "kho hàng", "chiết khấu", "giảm giá",
+        "dthu", "hnay", "hqua", "bnhiu", "bnhieu", "công nợ", "cong no",
+        "thanh toán", "thanh toan", "giá nhập", "gia nhap", "nhập hàng",
+        "kênh", "kenh", "món", "mon", "thuốc", "thuoc", "hóa đơn", "hoa don",
+        "trả lại", "tra lai", "đã hủy", "da huy", "khách", "khach", "bán được", "ban duoc",
     ]
     has_data_signal = any(k in q_low for k in data_signals)
 

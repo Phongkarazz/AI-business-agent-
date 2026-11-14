@@ -9721,6 +9721,7 @@ def run_agent(
     enable_auto_insights: bool = True,
     status_callback=None,
     lang: str = None,
+    datamate_knowledge=None,
     **kwargs
 ) -> dict:
     """Điều phối toàn bộ chu trình Text-to-SQL, tự sửa lỗi âm thầm (bao gồm cứu kết quả 0 dòng) và tự động khám phá Insight."""
@@ -9792,41 +9793,69 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
     is_chocolates_db = False
     is_sakila_db = False
 
-    # 0.08 Nhận diện câu nói giao tiếp tự nhiên / sức khỏe / ngoài phạm vi CSDL
+    # 0.08 Nhận diện lời chào / sức khỏe cá nhân rõ ràng trước khi vào DataMate hoặc legacy agent
+    personal_health_keys = [
+        "ốm", "bị ốm", "sốt", "bị sốt", "mệt", "đau đầu", "đau bụng", "đau họng",
+        "bệnh", "không khỏe", "buồn ngủ", "buồn quá", "vui quá", "uống thuốc", "sick", "ill", "tired", "headache", "fever", "unwell"
+    ]
+    if any(re.search(rf"\b{k}\b", user_query_low) for k in personal_health_keys):
+        result["explanation"] = (
+            "Tôi rất tiếc khi biết bạn không được khỏe! Bạn hãy nghỉ ngơi nhiều, giữ ấm và uống đủ nước ấm để mau hồi phục nhé. "
+            "Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus — khi nào bạn khỏe lại và cần tra cứu, phân tích số liệu, tôi luôn sẵn sàng hỗ trợ bạn!"
+            if lang != "en" else
+            "I'm sorry to hear that you are not feeling well! Please take some rest, stay hydrated, and get well soon. "
+            "I am your Veraxus Business Data Assistant — whenever you feel better and need data analysis, I'm always here to help!"
+        )
+        result["df"] = None
+        result["sql"] = None
+        return result
+    if any(re.search(rf"\b{k}\b", user_query_low) for k in ["chào", "xin chào", "hello", "hi", "hey"]) and len(user_query_low.split()) <= 5:
+        result["explanation"] = (
+            "Xin chào bạn! Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus. Bạn cần tra cứu, phân tích hay lập báo cáo số liệu nào hôm nay?"
+            if lang != "en" else
+            "Hello! I am Veraxus, your Business Data Assistant. What business metrics or reports would you like to explore today?"
+        )
+        result["df"] = None
+        result["sql"] = None
+        return result
+    if any(re.search(rf"\b{k}\b", user_query_low) for k in ["bạn là ai", "tên gì", "who are you", "what is your name"]) and len(user_query_low.split()) <= 6:
+        result["explanation"] = (
+            "Tôi là Veraxus — AI Data Analyst & Trợ lý Dữ liệu Kinh doanh. Tôi có thể hỗ trợ bạn truy vấn tự động, vẽ biểu đồ và phân tích chuyên sâu các số liệu từ cơ sở dữ liệu doanh nghiệp!"
+            if lang != "en" else
+            "I am Veraxus — your AI Data Analyst & Business Intelligence Assistant, ready to help you analyze and visualize enterprise data!"
+        )
+        result["df"] = None
+        result["sql"] = None
+        return result
+
+    # 0.09 Chế độ DataMate Hardened Engine (cho dữ liệu doanh nghiệp CSV/Excel/SQLite & chống ảo giác số liệu)
+    dm_know = datamate_knowledge if datamate_knowledge is not None else kwargs.get("datamate_knowledge")
+    if dm_know is not None:
+        from src.llm.datamate_bridge import run_datamate_enhanced_turn
+        return run_datamate_enhanced_turn(
+            user_query=user_query,
+            client=client,
+            provider=provider,
+            model_name=model_name,
+            knowledge=dm_know,
+            enable_self_check=enable_self_check,
+            enable_auto_insights=enable_auto_insights,
+            status_callback=status_callback,
+            lang=lang,
+            as_of_date=kwargs.get("as_of_date"),
+            insights_fn=generate_auto_insights,
+        )
+
+    # 0.09b Bộ lọc câu nói ngoài phạm vi cho chế độ Legacy (không có DataMate knowledge)
     if is_non_data_conversational(user_query, schema_context=schema_context):
-        personal_health_keys = [
-            "ốm", "bị ốm", "sốt", "bị sốt", "mệt", "đau đầu", "đau bụng", "đau họng",
-            "bệnh", "không khỏe", "buồn ngủ", "buồn quá", "vui quá", "uống thuốc", "sick", "ill", "tired", "headache", "fever", "unwell"
-        ]
-        if any(re.search(rf"\b{k}\b", user_query_low) for k in personal_health_keys):
-            result["explanation"] = (
-                "Tôi rất tiếc khi biết bạn không được khỏe! Bạn hãy nghỉ ngơi nhiều, giữ ấm và uống đủ nước ấm để mau hồi phục nhé. "
-                "Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus — khi nào bạn khỏe lại và cần tra cứu, phân tích số liệu, tôi luôn sẵn sàng hỗ trợ bạn!"
-                if lang != "en" else
-                "I'm sorry to hear that you are not feeling well! Please take some rest, stay hydrated, and get well soon. "
-                "I am your Veraxus Business Data Assistant — whenever you feel better and need data analysis, I'm always here to help!"
-            )
-        elif any(re.search(rf"\b{k}\b", user_query_low) for k in ["chào", "xin chào", "hello", "hi", "hey"]):
-            result["explanation"] = (
-                "Xin chào bạn! Tôi là Trợ lý Dữ liệu Kinh doanh Veraxus. Bạn cần tra cứu, phân tích hay lập báo cáo số liệu nào hôm nay?"
-                if lang != "en" else
-                "Hello! I am Veraxus, your Business Data Assistant. What business metrics or reports would you like to explore today?"
-            )
-        elif any(re.search(rf"\b{k}\b", user_query_low) for k in ["bạn là ai", "tên gì", "who are you", "what is your name"]):
-            result["explanation"] = (
-                "Tôi là Veraxus — AI Data Analyst & Trợ lý Dữ liệu Kinh doanh. Tôi có thể hỗ trợ bạn truy vấn tự động, vẽ biểu đồ và phân tích chuyên sâu các số liệu từ cơ sở dữ liệu doanh nghiệp!"
-                if lang != "en" else
-                "I am Veraxus — your AI Data Analyst & Business Intelligence Assistant, ready to help you analyze and visualize enterprise data!"
-            )
-        else:
-            result["explanation"] = (
-                "💡 **Thông báo từ Trợ lý:** Câu hỏi của bạn nằm ngoài phạm vi cơ sở dữ liệu doanh nghiệp hiện tại. "
-                "Tôi là Trợ lý Dữ liệu Kinh doanh, chuyên hỗ trợ phân tích các thông tin về bán hàng, sản phẩm, nhân sự, đơn hàng và khách hàng.\n\n"
-                "👉 Bạn có thể thử các câu hỏi về doanh số, sản phẩm hoặc thị trường để tôi hỗ trợ nhé!"
-                if lang != "en" else
-                "💡 **Notice:** Your query is outside the scope of this business database. "
-                "Please ask questions related to sales, products, employees, or customers!"
-            )
+        result["explanation"] = (
+            "💡 **Thông báo từ Trợ lý:** Câu hỏi của bạn nằm ngoài phạm vi cơ sở dữ liệu doanh nghiệp hiện tại. "
+            "Tôi là Trợ lý Dữ liệu Kinh doanh, chuyên hỗ trợ phân tích các thông tin về bán hàng, sản phẩm, nhân sự, đơn hàng và khách hàng.\n\n"
+            "👉 Bạn có thể thử các câu hỏi về doanh số, sản phẩm hoặc thị trường để tôi hỗ trợ nhé!"
+            if lang != "en" else
+            "💡 **Notice:** Your query is outside the scope of this business database. "
+            "Please ask questions related to sales, products, employees, or customers!"
+        )
         result["df"] = None
         result["sql"] = None
         return result
@@ -10089,7 +10118,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             for s in selected_shots
         ]
 
-    initial_prompt = build_sql_prompt(effective_schema, dialect, user_query, lang=lang)
+    from src.llm.datamate_bridge import augment_vietnamese_query_with_temporal
+    prompt_user_query = augment_vietnamese_query_with_temporal(user_query)
+    initial_prompt = build_sql_prompt(effective_schema, dialect, prompt_user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=2048)
     if sql_query:
         sql_query = clean_sql_query(sql_query)

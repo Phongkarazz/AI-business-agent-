@@ -3,6 +3,7 @@ Dedicated full-screen Onboarding and Settings Wizard UI component with Loading D
 Optimized for 1-Click Judge Experience and Enterprise Configuration.
 """
 
+import pathlib
 import streamlit as st
 from src.config import (
     PROVIDER_CONFIGS,
@@ -13,6 +14,7 @@ from src.config import (
 from src.config_store import load_saved_config, save_user_config, clear_saved_config
 from src.ui.connection_dialog import show_connecting_dialog
 from src.database.connection import try_connect
+from src.database.business_upload import save_uploaded_business_files
 
 
 def render_onboarding():
@@ -132,15 +134,18 @@ def render_onboarding():
                 options = [
                     "📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)",
                     "🕊️ Dữ liệu Mẫu Yến Sào Khánh Hòa (SQLite Cục Bộ)",
+                    "📂 Tải lên CSV / Excel / SQLite Doanh nghiệp (DataMate AI)",
                     "🖥️ MySQL Máy tính này (Localhost)",
                     "☁️ MySQL Máy chủ / Cloud (Từ xa)"
                 ]
-                if saved_mode_idx == 0:
+                if saved_mode_idx == 2:
+                    default_idx = 2
+                elif saved_mode_idx == 0:
                     default_idx = 1 if "yen" in saved_db_name else 0
                 elif saved.get("run_local", True):
-                    default_idx = 2
-                else:
                     default_idx = 3
+                else:
+                    default_idx = 4
 
                 db_source = st.radio(
                     "Chọn Nguồn Cơ sở Dữ liệu",
@@ -150,7 +155,10 @@ def render_onboarding():
                 )
                 use_demo_db = (db_source in ("📦 Dữ liệu Mẫu (Awesome Chocolates SQLite)", "🕊️ Dữ liệu Mẫu Yến Sào Khánh Hòa (SQLite Cục Bộ)"))
                 is_yen_demo = (db_source == "🕊️ Dữ liệu Mẫu Yến Sào Khánh Hòa (SQLite Cục Bộ)")
+                is_custom_upload = (db_source == "📂 Tải lên CSV / Excel / SQLite Doanh nghiệp (DataMate AI)")
                 run_local = (db_source == "🖥️ MySQL Máy tính này (Localhost)")
+                uploaded_biz_files = None
+                custom_ws_dir_input = ""
 
                 if is_yen_demo:
                     db_host = ""
@@ -176,6 +184,39 @@ def render_onboarding():
                         📊 <b>Dữ liệu Mẫu (In-Memory SQLite):</b> Tích hợp sẵn CSDL Awesome Chocolates (bảng <code>sales</code>, <code>products</code>, <code>salespersons</code>, <code>geo</code>). Không cần cài đặt MySQL!
                     </div>
                     """, unsafe_allow_html=True)
+                elif is_custom_upload:
+                    db_host = ""
+                    db_user = ""
+                    db_pass = ""
+                    db_port = "3306"
+                    use_ssl = False
+                    st.markdown("""
+                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
+                        📂 <b>Nạp Dữ liệu Doanh nghiệp (DataMate AI Engine):</b> Kéo thả nhiều file <code>.csv</code>, <code>.xlsx</code>, <code>.sqlite</code>/<code>.db</code> hoặc <code>README.md</code> mô tả nghiệp vụ — hoặc trỏ tới thư mục dữ liệu cục bộ.
+                    </div>
+                    """, unsafe_allow_html=True)
+                    uploaded_biz_files = st.file_uploader(
+                        "Tải lên bộ file dữ liệu (.csv, .xlsx, .sqlite, .db, .md)",
+                        type=["csv", "xlsx", "sqlite", "db", "md"],
+                        accept_multiple_files=True,
+                        key="onboarding_custom_files",
+                    )
+                    c_ws1, c_ws2 = st.columns([1, 2])
+                    with c_ws1:
+                        custom_ws_name_input = st.text_input(
+                            "Tên Workspace",
+                            value=(saved.get("db_name") or "my_business") if saved_mode_idx == 2 else "my_business",
+                            placeholder="VD: cua_hang_hoa",
+                            key="onboarding_custom_ws_name",
+                        )
+                    with c_ws2:
+                        custom_ws_dir_input = st.text_input(
+                            "Hoặc đường dẫn thư mục dữ liệu cục bộ (tùy chọn)",
+                            value=saved.get("custom_workspace_dir", "") if saved_mode_idx == 2 else "",
+                            placeholder="VD: /path/to/business_folder",
+                            key="onboarding_custom_dir",
+                        )
+                    db_name = (custom_ws_name_input or "my_business").strip()
                 elif run_local:
                     db_host = "localhost"
                     use_ssl = False
@@ -220,7 +261,7 @@ def render_onboarding():
                     db_port_digits = "".join(ch for ch in str(db_port_raw) if ch.isdigit())
                     db_port = db_port_digits or "3306"
 
-                if not use_demo_db:
+                if not use_demo_db and not is_custom_upload:
                     db_host = (db_host or "localhost" if run_local else db_host or "").strip()
                     db_user = db_user.strip()
                     db_name = db_name.strip()
@@ -402,6 +443,7 @@ def render_onboarding():
             config_to_save = saved.copy()
             config_to_save.update({
                 "data_mode_index": 0,
+                "custom_workspace_dir": "",
                 "run_local": False,
                 "provider": effective_provider,
                 "model_name": model_used,
@@ -433,15 +475,40 @@ def render_onboarding():
         if effective_provider == "Ollama (Local AI Offline)" and not clean_api_key:
             clean_api_key = "ollama"
 
+        is_mysql_mode = (not use_demo_db) and (not is_custom_upload)
+        resolved_ws_dir = ""
+        upload_error = ""
+        if is_custom_upload:
+            dir_candidate = (custom_ws_dir_input or "").strip()
+            if uploaded_biz_files:
+                try:
+                    resolved_ws_dir = str(
+                        save_uploaded_business_files(
+                            uploaded_biz_files,
+                            workspace_name=db_name or "uploaded_business",
+                        )
+                    )
+                except Exception as up_err:
+                    upload_error = str(up_err)
+            elif dir_candidate and pathlib.Path(dir_candidate).is_dir():
+                resolved_ws_dir = str(pathlib.Path(dir_candidate))
+            else:
+                upload_error = (
+                    "Vui lòng tải lên ít nhất 1 file (.csv, .xlsx, .sqlite, .db) "
+                    "hoặc nhập đường dẫn thư mục dữ liệu hợp lệ!"
+                )
+
         if not clean_api_key and effective_provider != "Ollama (Local AI Offline)":
             st.error(f"❌ Vui lòng nhập API Key cho {effective_provider}!")
-        elif not use_demo_db and run_local and not db_name:
+        elif upload_error:
+            st.error(f"❌ {upload_error}")
+        elif is_mysql_mode and run_local and not db_name:
             st.error("❌ Vui lòng nhập Database Name (VD: employees)!")
-        elif not use_demo_db and run_local and not db_user:
+        elif is_mysql_mode and run_local and not db_user:
             st.error("❌ Vui lòng nhập User MySQL (mặc định: root)!")
-        elif not use_demo_db and not run_local and not db_host:
+        elif is_mysql_mode and not run_local and not db_host:
             st.error("❌ Vui lòng nhập Host máy chủ MySQL Cloud (hoặc chọn 'Dữ liệu Mẫu (Awesome Chocolates SQLite)')!")
-        elif not use_demo_db and not run_local and not (db_user and db_name):
+        elif is_mysql_mode and not run_local and not (db_user and db_name):
             st.error("❌ Vui lòng điền đầy đủ User và Database Name!")
         else:
             # Đồng bộ session state
@@ -461,14 +528,15 @@ def render_onboarding():
                 if remember_config:
                     config_to_save = saved.copy()
                     config_to_save.update({
-                        "data_mode_index": 0 if use_demo_db else 1,
-                        "run_local": run_local,
-                        "db_host": db_host if not use_demo_db else "",
-                        "db_port": db_port if not use_demo_db else "3306",
-                        "db_user": db_user if not use_demo_db else "",
-                        "db_pass": db_pass if not use_demo_db else "",
+                        "data_mode_index": 2 if is_custom_upload else (0 if use_demo_db else 1),
+                        "custom_workspace_dir": resolved_ws_dir if is_custom_upload else "",
+                        "run_local": run_local if is_mysql_mode else False,
+                        "db_host": db_host if is_mysql_mode else "",
+                        "db_port": db_port if is_mysql_mode else "3306",
+                        "db_user": db_user if is_mysql_mode else "",
+                        "db_pass": db_pass if is_mysql_mode else "",
                         "db_name": db_name,
-                        "use_ssl": use_ssl if not use_demo_db else False,
+                        "use_ssl": use_ssl if is_mysql_mode else False,
                         "provider": effective_provider,
                         "model_name": model_used,
                         "enable_auto_insights": enable_auto_insights,
@@ -501,17 +569,18 @@ def render_onboarding():
 
             show_connecting_dialog(
                 use_demo=use_demo_db,
-                db_host=db_host if not use_demo_db else "",
-                db_port=db_port if not use_demo_db else "3306",
-                db_user=db_user if not use_demo_db else "",
-                db_pass=db_pass if not use_demo_db else "",
+                db_host=db_host if is_mysql_mode else "",
+                db_port=db_port if is_mysql_mode else "3306",
+                db_user=db_user if is_mysql_mode else "",
+                db_pass=db_pass if is_mysql_mode else "",
                 db_name=db_name,
-                use_ssl=use_ssl if not use_demo_db else False,
-                run_local=run_local if not use_demo_db else False,
+                use_ssl=use_ssl if is_mysql_mode else False,
+                run_local=run_local if is_mysql_mode else False,
                 effective_provider=effective_provider,
                 clean_api_key=clean_api_key,
                 custom_base_url=custom_base_url,
                 selected_model=selected_model,
                 schema_context_input=schema_context_input,
                 on_success_callback=on_custom_success,
+                custom_workspace_dir=resolved_ws_dir,
             )

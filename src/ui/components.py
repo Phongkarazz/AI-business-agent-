@@ -6292,10 +6292,13 @@ def render_result(result: dict, turn_id: str):
                             st.session_state["submitted_query"] = clean_q
                             st.rerun()
 
-            # Hiển thị chi tiết kỹ thuật nếu có lệnh SQL
-            if result.get("sql"):
-                with st.expander("🛠️ Technical SQL Context" if is_en else "🛠️ Chi tiết Kỹ thuật & Câu lệnh SQL", expanded=False):
-                    st.code(result["sql"], language="sql")
+            # Hiển thị chi tiết kỹ thuật & nhật ký kiểm toán nếu có
+            if result.get("sql") or result.get("logs"):
+                with st.expander("🛠️ Technical SQL & Audit Context" if is_en else "🛠️ Chi tiết Kỹ thuật & Nhật ký AI", expanded=False):
+                    if result.get("sql"):
+                        st.code(result["sql"], language="sql")
+                    if result.get("logs"):
+                        st.code("\n".join(str(line) for line in result["logs"]), language="text")
             return
 
     # 2. Hiển thị lỗi nếu có kèm Khung Sao chép Lỗi 1-Click (Copy to Clipboard)

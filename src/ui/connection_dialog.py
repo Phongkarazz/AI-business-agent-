@@ -3,8 +3,11 @@ Connection progress and loading modal/view manager with cancellation and retry h
 """
 
 import streamlit as st
-from src.database.connection import try_connect
-from src.database.demo_data import build_demo_engine
+from src.database.business_upload import (
+    compose_connection_schema,
+    describe_database_target,
+    resolve_database_connection,
+)
 from src.database.schema import auto_extract_schema
 from src.database.query_runner import sanitize_error
 from src.llm.client import get_llm_client, normalize_model_for_openrouter
@@ -51,6 +54,7 @@ def show_connecting_dialog(
     selected_model: str,
     schema_context_input: str,
     on_success_callback=None,
+    custom_workspace_dir: str = "",
 ):
     """Dialog hiển thị trạng thái kết nối với thanh tiến trình và nút Hủy."""
     st.write("Vui lòng đợi trong giây lát trong khi hệ thống thiết lập kết nối và trích xuất Schema.")
@@ -70,25 +74,32 @@ def show_connecting_dialog(
         client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
 
         # Bước 2: Database Engine
-        demo_type = "yen_sao" if "yen" in (db_name or "").lower() else "chocolate"
-        db_desc = ("SQLite Yến Sào Demo" if demo_type == "yen_sao" else "SQLite In-Memory Demo") if use_demo else f"MySQL ({db_host}:{db_port})"
+        db_desc = describe_database_target(
+            use_demo=use_demo,
+            db_host=db_host,
+            db_port=db_port,
+            db_name=db_name,
+            custom_workspace_dir=custom_workspace_dir,
+        )
         progress_bar.progress(70, text=f"2/3: Đang kết nối Cơ sở dữ liệu: {db_desc}...")
-        if use_demo:
-            engine = build_demo_engine(demo_type=demo_type)
-        else:
-            engine = try_connect(
-                db_host, db_port, db_user, db_pass, db_name, use_ssl, run_local=run_local
-            )
+        engine, knowledge, dialect, _desc, resolved_is_demo = resolve_database_connection(
+            use_demo=use_demo,
+            db_host=db_host,
+            db_port=db_port,
+            db_user=db_user,
+            db_pass=db_pass,
+            db_name=db_name,
+            use_ssl=use_ssl,
+            run_local=run_local,
+            custom_workspace_dir=custom_workspace_dir,
+        )
 
         # Bước 3: Schema Extraction
         progress_bar.progress(90, text="3/3: Đang trích xuất cấu trúc bảng (Schema)...")
         extracted_schema = auto_extract_schema(engine, force_refresh=True)
-        custom_notes = (schema_context_input or "").strip()
-        # Nếu người dùng có ghi chú nghiệp vụ riêng (và không phải là text schema cũ dạng 'Cơ sở dữ liệu bao gồm...')
-        if custom_notes and not custom_notes.startswith("Cơ sở dữ liệu bao gồm") and custom_notes != extracted_schema:
-            final_schema = f"{extracted_schema}\n\n=== GHI CHÚ NGHIỆP VỤ BỔ SUNG ===\n{custom_notes}"
-        else:
-            final_schema = extracted_schema
+        final_schema = compose_connection_schema(
+            extracted_schema, schema_context_input, knowledge
+        )
 
         final_model_name = selected_model
         if effective_provider == "OpenRouter":
@@ -103,10 +114,12 @@ def show_connecting_dialog(
             "provider": effective_provider,
             "model_name": final_model_name,
             "schema_context": final_schema,
+            "datamate_knowledge": knowledge,
+            "custom_workspace_dir": (custom_workspace_dir or "").strip(),
             "connected": True,
             "_db_pass_for_sanitize": db_pass,
-            "is_demo": use_demo,
-            "db_dialect": "SQLite" if use_demo else "MySQL",
+            "is_demo": resolved_is_demo,
+            "db_dialect": dialect,
             "view_mode": "chat",
             "_connecting_in_progress": False,
             "history": [],

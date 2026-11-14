@@ -8,6 +8,8 @@ import streamlit as st
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
+from src.database.business_upload import attach_datamate_sqlite_udfs
+
 
 import os
 
@@ -21,17 +23,19 @@ def build_demo_engine(demo_type: str = "chocolate"):
         if not os.path.exists(db_path):
             from create_yen_sao_sqlite import init_db
             init_db()
-        return create_engine(
+        engine = create_engine(
             f"sqlite:///{db_path}",
             connect_args={"check_same_thread": False},
             poolclass=StaticPool
         )
+        return attach_datamate_sqlite_udfs(engine)
 
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool
     )
+    attach_datamate_sqlite_udfs(engine)
     rng = np.random.default_rng(42)
 
     geo_df = pd.DataFrame({
