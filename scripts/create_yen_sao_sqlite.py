@@ -5,9 +5,11 @@ Tạo CSDL SQLite Yến Sào Nha Trang (yen_sao.db) để test trực tiếp tr�
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "yen_sao.db")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(PROJECT_ROOT, "data", "yen_sao.db")
 
 def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     if os.path.exists(DB_PATH):
         os.remove(DB_PATH)
 

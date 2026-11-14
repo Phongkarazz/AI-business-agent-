@@ -21,7 +21,7 @@ def build_demo_engine(demo_type: str = "chocolate"):
     if str(demo_type).lower() in ("yen_sao", "yen", "yen_sao_db", "yensao"):
         db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "yen_sao.db")
         if not os.path.exists(db_path):
-            from create_yen_sao_sqlite import init_db
+            from scripts.create_yen_sao_sqlite import init_db
             init_db()
         engine = create_engine(
             f"sqlite:///{db_path}",

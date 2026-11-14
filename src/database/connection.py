@@ -53,7 +53,7 @@ def try_connect(host: str, port: str, user: str, pw: str, name: str, use_ssl: bo
             if "1049" in err_msg or "unknown database" in err_msg.lower():
                 raise RuntimeError(
                     f"Cơ sở dữ liệu '{name}' chưa tồn tại trong MySQL ({candidate}:{port_int}). "
-                    f"Vui lòng tạo database '{name}' và nạp dữ liệu trước (hoặc chạy lệnh: python3 import_yen_sao_mysql.py)."
+                    f"Vui lòng tạo database '{name}' và nạp dữ liệu trước (hoặc chạy lệnh: python3 scripts/import_yen_sao_mysql.py)."
                 ) from e
             # 1045: Access denied - Sai user hoặc password
             if "1045" in err_msg or "access denied" in err_msg.lower():

@@ -9,13 +9,15 @@ import sys
 import json
 import re
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 def load_saved_mysql_config():
-    config_path = os.path.join(os.path.dirname(__file__), ".saved_config.json")
+    config_path = os.path.join(PROJECT_ROOT, ".saved_config.json")
     cfg = {
         "host": "localhost",
         "port": 3306,
         "user": "root",
-        "pass": "phongdeptrai1234"
+        "pass": os.getenv("MYSQL_PASSWORD", "")
     }
     if os.path.exists(config_path):
         try:
@@ -91,7 +93,7 @@ def main():
         print(f"\n❌ Kết nối thất bại: {last_err}")
         print("💡 Hãy kiểm tra lại:")
         print("   1. MySQL server đã bật chưa? (Chạy: brew services start mysql)")
-        print(f"   2. Mật khẩu user '{cfg['user']}' có đúng là '{cfg['pass']}' không?")
+        print(f"   2. Kiểm tra lại mật khẩu cho user '{cfg['user']}' (trong .saved_config.json hoặc biến môi trường MYSQL_PASSWORD).")
         sys.exit(1)
 
     print(f"✅ Đã kết nối thành công tới MySQL ({cfg['host']})!")
@@ -109,7 +111,7 @@ def main():
         sys.exit(1)
 
     # Bước 3: Đọc file yen_sao.sql và thực thi
-    sql_file = os.path.join(os.path.dirname(__file__), "data", "yen_sao.sql")
+    sql_file = os.path.join(PROJECT_ROOT, "data", "yen_sao.sql")
     if not os.path.exists(sql_file):
         print(f"❌ Không tìm thấy file dữ liệu tại {sql_file}")
         conn.close()
