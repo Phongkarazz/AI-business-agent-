@@ -281,6 +281,197 @@ class TestStage1SchemaAndSemanticGuard(unittest.TestCase):
         self.assertEqual(r.prediction, {"id": "qj", "type": "number", "answer": 300000})
         self.assertEqual(seen, [{"max_tokens": 320, "json_mode": True}])
 
+    def test_workspace_cache_invalidates_when_source_files_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            ws_dir = tmp_path / "my_business"
+            cache_dir = tmp_path / "_sqlite_cache"
+            ws_dir.mkdir(parents=True, exist_ok=True)
+            with open(ws_dir / "old_northwind.csv", "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["category_id", "category_name"])
+                w.writerow([1, "Beverages"])
+
+            ws1 = load_business_workspace(ws_dir, cache_dir=cache_dir)
+            self.assertEqual(list(ws1.tables.keys()), ["old_northwind"])
+            manifest_path = cache_dir / "my_business.manifest.json"
+            self.assertTrue(manifest_path.exists())
+
+            # Replace source file inside the same workspace name without deleting cache manually
+            (ws_dir / "old_northwind.csv").unlink()
+            with open(ws_dir / "donhang_moi.csv", "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["ma_don", "ngay_gd", "ten_mon", "thanh_tien"])
+                w.writerow(["CF001", "2026-10-01", "Cà phê sữa đá", 58000])
+
+            ws2 = load_business_workspace(ws_dir, cache_dir=cache_dir)
+            self.assertEqual(list(ws2.tables.keys()), ["donhang_moi"])
+
+    def test_binary_blob_values_excluded_from_schema_prompt(self) -> None:
+        import sqlite3
+        from src.database.business_upload import build_knowledge_from_sqlite_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "blob_northwind.sqlite"
+            con = sqlite3.connect(str(db_path))
+            con.execute("CREATE TABLE Categories (CategoryID INTEGER PRIMARY KEY, CategoryName TEXT, Description TEXT, Picture BLOB)")
+            jpeg_blob = b"\xff\xd8\xff\xe0" + (b"\xab\xcd\xef\x12" * 8000)
+            con.execute(
+                "INSERT INTO Categories VALUES (?, ?, ?, ?)",
+                (1, "Beverages", "Coffee, teas, beers", jpeg_blob),
+            )
+            con.commit()
+            con.close()
+
+            kn = build_knowledge_from_sqlite_path(db_path)
+            self.assertIsNotNone(kn)
+            self.assertLess(len(kn.schema_prompt), 4000)
+            self.assertNotIn("xff", kn.schema_prompt.lower())
+            self.assertIn("Categories", kn.schema_prompt)
+            self.assertIn("CategoryName", kn.schema_prompt)
+
+    def test_cafe_pho_viet_semantic_guards_starter_prompts_and_workspace_resolution(self) -> None:
+        from datamate.agent import classify_expected_type, verify_sql_semantics
+        from datamate.sql_executor import SQLExecutionResult
+        from src.analytics.heuristics import generate_dynamic_heuristic_prompts
+        from src.database.business_upload import build_datamate_workspace_engine, compose_connection_schema
+        from src.database.schema import auto_extract_schema, clear_schema_caches, get_table_names
+        from src.ui.onboarding import _resolve_workspace_dir_candidate
+
+        resolved = _resolve_workspace_dir_candidate("cafe_pho_viet/")
+        self.assertIsNotNone(resolved)
+        self.assertTrue((resolved / "bao_cao_ban_hang.xlsx").exists())
+
+        eng, know = build_datamate_workspace_engine(resolved)
+        try:
+            clear_schema_caches()
+            setattr(eng, "_veraxus_cache_epoch", 1)
+            tables = get_table_names(eng)
+            self.assertEqual(sorted(tables), ["danhmucmon", "donhang"])
+            full_schema = compose_connection_schema(auto_extract_schema(eng, force_refresh=True), "", know)
+
+            prompts = generate_dynamic_heuristic_prompts(tables, full_schema, lang="vi")
+            all_prompts = " | ".join(c["prompt"] for cards in prompts.values() for c in cards)
+            self.assertIn("thành tiền", all_prompts.lower())
+            self.assertIn("nhóm món", all_prompts.lower())
+
+            dummy_res = SQLExecutionResult(ok=True, sql="", columns=["c"], rows=[(1,)], row_count=1)
+            # Double multiplication (so_luong * thanh_tien) rejected
+            ok, msg, _ = verify_sql_semantics(
+                "SELECT SUM(so_luong * thanh_tien) FROM donhang WHERE trang_thai = 'Hoàn thành'",
+                dummy_res,
+                "Báo cáo số lượng và thành tiền",
+                know,
+                classify_expected_type("Báo cáo số lượng và thành tiền"),
+            )
+            self.assertFalse(ok)
+            self.assertIn("nhân", msg.lower())
+
+            # Missing explicit requested table ('bảng danhmucmon') rejected
+            ok_tbl, _, _ = verify_sql_semantics(
+                "SELECT SUM(thanh_tien) FROM donhang WHERE trang_thai = 'Hoàn thành'",
+                dummy_res,
+                "Thống kê tổng quan các chỉ số chính của bảng danhmucmon",
+                know,
+                classify_expected_type("Thống kê tổng quan các chỉ số chính của bảng danhmucmon"),
+            )
+            self.assertFalse(ok_tbl)
+
+            # Missing requested 'nhom_mon' group dimension rejected
+            ok_dim, _, _ = verify_sql_semantics(
+                "SELECT ten_mon, SUM(thanh_tien) FROM donhang WHERE trang_thai = 'Hoàn thành' GROUP BY ten_mon",
+                dummy_res,
+                "Nhóm món nào mang lại doanh thu cao nhất?",
+                know,
+                classify_expected_type("Nhóm món nào mang lại doanh thu cao nhất?"),
+            )
+            self.assertFalse(ok_dim)
+
+            # COUNT(*) substituting for SUM(so_luong) rejected
+            ok_qty, _, _ = verify_sql_semantics(
+                "SELECT ngay_ban, COUNT(*) FROM donhang WHERE trang_thai = 'Hoàn thành' GROUP BY ngay_ban",
+                dummy_res,
+                "Xu hướng tổng số lượng theo từng ngày thay đổi như thế nào?",
+                know,
+                classify_expected_type("Xu hướng tổng số lượng theo từng ngày thay đổi như thế nào?"),
+            )
+            self.assertFalse(ok_qty)
+
+            # Broken grouped denominator share without OVER () or scalar subquery rejected
+            ok_pct, _, _ = verify_sql_semantics(
+                "SELECT dm.nhom_mon, COUNT(*) * 100.0 / SUM(dh.thanh_tien) FROM donhang dh JOIN danhmucmon dm ON dh.ten_mon = dm.ten_mon WHERE dh.trang_thai = 'Hoàn thành' GROUP BY dm.nhom_mon",
+                dummy_res,
+                "Tỷ lệ đóng góp thành tiền của từng nhóm món vào tổng số",
+                know,
+                classify_expected_type("Tỷ lệ đóng góp thành tiền của từng nhóm món vào tổng số"),
+            )
+            self.assertFalse(ok_pct)
+
+            # Mismatched numerator/denominator metric in window/subquery share rejected
+            ok_pct_mismatch, msg_mismatch, _ = verify_sql_semantics(
+                "SELECT dm.nhom_mon, ROUND(SUM(dh.thanh_tien) / SUM(SUM(dh.so_luong)) OVER () * 100.0, 2) AS percent FROM donhang dh JOIN danhmucmon dm ON dh.ten_mon = dm.ten_mon WHERE dh.trang_thai = 'Hoàn thành' GROUP BY dm.nhom_mon",
+                dummy_res,
+                "Tỷ lệ đóng góp thành tiền của từng nhóm món vào tổng số",
+                know,
+                classify_expected_type("Tỷ lệ đóng góp thành tiền của từng nhóm món vào tổng số"),
+            )
+            self.assertFalse(ok_pct_mismatch)
+            self.assertIn("so_luong", msg_mismatch)
+
+            # Valid window share & subquery share accepted
+            ok_pct_win, _, _ = verify_sql_semantics(
+                "SELECT dm.nhom_mon, SUM(dh.thanh_tien) * 100.0 / SUM(SUM(dh.thanh_tien)) OVER () FROM donhang dh JOIN danhmucmon dm ON dh.ten_mon = dm.ten_mon WHERE dh.trang_thai = 'Hoàn thành' GROUP BY dm.nhom_mon",
+                dummy_res,
+                "Tỷ lệ đóng góp thành tiền của từng nhóm món vào tổng số",
+                know,
+                classify_expected_type("Tỷ lệ đóng góp thành tiền của từng nhóm món vào tổng số"),
+            )
+            self.assertTrue(ok_pct_win)
+
+            # Missing GROUP BY on peak-date aggregate (e.g. MAX(ngay_ban), SUM(thanh_tien)) rejected
+            ok_nogrp_max, msg_nogrp, _ = verify_sql_semantics(
+                "SELECT MAX(ngay_ban), SUM(thanh_tien) FROM donhang WHERE trang_thai NOT IN ('Đã hủy', 'Trả lại') AND ngay_ban BETWEEN '2026-10-01' AND '2026-10-06'",
+                dummy_res,
+                "Ngày nào có Doanh Thu cao nhất trong tháng 10/2026?",
+                know,
+                classify_expected_type("Ngày nào có Doanh Thu cao nhất trong tháng 10/2026?"),
+            )
+            self.assertFalse(ok_nogrp_max)
+            self.assertIn("GROUP BY", msg_nogrp)
+
+            # Mixed unaggregated dimension column + SUM without GROUP BY rejected
+            ok_nogrp_mix, _, _ = verify_sql_semantics(
+                "SELECT ngay_ban, SUM(thanh_tien) FROM donhang WHERE trang_thai = 'Hoàn thành'",
+                dummy_res,
+                "Ngày nào có Doanh Thu cao nhất trong tháng 10/2026?",
+                know,
+                classify_expected_type("Ngày nào có Doanh Thu cao nhất trong tháng 10/2026?"),
+            )
+            self.assertFalse(ok_nogrp_mix)
+
+            # Valid grouped peak-date query accepted
+            ok_grp_peak, _, _ = verify_sql_semantics(
+                "SELECT ngay_ban, SUM(thanh_tien) AS doanh_thu FROM donhang WHERE trang_thai NOT IN ('Đã hủy', 'Trả lại') GROUP BY ngay_ban ORDER BY doanh_thu DESC LIMIT 1",
+                dummy_res,
+                "Ngày nào có Doanh Thu cao nhất trong tháng 10/2026?",
+                know,
+                classify_expected_type("Ngày nào có Doanh Thu cao nhất trong tháng 10/2026?"),
+            )
+            self.assertTrue(ok_grp_peak)
+
+            # Rulebook prompt injects explicit JOIN danhmucmon & GROUP BY hint on Attempt 1
+            from datamate.agent import _select_rulebook_prompt
+            rb_cat = _select_rulebook_prompt(
+                "Nhóm món nào mang lại doanh thu cao nhất?",
+                know.data_max_date or "2026-10-06",
+                know,
+                classify_expected_type("Nhóm món nào mang lại doanh thu cao nhất?"),
+            )
+            self.assertIn("danhmucmon.nhom_mon", rb_cat)
+            self.assertIn("JOIN danhmucmon", rb_cat)
+        finally:
+            eng.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()

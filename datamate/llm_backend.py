@@ -22,10 +22,8 @@ except ImportError:
     _OpenAIClient = None
 
 try:
-    from src.llm.client import get_llm_client as _veraxus_get_llm_client
     from src.config import DASHSCOPE_BASE_URL, OLLAMA_BASE_URL, OPENROUTER_BASE_URL
 except ImportError:
-    _veraxus_get_llm_client = None
     OLLAMA_BASE_URL = "http://localhost:11434/v1"
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -201,6 +199,11 @@ class MultiProviderLLMBackend:
                     max_retries=1,
                 )
             return
+
+        try:
+            from src.llm.client import get_llm_client as _veraxus_get_llm_client
+        except ImportError:
+            _veraxus_get_llm_client = None
 
         if _veraxus_get_llm_client is not None:
             try:

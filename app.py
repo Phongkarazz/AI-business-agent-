@@ -44,32 +44,93 @@ import src.llm.agent
 import src.llm
 
 # Tự động xóa sạch query cache cũ & hot-reload các submodule khi cập nhật code mới
-CACHE_BUILD_ID = "20261114_datamate_veraxus_step1_v225"
-if getattr(sys, "_veraxus_loaded_build_id", None) != CACHE_BUILD_ID:
-    importlib.reload(src.i18n)
-    importlib.reload(src.database.crm_queries)
-    importlib.reload(src.database.business_upload)
-    importlib.reload(src.analytics.heuristics)
-    importlib.reload(src.analytics.anomaly)
-    importlib.reload(src.llm.prompts)
-    importlib.reload(src.llm.few_shot_selector)
-    importlib.reload(src.llm.router_planner)
-    importlib.reload(src.llm.evaluator)
-    importlib.reload(src.llm.datamate_bridge)
-    importlib.reload(src.llm.agent)
-    importlib.reload(src.llm)
-    importlib.reload(src.ui.components)
-    importlib.reload(src.ui.sidebar)
-    importlib.reload(src.ui.crm_dashboard)
+def _compute_backend_mtime_sig() -> str:
+    """Compute a lightweight mtime signature across backend Python modules."""
+    root = pathlib.Path(__file__).resolve().parent
+    latest_ns = 0
+    file_count = 0
+    for pkg_dir in ("src", "datamate"):
+        base = root / pkg_dir
+        if not base.exists():
+            continue
+        for py_file in base.rglob("*.py"):
+            if "__pycache__" in py_file.parts:
+                continue
+            try:
+                st_res = py_file.stat()
+                file_count += 1
+                if st_res.st_mtime_ns > latest_ns:
+                    latest_ns = st_res.st_mtime_ns
+            except OSError:
+                continue
+    return f"{file_count}:{latest_ns}"
+
+
+CACHE_BUILD_ID = "20261119_datamate_veraxus_v237"
+_EFFECTIVE_BUILD_ID = f"{CACHE_BUILD_ID}:{_compute_backend_mtime_sig()}"
+_HOT_RELOAD_ORDER = (
+    "src.i18n",
+    "src.config",
+    "src.config_store",
+    "src.database.connection",
+    "src.database.schema",
+    "src.database.query_runner",
+    "src.database.demo_data",
+    "src.database.crm_queries",
+    "src.database.business_upload",
+    "src.analytics.heuristics",
+    "src.analytics.anomaly",
+    "src.analytics.forecasting",
+    "src.analytics.export_reports",
+    "src.analytics.share_report",
+    "src.visualization.charts",
+    "src.visualization.crm_dashboard_charts",
+    "src.visualization.chart_modal",
+    "src.visualization",
+    "datamate.temporal",
+    "datamate.loader",
+    "datamate.schema_context",
+    "datamate.knowledge_store",
+    "datamate.sql_executor",
+    "datamate.evaluator_pa",
+    "datamate.splits",
+    "datamate.llm_backend",
+    "datamate.agent",
+    "datamate",
+    "src.llm.client",
+    "src.llm.sql_sanitizer",
+    "src.llm.schema_linker",
+    "src.llm.few_shots_data",
+    "src.llm.prompts",
+    "src.llm.few_shot_selector",
+    "src.llm.dynamic_memory",
+    "src.llm.router_planner",
+    "src.llm.datamate_bridge",
+    "src.llm.evaluator",
+    "src.llm.agent",
+    "src.llm",
+    "src.ui.state",
+    "src.ui.components",
+    "src.ui.connection_dialog",
+    "src.ui.onboarding",
+    "src.ui.sidebar",
+    "src.ui.evolution_dashboard",
+    "src.ui.crm_dashboard",
+)
+if getattr(sys, "_veraxus_loaded_build_id", None) != _EFFECTIVE_BUILD_ID:
+    for _mod_name in _HOT_RELOAD_ORDER:
+        _mod_obj = sys.modules.get(_mod_name)
+        if _mod_obj is not None:
+            importlib.reload(_mod_obj)
     try:
         st.cache_data.clear()
     except Exception:
         pass
-    setattr(sys, "_veraxus_loaded_build_id", CACHE_BUILD_ID)
+    setattr(sys, "_veraxus_loaded_build_id", _EFFECTIVE_BUILD_ID)
 
 from src.i18n import t, get_current_language, set_current_language
 from src.config_store import load_saved_config
-from src.database.schema import get_table_names
+from src.database.schema import get_table_names, auto_extract_schema
 from src.analytics.heuristics import (
     generate_starter_prompts,
     generate_categorized_starter_prompts,
@@ -82,8 +143,8 @@ from src.ui.components import render_result, render_voice_input_button, render_v
 from src.ui.crm_dashboard import render_crm_dashboard
 from src.llm.agent import run_agent
 
-if st.session_state.get("_cache_build_id") != CACHE_BUILD_ID:
-    st.session_state["_cache_build_id"] = CACHE_BUILD_ID
+if st.session_state.get("_cache_build_id") != _EFFECTIVE_BUILD_ID:
+    st.session_state["_cache_build_id"] = _EFFECTIVE_BUILD_ID
     st.session_state["query_cache"] = {}
     st.session_state["_needs_history_heal"] = True
 
@@ -873,6 +934,90 @@ else:
                 if not isinstance(_turn, dict):
                     continue
                 if st.session_state.get("datamate_knowledge") is not None or _turn.get("is_datamate_turn"):
+                    _dm_know = st.session_state.get("datamate_knowledge")
+                    _q_dm = str(_turn.get("query") or "")
+                    _sql_dm = str(_turn.get("sql") or "")
+                    if _dm_know is not None and _q_dm and _turn.get("df") is not None:
+                        from datamate.agent import check_preflight_unanswerable, classify_expected_type
+                        from src.llm.datamate_bridge import _governance_notice, resolve_interactive_as_of_date
+
+                        _as_of_dm = resolve_interactive_as_of_date(_dm_know)
+                        _pref_reason = check_preflight_unanswerable(
+                            _q_dm,
+                            _as_of_dm,
+                            _dm_know,
+                            classify_expected_type(_q_dm),
+                        )
+                        if _pref_reason:
+                            _turn["df"] = None
+                            _turn["sql"] = None
+                            _turn["insights"] = None
+                            _turn["anomalies_info"] = None
+                            _turn["datamate_prediction"] = None
+                            _turn["explanation"] = _governance_notice(
+                                "Dữ liệu không đủ thông tin để trả lời chính xác",
+                                "Insufficient data to answer reliably",
+                                _pref_reason,
+                                _turn.get("lang", "vi"),
+                            )
+                            _turn["evaluator"] = {
+                                "verdict": "UNANSWERABLE_BLOCKED",
+                                "score": 100,
+                                "critique": _pref_reason,
+                            }
+                            continue
+                    if _dm_know is not None and _q_dm and _sql_dm:
+                        from datamate.agent import classify_expected_type, format_sql_result, rewrite_ranked_entity_sql
+                        from datamate.sql_executor import execute_sql_safe
+                        from src.llm.datamate_bridge import _format_answer_banner
+
+                        _sql_dm_fixed = rewrite_ranked_entity_sql(_sql_dm, _q_dm, use_round_half_up=True)
+                        if _sql_dm_fixed != _sql_dm:
+                            _res_dm = execute_sql_safe(
+                                _dm_know.workspace.open_connection,
+                                _sql_dm_fixed,
+                                valid_tables=_dm_know.valid_tables,
+                                max_rows=500,
+                                timeout_seconds=8.0,
+                            )
+                            if _res_dm.ok and _res_dm.rows:
+                                _df_dm = pd.DataFrame(_res_dm.rows, columns=_res_dm.columns)
+                                _an_dm = classify_expected_type(_q_dm)
+                                _fmt_dm = format_sql_result(_res_dm, _an_dm, _q_dm)
+                                _turn["sql"] = _res_dm.sql or _sql_dm_fixed
+                                _turn["df"] = _df_dm
+                                _turn["datamate_prediction"] = _fmt_dm
+                                _turn["explanation"] = _format_answer_banner(_fmt_dm, _an_dm, _turn.get("lang", "vi"), sql_res=_res_dm)
+                                _sec_dm = split_insight_sections("", df=_df_dm, user_query=_q_dm, is_en=(_turn.get("lang") == "en"))
+                                _turn["insights"] = (
+                                    f"### 2.1. Phát hiện Bất thường & Xu hướng Chính\n{_sec_dm['anomaly']}\n\n"
+                                    f"### 2.2. Giả thuyết & Nguyên nhân Tiềm năng\n{_sec_dm['hypothesis']}\n\n"
+                                    f"### 2.3. Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec_dm['action_plan']}"
+                                )
+                    if _turn.get("df") is not None and len(_turn["df"]) == 1 and "Thực thể Trọng tâm:" in (_turn.get("insights") or ""):
+                        _sec_dm = split_insight_sections("", df=_turn["df"], user_query=_q_dm, is_en=(_turn.get("lang") == "en"))
+                        _turn["insights"] = (
+                            f"### 2.1. Phát hiện Bất thường & Xu hướng Chính\n{_sec_dm['anomaly']}\n\n"
+                            f"### 2.2. Giả thuyết & Nguyên nhân Tiềm năng\n{_sec_dm['hypothesis']}\n\n"
+                            f"### 2.3. Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec_dm['action_plan']}"
+                        )
+                    if _dm_know is not None:
+                        from src.llm.datamate_bridge import build_datamate_suggested_questions
+
+                        _cur_fups = [str(f).lower() for f in (_turn.get("followups") or [])]
+                        _has_legacy_static = any(
+                            ("tổng doanh thu và số đơn hợp lệ trong tháng" in f)
+                            or ("ngày nào có doanh thu cao nhất trong tháng" in f)
+                            for f in _cur_fups
+                        )
+                        if not _cur_fups or _has_legacy_static:
+                            _turn["followups"] = build_datamate_suggested_questions(
+                                _dm_know,
+                                lang=_turn.get("lang", "vi"),
+                                user_query=_q_dm,
+                                df=_turn.get("df"),
+                                sql=str(_turn.get("sql") or ""),
+                            )
                     continue
                 _q = str(_turn.get("query") or "")
                 _sql_orig = str(_turn.get("sql") or "")
@@ -901,18 +1046,18 @@ else:
                         _turn["anomalies_info"] = analyze_data_anomalies(_df_new)
                         _sec = split_insight_sections("", df=_df_new, user_query=_q, is_en=(_turn.get("lang") == "en"))
                         _turn["insights"] = (
-                            f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{_sec['anomaly']}\n\n"
-                            f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{_sec['hypothesis']}\n\n"
-                            f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec['action_plan']}"
+                            f"### 2.1. Phát hiện Bất thường & Xu hướng Chính\n{_sec['anomaly']}\n\n"
+                            f"### 2.2. Giả thuyết & Nguyên nhân Tiềm năng\n{_sec['hypothesis']}\n\n"
+                            f"### 2.3. Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec['action_plan']}"
                         )
                 else:
                     _ins = _turn.get("insights") or ""
                     if ("Đơn vị/ngạch" in _ins or "cho từng thành viên trong" in _ins) and _turn.get("df") is not None and not _turn["df"].empty:
                         _sec = split_insight_sections("", df=_turn["df"], user_query=_q, is_en=(_turn.get("lang") == "en"))
                         _turn["insights"] = (
-                            f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{_sec['anomaly']}\n\n"
-                            f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{_sec['hypothesis']}\n\n"
-                            f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec['action_plan']}"
+                            f"### 2.1. Phát hiện Bất thường & Xu hướng Chính\n{_sec['anomaly']}\n\n"
+                            f"### 2.2. Giả thuyết & Nguyên nhân Tiềm năng\n{_sec['hypothesis']}\n\n"
+                            f"### 2.3. Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec['action_plan']}"
                         )
         except Exception:
             pass
@@ -921,7 +1066,7 @@ else:
 
     # Tiếp nhận câu hỏi từ Chat Input hoặc Pending Prompt (từ Thẻ Starter / Gợi ý tiếp nối)
     has_active_conversation = bool(history) or (focused_turn_idx is not None)
-    pending_prompt = st.session_state.get("pending_prompt")
+    pending_prompt = st.session_state.get("pending_prompt") or st.session_state.get("submitted_query")
 
     # Chỉ hiển thị chat_input ở chân trang khi ĐÃ CÓ lịch sử trò chuyện hoặc đang ở chế độ Chat
     user_input = None
@@ -1163,6 +1308,7 @@ else:
     if prompt_to_run:
         # Xóa pending prompt và reset focus view, chuyển về chế độ chat
         st.session_state["pending_prompt"] = None
+        st.session_state["submitted_query"] = None
         st.session_state["focused_turn_idx"] = None
         st.session_state["view_mode"] = "chat"
 
@@ -1172,6 +1318,26 @@ else:
         # Nếu là câu hỏi giao tiếp phi dữ liệu hoặc cache cũ vô tình dính df/sql, bỏ qua cache cũ
         if is_non_data_conversational(prompt_to_run) or (cached and is_non_data_conversational(cached.get("query", "")) and cached.get("df") is not None):
             cached = None
+
+        # Bỏ qua cache nếu câu hỏi chạm ngưỡng schema không đủ thông tin nhưng cache cũ lại lưu DataFrame
+        if cached and cached.get("df") is not None:
+            _dm_know_cur = st.session_state.get("datamate_knowledge")
+            if _dm_know_cur is not None:
+                from datamate.agent import check_preflight_unanswerable, classify_expected_type
+                if check_preflight_unanswerable(
+                    prompt_to_run,
+                    src.llm.datamate_bridge.resolve_interactive_as_of_date(_dm_know_cur),
+                    _dm_know_cur,
+                    classify_expected_type(prompt_to_run),
+                ):
+                    cached = None
+            if cached and src.llm.datamate_bridge.detect_legacy_schema_gap(
+                prompt_to_run,
+                engine=st.session_state.get("engine"),
+                schema_context=st.session_state.get("schema_context", ""),
+                lang=get_current_language(),
+            ):
+                cached = None
 
         if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
             result = cached

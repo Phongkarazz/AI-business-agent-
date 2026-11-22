@@ -32,8 +32,8 @@ def detect_database_domain(schema_context: str) -> str:
     """Phân loại CSDL hiện tại: 'employees', 'awesome_chocolates', 'sakila', 'northwind', hoặc 'generic'."""
     s_low = (schema_context or "").lower()
     
-    # 1. Northwind ERP Domain (order_details, orders, products, customers, suppliers...)
-    is_northwind = any(k in s_low for k in ["order_details", "`order_details`", "orders_status", "inventory_transactions", "purchase_orders"]) or \
+    # 1. Northwind ERP Domain (order_details / "Order Details", orders, products, customers, suppliers...)
+    is_northwind = any(k in s_low for k in ["order_details", "`order_details`", "order details", "`order details`", "orders_status", "inventory_transactions", "purchase_orders"]) or \
                    (("products" in s_low or "`products`" in s_low) and ("orders" in s_low or "`orders`" in s_low) and not any(k in s_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
 
     # 2. Sakila Film & Rental Domain
@@ -168,12 +168,12 @@ def score_few_shot_relevance(user_query: str, example: dict) -> float:
     elif cat == "window_function" and any(k in q_low for k in ["top 10%", "top 1 mỗi", "nhất của từng", "dẫn đầu từng"]):
         intent_score += 20.0
     elif cat == "monthly_trend":
-        is_geo_q = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"])
+        is_geo_q = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "khu vực", "region", "apac", "europe", "americas"])
         is_team_q = any(k in q_low for k in ["team", "đội ngũ", "yummies", "delish", "jucies"])
         is_prod_q = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
         ex_id = example.get("id", "")
         if is_geo_q and not is_team_q and not is_prod_q:
-            if "country" in ex_id or "geo" in ex_id:
+            if "country" in ex_id or "geo" in ex_id or "region" in ex_id:
                 intent_score += 85.0
             else:
                 intent_score -= 35.0
@@ -187,7 +187,7 @@ def score_few_shot_relevance(user_query: str, example: dict) -> float:
     elif cat == "monthly_spread_volatility":
         has_extreme = any(k in q_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "mạnh nhất", "rộng nhất", "biên độ", "volatility", "spread"])
         has_trend_how = any(k in q_low for k in ["như thế nào", "xu hướng", "diễn biến"])
-        is_geo_q = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo"])
+        is_geo_q = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "khu vực", "region"])
         if has_trend_how and not has_extreme:
             intent_score -= 75.0
         elif is_geo_q and "product" in example.get("id", ""):
@@ -199,8 +199,60 @@ def score_few_shot_relevance(user_query: str, example: dict) -> float:
     elif cat == "threshold" and any(k in q_low for k in ["vượt mức", "trên", "hơn", "đạt từ", "ngưỡng"]) and any(c.isdigit() for c in q_low):
         intent_score += 20.0
 
+    # Dimension alignment penalties / boosts for Size, Region, Team headcount
+    ex_sql_low = (example.get("sql_mysql", "") + " " + example.get("sql_sqlite", "") + " " + example.get("sql_query", "")).lower()
+    if re.search(r"(?:kích\s+thước|\bsize\b)", q_low):
+        if "size" in ex_sql_low:
+            intent_score += 60.0
+        else:
+            intent_score -= 60.0
+    if any(k in q_low for k in ["khu vực", "region", "apac", "europe", "americas"]) and "location" not in q_low:
+        if "region" in ex_sql_low and "geo" in ex_sql_low:
+            intent_score += 60.0
+        else:
+            intent_score -= 60.0
+    if any(k in q_low for k in ["team", "đội ngũ"]) and any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "headcount"]):
+        if "team" in ex_sql_low and "count(" in ex_sql_low:
+            intent_score += 60.0
+        else:
+            intent_score -= 50.0
+    if any(k in q_low for k in ["ticket", "crm_tickets", "phiếu hỗ trợ"]) and any(
+        k in q_low for k in ["doanh thu", "doanh số", "revenue", "boxes", "hộp", "thùng", "lợi nhuận"]
+    ):
+        if cat == "crm_sales_cross":
+            intent_score += 90.0
+        elif "crm_tickets" in ex_sql_low and "sales" in ex_sql_low:
+            intent_score += 75.0
+        elif "crm_tickets" not in ex_sql_low:
+            intent_score -= 60.0
+
     total_score = token_score + tag_score + intent_score
     return total_score
+
+
+def _is_crm_tickets_intent(user_query: str, schema_context: str) -> bool:
+    """Nhận diện câu hỏi đang truy vấn dữ liệu hỗ trợ khách hàng (`crm_tickets`) để cô lập few-shot."""
+    schema_low = (schema_context or "").lower()
+    if "crm_tickets" not in schema_low:
+        return False
+    q_low = (user_query or "").lower()
+    has_crm_kw = any(
+        k in q_low
+        for k in [
+            "ticket", "crm_tickets", "phiếu hỗ trợ", "kênh hỗ trợ", "channel",
+            "firstreply", "fullresolve", "phản hồi đầu tiên", "thời gian phản hồi",
+            "thời gian xử lý", "customertype", "customer type", "khách hàng quay lại",
+            "returned", "solved", "responded", "createdat",
+        ]
+    )
+    if not has_crm_kw:
+        return False
+    q_no_ticket_sales_type = re.sub(r"(?:loại|type)\s*=?\s*['\"]?sales\b", "", q_low)
+    has_sales_kw = any(
+        k in q_no_ticket_sales_type
+        for k in ["doanh thu", "doanh số", "revenue", "sales", "boxes", "hộp", "thùng", "sô-cô-la", "chocolate", "cost_per_box", "lợi nhuận"]
+    )
+    return not has_sales_kw
 
 
 def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect: str = "MySQL", top_k: int = 2) -> list[dict]:
@@ -210,6 +262,7 @@ def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect:
 
     target_domain = detect_database_domain(schema_context)
     is_sqlite = "sqlite" in (dialect or "").lower()
+    is_crm_q = _is_crm_tickets_intent(user_query, schema_context)
 
     # 1. Truy xuất các mẫu động đã học từ Vòng lặp Tiến hóa Tri thức (Tầng 2)
     dynamic_learned = []
@@ -219,15 +272,28 @@ def select_dynamic_few_shots(user_query: str, schema_context: str = "", dialect:
     except Exception:
         dynamic_learned = []
 
-    # 2. Lọc ví dụ tĩnh theo Domain CSDL
+    # 2. Lọc ví dụ tĩnh theo Domain CSDL (và hỗ trợ crm_tickets kể cả khi schema chỉ có bảng crm_tickets)
     candidate_examples = []
     for ex in FEW_SHOT_EXAMPLES:
         if target_domain in ("employees", "awesome_chocolates", "sakila", "northwind"):
             if ex.get("domain") == target_domain:
                 candidate_examples.append(ex)
+        elif is_crm_q and "crm_tickets" in (ex.get("sql_mysql", "") + ex.get("sql_sqlite", "")).lower():
+            candidate_examples.append(ex)
 
     if not candidate_examples and target_domain not in ("employees", "awesome_chocolates", "sakila", "northwind"):
         candidate_examples = [ex for ex in FEW_SHOT_EXAMPLES if ex.get("domain") == "generic"]
+
+    # 2.4 Cô lập CRM tickets khỏi ví dụ doanh số Chocolates (`sales`/`products`/`people`) để không làm nhiễu model
+    if is_crm_q:
+        dynamic_learned = [
+            d for d in dynamic_learned
+            if "crm_tickets" in (d.get("sql_sqlite" if is_sqlite else "sql_mysql", d.get("sql_query", ""))).lower()
+        ]
+        candidate_examples = [
+            ex for ex in candidate_examples
+            if "crm_tickets" in (ex.get("sql_sqlite" if is_sqlite else "sql_mysql", "")).lower()
+        ]
 
     # 2.5 BẢO ĐẢM CÔ LẬP SCHEMA TUYỆT ĐỐI: Loại bỏ ví dụ có bảng ngoại lai không tồn tại trong schema hiện tại
     try:

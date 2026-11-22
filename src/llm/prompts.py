@@ -68,10 +68,73 @@ def extract_schema_metadata_summary(schema_context: str) -> str:
     return "\n".join(summary_lines)
 
 
-def get_db_specific_rules(schema_context: str) -> str:
+def _extract_crm_and_sales_flags(user_query: str, schema_context: str = "") -> tuple[bool, bool, bool]:
+    """Return `(has_crm_schema_and_sales, is_crm_kw, is_sales_kw)` for pure vs cross-domain CRM routing."""
+    schema_low = (schema_context or "").lower()
+    has_crm_tbl = "crm_tickets" in schema_low
+    has_sales_tbl = "sales" in schema_low
+    if not has_crm_tbl:
+        return False, False, False
+    q_low = (user_query or "").lower()
+    has_crm_kw = any(
+        k in q_low
+        for k in [
+            "ticket", "crm_tickets", "phiếu hỗ trợ", "kênh hỗ trợ", "channel",
+            "firstreply", "fullresolve", "phản hồi đầu tiên", "thời gian phản hồi",
+            "thời gian xử lý", "customertype", "customer type", "khách hàng quay lại",
+            "returned", "solved", "responded", "createdat",
+        ]
+    ) or bool(re.search(r"\b(?:bug|setup|features?)\b", q_low) and any(k in q_low for k in ["loại", "type", "hỗ trợ", "cskh", "khách hàng", "crm"]))
+    q_no_ticket_sales_type = re.sub(r"(?:loại|type)\s*=?\s*['\"]?sales\b", "", q_low)
+    has_sales_kw = any(
+        k in q_no_ticket_sales_type
+        for k in [
+            "doanh thu", "doanh số", "revenue", "sales", "boxes", "hộp", "thùng",
+            "sô-cô-la", "chocolate", "cost_per_box", "lợi nhuận",
+        ]
+    )
+    return (has_crm_tbl and has_sales_tbl), has_crm_kw, has_sales_kw
+
+
+def _is_crm_tickets_query(user_query: str, schema_context: str = "") -> bool:
+    """Nhận diện câu hỏi đang truy vấn thuần bảng `crm_tickets` (chăm sóc khách hàng / hỗ trợ ticket)."""
+    schema_low = (schema_context or "").lower()
+    if "crm_tickets" not in schema_low:
+        return False
+    _, has_crm_kw, has_sales_kw = _extract_crm_and_sales_flags(user_query, schema_context)
+    return has_crm_kw and not has_sales_kw
+
+
+def _is_cross_crm_sales_query(user_query: str, schema_context: str = "") -> bool:
+    """Nhận diện câu hỏi liên bảng kết hợp doanh số (`sales`/`geo`/`people`) và hỗ trợ (`crm_tickets`)."""
+    has_both_tbls, has_crm_kw, has_sales_kw = _extract_crm_and_sales_flags(user_query, schema_context)
+    return has_both_tbls and has_crm_kw and has_sales_kw
+
+
+def get_db_specific_rules(schema_context: str, user_query: str = "") -> str:
     """Tự động nhận diện CSDL và sinh quy tắc chi tiết theo từng bảng."""
     schema_low = (schema_context or "").lower()
-    is_northwind_db = any(k in schema_low for k in ["order_details", "`order_details`", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in schema_low or "`products`" in schema_low) and ("orders" in schema_low or "`orders`" in schema_low) and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
+    if _is_crm_tickets_query(user_query, schema_context):
+        return """   - QUY TẮC BẢNG CRM_TICKETS (CHĂM SÓC KHÁCH HÀNG):
+     + Truy vấn trực tiếp bảng `crm_tickets` (bí danh `t`), CHỈ sử dụng các cột thực tế xuất hiện trong SCHEMA ở trên:
+       `TicketID`, `CustomerID`, `CustomerType` ('Returned', 'New'), `Channel`, `Type`, `Status` ('Solved', 'Responded', 'Open', 'Created'), `CreatedAt`, `FirstReplyMinutes`, `FullResolveHours`, `SPID`, `GeoID`.
+     + QUAN TRỌNG VỀ KIỂU DỮ LIỆU THỜI GIAN PHẢN HỒI / XỬ LÝ:
+       * `FirstReplyMinutes` ĐÃ LÀ SỐ THỰC (FLOAT) tính bằng PHÚT -> tính trung bình bằng `ROUND(AVG(t.FirstReplyMinutes), 2)`. TUYỆT ĐỐI CẤM dùng `TIMESTAMPDIFF`, `TIMEDIFF`, `DATEDIFF`, `JULIANDAY` trên `FirstReplyMinutes`!
+       * `FullResolveHours` ĐÃ LÀ SỐ THỰC (FLOAT) tính bằng GIỜ -> tính trung bình bằng `ROUND(AVG(t.FullResolveHours), 2)`. TUYỆT ĐỐI CẤM dùng `TIMESTAMPDIFF`, `TIMEDIFF`, `DATEDIFF` trên `FullResolveHours`!
+     + Tỷ lệ giải quyết xong (`Status = 'Solved'`):
+       `ROUND(SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) AS SolvedRatePct`.
+     + CHỈ trả về 1 câu lệnh `SELECT` chuẩn xác (TUYỆT ĐỐI KHÔNG dùng `DECLARE`, KHÔNG truy vấn bảng `products` hay `sales` khi chỉ thống kê ticket)."""
+
+    if _is_cross_crm_sales_query(user_query, schema_context):
+        return """   - QUY TẮC LIÊN BẢNG SALES + CRM_TICKETS (QUAN TRỌNG TUYỆT ĐỐI):
+     + CSDL hiện tại CHỈ CÓ các bảng: `sales` (`s`), `geo` (`g`), `people` (`pe`), `products` (`pr`), `crm_tickets` (`t`).
+     + TUYỆT ĐỐI KHÔNG bịa bảng `bugs` hay `tickets`! Loại ticket ('Bug', 'Sales', 'Features', 'Setup') nằm ở cột `t.Type` và trạng thái ('Solved', 'Open', 'Responded', 'Created') nằm ở cột `t.Status` của bảng `crm_tickets` (`TicketID`, `CustomerID`, `CustomerType`, `Channel`, `Type`, `Status`, `CreatedAt`, `FirstReplyMinutes`, `FullResolveHours`, `SPID`, `GeoID`).
+     + QUY TẮC CHỐNG NHÂN BẢN DÒNG DESCARTES (BẮT BUỘC DÙNG 2 CTE RIÊNG):
+       * KHÔNG BAO GIỜ JOIN thô `sales s` trực tiếp với `crm_tickets t` trong cùng một `FROM`/`SELECT` theo `GeoID` hay `SPID` vì sẽ làm `SUM(s.Amount)` bị nhân gấp hàng trăm lần!
+       * BẮT BUỘC tách thành 2 CTE: `SalesAgg AS (SELECT s.GeoID, SUM(s.Amount) AS TotalSales ... GROUP BY s.GeoID)` và `TicketAgg AS (SELECT t.GeoID, COUNT(DISTINCT t.TicketID) AS BugTickets ... GROUP BY t.GeoID)` (hoặc `SPID`), rồi `JOIN` với `geo g` (hoặc `people pe`).
+     + KHI HỎI THEO MỘT NĂM CỤ THỂ (VD: 2023): BẮT BUỘC lọc đúng năm đó trên CẢ `s.SaleDate` trong `SalesAgg` VÀ `t.CreatedAt` trong `TicketAgg`. TUYỆT ĐỐI KHÔNG tự ý đổi sang năm 2021 hoặc chuyển sang bảng `products`!"""
+
+    is_northwind_db = any(k in schema_low for k in ["order_details", "`order_details`", "order details", "`order details`", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in schema_low or "`products`" in schema_low) and ("orders" in schema_low or "`orders`" in schema_low) and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
     is_sakila_db = any(k in schema_low for k in ["`film`", "`rental`", "film_id", "rental_id", "`actor`", "actor_id", "film_actor", "film_category", "rental_date"]) and not is_northwind_db
     is_employees_db = ("departments" in schema_low or "dept_emp" in schema_low or "hire_date" in schema_low or "salaries" in schema_low) and not is_sakila_db and not is_northwind_db
     is_chocolates_db = ("people" in schema_low and "products" in schema_low) and not is_sakila_db and not is_northwind_db
@@ -563,11 +626,16 @@ def get_db_specific_rules(schema_context: str) -> str:
       + Bảng `people` (Bí danh bắt buộc: `pe`):
         * Cột: `SPID` (Khóa chính), `Salesperson` (Tên nhân viên: 'Ches Bonnell', 'Van Tuxwell'...), `Team` ('Yummies', 'Jucies', 'Delish'..., riêng 'Ches Bonnell' có Team = '' tức Chưa phân loại / Chưa phân đội), `Location`.
       + Bảng `geo` (Bí danh bắt buộc: `g`):
-        * Cột: `GeoID` (Khóa chính), `Geo` (Tên quốc gia/thị trường: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand'), `Region` (Khu vực địa lý lớn: 'APAC', 'Americas').
+        * Cột: `GeoID` (Khóa chính), `Geo` (Tên quốc gia/thị trường: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand'), `Region` (Khu vực địa lý lớn: 'APAC', 'Europe', 'Americas').
       + Bảng `sales` (Bí danh bắt buộc: `s`):
         * Cột: `SPID` (liên kết pe.SPID), `PID` (liên kết pr.PID), `GeoID` (liên kết g.GeoID), `SaleDate` (Ngày bán), `Amount` (Doanh số), `Boxes`, `Customers`.
-      + QUY TẮC BÍ DANH (ALIAS) TUYỆT ĐỐI KHÔNG TRÙNG NHAU:
+      + Bảng `crm_tickets` (nếu có trong Schema, bí danh `t`):
+        * `TicketID`, `CustomerID`, `CustomerType` ('Returned', 'New'), `Channel`, `Type`, `Status` ('Solved', 'Responded', 'Open', 'Created'), `CreatedAt`, `FirstReplyMinutes` (FLOAT phút — dùng `AVG(t.FirstReplyMinutes)`), `FullResolveHours` (FLOAT giờ — dùng `AVG(t.FullResolveHours)`), `SPID`, `GeoID`.
+      + QUY TẮC BÍ DANH & TÍNH CHỈ SỐ CỐT LÕI:
         * Luôn dùng: `pe` cho people, `pr` cho products, `s` cho sales, `g` cho geo.
+        * Doanh thu trung bình trên mỗi hộp (Revenue per Box): BẮT BUỘC dùng `ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox` (TUYỆT ĐỐI KHÔNG dùng `AVG(s.Amount)` vì đó là TB mỗi giao dịch!).
+        * Khi hỏi ĐỒNG THỜI số lượng nhân viên VÀ doanh thu/số hộp theo `Team`: JOIN `people pe` với `sales s ON pe.SPID = s.SPID`, chọn `pe.Team`, `COUNT(DISTINCT pe.SPID) AS EmployeeCount`, `SUM(s.Amount) AS TotalSales`, `SUM(s.Boxes) AS TotalBoxes`, lọc `pe.Team != '' AND pe.Team IS NOT NULL`, `GROUP BY pe.Team`.
+        * Khi phân tích theo `Category`/`Size` (`products pr`) VÀ `Region`/`Geo` (`geo g`): BẮT BUỘC JOIN `sales s` với `products pr ON s.PID = pr.PID` và `geo g ON s.GeoID = g.GeoID`, lọc `WHERE g.Region IN (...)` nếu được yêu cầu và `GROUP BY pr.Category, g.Region` (hoặc `pr.Size`). TUYỆT ĐỐI KHÔNG gộp toàn bộ bảng `products` bằng `SUM(pr.Cost_per_box)` thay cho doanh thu `SUM(s.Amount)`!
        + MẪU CHUẨN NHÂN VIÊN CHƯA ĐƯỢC PHÂN LOẠI / CHƯA PHÂN ĐỘI / KHÔNG THUỘC TEAM NÀO / CHES BONNELL:
          * Khi hỏi 'nhân viên nào chưa được phân loại', 'nhân viên chưa phân đội', 'ai chưa có team', 'nhân sự không thuộc team nào', 'Ches Bonnell thuộc team nào':
            SELECT 
@@ -865,6 +933,17 @@ def get_db_specific_rules(schema_context: str) -> str:
        LIMIT 10;
      + CẢNH BÁO BẮT BUỘC: CSDL Sakila KHÔNG CÓ BẢNG `sales`, `products`, `salaries`, `employees`! TUYỆT ĐỐI KHÔNG DÙNG CÁC BẢNG KHÔNG TỒN TẠI!"""
     elif is_northwind_db:
+        if any(k in schema_low for k in ["order details", "orderid", "categoryname", "productid"]) and "order_details" not in schema_low:
+            return """   - QUY TẮC CSDL NORTHWIND CLASSIC (SQLite / PascalCase):
+     + CHÚ Ý TÊN BẢNG CÓ KHOẢNG TRẮNG: Bảng chi tiết đơn hàng là `"Order Details"` — BẮT BUỘC đặt trong ngoặc kép `"Order Details"` hoặc backtick `` `Order Details` `` ở mọi chỗ `FROM`/`JOIN`!
+     + Khóa chính & khóa ngoại chuẩn:
+       * `Orders` (`o`): `o.OrderID`, `o.CustomerID`, `o.EmployeeID`, `o.OrderDate`, `o.ShipCountry`, `o.Freight`
+       * `"Order Details"` (`od`): `od.OrderID`, `od.ProductID`, `od.UnitPrice`, `od.Quantity`, `od.Discount`
+       * `Products` (`p`): `p.ProductID`, `p.ProductName`, `p.CategoryID`, `p.SupplierID`, `p.UnitPrice`
+       * `Categories` (`cat`): `cat.CategoryID`, `cat.CategoryName`, `cat.Description`
+       * `Customers` (`c`): `c.CustomerID`, `c.CompanyName`, `c.ContactName`, `c.City`, `c.Country`
+       * `Employees` (`e`): `e.EmployeeID`, `e.FirstName`, `e.LastName`, `e.Title`, `e.City`, `e.Country` (Ghép tên SQLite: `e.FirstName || ' ' || e.LastName`)
+     + Doanh thu: `ROUND(SUM(od.UnitPrice * od.Quantity * (1 - COALESCE(od.Discount, 0))), 2) AS TotalRevenue`."""
         return """   - QUY TẮC CSDL NORTHWIND TRADERS (ENTERPRISE ERP & SALES):
      + Bảng `products` (Bí danh bắt buộc: `p`):
        * Cột: `id` (Khóa chính), `product_name`, `product_code`, `category`, `standard_cost`, `list_price`, `discontinued`.
@@ -1403,6 +1482,156 @@ def parse_threshold_query_info(q_low: str):
     }
 
 
+def _build_cross_crm_sales_hint(
+    q_low: str,
+    is_sqlite: bool,
+    req_limit: int,
+    has_explicit_limit: bool,
+) -> str:
+    """Build a Cartesian-safe 2-CTE targeted SQL hint for cross-domain sales + crm_tickets queries."""
+    req_years = list(dict.fromkeys(re.findall(r"\b(20\d{2})\b", q_low)))
+    s_yr_where = ""
+    t_yr_conds: list[str] = []
+    if len(req_years) == 1:
+        yr = req_years[0]
+        s_yr_expr = f"strftime('%Y', s.SaleDate) = '{yr}'" if is_sqlite else f"YEAR(s.SaleDate) = {yr}"
+        t_yr_expr = f"strftime('%Y', t.CreatedAt) = '{yr}'" if is_sqlite else f"YEAR(t.CreatedAt) = {yr}"
+        s_yr_where = f"\n    WHERE {s_yr_expr}"
+        t_yr_conds.append(t_yr_expr)
+    elif len(req_years) >= 2:
+        y1, y2 = min(req_years), max(req_years)
+        s_yr_expr = (
+            f"strftime('%Y', s.SaleDate) BETWEEN '{y1}' AND '{y2}'"
+            if is_sqlite else f"YEAR(s.SaleDate) BETWEEN {y1} AND {y2}"
+        )
+        t_yr_expr = (
+            f"strftime('%Y', t.CreatedAt) BETWEEN '{y1}' AND '{y2}'"
+            if is_sqlite else f"YEAR(t.CreatedAt) BETWEEN {y1} AND {y2}"
+        )
+        s_yr_where = f"\n    WHERE {s_yr_expr}"
+        t_yr_conds.append(t_yr_expr)
+
+    matched_types = []
+    if re.search(r"\bbug\b", q_low):
+        matched_types.append("Bug")
+    if re.search(r"\bsetup\b", q_low):
+        matched_types.append("Setup")
+    if re.search(r"\bfeatures?\b", q_low):
+        matched_types.append("Features")
+    if re.search(r"(?:loại|type)\s*=?\s*['\"]?sales\b", q_low):
+        matched_types.append("Sales")
+
+    ticket_alias = "TotalTickets"
+    if len(matched_types) == 1:
+        t_type = matched_types[0]
+        t_yr_conds.append(f"t.Type = '{t_type}'")
+        ticket_alias = f"{t_type}Tickets"
+
+    if any(k in q_low for k in ["đã giải quyết", "giải quyết xong"]) or re.search(r"\bsolved\b", q_low):
+        if "tỷ lệ" not in q_low and "rate" not in q_low:
+            t_yr_conds.append("t.Status = 'Solved'")
+
+    t_where = ("\n    WHERE " + " AND ".join(t_yr_conds)) if t_yr_conds else ""
+
+    asks_boxes = any(k in q_low for k in ["hộp", "boxes", "thùng"])
+    asks_sales = any(k in q_low for k in ["doanh thu", "doanh số", "revenue", "sales"]) or not asks_boxes
+    limit_clause = f"\nLIMIT {req_limit}" if (has_explicit_limit or req_limit == 1) else ""
+
+    if any(k in q_low for k in ["customerid", "mã khách hàng", "từng gửi ticket"]):
+        dim_key = "CustomerID"
+        sales_cols = ["SUM(s.Amount) AS TotalRevenue", "COUNT(*) AS NumTransactions"]
+        if asks_boxes:
+            sales_cols.append("SUM(s.Boxes) AS TotalBoxes")
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP LIÊN BẢNG (`sales` + `crm_tickets` theo `{dim_key}`):
+WITH SalesAgg AS (
+    SELECT s.CustomerID, {', '.join(sales_cols)}
+    FROM sales s{s_yr_where}
+    GROUP BY s.CustomerID
+),
+TicketAgg AS (
+    SELECT t.CustomerID, COUNT(DISTINCT t.TicketID) AS {ticket_alias}
+    FROM crm_tickets t{t_where}
+    GROUP BY t.CustomerID
+)
+SELECT
+    sa.CustomerID,
+    sa.TotalRevenue,
+    sa.NumTransactions,
+    COALESCE(ta.{ticket_alias}, 0) AS {ticket_alias}
+FROM SalesAgg sa
+LEFT JOIN TicketAgg ta ON sa.CustomerID = ta.CustomerID
+ORDER BY sa.TotalRevenue DESC{limit_clause or chr(10) + 'LIMIT 10'};
+"""
+
+    use_people = any(k in q_low for k in ["nhân viên", "salesperson", "team", "đội ngũ"]) and not any(
+        k in q_low for k in ["quốc gia", "geo", "country", "thị trường"]
+    )
+    if use_people:
+        is_team = any(k in q_low for k in ["team", "đội ngũ"]) and not any(k in q_low for k in ["nhân viên", "salesperson"])
+        group_expr = "pe.Team" if is_team else "pe.SPID, pe.Salesperson, pe.Team"
+        select_dim = "pe.Team AS Team" if is_team else "pe.Salesperson AS Salesperson, pe.Team AS Team"
+        team_where = " WHERE pe.Team != '' AND pe.Team IS NOT NULL" if is_team else ""
+        sales_metric = "SUM(s.Boxes) AS TotalBoxes" if (asks_boxes and not asks_sales) else "SUM(s.Amount) AS TotalSales"
+        order_col = ticket_alias if ("nhiều ticket" in q_low or "nhiều bug" in q_low) else ("TotalBoxes" if (asks_boxes and not asks_sales) else "TotalSales")
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP LIÊN BẢNG (`sales` + `people` + `crm_tickets` qua 2 CTE):
+WITH SalesAgg AS (
+    SELECT pe.SPID, {sales_metric}
+    FROM sales s
+    JOIN people pe ON s.SPID = pe.SPID{s_yr_where}
+    GROUP BY pe.SPID
+),
+TicketAgg AS (
+    SELECT t.SPID, COUNT(DISTINCT t.TicketID) AS {ticket_alias}
+    FROM crm_tickets t{t_where}
+    GROUP BY t.SPID
+)
+SELECT
+    {select_dim},
+    SUM(COALESCE(sa.{'TotalBoxes' if (asks_boxes and not asks_sales) else 'TotalSales'}, 0)) AS {'TotalBoxes' if (asks_boxes and not asks_sales) else 'TotalSales'},
+    SUM(COALESCE(ta.{ticket_alias}, 0)) AS {ticket_alias}
+FROM people pe
+JOIN SalesAgg sa ON pe.SPID = sa.SPID
+LEFT JOIN TicketAgg ta ON pe.SPID = ta.SPID{team_where}
+GROUP BY {group_expr}
+ORDER BY {order_col} DESC{limit_clause};
+(CẢNH BÁO: Bắt buộc tách 2 CTE `SalesAgg` và `TicketAgg` rồi mới JOIN `people`, KHÔNG JOIN thẳng `sales` với `crm_tickets`!)
+"""
+
+    is_region = any(k in q_low for k in ["khu vực", "region"]) and not any(k in q_low for k in ["quốc gia", "geo", "country"])
+    geo_col = "g.Region AS Region" if is_region else "g.Geo AS Country"
+    geo_grp = "g.Region" if is_region else "g.GeoID, g.Geo"
+    sales_metric = "SUM(s.Boxes) AS TotalBoxes" if (asks_boxes and not asks_sales) else "SUM(s.Amount) AS TotalSales"
+    sales_out_col = "TotalBoxes" if (asks_boxes and not asks_sales) else "TotalSales"
+    order_col = ticket_alias if ("nhiều ticket" in q_low or "nhiều bug" in q_low) else sales_out_col
+    return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP LIÊN BẢNG (`sales` + `geo` + `crm_tickets` qua 2 CTE):
+WITH SalesAgg AS (
+    SELECT s.GeoID, {sales_metric}
+    FROM sales s{s_yr_where}
+    GROUP BY s.GeoID
+),
+TicketAgg AS (
+    SELECT t.GeoID, COUNT(DISTINCT t.TicketID) AS {ticket_alias}
+    FROM crm_tickets t{t_where}
+    GROUP BY t.GeoID
+)
+SELECT
+    {geo_col},
+    SUM(COALESCE(sa.{sales_out_col}, 0)) AS {sales_out_col},
+    SUM(COALESCE(ta.{ticket_alias}, 0)) AS {ticket_alias}
+FROM geo g
+JOIN SalesAgg sa ON g.GeoID = sa.GeoID
+LEFT JOIN TicketAgg ta ON g.GeoID = ta.GeoID
+GROUP BY {geo_grp}
+ORDER BY {order_col} DESC{limit_clause};
+(CẢNH BÁO BẮT BUỘC:
+1. Bảng ticket là `crm_tickets` (`t.Type = 'Bug'`...), KHÔNG có bảng `bugs` và KHÔNG truy vấn `products`!
+2. Bắt buộc tách `SalesAgg` (từ `sales`) và `TicketAgg` (từ `crm_tickets`) trong 2 CTE riêng trước khi JOIN `geo`, KHÔNG JOIN thẳng `sales` với `crm_tickets`!)
+"""
+
+
 def _compute_targeted_hint_raw(user_query: str, schema_context: str = "", dialect: str = "") -> str:
     """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) cho câu hỏi cụ thể, áp dụng cho cả prompt gốc và prompt sửa lỗi."""
     q_low = (user_query or "").lower()
@@ -1418,7 +1647,10 @@ def _compute_targeted_hint_raw(user_query: str, schema_context: str = "", dialec
         "mặt hàng nào", "quốc gia nào", "nước nào", "khách hàng nào", "đội nào", 
         "team nào", "tháng nào", "năm nào", "quý nào", "đâu là", "ai đứng đầu",
         "ai dẫn đầu", "ai đạt", "nhân viên xuất sắc nhất", "sản phẩm bán chạy nhất", "quán quân"
-    ])
+    ]) or bool(re.search(
+        r"\b(?:quốc gia|nước|thị trường|sản phẩm|nhân viên|người|đội ngũ|đội|team|khách hàng)(?:\s*\([^)]+\))?\s+nào\b",
+        q_low,
+    ))
     has_superlative = any(k in q_low for k in [
         "nhất", "xuất sắc nhất", "cao nhất", "thấp nhất", "nhiều nhất", "ít nhất",
         "bán chạy nhất", "lớn nhất", "nhỏ nhất", "đỉnh nhất", "giỏi nhất",
@@ -1435,7 +1667,7 @@ def _compute_targeted_hint_raw(user_query: str, schema_context: str = "", dialec
         req_limit = 10
 
     # 0. Phân biệt ngữ cảnh CSDL (Northwind vs Sakila vs Employees vs Awesome Chocolates)
-    is_northwind_db = any(k in schema_low for k in ["order_details", "`order_details`", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in schema_low or "`products`" in schema_low) and ("orders" in schema_low or "`orders`" in schema_low) and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
+    is_northwind_db = any(k in schema_low for k in ["order_details", "`order_details`", "order details", "`order details`", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in schema_low or "`products`" in schema_low) and ("orders" in schema_low or "`orders`" in schema_low) and not any(k in schema_low for k in ["geoid", "spid", "boxes", "`film`", "`rental`"]))
     is_sakila_db = any(k in schema_low for k in ["`film`", "`rental`", "film_id", "rental_id", "`actor`", "actor_id", "film_actor", "film_category", "rental_date"]) and not is_northwind_db
     is_employees_db = (
         ("dept_emp" in schema_low or "dept_manager" in schema_low or "titles" in schema_low or "salaries" in schema_low or "hire_date" in schema_low)
@@ -1451,7 +1683,67 @@ def _compute_targeted_hint_raw(user_query: str, schema_context: str = "", dialec
         and not is_northwind_db
     )
 
+    if _is_crm_tickets_query(user_query, schema_context):
+        has_first_reply = any(k in q_low for k in ["firstreply", "phản hồi đầu tiên", "thời gian phản hồi"])
+        has_resolve = any(k in q_low for k in ["fullresolve", "thời gian xử lý", "solved", "giải quyết"])
+        metric_notes = []
+        if has_first_reply:
+            metric_notes.append("- `FirstReplyMinutes` là số thực (FLOAT phút): tính bằng `ROUND(AVG(t.FirstReplyMinutes), 2) AS AvgFirstReplyMinutes` (TUYỆT ĐỐI KHÔNG dùng TIMESTAMPDIFF/TIMEDIFF/JULIANDAY).")
+        if has_resolve:
+            metric_notes.append("- `FullResolveHours` là số thực (FLOAT giờ): tính bằng `ROUND(AVG(t.FullResolveHours), 2) AS AvgFullResolveHours`.")
+            metric_notes.append("- Tỷ lệ giải quyết xong (`Solved`): `ROUND(SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) AS SolvedRatePct`.")
+        if not metric_notes:
+            metric_notes.append("- Đếm số lượng ticket bằng `COUNT(*) AS TicketCount`, trung bình thời gian dùng `AVG(t.FirstReplyMinutes)` / `AVG(t.FullResolveHours)`.")
+        metrics_guide = "\n".join(metric_notes)
+        return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO BẢNG `crm_tickets` (CHĂM SÓC KHÁCH HÀNG):
+- Truy vấn trực tiếp bảng `crm_tickets t`, KHÔNG thay bằng `people`/`sales`/`products` và KHÔNG dùng `DECLARE`.
+- Chỉ dùng các cột tồn tại trong SCHEMA `crm_tickets` (`TicketID`, `CustomerID`, `CustomerType`, `Channel`, `Type`, `Status`, `CreatedAt`, `FirstReplyMinutes`, `FullResolveHours`, `SPID`, `GeoID`).
+{metrics_guide}
+"""
+
+    if _is_cross_crm_sales_query(user_query, schema_context):
+        return _build_cross_crm_sales_hint(
+            q_low=q_low,
+            is_sqlite=is_sqlite,
+            req_limit=req_limit,
+            has_explicit_limit=bool(top_m),
+        )
+
     if is_northwind_db:
+        is_classic_northwind = any(k in schema_low for k in ["order details", "orderid", "categoryname", "productid"]) and "order_details" not in schema_low
+        if is_classic_northwind:
+            if any(k in q_low for k in ["danh mục", "category", "categories", "ngành hàng", "nhóm hàng"]):
+                return f"""
+⚠️ CHỈ DẪN NORTHWIND CLASSIC (SẢN PHẨM & DANH MỤC `Categories`):
+SELECT
+    cat.CategoryID,
+    cat.CategoryName,
+    COUNT(DISTINCT p.ProductID) AS ProductCount,
+    ROUND(COALESCE(SUM(od.UnitPrice * od.Quantity * (1 - COALESCE(od.Discount, 0))), 0), 2) AS TotalRevenue,
+    COALESCE(SUM(od.Quantity), 0) AS TotalQuantity
+FROM Categories cat
+LEFT JOIN Products p ON cat.CategoryID = p.CategoryID
+LEFT JOIN "Order Details" od ON p.ProductID = od.ProductID
+GROUP BY cat.CategoryID, cat.CategoryName
+ORDER BY TotalRevenue DESC;
+"""
+            if any(k in q_low for k in ["khách hàng", "customer"]) and any(k in q_low for k in ["mua", "doanh thu", "đơn", "nhiều nhất", "top", "revenue", "orders"]):
+                return f"""
+⚠️ CHỈ DẪN NORTHWIND CLASSIC (KHÁCH HÀNG & ĐƠN HÀNG - BẮT BUỘC DÙNG `"Order Details"`):
+SELECT
+    c.CustomerID,
+    c.CompanyName,
+    COUNT(DISTINCT o.OrderID) AS TotalOrders,
+    ROUND(SUM(od.UnitPrice * od.Quantity * (1 - COALESCE(od.Discount, 0))), 2) AS TotalRevenue
+FROM Customers c
+JOIN Orders o ON c.CustomerID = o.CustomerID
+JOIN "Order Details" od ON o.OrderID = od.OrderID
+GROUP BY c.CustomerID, c.CompanyName
+ORDER BY TotalRevenue DESC
+LIMIT {req_limit};
+"""
+            return ""
         # Xu hướng thay đổi của Total Revenue theo thời gian / tháng
         if (any(k in q_low for k in ["xu hướng", "trend", "thay đổi", "biến động", "theo thời gian", "từng tháng", "mỗi tháng", "qua các tháng", "over time", "monthly"])
             and any(k in q_low for k in ["doanh thu", "revenue", "doanh số", "sales", "total revenue"])):
@@ -3087,11 +3379,14 @@ WHERE pe.Team = '' OR pe.Team IS NULL;
 3. Dùng COALESCE(NULLIF(pe.Team, ''), 'Chưa phân loại') AS `Đội Ngũ`!)
 """
 
+        from src.llm.datamate_bridge import has_headcount_qualifier_conflict
+
         # 0.00 Số lượng nhân viên bán hàng / Headcount theo từng Đội ngũ (Team) hoặc Khu vực (Location)
         is_headcount_q = (
             any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "sales person", "người bán", "sales rep", "sales reps"])
             and any(k in q_low for k in ["số lượng", "quy mô", "bao nhiêu", "đếm", "phân bổ", "cơ cấu", "phân chia", "mỗi team có", "từng team có", "từng đội có"])
             and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền bán", "bán được bao nhiêu tiền", "doanh thu bao nhiêu", "tháng", "quý"])
+            and not has_headcount_qualifier_conflict(q_low)
         )
         if is_headcount_q:
             group_by_loc = any(k in q_low for k in ["khu vực", "địa điểm", "location", "vị trí", "thành phố", "city"]) and not any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm"])
@@ -3243,7 +3538,11 @@ ORDER BY {order_p}{limit_clause};
 """
 
         # 0.01 Tỷ lệ đóng góp doanh thu theo nhóm sản phẩm (Category)
-        if any(k in q_low for k in ["category", "nhóm sản phẩm", "nhóm hàng", "danh mục"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+        _has_explicit_pct_or_contrib = (
+            any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "percent", "%", "tỉ trọng", "tỷ trọng", "cơ cấu", "share", "ratio"])
+            or ("đóng góp" in q_low and not any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "headcount", "số hộp", "boxes", "khu vực", "region", "size", "kích thước"]))
+        )
+        if any(k in q_low for k in ["category", "nhóm sản phẩm", "nhóm hàng", "danh mục"]) and _has_explicit_pct_or_contrib and not any(k in q_low for k in ["khu vực", "region", "apac", "europe", "americas"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_inner = ""
@@ -3268,7 +3567,7 @@ ORDER BY TotalSales DESC;
 """
 
         # 0.02 Tỷ lệ đóng góp doanh thu theo quốc gia / thị trường (Country / Geo)
-        elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+        elif any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"]) and _has_explicit_pct_or_contrib:
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_inner = ""
@@ -3293,7 +3592,7 @@ ORDER BY TotalSales DESC;
 """
 
         # 0.03 Tỷ lệ đóng góp doanh thu theo đội ngũ (Team)
-        elif any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+        elif any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng"]) and _has_explicit_pct_or_contrib:
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_inner = ""
@@ -3319,7 +3618,7 @@ ORDER BY TotalSales DESC;
 """
 
         # 0.04 Tỷ lệ đóng góp doanh thu theo sản phẩm (Product)
-        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "kẹo", "socola", "chocolate"]) and any(k in q_low for k in ["tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "tỉ trọng", "tỷ trọng", "cơ cấu", "đóng góp", "share", "ratio"]):
+        elif any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "kẹo", "socola", "chocolate"]) and _has_explicit_pct_or_contrib and not any(k in q_low for k in ["khu vực", "region", "size", "kích thước"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
             yr_filter = ""
             yr_inner = ""
@@ -4782,9 +5081,79 @@ WHERE rn = 1
 ORDER BY Year ASC;
 """
 
+        # 0.58 Phân tích theo Kích thước sản phẩm (`pr.Size`) và/hoặc Doanh thu trung bình mỗi hộp
+        elif re.search(r"(?:kích\s+thước|\bsize\b)", q_low) and "crm_tickets" not in q_low:
+            has_cat = any(k in q_low for k in ["category", "danh mục", "nhóm sản phẩm"])
+            sel_cat = "    pr.Category,\n" if has_cat else ""
+            grp_cat = "pr.Category, " if has_cat else ""
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÂN TÍCH DOANH THU THEO KÍCH THƯỚC SẢN PHẨM `pr.Size`):
+SELECT
+{sel_cat}    pr.Size,
+    SUM(s.Amount) AS TotalRevenue,
+    SUM(s.Boxes) AS TotalBoxes,
+    ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+GROUP BY {grp_cat}pr.Size
+ORDER BY TotalRevenue DESC;
+(CẢNH BÁO BẮT BUỘC: BẮT BUỘC nhóm theo `pr.Size` và tính doanh thu trung bình trên mỗi hộp bằng `ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2)` — TUYỆT ĐỐI KHÔNG dùng `AVG(s.Amount)`!)
+"""
+
+        # 0.59 Phân tích theo Khu vực (`geo.Region`, VD APAC / Europe / Americas) kết hợp Category / Boxes / Sales
+        elif any(k in q_low for k in ["khu vực", "region", "apac", "europe", "americas"]) and "location" not in q_low and "crm_tickets" not in q_low:
+            reg_vals = []
+            for r_tok, r_canon in [("apac", "'APAC'"), ("europe", "'Europe'"), ("americas", "'Americas'")]:
+                if re.search(rf"\b{r_tok}\b", q_low):
+                    reg_vals.append(r_canon)
+            where_reg = f"\nWHERE g.Region IN ({', '.join(reg_vals)})" if reg_vals else ""
+            has_cat_or_prod = any(k in q_low for k in ["category", "danh mục", "nhóm sản phẩm", "sản phẩm", "product"])
+            sel_cat = "    pr.Category,\n" if has_cat_or_prod else ""
+            join_prod = "\nJOIN products pr ON s.PID = pr.PID" if has_cat_or_prod else ""
+            grp_clause = "pr.Category, g.Region" if has_cat_or_prod else "g.Region"
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (PHÂN TÍCH DOANH THU / SẢN LƯỢNG THEO KHU VỰC `g.Region`):
+SELECT
+{sel_cat}    g.Region,
+    SUM(s.Amount) AS TotalRevenue,
+    SUM(s.Boxes) AS TotalBoxes
+FROM sales s{join_prod}
+JOIN geo g ON s.GeoID = g.GeoID{where_reg}
+GROUP BY {grp_clause}
+ORDER BY TotalRevenue DESC;
+(CẢNH BÁO BẮT BUỘC: Bảng địa lý là `geo g` nối qua `s.GeoID = g.GeoID` với cột `g.Region`, TUYỆT ĐỐI KHÔNG bịa bảng `regions`!)
+"""
+
+        # 0.595 Tổng hợp theo Đội ngũ (`pe.Team`) kèm số nhân viên, doanh thu và số hộp
+        elif (
+            any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng"])
+            and any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "nhân sự", "headcount", "mỗi đội ngũ", "mỗi team", "từng team", "theo team"])
+            and not any(k in q_low for k in ["top ", "danh sách nhân viên", "từng nhân viên", "những nhân viên", "ai bán"])
+        ):
+            yr_match = re.search(r'\b(20\d{2})\b', q_low)
+            yr_cond = (f" AND strftime('%Y', s.SaleDate) = '{yr_match.group(1)}'" if is_sqlite else f" AND YEAR(s.SaleDate) = {yr_match.group(1)}") if yr_match else ""
+            yr_label = f" NĂM {yr_match.group(1)}" if yr_match else ""
+            asks_headcount = any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "nhân sự", "headcount"])
+            asks_boxes = any(k in q_low for k in ["hộp", "thùng", "boxes"])
+            cnt_line = "    COUNT(DISTINCT pe.SPID) AS EmployeeCount,\n" if asks_headcount else ""
+            box_line = ",\n    SUM(s.Boxes) AS TotalBoxes" if asks_boxes else ""
+            return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN SỰ, DOANH THU & SẢN LƯỢNG THEO ĐỘI NGŨ / TEAM{yr_label}):
+SELECT
+    pe.Team AS Team,
+{cnt_line}    SUM(s.Amount) AS TotalSales{box_line}
+FROM people pe
+JOIN sales s ON pe.SPID = s.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL{yr_cond}
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: Nhóm theo `pe.Team`, giữ đủ các chỉ số nhân sự (`COUNT(DISTINCT pe.SPID)`), doanh thu (`SUM(s.Amount)`) và số hộp (`SUM(s.Boxes)`) nếu được hỏi!)
+"""
+
         # 0.6 Top N nhân viên bán hàng / nhân sự (Salesperson) có doanh số / số lượng bán ra cao nhất
         elif (
-            any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "sales rep", "rep", "thành viên", "ai bán", "ai có doanh số", "người", "ai có"])
+            (any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "sales rep", "thành viên", "ai bán", "ai có doanh số", "người", "ai có"]) or bool(re.search(r"\brep\b", q_low)))
+            and not any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "headcount", "mỗi đội ngũ", "mỗi team", "từng team", "từng đội", "theo team", "theo đội ngũ"])
             and not any(k in q_low for k in ["chưa từng", "chưa bao giờ", "không bán", "chưa bán", "không có", "never", "not in", "giao dịch", "đơn hàng", "orders", "transactions"])
             and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "xuất sắc", "nhiều nhất", "lớn nhất", "bán được", "bán chạy", "hộp", "thùng", "boxes"])
             and not match_chocolates_specific_person(q_low)
@@ -5016,6 +5385,7 @@ LIMIT {eff_limit};
         elif (
             any(k in q_low for k in ["sản phẩm", "product", "mặt hàng", "món", "kẹo", "socola", "chocolate"])
             and not any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "yummies", "delish", "jucies", "thành viên"])
+            and not re.search(r"(?:kích\s+thước|\bsize\b|\bregion\b|khu\s+vực|apac|europe|americas|\bcategory\b|danh\s+mục)", q_low)
             and not any(k in q_low for k in ["biên độ", "dao động", "chênh lệch", "khoảng cách", "giá bán", "đơn giá", "giá trung bình", "spread", "fluctuation", "tỷ suất", "margin", "pnl"])
             and not any(k in q_low for k in ["ế ẩm", "ế nhất", "thấp nhất tại", "kém nhất tại", "nhưng lại", "nghịch lý", "phân hóa", "divergence", "đối lập", "thị trường"])
             and any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền", "cao nhất", "top", "bán chạy", "chạy nhất", "nhiều nhất", "hộp", "thùng", "boxes"])
@@ -5264,16 +5634,34 @@ LIMIT {req_limit};
 (CẢNH BÁO BẮT BUỘC: BẮT BUỘC JOIN giữa sales s và geo g ON s.GeoID = g.GeoID! BẮT BUỘC dùng LIMIT {req_limit} theo yêu cầu người dùng!)
 """
 
-        # 0.9 Doanh số theo đội ngũ (Team) bán hàng
+        # 0.9 Doanh số (và số nhân viên / số hộp) theo đội ngũ (Team) bán hàng
         elif any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng"]):
             yr_match = re.search(r'\b(20\d{2})\b', q_low)
-            yr_filter = ""
+            yr_cond = ""
             yr_label = ""
             if yr_match:
                 yr_val = yr_match.group(1)
-                yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr_val}"
+                yr_cond = f" AND strftime('%Y', s.SaleDate) = '{yr_val}'" if is_sqlite else f" AND YEAR(s.SaleDate) = {yr_val}"
                 yr_label = f" NĂM {yr_val}"
 
+            asks_headcount = any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "nhân sự", "headcount"])
+            asks_boxes = any(k in q_low for k in ["hộp", "thùng", "boxes"])
+            if asks_headcount:
+                box_line = ",\n    SUM(s.Boxes) AS TotalBoxes" if asks_boxes else ""
+                return f"""
+⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (NHÂN SỰ, DOANH THU & SẢN LƯỢNG THEO ĐỘI NGŨ / TEAM{yr_label}):
+SELECT
+    pe.Team AS Team,
+    COUNT(DISTINCT pe.SPID) AS EmployeeCount,
+    SUM(s.Amount) AS TotalSales{box_line}
+FROM people pe
+JOIN sales s ON pe.SPID = s.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL{yr_cond}
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;
+(CẢNH BÁO BẮT BUỘC: Xuất ĐẦY ĐỦ `pe.Team`, `COUNT(DISTINCT pe.SPID) AS EmployeeCount`, `SUM(s.Amount) AS TotalSales`{' và `SUM(s.Boxes) AS TotalBoxes`' if asks_boxes else ''}!)
+"""
+            yr_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr_val}'" if (yr_match and is_sqlite) else (f"WHERE YEAR(s.SaleDate) = {yr_val}" if yr_match else "")
             return f"""
 ⚠️ CHỈ DẪN TRỰC TIẾP CHO CÂU HỎI HIỆN TẠI (DOANH THU THEO ĐỘI NGŨ / TEAM{yr_label}):
 SELECT 
@@ -8297,8 +8685,12 @@ ORDER BY `{time_col}` ASC;
 
     # 12. XỬ LÝ PHỔ QUÁT CHO CÂU HỎI TỶ LỆ PHẦN TRĂM ĐÓNG GÓP / TỶ TRỌNG / CƠ CẤU (UNIVERSAL PERCENTAGE CONTRIBUTION HINT)
     elif (
-        any(k in q_low for k in ["tỷ lệ phần trăm đóng góp", "tỷ lệ đóng góp", "phần trăm đóng góp", "tỷ trọng", "tỉ trọng", "chiếm bao nhiêu phần trăm", "cơ cấu đóng góp"])
-        or (any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "tỷ trọng", "tỉ trọng"]) and any(k in q_low for k in ["đóng góp", "vào tổng", "trong tổng", "từng nhóm", "mỗi nhóm", "từng sản phẩm", "mỗi sản phẩm"]))
+        not is_choco_context
+        and not _is_crm_tickets_query(user_query, schema_context)
+        and (
+            any(k in q_low for k in ["tỷ lệ phần trăm đóng góp", "tỷ lệ đóng góp", "phần trăm đóng góp", "tỷ trọng", "tỉ trọng", "chiếm bao nhiêu phần trăm", "cơ cấu đóng góp"])
+            or (any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "tỷ trọng", "tỉ trọng"]) and any(k in q_low for k in ["đóng góp", "vào tổng", "trong tổng", "từng nhóm", "mỗi nhóm", "từng sản phẩm", "mỗi sản phẩm"]))
+        )
     ):
         tbl_matches = re.findall(r"-\s*Bảng\s+`?([a-zA-Z0-9_]+)`?:\s*([^\n]+)", schema_context, re.IGNORECASE)
         target_tbl = None
@@ -8374,15 +8766,27 @@ def extract_tables_from_schema(schema_context: str) -> set[str]:
     if not schema_context:
         return valid_tables
 
-    # 1. Định dạng Veraxus: - Bảng `table_name`: col1, col2...
-    for m in re.finditer(r"(?:Bảng|Table)\s*[`'\"]?([a-zA-Z0-9_]+)[`'\"]?", schema_context, re.IGNORECASE):
-        valid_tables.add(m.group(1).lower())
+    # 1. Định dạng Veraxus: - Bảng `table_name` hoặc - Bảng "Order Details": ...
+    for m in re.finditer(
+        r"(?:Bảng|Table)\s*(?:`([^`]+)`|\"([^\"]+)\"|'([^']+)'|([a-zA-Z0-9_]+))",
+        schema_context,
+        re.IGNORECASE,
+    ):
+        name = next((g for g in m.groups() if g), "")
+        if name:
+            valid_tables.add(name.lower())
     # 2. Định dạng CREATE TABLE [IF NOT EXISTS] `table_name`
-    for m in re.finditer(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`'\"]?([a-zA-Z0-9_]+)[`'\"]?", schema_context, re.IGNORECASE):
-        valid_tables.add(m.group(1).lower())
-    # 3. Dấu backtick bất kỳ trước dấu hai chấm: `table_name`:
-    for m in re.finditer(r"[`'\"]([a-zA-Z0-9_]+)[`'\"]\s*:", schema_context):
-        valid_tables.add(m.group(1).lower())
+    for m in re.finditer(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:`([^`]+)`|\"([^\"]+)\"|'([^']+)'|([a-zA-Z0-9_]+))",
+        schema_context,
+        re.IGNORECASE,
+    ):
+        name = next((g for g in m.groups() if g), "")
+        if name:
+            valid_tables.add(name.lower())
+    # 3. Dấu backtick/ngoặc kép trước dấu hai chấm: `table_name`:
+    for m in re.finditer(r"[`'\"]\s*([a-zA-Z0-9_ ][a-zA-Z0-9_ ]*?)\s*[`'\"]\s*:", schema_context):
+        valid_tables.add(m.group(1).strip().lower())
     return valid_tables
 
 
@@ -8398,11 +8802,16 @@ def validate_hint_against_schema(hint: str, schema_context: str) -> str:
     # Trích xuất các tên CTE được định nghĩa trong WITH ... AS (lower-case để khớp chuẩn xác)
     cte_names = {c.lower() for c in re.findall(r"\b([a-zA-Z0-9_]+)\s+AS\s*\(", hint, re.IGNORECASE)}
 
-    # Tìm các bảng sau FROM và JOIN trong hint
+    # Tìm các bảng sau FROM và JOIN trong hint (bỏ qua từ khóa SQL và từ nối tiếng Việt trong chú thích)
     referenced_tables = set()
-    for m in re.finditer(r"\b(?:FROM|JOIN)\s+[`'\"]?([a-zA-Z0-9_]+)[`'\"]?", hint, re.IGNORECASE):
+    _non_table_tokens = {
+        "select", "where", "group", "order", "limit", "with", "as", "on", "using",
+        "left", "right", "inner", "outer", "cross", "full",
+        "giữa", "bảng", "với", "các", "những", "từ", "hai", "ba", "nhau", "nhiều",
+    }
+    for m in re.finditer(r"\b(?:FROM|JOIN)\s+[`'\"]?([a-zA-Z0-9_]+)[`'\"]?(?=$|[\s,;)`'\"\.])", hint, re.IGNORECASE):
         tbl = m.group(1).lower()
-        if tbl not in cte_names and tbl not in ("select", "where", "group", "order", "limit", "with", "as", "on", "using", "left", "right", "inner", "outer"):
+        if tbl not in cte_names and tbl not in _non_table_tokens:
             referenced_tables.add(tbl)
 
     # Nếu hint yêu cầu bất kỳ bảng nào mà không tồn tại trong CSDL hiện tại:
@@ -8416,6 +8825,9 @@ def validate_hint_against_schema(hint: str, schema_context: str) -> str:
 
 def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = "") -> str:
     """Tự động sinh chỉ dẫn chuyên biệt (Targeted Hint) và lọc triệt để bảng không thuộc CSDL hiện tại."""
+    from src.llm.datamate_bridge import detect_legacy_schema_gap
+    if detect_legacy_schema_gap(user_query, schema_context=schema_context):
+        return ""
     raw_hint = _compute_targeted_hint_raw(user_query, schema_context, dialect)
     return validate_hint_against_schema(raw_hint, schema_context)
 
@@ -8423,7 +8835,7 @@ def get_targeted_hint(user_query: str, schema_context: str = "", dialect: str = 
 def build_sql_prompt(schema_context: str, dialect: str, user_query: str, lang: str = "vi") -> str:
     """Xây dựng prompt tạo câu lệnh SQL với độ chính xác Schema tuyệt đối và Dynamic Few-Shot In-Context Learning."""
     dialect_hint = get_dialect_hints(dialect, lang=lang)
-    db_specific_rules = get_db_specific_rules(schema_context)
+    db_specific_rules = get_db_specific_rules(schema_context, user_query=user_query)
     targeted_hint = get_targeted_hint(user_query, schema_context, dialect=dialect)
 
     # Dynamic Few-Shot In-Context Learning (Top 2 most relevant gold-standard examples)
@@ -8446,8 +8858,8 @@ BUSINESS QUERY DECOMPOSITION RULES (MANDATORY COMPLIANCE):
 STRICT RULES:
 1. PURE SCHEMA GROUNDING & DYNAMIC ADAPTATION:
    - ONLY use tables, views, and columns that appear in the SCHEMA above. NEVER invent or assume table/column names from other domains (e.g. departments, salaries, sales, film).
-   - If the user asks about an entity/metric not in the schema (e.g. asking for 'salary' in a sales/product database):
-     SMARTLY ADAPT: Query the closest numerical business metric (e.g. unit price, revenue, total amount, quantity) across the corresponding entity groups (category, customer type, region, product group) so that the generated SQL executes 100% cleanly on the actual schema!
+   - If the user explicitly asks for an attribute, dimension, or metric that DOES NOT EXIST anywhere in the ACTUAL DATABASE SCHEMA above (for example: order return rate / refund, customer age, customer gender, inventory/stock, discount, shipping fee when no matching column exists), DO NOT drop that constraint and DO NOT substitute an unrelated column or fabricate SQL! Instead, return strictly one line starting with:
+     `UNANSWERABLE: <concise explanation of which requested column/data is missing in this database>`
 {db_specific_rules}
 2. HISTORICAL DATES:
    - Anchor relative dates to `(SELECT MAX(date_col) FROM table_name)`.
@@ -8458,8 +8870,8 @@ STRICT RULES:
    - Ensure all parentheses () and quotes are balanced.
    - Wrap identifiers in backticks ` when needed.
 5. CLEAN OUTPUT:
-   - Return ONLY the single executable raw SQL statement (starting with SELECT or WITH).
-   - No markdown code blocks, no explanations, no comments.
+   - Return ONLY the single executable raw SQL statement (starting with SELECT or WITH), OR a single line starting with `UNANSWERABLE: ...` if the requested columns/data do not exist in the schema.
+   - No markdown code blocks, no extra explanations, no comments.
 {few_shot_block}
 {targeted_hint}
 User Query: "{user_query}"
@@ -8479,13 +8891,14 @@ QUY TẮC PHÂN RÃ TRUY VẤN NGHIỆP VỤ (BẮT BUỘC TUÂN THỦ):
 3. NẾU BÀI TOÁN CẦN TỪ 2 BƯỚC LOGIC TRỞ LÊN (ví dụ: tìm giá trị đầu tiên/phòng ban đầu tiên rồi so sánh với trung bình, phân vị/cohorts): HÃY DÙNG CÚ PHÁP 'WITH ... AS' (CTE) để chia nhỏ từng bước tính toán một cách tường minh, rõ ràng và chuẩn xác.
 
 QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
-1. TUÂN THỦ SCHEMA TUYỆT ĐỐI & THÍCH ỨNG NGHIỆP VỤ (PURE SCHEMA GROUNDING & ADAPTATION):
+1. TUÂN THỦ SCHEMA TUYỆT ĐỐI & TRUNG THỰC DỮ LIỆU (PURE SCHEMA GROUNDING):
    - CHỈ ĐƯỢC PHÉP SỬ DỤNG các bảng, view và cột xuất hiện thực tế trong SCHEMA CƠ SỞ DỮ LIỆU THỰC TẾ ở trên.
    - Tuyệt đối KHÔNG tự ý bịa đặt hoặc gọi các bảng từ CSDL khác (như departments, salaries, employees, sales, film...).
-   - NẾU CÂU HỎI THUỘC LĨNH VỰC KINH DOANH NHƯNG ĐỀ CẬP ĐẾN CHỈ SỐ KHÔNG CÓ TRỰC TIẾP TRONG CSDL (ví dụ hỏi 'mức lương' trong CSDL bán hàng/sản phẩm):
-     HÃY THÍCH ỨNG NGHIỆP VỤ THÔNG MINH (SMART ADAPTATION): Phân tích chỉ số tài chính/giá trị tương đương gần nhất của CSDL này (ví dụ: giá bán lẻ `gia_ban_le`, doanh thu `tong_tien`/`thanh_tien`, đơn giá, số lượng) theo nhóm thực thể tương ứng (`danh_muc`, `loai_khach`, nhóm sản phẩm) để luôn trả về câu lệnh SQL hợp lệ, có dữ liệu thực tế và giải quyết trọn vẹn bài toán so sánh/chênh lệch cho người dùng!
+   - NẾU CÂU HỎI YÊU CẦU THUỘC TÍNH, CHIỀU PHÂN TÍCH HOẶC CHỈ SỐ HOÀN TOÀN KHÔNG CÓ TRONG SCHEMA THỰC TẾ (ví dụ: tỷ lệ hoàn trả đơn hàng, độ tuổi, giới tính, chiết khấu, tồn kho, phí vận chuyển khi không có cột lưu trữ tương ứng):
+     TUYỆT ĐỐI KHÔNG tự ý bỏ bớt điều kiện đó hay thay bằng cột khác để bịa câu SQL! Thay vào đó, chỉ trả về đúng 1 dòng bắt đầu bằng:
+     `UNANSWERABLE: Dữ liệu hiện tại không có cột/thông tin về <khái niệm còn thiếu>.`
    - NẾU CÂU HỎI HOÀN TOÀN NGOÀI PHẠM VI DỮ LIỆU KINH DOANH (ví dụ: chào hỏi, sức khỏe, thời tiết, lập trình chung, thơ ca): TUYỆT ĐỐI KHÔNG sinh câu lệnh SQL hoặc cố tình truy vấn các bảng không liên quan.
-   - Với câu hỏi đơn giản: dùng SELECT đơn trực tiếp. Với bài toán đa bước: dùng CTE (`WITH ... AS`) theo Quy tắc Phân rã Nghiệp vụ ở trên!
+   - Với câu hỏi hợp lệ đơn giản: dùng SELECT đơn trực tiếp. Với bài toán đa bước: dùng CTE (`WITH ... AS`) theo Quy tắc Phân rã Nghiệp vụ ở trên!
 {db_specific_rules}
 2. XỬ LÝ THỜI GIAN TRÊN DỮ LIỆU LỊCH SỬ (QUAN TRỌNG):
    - CSDL doanh nghiệp chứa dữ liệu các năm lịch sử (không phải realtime hôm nay).
@@ -8525,9 +8938,9 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
         MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CHỨA CẢ CỘT ĐỊNH DANH (Tên nhân viên, Tên sản phẩm, Quốc gia, Đội ngũ...) VÀ CỘT CHỈ SỐ ĐO LƯỜNG ĐƯỢC TÍNH TOÁN (`SUM(s.Amount) AS TotalSales`, `SUM(s.Boxes) AS TotalBoxesSold`, `COUNT(...)`)!
         TUYỆT ĐỐI CẤM chỉ SELECT mỗi tên thực thể rồi để ẩn chỉ số tính toán trong HAVING, vì hệ thống bắt buộc cần cột số đo lường để hiển thị số tiền/số lượng và vẽ biểu đồ kinh doanh!
 5. ĐỊNH DẠNG ĐẦU RA (QUAN TRỌNG NHẤT):
-   - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng chữ SELECT).
+   - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng chữ SELECT hoặc WITH), HOẶC đúng 1 dòng `UNANSWERABLE: <lý do thiếu cột/dữ liệu>` nếu schema không đủ thông tin.
    - TUYỆT ĐỐI KHÔNG bọc trong markdown code block (```sql hoặc ```), TUYỆT ĐỐI KHÔNG đặt dấu backtick ` ở đầu hay cuối câu lệnh (`SELECT...).
-   - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích nào bên ngoài.
+   - TUYỆT ĐỐI KHÔNG thêm bất kỳ comment (#, --), không thêm lời giải thích nào bên ngoài khi trả về SQL.
 {few_shot_block}
 {targeted_hint}
 Câu hỏi của người dùng: "{user_query}"
@@ -8537,7 +8950,7 @@ Câu lệnh SQL:"""
 def build_fix_prompt(schema_context: str, dialect: str, user_query: str, sql_query: str, reason_or_error: str, lang: str = "vi") -> str:
     """Xây dựng prompt yêu cầu LLM sửa lại SQL khi gặp lỗi, kết quả rỗng (0 dòng) hoặc không qua self-check."""
     dialect_hint = get_dialect_hints(dialect, lang=lang)
-    db_specific_rules = get_db_specific_rules(schema_context)
+    db_specific_rules = get_db_specific_rules(schema_context, user_query=user_query)
     targeted_hint = get_targeted_hint(user_query, schema_context, dialect=dialect)
 
     # Dynamic Few-Shot In-Context Learning for self-healing
@@ -8568,7 +8981,7 @@ FIX INSTRUCTIONS:
 1. If result returned 0 rows due to CURRENT_DATE(), NOW(), CURDATE() or overly strict date filtering: Anchor to `(SELECT MAX(date_col) FROM table_name)` or remove restrictive date filters to fetch real data!
 2. If 'Table or column doesn't exist': Carefully check the SCHEMA above and ONLY use tables and columns that exist in the Schema.
 3. If syntax error: Use `COUNT(*)`, ensure balanced parentheses ().
-4. Return ONLY the single corrected raw SQL query (starting with SELECT or WITH). No markdown, no comments, no explanations."""
+4. If the requested metric/column truly does not exist in the schema, do NOT fabricate SQL — return `UNANSWERABLE: <concise reason>`. Otherwise return ONLY the single corrected raw SQL query (starting with SELECT or WITH). No markdown, no comments, no explanations."""
 
     return f"""Bạn là chuyên gia SQL. Câu lệnh SQL bạn vừa sinh ra CẦN ĐƯỢC ĐIỀU CHỈNH LẠI trên {dialect}.
 
@@ -8594,7 +9007,7 @@ HƯỚNG DẪN ĐIỀU CHỈNH BẮT BUỘC:
 2. BẢNG EMPLOYEES: Không có cột dept_no! BẮT BUỘC JOIN qua dept_emp de: `FROM employees e JOIN dept_emp de ON e.emp_no = de.emp_no JOIN departments d ON de.dept_no = d.dept_no JOIN salaries s ON e.emp_no = s.emp_no`.
 3. Nếu ở mục QUY TẮC & MẪU SQL CHUẨN hoặc CHỈ DẪN TRỰC TIẾP ở trên có mẫu cú pháp chuẩn (kể cả CTE `WITH ...`), BẮT BUỘC tuân thủ đúng cấu trúc mẫu đó!
 4. Nếu kết quả trả về 0 dòng dữ liệu do dùng CURRENT_DATE(), NOW(), CURDATE() hoặc lọc thời gian quá chặt: Hãy thay thế bằng `(SELECT MAX(date_col) FROM table_name)` làm mốc ngày gần nhất hoặc bỏ điều kiện lọc thời gian để lấy dữ liệu thực tế!
-5. Viết lại câu SQL hoàn chỉnh, chuẩn xác 100%. CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (bắt đầu bằng chữ SELECT hoặc WITH), không giải thích, không thêm comment."""
+5. Nếu thông báo hoặc schema xác nhận cột/chỉ số người dùng yêu cầu KHÔNG tồn tại trong CSDL này, TUYỆT ĐỐI KHÔNG bịa SQL — trả về đúng 1 dòng `UNANSWERABLE: <lý do>`. Ngược lại, CHỈ TRẢ VỀ DUY NHẤT CÂU SQL THUẦN (bắt đầu bằng chữ SELECT hoặc WITH), không giải thích, không thêm comment."""
 
 
 def build_self_check_prompt(schema_context: str, user_query: str, sql_query: str, sample_str: str, lang: str = "vi") -> str:
@@ -8721,10 +9134,10 @@ STRICT BUSINESS ANALYTICS DISCIPLINE & GUIDELINES:
 REQUIREMENTS:
 Generate an Executive Business Insight Report in English with exact Markdown format:
 
-### 1. 🚨 Key Discoveries & Trend Anomalies
-(State the Gross Margin / Performance leader, the Trade-off Matrix between % and $, and the portfolio Benchmark Median. Concise and noise-free).
+### 1. Key Discoveries & Trend Anomalies
+(State the Gross Margin / Performance leader, the Trade-off Matrix between % and $, and the portfolio Benchmark Median. Concise and noise-free; do NOT use decorative emojis).
 
-### 2. 🔍 Potential Root Causes & Hypotheses
+### 2. Potential Root Causes & Hypotheses
 (MUST DYNAMICALLY REASON BASED ON THE EXACT METRIC AND DATA NUMBERS:
 - Provide 2 distinct, logical business hypotheses:
   * If Margin %: Reason on COGS structure and Value Capture / Premium pricing power.
@@ -8732,9 +9145,9 @@ Generate an Executive Business Insight Report in English with exact Markdown for
     - If Target is Product: Reason on channel penetration and customer taste.
     - If Target is Sales Team: Reason on frontline conversion discipline and account coverage.
     - If Target is Market / Country: Reason on local purchasing power, market size, and retail distribution network maturity. STRICTLY DO NOT attribute a country's revenue to 'sales team closing skills' or 'team discipline'.
-- CITE exact entities and numbers from the table. NEVER use generic boilerplate).
+- CITE exact entities and numbers from the table. NEVER use generic boilerplate or decorative emojis).
 
-### 3. 🎯 Executive Action Plan & Priority Recommendations
+### 3. Executive Action Plan & Priority Recommendations
 (CRITICAL DISCIPLINE - MANDATORY ENTITY CONTEXT RULE BEFORE PROPOSING ACTIONS:
 1. IDENTIFY THE TARGET ENTITY UNDER ANALYSIS (Entity Context Rule):
    - If "Product / SKU / Category":
@@ -8745,10 +9158,10 @@ Generate an Executive Business Insight Report in English with exact Markdown for
    - If "Market / Country (g.Geo / Country)":
      * Strategy: Expand local distribution channels, Market penetration, Consumer localization (taste & packaging fit), Optimize supply chain and import-export logistics.
      * STRICT PROHIBITION: ABSOLUTELY DO NOT use phrases like 'team New Zealand', 'team USA', 'sales incentive for USA', or 'sales pitch training for Canada'. A country is a geographical market, NOT a sales team or salesperson!
-2. Provide exactly 3 actionable, high-impact recommendations tied to real data:
-• 🔴 **[High Priority - Immediate Action / 0-30 Days]**: ...
-• 🟡 **[Medium Priority - Tactical / Next 1-3 Quarters]**: ...
-• 🟢 **[Low Priority / Long-term Strategy / 1-3 Years]**: ...
+2. Provide exactly 3 actionable, high-impact recommendations tied to real data without decorative emojis:
+• **[High Priority - Immediate Action / 0-30 Days]**: ...
+• **[Medium Priority - Tactical / Next 1-3 Quarters]**: ...
+• **[Low Priority / Long-term Strategy / 1-3 Years]**: ...
 - AVOID vague clichés like "enhance competitive edge", "automate analytics pipeline", or "replicate success enterprise-wide").
 
 Style: Executive, concise, data-driven, professional tone."""
@@ -8825,10 +9238,10 @@ KỶ LUẬT PHÂN TÍCH TÀI CHÍNH & QUẢN TRỊ CFO (BẮT BUỘC TUÂN THỦ
 
 YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
 
-### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính
-(Nêu rõ: Thực thể dẫn đầu biên độ/chỉ số, Nghịch lý đánh đổi Trade-off Matrix giữa % và $, và Mức trung vị chuẩn toàn bảng. Đi thẳng vào trọng tâm quản trị, không liệt kê số học vụn vặt).
+### 2.1. Phát hiện Bất thường & Xu hướng Chính
+(Nêu rõ: Thực thể dẫn đầu biên độ/chỉ số, Nghịch lý đánh đổi Trade-off Matrix giữa % và $, và Mức trung vị chuẩn toàn bảng. Đi thẳng vào trọng tâm quản trị, KHÔNG chèn emoji, không liệt kê số học vụn vặt).
 
-### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng
+### 2.2. Giả thuyết & Nguyên nhân Tiềm năng
 (BẮT BUỘC SUY LUẬN LOGIC BÁM SÁT ĐÚNG BẢN CHẤT CHỈ SỐ VÀ DẪN CHỨNG SỐ LIỆU THỰC TẾ:
 - Đưa ra đúng 2 giả thuyết kinh doanh giải thích TẠI SAO:
   * Nếu là Quản trị Cấp cao / Lãnh đạo / Giới tính (Leadership & Diversity): Giả thuyết về Cân bằng Giới tính & Quản trị ESG (Gender Parity & ESG Governance) và Giả thuyết về Chu kỳ Bổ nhiệm & Quy hoạch Cán bộ nguồn (Succession Lifecycle).
@@ -8840,9 +9253,9 @@ YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
     - Nếu đối tượng là Phòng ban (department): Dùng danh xưng "Phòng ban [Tên Phòng]". Giả thuyết về Định biên nhân sự và Phân bổ nguồn lực chức năng.
     - Nếu đối tượng là Thị trường / Quốc gia: Giả thuyết về Quy mô thị trường & Sức mua địa phương; Giả thuyết về Mạng lưới phân phối và Thích ứng thị hiếu người tiêu dùng bản địa. TUYỆT ĐỐI KHÔNG gán "kỹ năng chốt hợp đồng" hay "kỷ luật của đội ngũ" cho một quốc gia/thị trường.
 - MỖI GIẢ THUYẾT BẮT BUỘC TRÍCH DẪN TÊN THỰC THỂ VÀ SỐ LIỆU CỤ THỂ TỪ KẾT QUẢ.
-- TUYỆT ĐỐI CẤM câu văn mẫu sáo rỗng, TUYỆT ĐỐI KHÔNG chèn nhãn [Ưu tiên Cao] vào mục này).
+- TUYỆT ĐỐI CẤM câu văn mẫu sáo rỗng, TUYỆT ĐỐI KHÔNG chèn emoji hay nhãn [Ưu tiên Cao] vào mục này).
 
-### 2.3. 🎯 Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)
+### 2.3. Đề xuất Chiến lược Phân cấp (Cấp bách | Trung hạn | Dài hạn)
 (Quy tắc phân loại ngữ cảnh thực thể & Ngưỡng chênh lệch %:
 1. Nếu đối tượng là LÃNH ĐẠO / QUẢN LÝ / GIỚI TÍNH / THÙ LAO (Leadership, Diversity & Compensation):
    - NẾU chênh lệch < 1.0%: Đánh giá "Bình đẳng tuyệt đối", hành động [Cấp bách] là DUY TRÌ ỔN ĐỊNH, KHÔNG can thiệp tốn kém.
@@ -8859,10 +9272,10 @@ YÊU CẦU ĐỊNH DẠNG BÁO CÁO (MARKDOWN):
    - Chiến lược: Mở rộng kênh phân phối địa phương, thâm nhập thị trường, thích ứng văn hóa tiêu dùng (Localization), tối ưu chuỗi cung ứng/logistics xuất nhập khẩu. TUYỆT ĐỐI KHÔNG dùng từ 'team New Zealand', 'hoa hồng thưởng nóng cho USA'.
 
 Quy tắc trình bày đề xuất:
-BẮT BUỘC chỉ viết đúng 3 dòng đề xuất tương ứng với 3 cấp độ thời gian, bám sát số liệu cụ thể vừa truy vấn:
-• 🔴 **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: ... (hành động cụ thể bám sát đối tượng và ngưỡng chênh lệch)
-• 🟡 **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: ... (hành động cụ thể bám sát đối tượng)
-• 🟢 **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: ... (hành động cụ thể bám sát đối tượng)
+BẮT BUỘC chỉ viết đúng 3 dòng đề xuất tương ứng với 3 cấp độ thời gian, bám sát số liệu cụ thể vừa truy vấn, KHÔNG chèn emoji trang trí:
+• **[Cấp Bách - Can thiệp Ngay / 0 - 30 Ngày]**: ... (hành động cụ thể bám sát đối tượng và ngưỡng chênh lệch)
+• **[Trung Hạn - Tối ưu Hóa / 1 - 3 Quý Tới]**: ... (hành động cụ thể bám sát đối tượng)
+• **[Dài Hạn - Chiến Lược Bền Vững / 1 - 3 Năm]**: ... (hành động cụ thể bám sát đối tượng)
 TUYỆT ĐỐI KHÔNG DÙNG BẢNG, KHÔNG THÊM GẠCH ĐẦU DÒNG CON).
 
 QUY TẮC ĐỊNH DẠNG & NGÔN NGỮ (BẮT BUỘC):
@@ -8885,13 +9298,16 @@ Available Database Schema & Actual Date Ranges:
 {schema_context}
 
 CRITICAL RULES FOR FOLLOW-UP QUESTIONS:
-1. NO AMBIGUOUS PRONOUNS: NEVER use words like "these 3 reps", "this product", "these items", "they", "those".
+1. DIRECT ANALYTICAL FLOW & 100% ACTIVE SCHEMA GROUNDING:
+   - Each follow-up MUST flow naturally as the next drill-down step from "{user_query}" and the top/bottom entities shown in `Sample query results`.
+   - ONLY reference tables, columns, dimensions (e.g., channel, category, supplier, debt), and entity names that ACTUALLY EXIST in `Available Database Schema & Actual Date Ranges` above — NEVER borrow concepts or templates from another database.
+2. NO AMBIGUOUS PRONOUNS: NEVER use words like "these 3 reps", "this product", "these items", "they", "those".
    - MUST use CONCRETE ENTITY NAMES directly from the sample data above (e.g., 'top 5 reps in Delish team', 'Dark 70% revenue by month', 'India market sales breakdown').
    - Every question must be 100% standalone and immediately executable when clicked.
-2. STRICT TIME GROUNDING: ONLY suggest questions for years/quarters that ACTUALLY EXIST in the Date Range above.
+3. STRICT TIME GROUNDING: ONLY suggest questions for years/quarters that ACTUALLY EXIST in the Date Range above.
    - NEVER suggest future/hallucinated years (like 2023/2024 if data is 2021).
-3. EXACT REAL ENTITIES: ONLY use real product names (e.g. 'Milk Bars', '70% Dark Bites'), real rep IDs (e.g. 'SP01'), and real geos from the sample list. NEVER use non-existent names like 'Milk Chocolate' or 'SP001'.
-4. Propose 2 to 3 high-value analytical drill-down questions.
+4. EXACT REAL ENTITIES: ONLY use real product names, entities, and dimension values from the schema & sample rows.
+5. Propose 2 to 3 high-value analytical drill-down questions.
 
 Return ONLY a JSON array of strings:
 ["Question 1", "Question 2", "Question 3"]"""
@@ -8906,28 +9322,21 @@ Schema CSDL & Khoảng thời gian thực tế:
 {schema_context}
 
 QUY TẮC BẮT BUỘC KHI ĐỀ XUẤT CÂU HỎI TIẾP NỐI:
-1. TUYỆT ĐỐI CẤM ĐẠI TỪ MƠ HỒ (QUAN TRỌNG NHẤT):
+1. ĂN NHẬP TRỰC TIẾP VỚI MẠCH HỎI & BÁM SÁT 100% CSDL ĐANG CHỌN (QUAN TRỌNG NHẤT):
+   - Mỗi câu hỏi gợi ý phải là bước đào sâu tiếp nối trực tiếp từ câu hỏi "{user_query}" và các thực thể vừa trả về trong `Kết quả dữ liệu mẫu`.
+   - CHỈ được phép dùng bảng, cột, chiều phân tích (kênh bán, nhóm món, nhà cung cấp, công nợ...) và tên thực thể CÓ THẬT trong `Schema CSDL` hiện tại — TUYỆT ĐỐI KHÔNG lấy nhầm khái niệm từ CSDL khác.
+2. TUYỆT ĐỐI CẤM ĐẠI TỪ MƠ HỒ:
    - TUYỆT ĐỐI KHÔNG dùng các từ như: "3 nhân viên này", "sản phẩm này", "nhóm này", "các đối tượng trên", "họ", "chúng".
-   - BẮT BUỘC PHẢI DÙNG TÊN THỰC THỂ CỤ THỂ lấy trực tiếp từ bảng dữ liệu mẫu ở trên (Ví dụ: thay vì "của 3 nhân viên này", hãy ghi rõ: "Top 5 nhân viên có doanh số cao nhất trong nhóm Delish", "Doanh số sản phẩm 70% Dark Bites theo từng tháng", "Doanh thu tại thị trường India").
-   - Mỗi câu hỏi phải hoàn toàn ĐỘC LẬP để khi người dùng bấm nút là chạy được ngay mà không phụ thuộc ngữ cảnh trước.
-2. RÀNG BUỘC THỜI GIAN TUYỆT ĐỐI:
-   - CHỈ đề xuất các câu hỏi cho những NĂM THỰC TẾ có trong phần "KHOẢNG THỜI GIAN THỰC TẾ TRONG DỮ LIỆU" ở Schema trên.
-   - TUYỆT ĐỐI KHÔNG tự bịa ra các năm không có trong dữ liệu (ví dụ: không gợi ý năm 2023/2024 nếu dữ liệu chỉ có năm 2021 hoặc 2022).
-3. CHỈ DÙNG TÊN THỰC THỂ CÓ THẬT TRONG CSDL:
-   - Dùng chính xác tên sản phẩm trong danh sách mẫu ('Milk Bars', '70% Dark Bites'...), mã nhân viên ('SP01'...), quốc gia ('India'...).
-   - TUYỆT ĐỐI KHÔNG dùng tên bịa như 'Milk Chocolate' nếu trong CSDL tên là 'Milk Bars'.
-4. ĐỊNH HƯỚNG CÁC DẠNG CÂU HỎI TIẾP NỐI CHUẨN KINH DOANH (DỄ VIẾT SQL VÀ CHẮC CHẮN VẼ ĐƯỢC BIỂU ĐỒ):
-   - Dạng Xếp hạng: "Top 5 sản phẩm bán chạy nhất tại thị trường Australia năm 2021" hoặc "Top 5 nhân viên có doanh số cao nhất trong nhóm Yummies"
-   - Dạng Xu hướng: "Doanh số theo từng tháng tại thị trường Australia năm 2021" hoặc "Doanh số của sản phẩm Milk Bars theo từng tháng năm 2021"
-   - Dạng Phân bổ: "Doanh thu theo từng quốc gia của sản phẩm Drinking Coco"
-   - TUYỆT ĐỐI KHÔNG đề xuất các câu hỏi cấu trúc kỳ lạ, mơ hồ, phi thực tế như 'ở đầu tháng và cuối tháng', 'doanh thu của mỗi sản phẩm tại...'.
-   - CHỈ đề xuất các quốc gia có trong CSDL: 'Australia', 'India', 'USA', 'Canada', 'UK', 'New Zealand' (TUYỆT ĐỐI KHÔNG bịa ra 'Việt Nam' hay 'Japan').
+   - BẮT BUỘC PHẢI DÙNG TÊN THỰC THỂ CỤ THỂ lấy trực tiếp từ bảng dữ liệu mẫu ở trên để khi người dùng bấm nút là chạy được ngay.
+3. RÀNG BUỘC THỜI GIAN TUYỆT ĐỐI:
+   - CHỈ đề xuất các câu hỏi cho những NĂM/THÁNG THỰC TẾ có trong `Schema CSDL` ở trên.
+   - TUYỆT ĐỐI KHÔNG tự bịa ra khoảng thời gian không có trong dữ liệu.
+4. CHỈ DÙNG TÊN THỰC THỂ CÓ THẬT TRONG CSDL:
+   - Dùng chính xác tên sản phẩm, kênh bán, nhà cung cấp hoặc khách hàng xuất hiện trong dữ liệu mẫu hoặc `Schema CSDL`.
+   - TUYỆT ĐỐI KHÔNG đề xuất các câu hỏi mơ hồ hay bịa đặt cột không tồn tại.
 5. CHÍNH TẢ & NGÔN NGỮ THUẦN VIỆT (BẮT BUỘC 100% CÓ DẤU THANH):
-   - BẮT BUỘC viết 100% tiếng Việt có đầy đủ dấu thanh (sắc, huyền, hỏi, ngã, nặng).
-   - TUYỆT ĐỐI CẤM viết tiếng Việt không dấu (như 'Gia Tri Trung Binh', 'Nhom', 'Do Chenh Lech', 'Gia Tri Cao Nhat').
-   - BẮT BUỘC viết chuẩn mực tiếng Việt có dấu: 'Giá Trị Trung Bình', 'Nhóm', 'Độ Chênh Lệch', 'Giá Trị Cao Nhất', 'Số Lượng', 'Tổng Giá Trị'.
-   - TUYỆT ĐỐI KHÔNG dùng ký tự lạ hay chữ tiếng Hàn/Trung (như '각'). Dùng từ 'từng khu vực' hoặc 'các khu vực'.
-   - Luôn tách từ rõ ràng, có dấu cách giữa tiếng Việt và tiếng Anh (ví dụ: viết 'danh mục Bars', TUYỆT ĐỐI KHÔNG viết 'danh mụcBars').
+   - BẮT BUỘC viết 100% tiếng Việt có đầy đủ dấu thanh, súc tích, rõ ràng.
+   - TUYỆT ĐỐI KHÔNG dùng ký tự lạ hay viết dính chữ giữa tiếng Việt và tiếng Anh.
 
 Trả về DUY NHẤT một JSON array chứa danh sách các chuỗi câu hỏi:
 ["Câu hỏi 1", "Câu hỏi 2", "Câu hỏi 3"]"""

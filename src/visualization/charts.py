@@ -25,6 +25,7 @@ from src.analytics.heuristics import (
     unify_year_month_columns,
     ensure_full_twelve_months,
     ensure_full_four_quarters,
+    is_vnd_context_dataframe,
 )
 
 VI_COLUMN_MAP = {
@@ -545,10 +546,44 @@ VI_COLUMN_MAP = {
     "soluonggiaodich": "Số Lượng Giao Dịch",
     "sodonhang": "Số Đơn Hàng",
     "so_don_hang": "Số Đơn Hàng",
+    "sodonhople": "Số Đơn Hợp Lệ",
+    "so_don_hop_le": "Số Đơn Hợp Lệ",
+    "sodonhole": "Số Đơn Hợp Lệ",
+    "so_don_ho_le": "Số Đơn Hợp Lệ",
+    "donhople": "Đơn Hợp Lệ",
+    "don_hop_le": "Đơn Hợp Lệ",
+    "donhole": "Đơn Hợp Lệ",
+    "don_ho_le": "Đơn Hợp Lệ",
+    "sodon": "Số Đơn",
+    "so_don": "Số Đơn",
+    "soluongdon": "Số Lượng Đơn",
+    "so_luong_don": "Số Lượng Đơn",
     "soluongdonhang": "Số Lượng Đơn Hàng",
     "so_luong_don_hang": "Số Lượng Đơn Hàng",
     "tensp": "Tên Sản Phẩm",
     "ten_sp": "Tên Sản Phẩm",
+    "tenmon": "Tên Món",
+    "ten_mon": "Tên Món",
+    "nhommon": "Nhóm Món",
+    "nhom_mon": "Nhóm Món",
+    "mamon": "Mã Món",
+    "ma_mon": "Mã Món",
+    "madon": "Mã Đơn",
+    "ma_don": "Mã Đơn",
+    "ngayban": "Ngày Bán",
+    "ngay_ban": "Ngày Bán",
+    "thanhtien": "Thành Tiền ($)",
+    "thanh_tien": "Thành Tiền ($)",
+    "dongia": "Đơn Giá ($)",
+    "don_gia": "Đơn Giá ($)",
+    "trangthai": "Trạng Thái",
+    "trang_thai": "Trạng Thái",
+    "tongsoluong": "Tổng Số Lượng",
+    "tong_so_luong": "Tổng Số Lượng",
+    "tongcongno": "Tổng Công Nợ ($)",
+    "tong_cong_no": "Tổng Công Nợ ($)",
+    "mucluong": "Mức Lương ($)",
+    "muc_luong": "Mức Lương ($)",
     "giavon": "Giá Vốn",
     "gia_von": "Giá Vốn",
     "giaban": "Giá Bán",
@@ -590,6 +625,14 @@ VI_COLUMN_MAP = {
     "recordcount": "Tổng Số Bản Ghi",
     "record_count": "Tổng Số Bản Ghi",
     "evaluation": "Đánh Giá Cực Trị",
+    "nhomxephang": "Nhóm Xếp Hạng",
+    "nhom_xep_hang": "Nhóm Xếp Hạng",
+    "chenhlechcaothap": "Chênh Lệch Cao - Thấp",
+    "chenh_lech_cao_thap": "Chênh Lệch Cao - Thấp",
+    "chenhlech": "Chênh Lệch",
+    "chenh_lech": "Chênh Lệch",
+    "tenthuoc": "Tên Thuốc",
+    "ten_thuoc": "Tên Thuốc",
 }
 
 
@@ -2042,6 +2085,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 and not is_top_period
             )
 
+            has_dual_rank_col = any(
+                "cao nhất" in " ".join(df[c].astype(str).tolist()).lower()
+                and "thấp nhất" in " ".join(df[c].astype(str).tolist()).lower()
+                for c in df.columns
+                if any(k in str(c).lower() for k in ["nhóm xếp hạng", "nhom_xep_hang", "nhomxephang", "rankgroup", "rank_group"])
+            )
+
             # 1. QUY TẮC VÀNG CHUỖI THỜI GIAN (TIME-SERIES / TEMPORAL TREND):
             # Nếu dữ liệu có trục thời gian (Month, Quarter, Year, Date) với >= 2 mốc thời gian:
             # - Khi người dùng hỏi xu hướng/diễn biến hoặc bảng là chuỗi thời gian thuần túy (not label_cols):
@@ -2050,6 +2100,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 chosen = "Line"
             elif is_distribution_breakdown:
                 chosen = "Bar Ngang" if len(df) > 6 else "Pie"
+            elif has_dual_rank_col and measure_cols:
+                chosen = "Bar Ngang"
             elif (is_gender_compare or is_multi_measure_compare) and measure_cols:
                 chosen = "Bar"
             elif (
@@ -4650,13 +4702,20 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             pct_labels = [format_col_title(c) for c in pct_cols]
                             chart_title = clean_chart_title(f"Tỷ Lệ ({', '.join(pct_labels)}) theo {format_col_title(label_name)}")
                     elif non_pct_cols:
-                        if len(non_pct_cols) >= 2:
-                            active_measures = non_pct_cols
-                            meas_labels = [format_col_title(c) for c in non_pct_cols]
+                        bar_non_pct_cols = [
+                            c for c in non_pct_cols
+                            if not (
+                                any(k in str(c).lower() for k in ["chenh_lech", "chenhlech", "chênh lệch", "diff", "spread", "gap"])
+                                and pd.to_numeric(plot_df[c], errors="coerce").dropna().nunique() <= 1
+                            )
+                        ] or non_pct_cols
+                        if len(bar_non_pct_cols) >= 2:
+                            active_measures = bar_non_pct_cols
+                            meas_labels = [format_col_title(c) for c in bar_non_pct_cols]
                             chart_title = clean_chart_title(f"So Sánh ({', '.join(meas_labels)}) theo {format_col_title(label_name)} (Grouped Bar)")
                         else:
-                            active_measures = non_pct_cols
-                            chart_title = clean_chart_title(f"{format_col_title(non_pct_cols[0])} theo {format_col_title(label_name)}")
+                            active_measures = bar_non_pct_cols
+                            chart_title = clean_chart_title(f"{format_col_title(bar_non_pct_cols[0])} theo {format_col_title(label_name)}")
                     elif pct_cols:
                         prom_cands = [c for c in pct_cols if any(k in c.lower() for k in ["promotion", "thăng chức", "promoted", "doichucdanh", "chucdanh"])]
                         if prom_cands and (any(k in uq_low for k in ["thăng chức", "đổi chức danh", "chuyển chức danh", "promotion", "promoted"]) or len(pct_cols) > 1):
@@ -6016,35 +6075,41 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                 plot_df = df.copy()
                 plot_df[label_name] = label_series.values
 
-                # Lựa chọn measure thông minh bám sát câu hỏi người dùng
+                # Lựa chọn measure thông minh bám sát câu hỏi người dùng (loại trừ cột chênh lệch hằng số lặp lại)
+                const_diff_hbar = {
+                    c for c in measure_cols
+                    if any(k in str(c).lower() for k in ["chenh_lech", "chenhlech", "chênh lệch", "diff", "spread", "gap"])
+                    and pd.to_numeric(plot_df[c], errors="coerce").dropna().nunique() <= 1
+                }
+                hbar_cands = [c for c in measure_cols if c not in const_diff_hbar] or measure_cols
                 uq_low = (user_query or "").lower()
-                chosen_m = measure_cols[0]
+                chosen_m = hbar_cands[0]
                 if any(k in uq_low for k in ["mỗi hộp", "per box", "per_box", "hộp", "boxes", "thùng"]) and any(k in uq_low for k in ["lợi nhuận", "profit", "doanh thu", "sales", "revenue", "chi phí", "cost"]):
-                    box_curr_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["perbox", "per_box", "mỗi hộp", "moi_hop", "lợi nhuận/hộp", "profit_per_box", "profitperbox", "revenue_per_box", "sales_per_box"])]
+                    box_curr_cands = [c for c in hbar_cands if any(k in str(c).lower() for k in ["perbox", "per_box", "mỗi hộp", "moi_hop", "lợi nhuận/hộp", "profit_per_box", "profitperbox", "revenue_per_box", "sales_per_box"])]
                     if box_curr_cands:
                         chosen_m = box_curr_cands[0]
                 elif any(k in uq_low for k in ["tỷ lệ", "tỉ lệ", "phần trăm", "percent", "percentage", "đóng góp", "tỷ trọng", "tỉ trọng", "cơ cấu", "share", "tỷ suất", "tỉ suất", "margin"]):
-                    pct_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "contribution", "tỷ trọng", "tỉ trọng", "margin", "%"])]
+                    pct_cands = [c for c in hbar_cands if any(k in str(c).lower() for k in ["pct", "percent", "tỷ lệ", "tỉ lệ", "contribution", "tỷ trọng", "tỉ trọng", "margin", "%"])]
                     if pct_cands:
                         chosen_m = pct_cands[0]
                 elif any(k in uq_low for k in ["lợi nhuận", "lãi", "profit"]) and not any(k in uq_low for k in ["tỷ suất", "tỉ suất", "margin", "%"]):
-                    prof_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["lợi nhuận", "profit", "lãi"]) and not any(k in str(c).lower() for k in ["pct", "percent", "margin", "tỷ suất", "tỉ suất", "%"])]
+                    prof_cands = [c for c in hbar_cands if any(k in str(c).lower() for k in ["lợi nhuận", "profit", "lãi"]) and not any(k in str(c).lower() for k in ["pct", "percent", "margin", "tỷ suất", "tỉ suất", "%"])]
                     if prof_cands:
                         chosen_m = prof_cands[0]
                 elif any(k in uq_low for k in ["chi phí", "giá vốn", "cost", "cogs"]) and not any(k in uq_low for k in ["doanh thu", "lợi nhuận", "profit"]):
-                    cost_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["chi phí", "giá vốn", "cost", "cogs"])]
+                    cost_cands = [c for c in hbar_cands if any(k in str(c).lower() for k in ["chi phí", "giá vốn", "cost", "cogs"])]
                     if cost_cands:
                         chosen_m = cost_cands[0]
                 elif any(k in uq_low for k in ["số tiền", "tiền", "tiền mặt", "tổng số tiền", "doanh thu", "sales", "revenue", "amount", "chi tiêu", "lương", "salary", "giá", "lợi nhuận", "profit"]):
-                    curr_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["amount", "revenue", "sales", "tiền", "số tiền", "tiền mặt", "salary", "lương", "doanh thu", "totalamount", "spent", "cost", "giá", "profit", "lợi nhuận"])]
+                    curr_cands = [c for c in hbar_cands if any(k in str(c).lower() for k in ["amount", "revenue", "sales", "tiền", "số tiền", "tiền mặt", "salary", "lương", "doanh thu", "doanh_thu", "thanh_tien", "tong_tien", "totalamount", "spent", "cost", "giá", "profit", "lợi nhuận"])]
                     if curr_cands:
                         chosen_m = curr_cands[0]
                 elif any(k in uq_low for k in ["hộp", "thùng", "box", "boxes", "sản lượng"]):
-                    box_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["box", "thùng", "hộp", "sản lượng"]) and not any(k in str(c).lower() for k in ["pct", "margin", "%"])]
+                    box_cands = [c for c in hbar_cands if any(k in str(c).lower() for k in ["box", "thùng", "hộp", "sản lượng"]) and not any(k in str(c).lower() for k in ["pct", "margin", "%"])]
                     if box_cands:
                         chosen_m = box_cands[0]
                 else:
-                    curr_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["amount", "revenue", "sales", "salary", "doanh", "totalamount", "tiền", "số tiền", "tiền mặt", "profit", "lợi nhuận"])]
+                    curr_cands = [c for c in hbar_cands if any(k in str(c).lower() for k in ["amount", "revenue", "sales", "salary", "doanh", "thanh_tien", "tong_tien", "totalamount", "tiền", "số tiền", "tiền mặt", "profit", "lợi nhuận"])]
                     if curr_cands:
                         chosen_m = curr_cands[0]
 
@@ -6080,8 +6145,12 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     or (any(k in m_lower for k in ["count", "số lượng", "so_luong"]) and not any(k in m_lower for k in ["box", "thùng", "hộp", "order", "đơn", "raise", "lần", "sản phẩm", "product", "item", "title", "chức danh"]))
                 ) and not is_years and not is_salary and not is_raises and not is_boxes and not is_orders and not is_title_count
 
-                curr_sym = "$" if is_salary else ""
+                is_vnd_hbar = is_vnd_context_dataframe(plot_df, str(measure_cols[0]))
+                curr_sym = "" if is_vnd_hbar else ("$" if is_salary else "")
+                curr_suf = " đ" if (is_vnd_hbar and is_salary) else ""
                 clean_m = format_col_title(measure_cols[0])
+                if is_vnd_hbar:
+                    clean_m = clean_m.replace(" ($)", " (đ)")
                 clean_lbl = format_col_title(label_name)
 
                 rank_grp_cols = [
@@ -6166,9 +6235,9 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     u_hc = " người" if not is_en else " reps"
                     h_ttemplate = f"%{{x:,.0f}}{u_hc}"
                 elif any('.' in str(v) for v in plot_df[measure_cols[0]]):
-                    h_ttemplate = f"{curr_sym}%{{x:,.2f}}"
+                    h_ttemplate = f"{curr_sym}%{{x:,.2f}}{curr_suf}"
                 else:
-                    h_ttemplate = f"{curr_sym}%{{x:,.0f}}"
+                    h_ttemplate = f"{curr_sym}%{{x:,.0f}}{curr_suf}"
 
                 if vs_tb_col is not None and vs_tb_col in plot_df.columns and is_pct:
                     custom_texts = [

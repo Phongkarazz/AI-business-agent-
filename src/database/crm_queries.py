@@ -4,6 +4,7 @@ Provides robust parameterized SQL query executors for the Multi-Layer HR Intelli
 and CRM/Sales modules.
 """
 
+import re
 import time
 import pandas as pd
 from sqlalchemy import text, inspect
@@ -24,8 +25,8 @@ def detect_dashboard_domain(engine) -> str:
         insp = inspect(engine)
         tables = [t.lower() for t in insp.get_table_names()]
         
-        # 1. Northwind ERP Domain (order_details, orders, products, customers, suppliers...)
-        if any(t in tables for t in ["order_details", "order_details_status", "purchase_orders", "inventory_transactions"]) or \
+        # 1. Northwind ERP Domain (order_details / "Order Details", orders, products, customers, suppliers...)
+        if any(t in tables for t in ["order_details", "order details", "order_details_status", "purchase_orders", "inventory_transactions"]) or \
            ("orders" in tables and "products" in tables and ("customers" in tables or "shippers" in tables)):
             return "northwind_erp"
 
@@ -1882,68 +1883,257 @@ LIMIT 10;"""
 # UNIVERSAL GENERIC DATABASE SCHEMA DISCOVERY & AUTO-DASHBOARD ENGINE
 # =========================================================================
 
+_ISO_DATE_RE = re.compile(r"^\d{4}[-/]\d{1,2}(?:[-/]\d{1,2})?(?:[ T]\d{2}:\d{2}.*)?$")
+
+
+def _q_ident(ident: str, is_sqlite: bool) -> str:
+    """Safely quote a table or column identifier for SQLite or MySQL."""
+    s = str(ident)
+    if is_sqlite:
+        return '"' + s.replace('"', '""') + '"'
+    return '`' + s.replace('`', '``') + '`'
+
+
+def _is_id_or_code_col(col_name: str, is_pk: bool = False) -> bool:
+    """Identify key/ID/code columns that should not be aggregated as metrics or categories."""
+    if is_pk:
+        return True
+    c_low = (col_name or "").strip().lower()
+    if c_low in {"id", "stt", "no", "index", "rowid", "zip", "zipcode", "postal_code", "phone", "sdt", "tel", "fax", "year", "nam", "month", "thang", "day"}:
+        return True
+    if c_low.endswith(("_id", "_code", "_key", "_no", "_stt", "_uuid")):
+        return True
+    if c_low.startswith(("ma_", "id_", "so_hd", "invoice_no", "order_code", "sku_")):
+        return True
+    if any(tok in c_low for tok in ("phone", "zipcode", "postal", "password", "hash", "token")):
+        return True
+    return False
+
+
+def _rank_numeric_column(col_name: str) -> int:
+    """Rank numeric columns so primary business revenue/amount metrics surface first."""
+    c_low = (col_name or "").strip().lower()
+    if any(k in c_low for k in ("thanh_tien", "tong_tien", "doanh_thu", "net_sales", "gross_sales", "revenue", "total_amount", "tong_cong", "gia_tri")):
+        return 120
+    if any(k in c_low for k in ("da_thanh_toan", "paid", "loi_nhuan", "profit", "margin", "amount", "sales", "total", "cong_no", "balance", "chi_phi", "expense", "salary", "luong", "cost", "gia_von")):
+        return 85
+    if any(k in c_low for k in ("don_gia", "gia_ban", "gia_nhap", "gia_niem_yet", "unit_price", "price", "fee", "tax", "vat", "discount", "freight")):
+        return 60
+    if any(k in c_low for k in ("so_luong", "qty", "quantity", "boxes", "units", "ton_kho", "stock", "count")):
+        return 35
+    return 15
+
+
+def _is_quantity_col(col_name: str) -> bool:
+    """Return True when a numeric column represents unit counts/quantities rather than currency."""
+    c_low = (col_name or "").strip().lower()
+    return any(k in c_low for k in ("so_luong", "qty", "quantity", "boxes", "units", "ton_kho", "stock", "count", "sl_"))
+
+
+def _detect_unit_style(col_name: str, sibling_cols: list = None, max_val: float = 0.0) -> str:
+    """Determine formatting style: 'vnd', 'usd', 'count', or 'number'."""
+    if not col_name:
+        return "number"
+    if _is_quantity_col(col_name):
+        return "count"
+    c_low = col_name.lower()
+    if any(k in c_low for k in ("tien", "gia", "doanh_thu", "loi_nhuan", "von", "luong", "chi_phi", "cong_no", "thue", "vnd", "phi")):
+        return "vnd"
+    sib_low = " ".join(c.lower() for c in (sibling_cols or []))
+    has_vn_ctx = any(k in sib_low for k in ("ngay_", "ten_", "ma_", "trang_thai", "don_gia", "so_luong", "thanh_tien", "tong_tien"))
+    if any(k in c_low for k in ("revenue", "sales", "amount", "price", "cost", "salary", "profit", "fee", "freight", "total", "balance", "spend")):
+        if has_vn_ctx and max_val >= 10000:
+            return "vnd"
+        return "usd"
+    return "number"
+
+
+def _is_date_column(conn, table_name: str, col_info: dict, is_sqlite: bool) -> bool:
+    """Detect both native SQL DATE/DATETIME and TEXT ISO date columns (including Vietnamese names)."""
+    c_name = col_info["name"]
+    c_type_str = str(col_info.get("type", "")).lower()
+    c_low = c_name.lower()
+
+    if any(dt in c_type_str for dt in ("date", "time", "timestamp")):
+        return True
+
+    is_numeric_type = any(nt in c_type_str for nt in ("int", "float", "numeric", "decimal", "double", "real", "bool"))
+    if is_numeric_type:
+        return False
+
+    name_matches_date = (
+        any(kw in c_low for kw in ("date", "time", "timestamp"))
+        or bool(re.search(r"(?:^|_)(?:ngay[a-z0-9]*|thoi_gian|thoi_diem|created|updated|thang|nam_thang|ky)(?:$|_)", c_low))
+    )
+
+    qt = _q_ident(table_name, is_sqlite)
+    qc = _q_ident(c_name, is_sqlite)
+    try:
+        rows = conn.execute(text(f"SELECT {qc} FROM {qt} WHERE {qc} IS NOT NULL AND TRIM(CAST({qc} AS TEXT)) != '' LIMIT 5" if is_sqlite else f"SELECT {qc} FROM {qt} WHERE {qc} IS NOT NULL LIMIT 5")).fetchall()
+        vals = [str(r[0]).strip() for r in rows if r and r[0] is not None]
+        if vals:
+            iso_hits = sum(1 for v in vals if _ISO_DATE_RE.match(v))
+            if iso_hits / len(vals) >= 0.6:
+                return True
+            if name_matches_date and any(re.search(r"\d{4}", v) for v in vals):
+                return True
+            return False
+    except Exception:
+        pass
+    return name_matches_date
+
+
+def _rank_categorical_column(col_name: str, distinct_cnt: int, row_count: int, is_pk: bool) -> tuple:
+    """Score categorical columns for chart usefulness (returns `(score, role_hint)`)."""
+    c_low = (col_name or "").lower()
+    is_status = any(k in c_low for k in ("trang_thai", "status", "tinh_trang", "kenh", "channel", "loai", "type", "phuong_thuc", "payment", "nhom", "group"))
+    is_id_name = _is_id_or_code_col(col_name, is_pk=is_pk)
+
+    score = 0
+    if is_id_name:
+        score -= 120
+    if row_count >= 5 and distinct_cnt >= row_count:
+        score -= 90
+    if distinct_cnt <= 1:
+        score -= 40
+    elif 2 <= distinct_cnt <= 8:
+        score += 45
+    elif 9 <= distinct_cnt <= 30:
+        score += 35
+    elif distinct_cnt <= 80:
+        score += 10
+    else:
+        score -= 20
+
+    if any(k in c_low for k in ("ten_mon", "vat_lieu", "ten_thuoc", "ten_sp", "san_pham", "danh_muc", "category", "product", "customer", "khach_hang", "nha_cung_cap", "supplier", "department", "region", "country", "city")):
+        score += 65
+    if is_status:
+        score += 50
+    if any(k in c_low for k in ("ghi_chu", "note", "desc", "mo_ta", "address", "dia_chi", "email", "url", "image", "photo")):
+        score -= 50
+
+    return (score, is_status)
+
+
 def discover_generic_database_schema(engine) -> dict:
     """Tự động phân tích toàn bộ cấu trúc Schema của CSDL mới bất kỳ:
     - Danh sách bảng & số dòng
-    - Cột thời gian (Date/Time/Year) & Khoảng năm Min/Max
-    - Cột định lượng (Numeric metrics: Amount, Salary, Price, Count...)
-    - Cột phân loại (Categorical: Name, Category, Status, Dept...)
+    - Cột thời gian (hỗ trợ cả cột TEXT chuẩn ISO và tiếng Việt: ngay_ban, ngay_gd...)
+    - Cột định lượng được xếp hạng theo mức độ ưu tiên nghiệp vụ (Doanh thu > Đã thanh toán > Đơn giá > Số lượng)
+    - Cột phân loại có ý nghĩa & cột trạng thái/kênh bán (tránh chọn nhầm mã ID duy nhất)
     """
     if not engine:
-        return {"tables": [], "date_col": None, "date_table": None, "min_year": 2020, "max_year": 2024, "meta": {}}
+        return {"tables": [], "date_col": None, "date_table": None, "min_year": 2020, "max_year": 2024, "has_timeline": False, "meta": {}}
 
     meta = {}
     date_col_candidate = None
     date_table_candidate = None
     min_year = 2020
     max_year = 2024
+    min_date_str = None
+    max_date_str = None
+    has_timeline = False
 
     try:
         insp = inspect(engine)
         table_names = insp.get_table_names()
         is_sqlite = _is_sqlite(engine)
 
-        for t_name in table_names:
-            cols = insp.get_columns(t_name)
-            col_names = [c["name"] for c in cols]
-            numeric_cols = []
-            categorical_cols = []
-            d_cols = []
+        with engine.connect() as conn:
+            for t_name in table_names:
+                cols = insp.get_columns(t_name)
+                col_names = [c["name"] for c in cols]
+                try:
+                    pks = set(insp.get_pk_constraint(t_name).get("constrained_columns") or [])
+                except Exception:
+                    pks = set()
 
-            for c in cols:
-                c_name = c["name"]
-                c_type_str = str(c["type"]).lower()
-                c_name_low = c_name.lower()
-
-                # Nhận diện cột Date/Time
-                if any(dt in c_type_str for dt in ["date", "time", "timestamp"]) or any(kw in c_name_low for kw in ["date", "time", "created_at", "from_date", "hire_date", "saledate", "orderdate", "payment_date", "rental_date"]):
-                    d_cols.append(c_name)
-
-                # Nhận diện cột Numeric
-                elif any(nt in c_type_str for nt in ["int", "float", "numeric", "decimal", "double", "real"]):
-                    if not any(id_kw in c_name_low for id_kw in ["id", "code", "zip", "phone", "key"]):
-                        numeric_cols.append(c_name)
-
-                # Nhận diện cột Categorical
-                elif any(st_t in c_type_str for st_t in ["char", "text", "string", "enum"]):
-                    categorical_cols.append(c_name)
-
-            # Lấy số dòng mẫu
-            row_count = 0
-            try:
-                with engine.connect() as conn:
-                    cnt_res = conn.execute(text(f"SELECT COUNT(*) FROM `{t_name}`" if not is_sqlite else f'SELECT COUNT(*) FROM "{t_name}"')).scalar()
-                    row_count = int(cnt_res or 0)
-            except Exception:
+                qt = _q_ident(t_name, is_sqlite)
                 row_count = 0
+                try:
+                    cnt_res = conn.execute(text(f"SELECT COUNT(*) FROM {qt}")).scalar()
+                    row_count = int(cnt_res or 0)
+                except Exception:
+                    row_count = 0
 
-            meta[t_name] = {
-                "columns": col_names,
-                "date_columns": d_cols,
-                "numeric_columns": numeric_cols,
-                "categorical_columns": categorical_cols,
-                "row_count": row_count
-            }
+                numeric_cols = []
+                raw_cat_cols = []
+                d_cols = []
+
+                for c in cols:
+                    c_name = c["name"]
+                    c_type_str = str(c.get("type", "")).lower()
+                    is_pk = c_name in pks
+
+                    if _is_date_column(conn, t_name, c, is_sqlite):
+                        d_cols.append(c_name)
+                    elif any(nt in c_type_str for nt in ("int", "float", "numeric", "decimal", "double", "real")):
+                        if not _is_id_or_code_col(c_name, is_pk=is_pk):
+                            numeric_cols.append(c_name)
+                    else:
+                        if c_name.lower() not in {"picture", "photo", "image", "thumbnail", "blob"}:
+                            raw_cat_cols.append(c_name)
+
+                numeric_cols.sort(key=_rank_numeric_column, reverse=True)
+
+                # Inspect cardinality of text columns in a single lightweight query
+                cat_stats = {}
+                if raw_cat_cols and row_count > 0:
+                    sample_cats = raw_cat_cols[:12]
+                    exprs = [f"COUNT(DISTINCT {_q_ident(cn, is_sqlite)}) AS c__{i}" for i, cn in enumerate(sample_cats)]
+                    try:
+                        row = conn.execute(text(f"SELECT {', '.join(exprs)} FROM {qt}")).fetchone()
+                        if row is not None:
+                            for i, cn in enumerate(sample_cats):
+                                cat_stats[cn] = int(row[i] or 0)
+                    except Exception:
+                        pass
+
+                ranked_cats = []
+                explicit_status_cands = []
+                fallback_status_cands = []
+                for cn in raw_cat_cols:
+                    dist_cnt = cat_stats.get(cn, min(row_count, 5))
+                    sc, is_status = _rank_categorical_column(cn, dist_cnt, row_count, cn in pks)
+                    ranked_cats.append((sc, cn, dist_cnt, is_status))
+                    if is_status and 2 <= dist_cnt <= 10:
+                        explicit_status_cands.append((sc, cn))
+                    elif not _is_id_or_code_col(cn, is_pk=cn in pks) and 2 <= dist_cnt <= 6:
+                        fallback_status_cands.append((sc, cn))
+
+                ranked_cats.sort(key=lambda x: x[0], reverse=True)
+                explicit_status_cands.sort(key=lambda x: x[0], reverse=True)
+                fallback_status_cands.sort(key=lambda x: x[0], reverse=True)
+                status_candidates = explicit_status_cands or fallback_status_cands
+
+                status_col = status_candidates[0][1] if status_candidates else None
+                non_status_cats = [item[1] for item in ranked_cats if item[0] > -60 and item[1] != status_col]
+                if not non_status_cats and ranked_cats:
+                    non_status_cats = [item[1] for item in ranked_cats if item[1] != status_col]
+
+                if non_status_cats:
+                    categorical_cols = non_status_cats + ([status_col] if status_col else [])
+                elif status_col:
+                    categorical_cols = [status_col]
+                else:
+                    categorical_cols = [item[1] for item in ranked_cats]
+                if not status_col and len(categorical_cols) > 1:
+                    # Fallback second low/medium cardinality categorical column for donut
+                    for cand in categorical_cols[1:]:
+                        if 2 <= cat_stats.get(cand, 99) <= 10:
+                            status_col = cand
+                            break
+
+                meta[t_name] = {
+                    "columns": col_names,
+                    "primary_keys": list(pks),
+                    "date_columns": d_cols,
+                    "numeric_columns": numeric_cols,
+                    "categorical_columns": categorical_cols,
+                    "status_col": status_col,
+                    "cat_stats": cat_stats,
+                    "row_count": row_count,
+                }
 
         # Chọn cặp (date_table, date_col) tối ưu nhất theo điểm số nghiệp vụ
         date_candidates = []
@@ -1953,9 +2143,8 @@ def discover_generic_database_schema(engine) -> dict:
             n_cols = t_info.get("numeric_columns", [])
             for d_c in t_info.get("date_columns", []):
                 d_low = d_c.lower()
-                cand_score = 0
+                cand_score = min(r_cnt, 50)
 
-                # Điểm theo số lượng bản ghi
                 if r_cnt > 1000:
                     cand_score += 40
                 elif r_cnt > 100:
@@ -1963,29 +2152,31 @@ def discover_generic_database_schema(engine) -> dict:
                 elif r_cnt > 0:
                     cand_score += 10
                 else:
-                    cand_score -= 20
-
-                # Điểm theo ngữ nghĩa tên cột thời gian
-                if any(kw in d_low for kw in ["payment_date", "rental_date", "order_date", "sale_date", "invoice_date", "trans_date", "transaction_date", "orderdate", "saledate", "booking_date"]):
-                    cand_score += 60
-                elif any(kw in d_low for kw in ["created_at", "created_date", "open_date", "start_date", "hire_date", "entry_date"]):
-                    cand_score += 30
-                elif "date" in d_low:
-                    cand_score += 20
-
-                # Trừ điểm audit timestamp kỹ thuật
-                if any(kw in d_low for kw in ["last_update", "updated_at", "modified_at", "update_time", "sys_"]):
                     cand_score -= 30
 
-                # Điểm theo bảng giao dịch và cột đo lường
+                if any(kw in d_low for kw in ("payment_date", "rental_date", "order_date", "sale_date", "invoice_date", "trans_date", "transaction_date", "orderdate", "saledate", "booking_date", "ngay_ban", "ngay_gd", "ngay_lap", "ngay_hoa_don", "ngay_xuat", "ngay_nhap")):
+                    cand_score += 65
+                elif any(kw in d_low for kw in ("created_at", "created_date", "open_date", "start_date", "hire_date", "entry_date", "ngay_dat", "ngay_giao", "ngay")):
+                    cand_score += 35
+                elif "date" in d_low or "ngay" in d_low:
+                    cand_score += 20
+
+                if any(kw in d_low for kw in ("last_update", "updated_at", "modified_at", "update_time", "sys_")):
+                    cand_score -= 30
+
                 if n_cols:
-                    cand_score += 30
-                    if any(any(mkw in nc.lower() for mkw in ["amount", "total", "price", "cost", "revenue", "qty", "quantity", "val", "fee"]) for nc in n_cols):
+                    cand_score += 35
+                    top_num_rank = max(_rank_numeric_column(nc) for nc in n_cols)
+                    if top_num_rank >= 120:
+                        cand_score += 45
+                    elif top_num_rank >= 85:
                         cand_score += 30
 
-                if any(kw in t_low for kw in ["payment", "rental", "order", "sale", "trans", "invoice", "booking", "fact"]):
-                    cand_score += 40
-                elif any(kw in t_low for kw in ["log", "audit", "history", "sys_", "meta"]):
+                if any(kw in t_low for kw in ("payment", "rental", "order", "sale", "trans", "invoice", "booking", "fact", "donhang", "don_hang", "hoadon", "hoa_don", "ban_hang", "giaodich", "giao_dich", "congno", "cong_no")):
+                    cand_score += 45
+                elif any(kw in t_low for kw in ("phieu", "nhap")):
+                    cand_score += 20
+                elif any(kw in t_low for kw in ("log", "audit", "history", "sys_", "meta")):
                     cand_score -= 30
 
                 date_candidates.append((cand_score, t_n, d_c))
@@ -1995,15 +2186,27 @@ def discover_generic_database_schema(engine) -> dict:
             date_table_candidate = date_candidates[0][1]
             date_col_candidate = date_candidates[0][2]
 
-        # Truy vấn khoảng năm Min/Max nếu tìm thấy cột thời gian
+        # Truy vấn khoảng năm Min/Max và Min/Max Date thực tế
         if date_table_candidate and date_col_candidate:
             try:
-                y_expr = f"CAST(substr({date_col_candidate}, 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({date_col_candidate})"
-                sql_min_max = f"""SELECT 
-    MIN({y_expr}) AS min_y, 
-    MAX({y_expr}) AS max_y 
-FROM `{date_table_candidate}` 
-WHERE {date_col_candidate} IS NOT NULL AND {y_expr} > 1900 AND {y_expr} < 2100;"""
+                qt_d = _q_ident(date_table_candidate, is_sqlite)
+                qc_d = _q_ident(date_col_candidate, is_sqlite)
+                y_expr = f"CAST(substr(TRIM(CAST({qc_d} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({qc_d})"
+                sql_min_max = f"""SELECT
+    MIN({y_expr}) AS min_y,
+    MAX({y_expr}) AS max_y,
+    MIN(substr(TRIM(CAST({qc_d} AS TEXT)), 1, 10)) AS min_d,
+    MAX(substr(TRIM(CAST({qc_d} AS TEXT)), 1, 10)) AS max_d
+FROM {qt_d}
+WHERE {qc_d} IS NOT NULL AND {y_expr} BETWEEN 1901 AND 2099;"""
+                if not is_sqlite:
+                    sql_min_max = f"""SELECT
+    MIN(YEAR({qc_d})) AS min_y,
+    MAX(YEAR({qc_d})) AS max_y,
+    MIN(DATE_FORMAT({qc_d}, '%Y-%m-%d')) AS min_d,
+    MAX(DATE_FORMAT({qc_d}, '%Y-%m-%d')) AS max_d
+FROM {qt_d}
+WHERE {qc_d} IS NOT NULL AND YEAR({qc_d}) BETWEEN 1901 AND 2099;"""
                 with engine.connect() as conn:
                     mm_df = pd.read_sql(text(sql_min_max), conn)
                     if not mm_df.empty and pd.notna(mm_df["min_y"].iloc[0]) and pd.notna(mm_df["max_y"].iloc[0]):
@@ -2012,6 +2215,9 @@ WHERE {date_col_candidate} IS NOT NULL AND {y_expr} > 1900 AND {y_expr} < 2100;"
                         if min_y <= max_y and 1900 < min_y < 2100 and 1900 < max_y < 2100:
                             min_year = min_y
                             max_year = max_y
+                            has_timeline = True
+                            min_date_str = str(mm_df["min_d"].iloc[0]) if pd.notna(mm_df["min_d"].iloc[0]) else None
+                            max_date_str = str(mm_df["max_d"].iloc[0]) if pd.notna(mm_df["max_d"].iloc[0]) else None
             except Exception:
                 pass
 
@@ -2021,26 +2227,142 @@ WHERE {date_col_candidate} IS NOT NULL AND {y_expr} > 1900 AND {y_expr} < 2100;"
             "date_table": date_table_candidate,
             "min_year": min_year,
             "max_year": max_year,
-            "meta": meta
+            "min_date": min_date_str,
+            "max_date": max_date_str,
+            "has_timeline": has_timeline,
+            "meta": meta,
         }
     except Exception:
-        return {"tables": [], "date_col": None, "date_table": None, "min_year": 2020, "max_year": 2024, "meta": {}}
+        return {"tables": [], "date_col": None, "date_table": None, "min_year": 2020, "max_year": 2024, "has_timeline": False, "meta": {}}
+
+
+def _find_secondary_metrics(conn, tbl_name: str, cols_meta: dict, where_clause: str, is_sqlite: bool) -> dict:
+    """Compute secondary financial/quantity KPIs (debt/receivables, quantity, average)."""
+    num_cols = cols_meta.get("numeric_columns", [])
+    main_num_col = num_cols[0] if num_cols else None
+    qt = _q_ident(tbl_name, is_sqlite)
+
+    total_col = next((c for c in num_cols if any(k in c.lower() for k in ("tong_tien", "tong_cong", "total_amount", "phai_thu", "amount", "total"))), None)
+    paid_col = next((c for c in num_cols if c != total_col and any(k in c.lower() for k in ("da_thanh_toan", "da_tra", "paid"))), None)
+    qty_col = next((c for c in num_cols if c != main_num_col and _is_quantity_col(c)), None)
+    sec_num_col = qty_col or paid_col or (num_cols[1] if len(num_cols) > 1 else None)
+
+    out = {
+        "sec_num_col": sec_num_col,
+        "sec_sum_val": 0.0,
+        "qty_col": qty_col or (main_num_col if main_num_col and _is_quantity_col(main_num_col) else None),
+        "total_qty": 0.0,
+        "avg_val": 0.0,
+        "filtered_records": 0,
+        "outstanding_val": None,
+        "paid_val": None,
+        "total_billed_val": None,
+    }
+    selects = ["COUNT(*) AS cnt"]
+    if main_num_col:
+        qm = _q_ident(main_num_col, is_sqlite)
+        selects.extend([f"COALESCE(SUM({qm}), 0) AS main_sum", f"COALESCE(AVG({qm}), 0) AS main_avg"])
+    if sec_num_col:
+        qs = _q_ident(sec_num_col, is_sqlite)
+        selects.append(f"COALESCE(SUM({qs}), 0) AS sec_sum")
+    if out["qty_col"]:
+        qq = _q_ident(out["qty_col"], is_sqlite)
+        selects.append(f"COALESCE(SUM({qq}), 0) AS qty_sum")
+    if total_col and paid_col:
+        qtot = _q_ident(total_col, is_sqlite)
+        qpaid = _q_ident(paid_col, is_sqlite)
+        selects.append(f"COALESCE(SUM({qtot}), 0) AS billed_sum")
+        selects.append(f"COALESCE(SUM({qpaid}), 0) AS paid_sum")
+        selects.append(f"COALESCE(SUM({qtot} - COALESCE({qpaid}, 0)), 0) AS out_sum")
+
+    try:
+        df_m = pd.read_sql(text(f"SELECT {', '.join(selects)} FROM {qt} {where_clause};"), conn)
+        if not df_m.empty:
+            out["filtered_records"] = int(df_m["cnt"].iloc[0] or 0)
+            if "main_avg" in df_m.columns:
+                out["avg_val"] = float(df_m["main_avg"].iloc[0] or 0.0)
+            if "main_sum" in df_m.columns:
+                out["main_sum"] = float(df_m["main_sum"].iloc[0] or 0.0)
+            if "sec_sum" in df_m.columns:
+                out["sec_sum_val"] = float(df_m["sec_sum"].iloc[0] or 0.0)
+            if "qty_sum" in df_m.columns:
+                out["total_qty"] = float(df_m["qty_sum"].iloc[0] or 0.0)
+            if "out_sum" in df_m.columns:
+                out["total_billed_val"] = float(df_m["billed_sum"].iloc[0] or 0.0)
+                out["paid_val"] = float(df_m["paid_sum"].iloc[0] or 0.0)
+                out["outstanding_val"] = float(df_m["out_sum"].iloc[0] or 0.0)
+    except Exception:
+        pass
+    return out
+
+
+def _fetch_adaptive_trend(conn, tbl_name: str, date_col: str, num_col: str, qty_col: str, where_clause: str, is_sqlite: bool) -> tuple:
+    """Query daily or monthly time-series automatically based on actual date span."""
+    qt = _q_ident(tbl_name, is_sqlite)
+    qd = _q_ident(date_col, is_sqlite)
+    granularity = "month"
+    d_cond = f"{qd} IS NOT NULL" if not where_clause else f"{where_clause} AND {qd} IS NOT NULL"
+    if not d_cond.strip().upper().startswith("WHERE"):
+        d_cond = f"WHERE {d_cond}"
+
+    try:
+        if is_sqlite:
+            mm = pd.read_sql(
+                text(f"SELECT MIN(substr(TRIM(CAST({qd} AS TEXT)),1,10)) AS dmin, MAX(substr(TRIM(CAST({qd} AS TEXT)),1,10)) AS dmax, COUNT(DISTINCT substr(TRIM(CAST({qd} AS TEXT)),1,7)) AS nm, COUNT(DISTINCT substr(TRIM(CAST({qd} AS TEXT)),1,10)) AS nd FROM {qt} {d_cond};"),
+                conn,
+            )
+        else:
+            mm = pd.read_sql(
+                text(f"SELECT MIN(DATE_FORMAT({qd},'%Y-%m-%d')) AS dmin, MAX(DATE_FORMAT({qd},'%Y-%m-%d')) AS dmax, COUNT(DISTINCT DATE_FORMAT({qd},'%Y-%m')) AS nm, COUNT(DISTINCT DATE_FORMAT({qd},'%Y-%m-%d')) AS nd FROM {qt} {d_cond};"),
+                conn,
+            )
+        if not mm.empty and pd.notna(mm["dmin"].iloc[0]) and pd.notna(mm["dmax"].iloc[0]):
+            dmin = pd.to_datetime(mm["dmin"].iloc[0], errors="coerce")
+            dmax = pd.to_datetime(mm["dmax"].iloc[0], errors="coerce")
+            nm = int(mm["nm"].iloc[0] or 0)
+            nd = int(mm["nd"].iloc[0] or 0)
+            span_days = (dmax - dmin).days if pd.notna(dmin) and pd.notna(dmax) else 365
+            if (span_days <= 90 or nm <= 2) and nd >= 2:
+                granularity = "day"
+    except Exception:
+        pass
+
+    if is_sqlite:
+        p_len = 10 if granularity == "day" else 7
+        p_expr = f"substr(TRIM(CAST({qd} AS TEXT)), 1, {p_len})"
+    else:
+        fmt = "%Y-%m-%d" if granularity == "day" else "%Y-%m"
+        p_expr = f"DATE_FORMAT({qd}, '{fmt}')"
+
+    val_expr = f"COALESCE(SUM({_q_ident(num_col, is_sqlite)}), 0)" if num_col else "COUNT(*)"
+    qty_expr = f"COALESCE(SUM({_q_ident(qty_col, is_sqlite)}), 0)" if qty_col else "COUNT(*)"
+
+    sql_trend = (
+        f"SELECT {p_expr} AS TimePeriod, COUNT(*) AS Count, {val_expr} AS MetricSum, {qty_expr} AS QtySum "
+        f"FROM {qt} {d_cond} GROUP BY TimePeriod ORDER BY TimePeriod ASC;"
+    )
+    try:
+        tdf = pd.read_sql(text(sql_trend), conn)
+        return tdf, granularity
+    except Exception:
+        return pd.DataFrame(), granularity
 
 
 def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = None, end_year: int = None) -> dict:
-    """Tự động tổng hợp dữ liệu tổng quan cho CSDL mới bất kỳ."""
+    """Tự động tổng hợp dữ liệu & KPI nghiệp vụ đa chiều cho CSDL mới bất kỳ."""
     start_t = time.time()
     tables = schema_meta.get("tables", [])
     meta = schema_meta.get("meta", {})
     date_col = schema_meta.get("date_col")
     date_table = schema_meta.get("date_table")
+    has_timeline = schema_meta.get("has_timeline", False)
+    meta_min_y = schema_meta.get("min_year")
+    meta_max_y = schema_meta.get("max_year")
     is_sqlite = _is_sqlite(engine)
 
     total_tables = len(tables)
     total_records = sum(m.get("row_count", 0) for m in meta.values())
 
-    # Chọn bảng chính: ưu tiên date_table (thường là bảng transaction nghiệp vụ cốt lõi),
-    # hoặc bảng có nhiều dòng nhất mà có numeric_columns, hoặc bảng có nhiều dòng nhất.
     main_table = None
     if date_table and date_table in meta and meta[date_table].get("row_count", 0) > 0:
         main_table = date_table
@@ -2055,171 +2377,571 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
         )
         main_table = sorted_tables[0]
 
-    # Truy xuất an toàn danh sách cột (chống triệt để IndexError: list index out of range)
     main_meta = meta.get(main_table, {}) if main_table else {}
     main_cols = main_meta.get("columns", [])
-
     main_num_cols = main_meta.get("numeric_columns", [])
     main_num_col = main_num_cols[0] if main_num_cols else None
-
     main_cat_cols = main_meta.get("categorical_columns", [])
     main_cat_col = main_cat_cols[0] if main_cat_cols else None
-
+    status_col = main_meta.get("status_col")
     main_date_cols = main_meta.get("date_columns", [])
     active_date_col = date_col if (date_col and date_col in main_cols) else (main_date_cols[0] if main_date_cols else None)
 
-    # Lọc thời gian chỉ khi main_table thực sự có active_date_col
+    is_narrowed_year = (
+        has_timeline
+        and active_date_col
+        and start_year is not None
+        and end_year is not None
+        and (start_year != meta_min_y or end_year != meta_max_y)
+    )
     where_clause = ""
-    if active_date_col and start_year and end_year and main_table:
-        y_expr = f"CAST(substr({active_date_col}, 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({active_date_col})"
-        where_clause = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}"
+    if is_narrowed_year and main_table:
+        qd = _q_ident(active_date_col, is_sqlite)
+        y_expr = f"CAST(substr(TRIM(CAST({qd} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({qd})"
+        where_clause = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
 
-    # Lấy mẫu dữ liệu bảng chính
     main_df = pd.DataFrame()
     cat_dist_df = pd.DataFrame()
+    status_df = pd.DataFrame()
     trend_df = pd.DataFrame()
+    table_summary_rows = []
+    trend_granularity = "month"
     sum_val = 0.0
+    metrics_info = {}
+    sql_parts = []
 
     if main_table:
+        qt_main = _q_ident(main_table, is_sqlite)
         try:
             with engine.connect() as conn:
-                # 1. Main DataFrame sample
-                sql_sample = f"SELECT * FROM `{main_table}` {where_clause} LIMIT 100;"
+                sql_sample = f"SELECT * FROM {qt_main} {where_clause} LIMIT 100;"
+                sql_parts.append(sql_sample)
                 main_df = pd.read_sql(text(sql_sample), conn)
-
-                # Fallback nếu lọc theo khoảng năm không ra dòng nào
                 if main_df.empty and where_clause:
-                    sql_sample_fb = f"SELECT * FROM `{main_table}` LIMIT 100;"
+                    sql_sample_fb = f"SELECT * FROM {qt_main} LIMIT 100;"
                     main_df = pd.read_sql(text(sql_sample_fb), conn)
+                    where_clause = ""
 
-                # 2. Main Numeric sum
-                if main_num_col:
-                    sql_sum = f"SELECT SUM({main_num_col}) AS total_metric, AVG({main_num_col}) AS avg_metric FROM `{main_table}` {where_clause};"
-                    s_df = pd.read_sql(text(sql_sum), conn)
-                    if not s_df.empty and pd.notna(s_df["total_metric"].iloc[0]):
-                        sum_val = float(s_df["total_metric"].iloc[0])
+                metrics_info = _find_secondary_metrics(conn, main_table, main_meta, where_clause, is_sqlite)
+                sum_val = float(metrics_info.get("main_sum", 0.0))
 
-                # 3. Categorical distribution
                 if main_cat_col:
-                    sql_cat = f"SELECT `{main_cat_col}` AS Category, COUNT(*) AS Count FROM `{main_table}` {where_clause} GROUP BY `{main_cat_col}` ORDER BY Count DESC LIMIT 10;"
+                    qc = _q_ident(main_cat_col, is_sqlite)
+                    cat_val_expr = f"COALESCE(SUM({_q_ident(main_num_col, is_sqlite)}), 0)" if main_num_col else "COUNT(*)"
+                    order_expr = "MetricSum DESC, Count DESC" if main_num_col else "Count DESC"
+                    sql_cat = (
+                        f"SELECT COALESCE(CAST({qc} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {cat_val_expr} AS MetricSum "
+                        f"FROM {qt_main} {where_clause} GROUP BY {qc} ORDER BY {order_expr} LIMIT 10;"
+                    ) if is_sqlite else (
+                        f"SELECT COALESCE(CAST({qc} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {cat_val_expr} AS MetricSum "
+                        f"FROM {qt_main} {where_clause} GROUP BY {qc} ORDER BY {order_expr} LIMIT 10;"
+                    )
+                    sql_parts.append(sql_cat)
                     try:
                         cat_dist_df = pd.read_sql(text(sql_cat), conn)
                     except Exception:
-                        sql_cat_fb = f"SELECT `{main_cat_col}` AS Category, COUNT(*) AS Count FROM `{main_table}` GROUP BY `{main_cat_col}` ORDER BY Count DESC LIMIT 10;"
-                        cat_dist_df = pd.read_sql(text(sql_cat_fb), conn)
+                        pass
 
-                # 4. Trend over time (ưu tiên active_date_col trên main_table, hoặc date_col trên date_table)
+                if status_col and status_col != main_cat_col:
+                    qs_col = _q_ident(status_col, is_sqlite)
+                    st_val_expr = f"COALESCE(SUM({_q_ident(main_num_col, is_sqlite)}), 0)" if main_num_col else "COUNT(*)"
+                    sql_status = (
+                        f"SELECT COALESCE(CAST({qs_col} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
+                        f"FROM {qt_main} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                    ) if is_sqlite else (
+                        f"SELECT COALESCE(CAST({qs_col} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
+                        f"FROM {qt_main} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                    )
+                    try:
+                        status_df = pd.read_sql(text(sql_status), conn)
+                    except Exception:
+                        pass
+
                 trend_tbl = main_table if active_date_col else (date_table if (date_table and date_col) else None)
                 trend_col = active_date_col if active_date_col else date_col
                 if trend_tbl and trend_col:
+                    t_num = main_num_col if trend_tbl == main_table else (meta.get(trend_tbl, {}).get("numeric_columns") or [None])[0]
+                    t_qty = metrics_info.get("qty_col") if trend_tbl == main_table else None
                     t_where = ""
-                    if start_year and end_year:
-                        t_y_expr = f"CAST(substr({trend_col}, 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({trend_col})"
-                        t_where = f"WHERE {t_y_expr} BETWEEN {start_year} AND {end_year}"
-                    m_expr = f"substr({trend_col}, 1, 7)" if is_sqlite else f"DATE_FORMAT({trend_col}, '%Y-%m')"
-                    sql_trend = f"SELECT {m_expr} AS TimePeriod, COUNT(*) AS Count FROM `{trend_tbl}` {t_where} GROUP BY TimePeriod ORDER BY TimePeriod ASC;"
-                    try:
-                        trend_df = pd.read_sql(text(sql_trend), conn)
-                    except Exception:
-                        pass
+                    if is_narrowed_year and trend_tbl == main_table:
+                        t_where = where_clause
+                    elif is_narrowed_year:
+                        q_td = _q_ident(trend_col, is_sqlite)
+                        ty_expr = f"CAST(substr(TRIM(CAST({q_td} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({q_td})"
+                        t_where = f"WHERE {ty_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
+                    trend_df, trend_granularity = _fetch_adaptive_trend(conn, trend_tbl, trend_col, t_num, t_qty, t_where, is_sqlite)
+
+                # All-tables summary matrix
+                for tbl_n in tables:
+                    t_m = meta.get(tbl_n, {})
+                    t_nums = t_m.get("numeric_columns", [])
+                    t_num_c = t_nums[0] if t_nums else None
+                    t_cats = t_m.get("categorical_columns", [])
+                    t_dates = t_m.get("date_columns", [])
+                    t_sum = None
+                    if t_num_c:
+                        try:
+                            s_val = conn.execute(text(f"SELECT COALESCE(SUM({_q_ident(t_num_c, is_sqlite)}), 0) FROM {_q_ident(tbl_n, is_sqlite)}")).scalar()
+                            t_sum = float(s_val or 0.0)
+                        except Exception:
+                            t_sum = None
+                    table_summary_rows.append({
+                        "Table": tbl_n,
+                        "Rows": t_m.get("row_count", 0),
+                        "Columns": len(t_m.get("columns", [])),
+                        "KeyMetric": t_num_c or "-",
+                        "MetricTotal": t_sum,
+                        "KeyDimension": t_cats[0] if t_cats else "-",
+                        "DateField": t_dates[0] if t_dates else "-",
+                    })
         except Exception:
             pass
 
+    table_summary_df = pd.DataFrame(table_summary_rows)
+    unit_style = _detect_unit_style(main_num_col, main_cols, sum_val)
+    sec_num_col = metrics_info.get("sec_num_col")
+    sec_unit_style = _detect_unit_style(sec_num_col, main_cols, metrics_info.get("sec_sum_val", 0.0))
+
+    top_item_name = str(cat_dist_df["Category"].iloc[0]) if not cat_dist_df.empty else None
+    top_item_val = float(cat_dist_df["MetricSum"].iloc[0]) if (not cat_dist_df.empty and "MetricSum" in cat_dist_df.columns) else (float(cat_dist_df["Count"].iloc[0]) if not cat_dist_df.empty else 0.0)
+    top_item_cnt = int(cat_dist_df["Count"].iloc[0]) if not cat_dist_df.empty else 0
+
     anomalies = []
-    if not main_df.empty:
+    if not cat_dist_df.empty and main_cat_col:
+        denom = sum_val if (main_num_col and sum_val > 0) else max(1, int(cat_dist_df["Count"].sum()))
+        share_pct = round(top_item_val / denom * 100.0, 1) if denom > 0 else 0.0
+        anomalies.append({
+            "title": f"Nhóm dẫn đầu ({main_cat_col}): '{top_item_name}' chiếm {share_pct}% ({top_item_cnt:,} dòng)",
+            "severity": "WARNING",
+            "metrics_summary": f"Bảng chính '{main_table}' có {metrics_info.get('filtered_records', len(main_df)):,} bản ghi trên tổng số {total_tables} bảng ({total_records:,} dòng).",
+            "root_cause": "Tự động xếp hạng phân bổ đóng góp theo chỉ số trọng yếu của bảng.",
+            "quantified_impact": f"Đóng góp giá trị {top_item_val:,.0f} trong nhóm dẫn đầu.",
+        })
+    if metrics_info.get("outstanding_val") is not None and metrics_info["outstanding_val"] > 0:
+        billed = max(1.0, float(metrics_info.get("total_billed_val") or 0.0))
+        out_v = float(metrics_info["outstanding_val"])
+        out_pct = round(out_v / billed * 100.0, 1)
+        anomalies.append({
+            "title": f"Cảnh báo công nợ / chưa thanh toán: {out_v:,.0f} ({out_pct}%)",
+            "severity": "CRITICAL" if out_pct >= 25.0 else "WARNING",
+            "metrics_summary": f"Đã thu {float(metrics_info.get('paid_val') or 0):,.0f} trên tổng {billed:,.0f}.",
+            "root_cause": "Phát hiện chênh lệch giữa tổng giá trị đơn và số tiền đã thanh toán.",
+            "quantified_impact": f"Cần theo dõi thu hồi phần công nợ còn lại ({out_v:,.0f}).",
+        })
+    if not status_df.empty:
+        cancel_rows = status_df[status_df["Category"].str.lower().str.contains("hủy|huy|cancel|nợ|no", na=False)]
+        if not cancel_rows.empty:
+            c_cnt = int(cancel_rows["Count"].sum())
+            tot_cnt = max(1, int(status_df["Count"].sum()))
+            anomalies.append({
+                "title": f"Phát hiện {c_cnt:,} bản ghi cần lưu ý ({round(c_cnt/tot_cnt*100,1)}% theo '{status_col}')",
+                "severity": "WARNING",
+                "metrics_summary": f"Nhóm trạng thái: {', '.join(cancel_rows['Category'].astype(str).tolist())}.",
+                "root_cause": "Phân tích phân bổ cột trạng thái trong bảng dữ liệu chính.",
+                "quantified_impact": f"Ảnh hưởng trực tiếp tới hiệu suất xử lý đơn/giao dịch.",
+            })
+    if not anomalies and not main_df.empty:
         anomalies.append({
             "title": f"Bảng dữ liệu cốt lõi: '{main_table}' ({meta.get(main_table, {}).get('row_count', len(main_df)):,} bản ghi)",
             "severity": "WARNING",
             "metrics_summary": f"Tổng số {total_tables} bảng với {total_records:,} bản ghi toàn CSDL.",
             "root_cause": "Hệ thống tự động phát hiện và ánh xạ dữ liệu theo thời gian thực.",
-            "quantified_impact": "Sẵn sàng phân tích chuyên sâu cùng AI Copilot."
+            "quantified_impact": "Sẵn sàng phân tích chuyên sâu cùng AI Copilot.",
         })
 
     return {
         "total_tables": total_tables,
         "total_records": total_records,
+        "filtered_records": metrics_info.get("filtered_records", meta.get(main_table, {}).get("row_count", len(main_df))),
         "main_table": main_table,
         "main_num_col": main_num_col,
+        "unit_style": unit_style,
+        "sec_num_col": sec_num_col,
+        "sec_sum_val": metrics_info.get("sec_sum_val", 0.0),
+        "sec_unit_style": sec_unit_style,
+        "qty_col": metrics_info.get("qty_col"),
+        "total_qty": metrics_info.get("total_qty", 0.0),
+        "avg_val": metrics_info.get("avg_val", 0.0),
+        "outstanding_val": metrics_info.get("outstanding_val"),
+        "paid_val": metrics_info.get("paid_val"),
+        "total_billed_val": metrics_info.get("total_billed_val"),
         "main_cat_col": main_cat_col,
+        "status_col": status_col,
+        "active_date_col": active_date_col,
+        "min_date": schema_meta.get("min_date"),
+        "max_date": schema_meta.get("max_date"),
+        "has_timeline": has_timeline,
+        "top_item_name": top_item_name,
+        "top_item_val": top_item_val,
+        "top_item_cnt": top_item_cnt,
         "sum_val": sum_val,
         "df": main_df,
         "cat_dist_df": cat_dist_df,
+        "status_df": status_df,
         "trend_df": trend_df,
+        "trend_granularity": trend_granularity,
+        "table_summary_df": table_summary_df,
         "anomalies": anomalies,
-        "sql": f"-- Auto-Generated Generic Overview for {main_table}\nSELECT * FROM `{main_table}` LIMIT 100;",
-        "exec_time_ms": round((time.time() - start_t) * 1000, 2)
+        "sql": "\n\n".join(sql_parts) if sql_parts else f"-- Overview for {main_table}",
+        "exec_time_ms": round((time.time() - start_t) * 1000, 2),
     }
 
 
 def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_year: int = None, end_year: int = None) -> dict:
-    """Tự động truy vấn dữ liệu chi tiết cho 1 bảng cụ thể của CSDL mới."""
+    """Tự động truy vấn KPI, phân bổ & xu hướng chi tiết cho 1 bảng cụ thể của CSDL mới."""
     start_t = time.time()
     meta = schema_meta.get("meta", {}).get(table_name, {})
+    cols = meta.get("columns", [])
     d_cols = meta.get("date_columns", [])
     date_col = d_cols[0] if d_cols else None
     num_cols = meta.get("numeric_columns", [])
+    num_col = num_cols[0] if num_cols else None
     cat_cols = meta.get("categorical_columns", [])
+    main_cat = cat_cols[0] if cat_cols else None
+    status_col = meta.get("status_col")
     is_sqlite = _is_sqlite(engine)
+    qt = _q_ident(table_name, is_sqlite)
 
+    meta_min_y = schema_meta.get("min_year")
+    meta_max_y = schema_meta.get("max_year")
+    is_narrowed = (
+        date_col
+        and start_year is not None
+        and end_year is not None
+        and (start_year != meta_min_y or end_year != meta_max_y)
+    )
     where_clause = ""
-    if date_col and start_year and end_year:
-        y_expr = f"CAST(substr({date_col}, 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({date_col})"
-        where_clause = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}"
+    if is_narrowed:
+        qd = _q_ident(date_col, is_sqlite)
+        y_expr = f"CAST(substr(TRIM(CAST({qd} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({qd})"
+        where_clause = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
 
     df = pd.DataFrame()
     cat_df = pd.DataFrame()
-    sql = f"SELECT * FROM `{table_name}` {where_clause} LIMIT 200;"
+    status_df = pd.DataFrame()
+    trend_df = pd.DataFrame()
+    trend_granularity = "month"
+    metrics_info = {}
+    sql = f"SELECT * FROM {qt} {where_clause} LIMIT 200;"
 
     try:
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
-            # Fallback nếu lọc theo thời gian không ra dòng nào
             if df.empty and where_clause:
-                fb_sql = f"SELECT * FROM `{table_name}` LIMIT 200;"
-                df = pd.read_sql(text(fb_sql), conn)
+                sql = f"SELECT * FROM {qt} LIMIT 200;"
+                df = pd.read_sql(text(sql), conn)
+                where_clause = ""
 
-            if cat_cols:
-                main_cat = cat_cols[0]
-                sql_cat = f"SELECT `{main_cat}` AS Category, COUNT(*) AS Count FROM `{table_name}` {where_clause} GROUP BY `{main_cat}` ORDER BY Count DESC LIMIT 10;"
+            metrics_info = _find_secondary_metrics(conn, table_name, meta, where_clause, is_sqlite)
+
+            if main_cat:
+                qc = _q_ident(main_cat, is_sqlite)
+                val_expr = f"COALESCE(SUM({_q_ident(num_col, is_sqlite)}), 0)" if num_col else "COUNT(*)"
+                ord_expr = "MetricSum DESC, Count DESC" if num_col else "Count DESC"
+                sql_cat = (
+                    f"SELECT COALESCE(CAST({qc} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {val_expr} AS MetricSum "
+                    f"FROM {qt} {where_clause} GROUP BY {qc} ORDER BY {ord_expr} LIMIT 12;"
+                ) if is_sqlite else (
+                    f"SELECT COALESCE(CAST({qc} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {val_expr} AS MetricSum "
+                    f"FROM {qt} {where_clause} GROUP BY {qc} ORDER BY {ord_expr} LIMIT 12;"
+                )
                 try:
                     cat_df = pd.read_sql(text(sql_cat), conn)
                 except Exception:
-                    sql_cat_fb = f"SELECT `{main_cat}` AS Category, COUNT(*) AS Count FROM `{table_name}` GROUP BY `{main_cat}` ORDER BY Count DESC LIMIT 10;"
-                    cat_df = pd.read_sql(text(sql_cat_fb), conn)
+                    pass
 
+            if status_col and status_col != main_cat:
+                qs_col = _q_ident(status_col, is_sqlite)
+                st_val_expr = f"COALESCE(SUM({_q_ident(num_col, is_sqlite)}), 0)" if num_col else "COUNT(*)"
+                sql_st = (
+                    f"SELECT COALESCE(CAST({qs_col} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
+                    f"FROM {qt} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                ) if is_sqlite else (
+                    f"SELECT COALESCE(CAST({qs_col} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
+                    f"FROM {qt} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                )
+                try:
+                    status_df = pd.read_sql(text(sql_st), conn)
+                except Exception:
+                    pass
+
+            if date_col:
+                trend_df, trend_granularity = _fetch_adaptive_trend(
+                    conn, table_name, date_col, num_col, metrics_info.get("qty_col"), where_clause, is_sqlite
+                )
+
+        sum_val = float(metrics_info.get("main_sum", 0.0))
+        unit_style = _detect_unit_style(num_col, cols, sum_val)
         anomalies = []
         if not df.empty:
             anomalies.append({
-                "title": f"Bảng '{table_name}': Đang hiển thị {len(df)} dòng dữ liệu",
+                "title": f"Bảng '{table_name}': {metrics_info.get('filtered_records', len(df)):,} bản ghi • {len(df.columns)} trường dữ liệu",
                 "severity": "WARNING",
-                "metrics_summary": f"Bao gồm {len(df.columns)} trường thông tin.",
-                "root_cause": "Dữ liệu được trích xuất trực tiếp từ CSDL.",
-                "quantified_impact": "Hỗ trợ tra cứu nhanh và phân tích tương quan đa chiều."
+                "metrics_summary": (
+                    f"Trường định lượng chính: {num_col} (Tổng: {sum_val:,.0f}, TB: {metrics_info.get('avg_val', 0.0):,.0f})."
+                    if num_col else f"Bao gồm {len(df.columns)} trường thông tin chuẩn hóa."
+                ),
+                "root_cause": "Dữ liệu được trích xuất và tổng hợp trực tiếp từ CSDL.",
+                "quantified_impact": "Hỗ trợ tra cứu nhanh và phân tích tương quan đa chiều.",
             })
 
         return {
             "df": df,
             "cat_df": cat_df,
+            "status_df": status_df,
+            "trend_df": trend_df,
+            "trend_granularity": trend_granularity,
+            "main_cat_col": main_cat,
+            "status_col": status_col,
+            "num_col": num_col,
+            "unit_style": unit_style,
+            "sum_val": sum_val,
+            "avg_val": float(metrics_info.get("avg_val", 0.0)),
+            "sec_num_col": metrics_info.get("sec_num_col"),
+            "sec_sum_val": float(metrics_info.get("sec_sum_val", 0.0)),
+            "qty_col": metrics_info.get("qty_col"),
+            "total_qty": float(metrics_info.get("total_qty", 0.0)),
+            "outstanding_val": metrics_info.get("outstanding_val"),
+            "paid_val": metrics_info.get("paid_val"),
+            "total_billed_val": metrics_info.get("total_billed_val"),
+            "row_count": metrics_info.get("filtered_records", len(df)),
             "anomalies": anomalies,
             "sql": sql,
-            "exec_time_ms": round((time.time() - start_t) * 1000, 2)
+            "exec_time_ms": round((time.time() - start_t) * 1000, 2),
         }
     except Exception as e:
-        return {"df": pd.DataFrame(), "cat_df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
+        return {"df": pd.DataFrame(), "cat_df": pd.DataFrame(), "status_df": pd.DataFrame(), "trend_df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
 
 
 # =========================================================================
 # NORTHWIND TRADERS GLOBAL SUPPLY CHAIN & ERP QUERIES
 # =========================================================================
 
+def _northwind_schema_map(engine) -> dict:
+    """Resolve physical table & column names for both MySQL Northwind and Classic/SQLite Northwind."""
+    is_sqlite = _is_sqlite(engine)
+    insp = inspect(engine)
+    tbl_lookup = {t.lower(): t for t in insp.get_table_names()}
+
+    def _tbl(*candidates: str):
+        for c in candidates:
+            if c in tbl_lookup:
+                return tbl_lookup[c]
+        return None
+
+    t_orders = _tbl("orders")
+    t_od = _tbl("order_details", "order details")
+    t_prod = _tbl("products")
+    t_cat = _tbl("categories")
+    t_cust = _tbl("customers")
+    t_emp = _tbl("employees")
+    t_sup = _tbl("suppliers")
+
+    cols_by_tbl = {}
+    for logical, actual in (
+        ("orders", t_orders),
+        ("od", t_od),
+        ("prod", t_prod),
+        ("cat", t_cat),
+        ("cust", t_cust),
+        ("emp", t_emp),
+        ("sup", t_sup),
+    ):
+        if actual:
+            cols_by_tbl[logical] = {c["name"].lower(): c["name"] for c in insp.get_columns(actual)}
+        else:
+            cols_by_tbl[logical] = {}
+
+    def _col(logical: str, alias: str, *candidates: str):
+        cmap = cols_by_tbl.get(logical, {})
+        for cand in candidates:
+            if cand.lower() in cmap:
+                return f"{alias}.{_q_ident(cmap[cand.lower()], is_sqlite)}"
+        return None
+
+    def _col_bare(logical: str, *candidates: str):
+        cmap = cols_by_tbl.get(logical, {})
+        for cand in candidates:
+            if cand.lower() in cmap:
+                return _q_ident(cmap[cand.lower()], is_sqlite)
+        return None
+
+    def _concat(expr_a: str, expr_b: str) -> str:
+        if is_sqlite:
+            return f"TRIM(COALESCE({expr_a}, '') || ' ' || COALESCE({expr_b}, ''))"
+        return f"TRIM(CONCAT(COALESCE({expr_a}, ''), ' ', COALESCE({expr_b}, '')))"
+
+    o_date_bare = _col_bare("orders", "order_date", "orderdate") or _q_ident("OrderDate", is_sqlite)
+    o_date = _col("orders", "o", "order_date", "orderdate") or "o.order_date"
+    o_id = _col("orders", "o", "id", "orderid") or "o.id"
+    o_shipped = _col("orders", "o", "shipped_date", "shippeddate") or "NULL"
+    o_cust = _col("orders", "o", "customer_id", "customerid") or "o.customer_id"
+    o_emp = _col("orders", "o", "employee_id", "employeeid") or "o.employee_id"
+    o_ship_city = _col("orders", "o", "ship_city", "shipcity") or "NULL"
+    o_ship_country = _col("orders", "o", "ship_country_region", "shipcountry") or "NULL"
+    o_ship_fee = _col("orders", "o", "shipping_fee", "freight") or "0"
+    o_pay_type = _col("orders", "o", "payment_type")
+
+    od_ord = _col("od", "od", "order_id", "orderid") or "od.order_id"
+    od_prod = _col("od", "od", "product_id", "productid") or "od.product_id"
+    od_qty = _col("od", "od", "quantity") or "od.quantity"
+    od_price = _col("od", "od", "unit_price", "unitprice") or "od.unit_price"
+    od_disc = _col("od", "od", "discount")
+    line_rev = (
+        f"({od_qty} * {od_price} * (1 - COALESCE({od_disc}, 0)))"
+        if od_disc else f"({od_qty} * {od_price})"
+    )
+
+    p_id = _col("prod", "p", "id", "productid") or "p.id"
+    p_code = _col("prod", "p", "product_code", "quantityperunit") or p_id
+    p_name = _col("prod", "p", "product_name", "productname") or "p.product_name"
+    p_cat_col = _col("prod", "p", "category")
+    p_cat_id = _col("prod", "p", "category_id", "categoryid")
+    cat_id = _col("cat", "cat", "category_id", "categoryid", "id")
+    cat_name = _col("cat", "cat", "category_name", "categoryname")
+    has_cat_join = bool(t_cat and p_cat_id and cat_id and cat_name)
+    cat_join_sql = (
+        f"LEFT JOIN {_q_ident(t_cat, is_sqlite)} cat ON {p_cat_id} = {cat_id}"
+        if has_cat_join else ""
+    )
+    cat_expr = (
+        f"COALESCE({cat_name}, 'Other')" if has_cat_join
+        else (f"COALESCE({p_cat_col}, 'Other')" if p_cat_col else "'General'")
+    )
+    p_cost = _col("prod", "p", "standard_cost")
+    p_price = _col("prod", "p", "list_price", "unit_price", "unitprice") or "0"
+    p_stock = _col("prod", "p", "units_in_stock", "unitsinstock")
+    p_on_order = _col("prod", "p", "units_on_order", "unitsonorder")
+    p_supp_id = _col("prod", "p", "supplier_ids", "supplier_id", "supplierid")
+
+    c_id = _col("cust", "c", "id", "customerid") or "c.id"
+    c_company = _col("cust", "c", "company", "companyname") or "NULL"
+    c_contact_col = _col("cust", "c", "contact_name", "contactname")
+    c_first = _col("cust", "c", "first_name", "firstname")
+    c_last = _col("cust", "c", "last_name", "lastname")
+    if c_contact_col:
+        c_contact = f"COALESCE({c_contact_col}, {c_company}, 'N/A')"
+        c_group_cols = [c_contact_col]
+    elif c_first and c_last:
+        c_contact = _concat(c_first, c_last)
+        c_group_cols = [c_first, c_last]
+    else:
+        c_contact = c_company
+        c_group_cols = []
+    c_title = _col("cust", "c", "job_title", "contact_title", "contacttitle") or "NULL"
+    c_city = _col("cust", "c", "city") or "NULL"
+    c_country = _col("cust", "c", "country_region", "country") or "NULL"
+
+    e_id = _col("emp", "e", "id", "employeeid") or "e.id"
+    e_first = _col("emp", "e", "first_name", "firstname")
+    e_last = _col("emp", "e", "last_name", "lastname")
+    if e_first and e_last:
+        e_name = _concat(e_first, e_last)
+        e_group_cols = [e_first, e_last]
+    else:
+        e_name = _col("emp", "e", "name", "full_name") or e_id
+        e_group_cols = [e_name] if e_name != e_id else []
+    e_title = _col("emp", "e", "job_title", "title") or "NULL"
+    e_city = _col("emp", "e", "city") or "NULL"
+    e_country = _col("emp", "e", "country_region", "country") or "NULL"
+
+    s_id = _col("sup", "s", "id", "supplierid") or "s.id"
+    s_company = _col("sup", "s", "company", "companyname") or "NULL"
+    s_contact_col = _col("sup", "s", "contact_name", "contactname")
+    s_first = _col("sup", "s", "first_name", "firstname")
+    s_last = _col("sup", "s", "last_name", "lastname")
+    if s_contact_col:
+        s_contact = s_contact_col
+        s_group_cols = [s_contact_col]
+    elif s_first and s_last:
+        s_contact = _concat(s_first, s_last)
+        s_group_cols = [s_first, s_last]
+    else:
+        s_contact = s_company
+        s_group_cols = []
+    s_title = _col("sup", "s", "job_title", "contact_title", "contacttitle") or "NULL"
+    s_city = _col("sup", "s", "city") or "NULL"
+    s_country = _col("sup", "s", "country_region", "country") or "NULL"
+
+    return {
+        "is_sqlite": is_sqlite,
+        "q_orders": _q_ident(t_orders, is_sqlite) if t_orders else "orders",
+        "q_od": _q_ident(t_od, is_sqlite) if t_od else "order_details",
+        "q_prod": _q_ident(t_prod, is_sqlite) if t_prod else "products",
+        "q_cust": _q_ident(t_cust, is_sqlite) if t_cust else "customers",
+        "q_emp": _q_ident(t_emp, is_sqlite) if t_emp else "employees",
+        "q_sup": _q_ident(t_sup, is_sqlite) if t_sup else "suppliers",
+        "o_date_bare": o_date_bare,
+        "o_date": o_date,
+        "o_id": o_id,
+        "o_shipped": o_shipped,
+        "o_cust": o_cust,
+        "o_emp": o_emp,
+        "o_ship_city": o_ship_city,
+        "o_ship_country": o_ship_country,
+        "o_ship_fee": o_ship_fee,
+        "o_pay_type": o_pay_type,
+        "od_ord": od_ord,
+        "od_prod": od_prod,
+        "od_qty": od_qty,
+        "od_price": od_price,
+        "line_rev": line_rev,
+        "p_id": p_id,
+        "p_code": p_code,
+        "p_name": p_name,
+        "p_cost": p_cost,
+        "p_price": p_price,
+        "p_stock": p_stock,
+        "p_on_order": p_on_order,
+        "p_supp_id": p_supp_id,
+        "cat_join_sql": cat_join_sql,
+        "cat_expr": cat_expr,
+        "has_cat_join": has_cat_join,
+        "cat_group_col": cat_name if has_cat_join else p_cat_col,
+        "c_id": c_id,
+        "c_company": c_company,
+        "c_contact": c_contact,
+        "c_group_cols": c_group_cols,
+        "c_title": c_title,
+        "c_city": c_city,
+        "c_country": c_country,
+        "e_id": e_id,
+        "e_name": e_name,
+        "e_group_cols": e_group_cols,
+        "e_title": e_title,
+        "e_city": e_city,
+        "e_country": e_country,
+        "s_id": s_id,
+        "s_company": s_company,
+        "s_contact": s_contact,
+        "s_group_cols": s_group_cols,
+        "s_title": s_title,
+        "s_city": s_city,
+        "s_country": s_country,
+    }
+
+
+def _nw_year_expr(m: dict, date_col: str) -> str:
+    if m["is_sqlite"]:
+        return f"CAST(substr(TRIM(CAST({date_col} AS TEXT)), 1, 4) AS INTEGER)"
+    return f"YEAR({date_col})"
+
+
+def _nw_month_expr(m: dict, date_col: str) -> str:
+    if m["is_sqlite"]:
+        return f"substr(TRIM(CAST({date_col} AS TEXT)), 1, 7)"
+    return f"DATE_FORMAT({date_col}, '%Y-%m')"
+
+
 def _get_northwind_year_range(engine) -> tuple:
-    """Tự động xác định khoảng năm của CSDL Northwind."""
+    """Tự động xác định khoảng năm của CSDL Northwind (MySQL & Classic SQLite)."""
     if not engine:
         return 2006, 2006
-    is_sqlite = _is_sqlite(engine)
     try:
-        y_expr = "CAST(substr(order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(order_date)"
-        sql = f"SELECT MIN({y_expr}) AS min_y, MAX({y_expr}) AS max_y FROM orders WHERE order_date IS NOT NULL;"
+        m = _northwind_schema_map(engine)
+        d_col = m["o_date_bare"]
+        y_expr = _nw_year_expr(m, d_col)
+        sql = f"SELECT MIN({y_expr}) AS min_y, MAX({y_expr}) AS max_y FROM {m['q_orders']} WHERE {d_col} IS NOT NULL AND {y_expr} BETWEEN 1990 AND 2099;"
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
             if not df.empty and pd.notna(df["min_y"].iloc[0]) and pd.notna(df["max_y"].iloc[0]):
@@ -2232,83 +2954,93 @@ def _get_northwind_year_range(engine) -> tuple:
 def fetch_northwind_overview_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
     """Layer 0: Tổng quan Điều hành Chuỗi cung ứng & Doanh số (Northwind Traders Overview)."""
     start_t = time.time()
-    is_sqlite = _is_sqlite(engine)
-    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
-    m_expr = "substr(o.order_date, 1, 7)" if is_sqlite else "DATE_FORMAT(o.order_date, '%Y-%m')"
-    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+    try:
+        m = _northwind_schema_map(engine)
+    except Exception as e:
+        return {"total_revenue": 0.0, "total_orders": 0, "active_products": 0, "total_customers": 0, "total_quantity": 0, "avg_order_value": 0.0, "trend_df": pd.DataFrame(), "category_df": pd.DataFrame(), "top_products_df": pd.DataFrame(), "geo_df": pd.DataFrame(), "sample_df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
 
-    sql_kpis = f"""SELECT 
-    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS total_revenue,
-    COUNT(DISTINCT o.id) AS total_orders,
-    COUNT(DISTINCT od.product_id) AS active_products,
-    COUNT(DISTINCT o.customer_id) AS total_customers,
-    COALESCE(SUM(od.quantity), 0) AS total_quantity
-FROM orders o
-JOIN order_details od ON o.id = od.order_id
+    y_expr = _nw_year_expr(m, m["o_date"])
+    m_expr = _nw_month_expr(m, m["o_date"])
+    where_c = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}" if start_year and end_year else ""
+    rev = m["line_rev"]
+
+    sql_kpis = f"""SELECT
+    COALESCE(SUM({rev}), 0) AS total_revenue,
+    COUNT(DISTINCT {m['o_id']}) AS total_orders,
+    COUNT(DISTINCT {m['od_prod']}) AS active_products,
+    COUNT(DISTINCT {m['o_cust']}) AS total_customers,
+    COALESCE(SUM({m['od_qty']}), 0) AS total_quantity
+FROM {m['q_orders']} o
+JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
 {where_c};"""
 
-    sql_trend = f"""SELECT 
+    sql_trend = f"""SELECT
     {m_expr} AS Month,
-    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
-    COUNT(DISTINCT o.id) AS Orders,
-    SUM(od.quantity) AS Quantity
-FROM orders o
-JOIN order_details od ON o.id = od.order_id
+    SUM({rev}) AS Revenue,
+    COUNT(DISTINCT {m['o_id']}) AS Orders,
+    SUM({m['od_qty']}) AS Quantity
+FROM {m['q_orders']} o
+JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
 {where_c}
 GROUP BY Month
 ORDER BY Month ASC;"""
 
-    sql_cat = f"""SELECT 
-    COALESCE(p.category, 'Other') AS Category,
-    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
-    SUM(od.quantity) AS Quantity,
-    COUNT(DISTINCT o.id) AS Orders
-FROM orders o
-JOIN order_details od ON o.id = od.order_id
-JOIN products p ON od.product_id = p.id
+    cat_grp = [m["cat_group_col"]] if m["cat_group_col"] else []
+    sql_cat = f"""SELECT
+    {m['cat_expr']} AS Category,
+    SUM({rev}) AS Revenue,
+    SUM({m['od_qty']}) AS Quantity,
+    COUNT(DISTINCT {m['o_id']}) AS Orders
+FROM {m['q_orders']} o
+JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
+JOIN {m['q_prod']} p ON {m['od_prod']} = {m['p_id']}
+{m['cat_join_sql']}
 {where_c}
-GROUP BY Category
+GROUP BY {', '.join(cat_grp) if cat_grp else 'Category'}
 ORDER BY Revenue DESC;"""
 
-    sql_top_prod = f"""SELECT 
-    p.product_name AS Product,
-    COALESCE(p.category, 'General') AS Category,
-    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
-    SUM(od.quantity) AS Quantity
-FROM orders o
-JOIN order_details od ON o.id = od.order_id
-JOIN products p ON od.product_id = p.id
+    tp_grp = [m["p_name"]] + cat_grp
+    sql_top_prod = f"""SELECT
+    {m['p_name']} AS Product,
+    {m['cat_expr']} AS Category,
+    SUM({rev}) AS Revenue,
+    SUM({m['od_qty']}) AS Quantity
+FROM {m['q_orders']} o
+JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
+JOIN {m['q_prod']} p ON {m['od_prod']} = {m['p_id']}
+{m['cat_join_sql']}
 {where_c}
-GROUP BY p.product_name, p.category
+GROUP BY {', '.join(tp_grp)}
 ORDER BY Revenue DESC
 LIMIT 5;"""
 
-    sql_geo = f"""SELECT 
-    COALESCE(c.country_region, o.ship_country_region, 'Unknown') AS Country,
-    SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))) AS Revenue,
-    COUNT(DISTINCT o.id) AS Orders
-FROM orders o
-JOIN order_details od ON o.id = od.order_id
-LEFT JOIN customers c ON o.customer_id = c.id
+    country_expr = f"COALESCE({m['c_country']}, {m['o_ship_country']}, 'Unknown')" if m["c_country"] != "NULL" else f"COALESCE({m['o_ship_country']}, 'Unknown')"
+    sql_geo = f"""SELECT
+    {country_expr} AS Country,
+    SUM({rev}) AS Revenue,
+    COUNT(DISTINCT {m['o_id']}) AS Orders
+FROM {m['q_orders']} o
+JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
+LEFT JOIN {m['q_cust']} c ON {m['o_cust']} = {m['c_id']}
 {where_c}
 GROUP BY Country
 ORDER BY Revenue DESC
 LIMIT 8;"""
 
-    sql_sample = f"""SELECT 
-    o.id AS OrderID,
-    CONCAT(c.first_name, ' ', c.last_name) AS Customer,
-    p.product_name AS Product,
-    od.quantity AS Qty,
-    od.unit_price AS UnitPrice,
-    ROUND(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0)), 2) AS TotalAmount,
-    o.order_date AS OrderDate
-FROM orders o
-JOIN order_details od ON o.id = od.order_id
-JOIN products p ON od.product_id = p.id
-LEFT JOIN customers c ON o.customer_id = c.id
+    sql_sample = f"""SELECT
+    {m['o_id']} AS OrderID,
+    {m['c_contact']} AS Customer,
+    {m['p_name']} AS Product,
+    {m['od_qty']} AS Qty,
+    {m['od_price']} AS UnitPrice,
+    ROUND({rev}, 2) AS TotalAmount,
+    {m['o_date']} AS OrderDate
+FROM {m['q_orders']} o
+JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
+JOIN {m['q_prod']} p ON {m['od_prod']} = {m['p_id']}
+LEFT JOIN {m['q_cust']} c ON {m['o_cust']} = {m['c_id']}
 {where_c}
-ORDER BY o.order_date DESC, o.id DESC
+ORDER BY {m['o_date']} DESC, {m['o_id']} DESC
 LIMIT 100;"""
 
     try:
@@ -2320,11 +3052,11 @@ LIMIT 100;"""
             geo_df = pd.read_sql(text(sql_geo), conn)
             sample_df = pd.read_sql(text(sql_sample), conn)
 
-        total_rev = float(kpi_df["total_revenue"].iloc[0]) if not kpi_df.empty else 0.0
-        total_orders = int(kpi_df["total_orders"].iloc[0]) if not kpi_df.empty else 0
-        active_prods = int(kpi_df["active_products"].iloc[0]) if not kpi_df.empty else 0
-        total_custs = int(kpi_df["total_customers"].iloc[0]) if not kpi_df.empty else 0
-        total_qty = int(kpi_df["total_quantity"].iloc[0]) if not kpi_df.empty else 0
+        total_rev = float(kpi_df["total_revenue"].iloc[0] or 0.0) if not kpi_df.empty else 0.0
+        total_orders = int(kpi_df["total_orders"].iloc[0] or 0) if not kpi_df.empty else 0
+        active_prods = int(kpi_df["active_products"].iloc[0] or 0) if not kpi_df.empty else 0
+        total_custs = int(kpi_df["total_customers"].iloc[0] or 0) if not kpi_df.empty else 0
+        total_qty = int(kpi_df["total_quantity"].iloc[0] or 0) if not kpi_df.empty else 0
         avg_order = round(total_rev / max(1, total_orders), 2)
 
         if not cat_df.empty and total_rev > 0:
@@ -2336,16 +3068,17 @@ LIMIT 100;"""
             anomalies.append({
                 "title": f"Sản phẩm chủ lực: {star_prod['Product']} đạt doanh số ${star_prod['Revenue']:,.2f}",
                 "severity": "CRITICAL",
-                "metrics_summary": f"Đã xuất bán {star_prod['Quantity']:,} sản phẩm thuộc danh mục {star_prod['Category']}.",
+                "metrics_summary": f"Đã xuất bán {int(star_prod['Quantity']):,} sản phẩm thuộc danh mục {star_prod['Category']}.",
                 "root_cause": "Nhu cầu thị trường cao và chuỗi cung ứng ổn định cho mặt hàng này.",
                 "quantified_impact": f"Chiếm {round(star_prod['Revenue']/max(1, total_rev)*100, 1)}% tổng doanh thu toàn hệ thống."
             })
         if not cat_df.empty:
             top_cat = cat_df.iloc[0]
+            share_v = top_cat["SharePct"] if "SharePct" in cat_df.columns else 0.0
             anomalies.append({
                 "title": f"Danh mục dẫn đầu doanh số: {top_cat['Category']} (${top_cat['Revenue']:,.2f})",
                 "severity": "WARNING",
-                "metrics_summary": f"Đóng góp {top_cat['SharePct']}% tổng doanh số qua {top_cat['Orders']} đơn đặt hàng.",
+                "metrics_summary": f"Đóng góp {share_v}% tổng doanh số qua {int(top_cat['Orders']):,} đơn đặt hàng.",
                 "root_cause": "Dòng sản phẩm cốt lõi có vòng quay tồn kho nhanh và biên lợi nhuận tốt.",
                 "quantified_impact": "Đóng vai trò then chốt trong tăng trưởng dòng tiền doanh nghiệp."
             })
@@ -2388,28 +3121,49 @@ LIMIT 100;"""
 def fetch_northwind_products_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
     """Layer 1: Phân tích Danh mục & Sản phẩm (Products & Catalog Intelligence)."""
     start_t = time.time()
-    is_sqlite = _is_sqlite(engine)
-    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
-    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+    try:
+        m = _northwind_schema_map(engine)
+        y_expr = _nw_year_expr(m, m["o_date"])
+        date_join = f" AND {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}" if start_year and end_year else ""
+        rev = m["line_rev"]
+        grp_cols = [m["p_id"], m["p_name"]]
+        if m["p_code"] != m["p_id"]:
+            grp_cols.append(m["p_code"])
+        if m["cat_group_col"]:
+            grp_cols.append(m["cat_group_col"])
+        if m["p_price"] != "0":
+            grp_cols.append(m["p_price"])
 
-    sql = f"""SELECT 
-    p.id AS ProductID,
-    p.product_code AS Code,
-    p.product_name AS ProductName,
-    COALESCE(p.category, 'General') AS Category,
-    p.standard_cost AS StandardCost,
-    p.list_price AS ListPrice,
-    ROUND(p.list_price - p.standard_cost, 2) AS UnitMargin,
-    ROUND((p.list_price - p.standard_cost) / NULLIF(p.list_price, 0) * 100, 1) AS MarginPct,
-    COALESCE(SUM(od.quantity), 0) AS UnitsSold,
-    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS TotalRevenue
-FROM products p
-LEFT JOIN order_details od ON p.id = od.product_id
-LEFT JOIN orders o ON od.order_id = o.id {('AND ' + y_expr + f' BETWEEN {start_year} AND {end_year}') if start_year and end_year else ''}
-GROUP BY p.id, p.product_code, p.product_name, p.category, p.standard_cost, p.list_price
+        if m["p_cost"]:
+            grp_cols.append(m["p_cost"])
+            select_extra = f"""{m['p_cost']} AS StandardCost,
+    {m['p_price']} AS ListPrice,
+    ROUND({m['p_price']} - {m['p_cost']}, 2) AS UnitMargin,
+    ROUND(({m['p_price']} - {m['p_cost']}) / NULLIF({m['p_price']}, 0) * 100, 1) AS MarginPct,"""
+        else:
+            stock_col = f", {m['p_stock']} AS UnitsInStock" if m["p_stock"] else ""
+            order_col = f", {m['p_on_order']} AS UnitsOnOrder" if m["p_on_order"] else ""
+            if m["p_stock"]:
+                grp_cols.append(m["p_stock"])
+            if m["p_on_order"]:
+                grp_cols.append(m["p_on_order"])
+            select_extra = f"""{m['p_price']} AS UnitPrice{stock_col}{order_col},"""
+
+        sql = f"""SELECT
+    {m['p_id']} AS ProductID,
+    {m['p_code']} AS CodeOrPack,
+    {m['p_name']} AS ProductName,
+    {m['cat_expr']} AS Category,
+    {select_extra}
+    COALESCE(SUM({m['od_qty']}), 0) AS UnitsSold,
+    ROUND(COALESCE(SUM({rev}), 0), 2) AS TotalRevenue
+FROM {m['q_prod']} p
+{m['cat_join_sql']}
+LEFT JOIN {m['q_od']} od ON {m['p_id']} = {m['od_prod']}
+LEFT JOIN {m['q_orders']} o ON {m['od_ord']} = {m['o_id']}{date_join}
+GROUP BY {', '.join(grp_cols)}
 ORDER BY TotalRevenue DESC;"""
 
-    try:
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
         return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
@@ -2420,32 +3174,39 @@ ORDER BY TotalRevenue DESC;"""
 def fetch_northwind_orders_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
     """Layer 2: Phân tích Đơn hàng & Vận chuyển (Orders & Fulfillment Operations)."""
     start_t = time.time()
-    is_sqlite = _is_sqlite(engine)
-    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
-    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+    try:
+        m = _northwind_schema_map(engine)
+        y_expr = _nw_year_expr(m, m["o_date"])
+        where_c = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}" if start_year and end_year else ""
+        pay_sel = f",\n    {m['o_pay_type']} AS PaymentType" if m["o_pay_type"] else ""
 
-    sql = f"""SELECT 
-    o.id AS OrderID,
-    o.order_date AS OrderDate,
-    o.shipped_date AS ShippedDate,
-    CONCAT(c.first_name, ' ', c.last_name) AS Customer,
-    c.company AS Company,
-    CONCAT(e.first_name, ' ', e.last_name) AS SalesRep,
-    o.ship_city AS ShipCity,
-    o.ship_country_region AS ShipCountry,
-    o.shipping_fee AS ShippingFee,
-    o.payment_type AS PaymentType,
-    ROUND(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 2) AS OrderValue
-FROM orders o
-JOIN order_details od ON o.id = od.order_id
-LEFT JOIN customers c ON o.customer_id = c.id
-LEFT JOIN employees e ON o.employee_id = e.id
+        grp_cols = [m["o_id"], m["o_date"]]
+        for c_cand in (m["o_shipped"], m["c_company"], m["o_ship_city"], m["o_ship_country"], m["o_ship_fee"], m["o_pay_type"]):
+            if c_cand and c_cand not in ("NULL", "0"):
+                grp_cols.append(c_cand)
+        grp_cols.extend(m["c_group_cols"])
+        grp_cols.extend(m["e_group_cols"])
+
+        sql = f"""SELECT
+    {m['o_id']} AS OrderID,
+    {m['o_date']} AS OrderDate,
+    {m['o_shipped']} AS ShippedDate,
+    {m['c_contact']} AS Customer,
+    {m['c_company']} AS Company,
+    {m['e_name']} AS SalesRep,
+    {m['o_ship_city']} AS ShipCity,
+    {m['o_ship_country']} AS ShipCountry,
+    {m['o_ship_fee']} AS ShippingFee{pay_sel},
+    ROUND(SUM({m['line_rev']}), 2) AS OrderValue
+FROM {m['q_orders']} o
+JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
+LEFT JOIN {m['q_cust']} c ON {m['o_cust']} = {m['c_id']}
+LEFT JOIN {m['q_emp']} e ON {m['o_emp']} = {m['e_id']}
 {where_c}
-GROUP BY o.id, o.order_date, o.shipped_date, c.first_name, c.last_name, c.company, e.first_name, e.last_name, o.ship_city, o.ship_country_region, o.shipping_fee, o.payment_type
-ORDER BY o.order_date DESC
+GROUP BY {', '.join(grp_cols)}
+ORDER BY {m['o_date']} DESC
 LIMIT 150;"""
 
-    try:
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
         return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
@@ -2456,26 +3217,31 @@ LIMIT 150;"""
 def fetch_northwind_employees_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
     """Layer 3: Phân tích Đội ngũ Sales & Đại diện bán hàng (Sales Reps & Team)."""
     start_t = time.time()
-    is_sqlite = _is_sqlite(engine)
-    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
-    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+    try:
+        m = _northwind_schema_map(engine)
+        y_expr = _nw_year_expr(m, m["o_date"])
+        date_join = f" AND {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}" if start_year and end_year else ""
+        rev = m["line_rev"]
+        grp_cols = [m["e_id"]] + m["e_group_cols"]
+        for c_cand in (m["e_title"], m["e_city"], m["e_country"]):
+            if c_cand and c_cand != "NULL":
+                grp_cols.append(c_cand)
 
-    sql = f"""SELECT 
-    e.id AS EmployeeID,
-    CONCAT(e.first_name, ' ', e.last_name) AS SalesRep,
-    e.job_title AS JobTitle,
-    e.city AS City,
-    e.country_region AS Country,
-    COUNT(DISTINCT o.id) AS TotalOrders,
-    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS TotalRevenue,
-    ROUND(COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) / NULLIF(COUNT(DISTINCT o.id), 0), 2) AS AvgDealSize
-FROM employees e
-LEFT JOIN orders o ON e.id = o.employee_id {('AND ' + y_expr + f' BETWEEN {start_year} AND {end_year}') if start_year and end_year else ''}
-LEFT JOIN order_details od ON o.id = od.order_id
-GROUP BY e.id, e.first_name, e.last_name, e.job_title, e.city, e.country_region
+        sql = f"""SELECT
+    {m['e_id']} AS EmployeeID,
+    {m['e_name']} AS SalesRep,
+    {m['e_title']} AS JobTitle,
+    {m['e_city']} AS City,
+    {m['e_country']} AS Country,
+    COUNT(DISTINCT {m['o_id']}) AS TotalOrders,
+    ROUND(COALESCE(SUM({rev}), 0), 2) AS TotalRevenue,
+    ROUND(COALESCE(SUM({rev}), 0) / NULLIF(COUNT(DISTINCT {m['o_id']}), 0), 2) AS AvgDealSize
+FROM {m['q_emp']} e
+LEFT JOIN {m['q_orders']} o ON {m['e_id']} = {m['o_emp']}{date_join}
+LEFT JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
+GROUP BY {', '.join(grp_cols)}
 ORDER BY TotalRevenue DESC;"""
 
-    try:
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
         return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
@@ -2486,26 +3252,31 @@ ORDER BY TotalRevenue DESC;"""
 def fetch_northwind_customers_data(engine, start_year: int = 2006, end_year: int = 2006) -> dict:
     """Layer 4: Phân tích Khách hàng & Thị trường (Global Customers Intelligence)."""
     start_t = time.time()
-    is_sqlite = _is_sqlite(engine)
-    y_expr = "CAST(substr(o.order_date, 1, 4) AS INTEGER)" if is_sqlite else "YEAR(o.order_date)"
-    where_c = f"WHERE {y_expr} BETWEEN {start_year} AND {end_year}" if start_year and end_year else ""
+    try:
+        m = _northwind_schema_map(engine)
+        y_expr = _nw_year_expr(m, m["o_date"])
+        date_join = f" AND {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}" if start_year and end_year else ""
+        rev = m["line_rev"]
+        grp_cols = [m["c_id"]] + m["c_group_cols"]
+        for c_cand in (m["c_company"], m["c_title"], m["c_city"], m["c_country"]):
+            if c_cand and c_cand != "NULL":
+                grp_cols.append(c_cand)
 
-    sql = f"""SELECT 
-    c.id AS CustomerID,
-    c.company AS Company,
-    CONCAT(c.first_name, ' ', c.last_name) AS ContactName,
-    c.job_title AS JobTitle,
-    c.city AS City,
-    c.country_region AS Country,
-    COUNT(DISTINCT o.id) AS OrdersCount,
-    COALESCE(SUM(od.quantity * od.unit_price * (1 - COALESCE(od.discount, 0))), 0) AS TotalSpend
-FROM customers c
-LEFT JOIN orders o ON c.id = o.customer_id {('AND ' + y_expr + f' BETWEEN {start_year} AND {end_year}') if start_year and end_year else ''}
-LEFT JOIN order_details od ON o.id = od.order_id
-GROUP BY c.id, c.company, c.first_name, c.last_name, c.job_title, c.city, c.country_region
+        sql = f"""SELECT
+    {m['c_id']} AS CustomerID,
+    {m['c_company']} AS Company,
+    {m['c_contact']} AS ContactName,
+    {m['c_title']} AS JobTitle,
+    {m['c_city']} AS City,
+    {m['c_country']} AS Country,
+    COUNT(DISTINCT {m['o_id']}) AS OrdersCount,
+    ROUND(COALESCE(SUM({rev}), 0), 2) AS TotalSpend
+FROM {m['q_cust']} c
+LEFT JOIN {m['q_orders']} o ON {m['c_id']} = {m['o_cust']}{date_join}
+LEFT JOIN {m['q_od']} od ON {m['o_id']} = {m['od_ord']}
+GROUP BY {', '.join(grp_cols)}
 ORDER BY TotalSpend DESC;"""
 
-    try:
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
         return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
@@ -2516,31 +3287,40 @@ ORDER BY TotalSpend DESC;"""
 def fetch_northwind_suppliers_data(engine) -> dict:
     """Layer 5: Phân tích Nhà cung ứng & Nhập hàng (Suppliers & Purchasing)."""
     start_t = time.time()
-    sql = """SELECT 
-    s.id AS SupplierID,
-    s.company AS SupplierCompany,
-    CONCAT(s.first_name, ' ', s.last_name) AS ContactPerson,
-    s.job_title AS JobTitle,
-    s.city AS City,
-    s.country_region AS Country,
-    COUNT(DISTINCT p.id) AS ProductsSupplied
-FROM suppliers s
-LEFT JOIN products p ON s.id = p.supplier_ids
-GROUP BY s.id, s.company, s.first_name, s.last_name, s.job_title, s.city, s.country_region
-ORDER BY ProductsSupplied DESC;"""
-
     try:
+        m = _northwind_schema_map(engine)
+        grp_cols = [m["s_id"]] + m["s_group_cols"]
+        for c_cand in (m["s_company"], m["s_title"], m["s_city"], m["s_country"]):
+            if c_cand and c_cand != "NULL":
+                grp_cols.append(c_cand)
+
+        if m["p_supp_id"]:
+            sql = f"""SELECT
+    {m['s_id']} AS SupplierID,
+    {m['s_company']} AS SupplierCompany,
+    {m['s_contact']} AS ContactPerson,
+    {m['s_title']} AS JobTitle,
+    {m['s_city']} AS City,
+    {m['s_country']} AS Country,
+    COUNT(DISTINCT {m['p_id']}) AS ProductsSupplied
+FROM {m['q_sup']} s
+LEFT JOIN {m['q_prod']} p ON {m['s_id']} = {m['p_supp_id']}
+GROUP BY {', '.join(grp_cols)}
+ORDER BY ProductsSupplied DESC;"""
+        else:
+            sql = f"""SELECT
+    {m['s_id']} AS SupplierID,
+    {m['s_company']} AS SupplierCompany,
+    {m['s_contact']} AS ContactPerson,
+    {m['s_city']} AS City,
+    {m['s_country']} AS Country
+FROM {m['q_sup']} s
+LIMIT 50;"""
+
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
         return {"df": df, "anomalies": [], "sql": sql, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
     except Exception as e:
-        # Fallback if supplier_ids column is different
-        sql_fallback = "SELECT id AS SupplierID, company AS SupplierCompany, city AS City, country_region AS Country FROM suppliers LIMIT 50;"
-        try:
-            with engine.connect() as conn:
-                df = pd.read_sql(text(sql_fallback), conn)
-            return {"df": df, "anomalies": [], "sql": sql_fallback, "exec_time_ms": round((time.time() - start_t) * 1000, 2)}
-        except Exception as e2:
-            return {"df": pd.DataFrame(), "anomalies": [], "sql": str(e2), "exec_time_ms": 0.0}
+        return {"df": pd.DataFrame(), "anomalies": [], "sql": str(e), "exec_time_ms": 0.0}
 
 

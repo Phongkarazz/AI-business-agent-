@@ -399,6 +399,387 @@ class TestVeraxusStep1Integration(unittest.TestCase):
         self.assertIn("JOIN categories ON orders.product_name = categories.product_name", prompt_join_col)
         engine.dispose()
 
+    def test_awesome_chocolates_schema_gap_blocks_hallucination_without_blocking_valid_queries(self) -> None:
+        import pandas as pd
+        from src.database.schema import auto_extract_schema
+        from src.llm.datamate_bridge import detect_legacy_schema_gap
+        from src.llm.evaluator import evaluate_execution
+        from src.llm.prompts import build_sql_prompt
+
+        engine, knowledge, dialect, *_ = resolve_database_connection(
+            use_demo=True,
+            db_host="",
+            db_port="3306",
+            db_user="",
+            db_pass="",
+            db_name="awesome chocolates",
+            use_ssl=False,
+        )
+        self.assertIsNone(knowledge)
+        schema_txt = auto_extract_schema(engine)
+
+        # Prompt must enforce honesty rather than fabricating substitute columns
+        prompt_vi = build_sql_prompt(schema_txt, dialect, "Phân tích doanh thu theo độ tuổi", lang="vi")
+        self.assertIn("UNANSWERABLE:", prompt_vi)
+        self.assertNotIn("SMART ADAPTATION", prompt_vi)
+
+        # Exact two bug-report queries on Awesome Chocolates must stop cleanly at preflight
+        for bad_q in (
+            "Liệt kê 5 khách hàng (CustomerID) có tỷ lệ hoàn trả đơn hàng (return rate) cao nhất.",
+            "Phân tích doanh thu theo độ tuổi và giới tính của khách hàng.",
+        ):
+            client = _QueuedOpenAIClient([])
+            res = run_agent(
+                user_query=bad_q,
+                client=client,
+                provider="Ollama (Local AI Offline)",
+                model_name="qwen2.5-coder:3b",
+                engine=engine,
+                schema_context=schema_txt,
+                dialect=dialect,
+            )
+            self.assertEqual(len(client.calls), 0, f"Preflight should block before LLM call for: {bad_q}")
+            self.assertIsNone(res.get("df"))
+            self.assertIsNone(res.get("sql"))
+            self.assertIn("🛡️", res.get("explanation", ""))
+            self.assertEqual((res.get("evaluator") or {}).get("verdict"), "UNANSWERABLE_BLOCKED")
+            self.assertTrue(res.get("followups"))
+
+        # Valid queries on Awesome Chocolates & Employees must NOT be blocked
+        for valid_q in (
+            "Tính doanh thu, ước tính tổng giá vốn (Boxes * Cost_per_box) và biên lợi nhuận gộp theo từng Category.",
+            "Thống kê số lượng ticket theo Kênh hỗ trợ (Channel) và Trạng thái (Status).",
+            "Tỷ lệ ticket của nhóm khách hàng quay lại (CustomerType = 'Returned') là bao nhiêu?",
+            "dthu sp Milk Bars tai India la bnhiu?",
+        ):
+            self.assertIsNone(
+                detect_legacy_schema_gap(valid_q, engine=engine, schema_context=schema_txt, lang="vi"),
+                f"Valid query falsely flagged as missing schema: {valid_q}",
+            )
+
+        employees_schema = (
+            "Cơ sở dữ liệu bao gồm các bảng và cột sau:\n"
+            "- Bảng `employees`: emp_no (INT), birth_date (DATE), gender (VARCHAR)\n"
+            "- Bảng `salaries`: emp_no (INT), salary (INT), to_date (DATE)"
+        )
+        self.assertIsNone(
+            detect_legacy_schema_gap(
+                "So sánh mức lương theo giới tính và độ tuổi của nhân viên",
+                engine=None,
+                schema_context=employees_schema,
+                lang="vi",
+            )
+        )
+
+        # Unseen missing column handled via LLM returning UNANSWERABLE: ...
+        # (route_and_plan -> SQL gen -> UNANSWERABLE)
+        client_unans = _QueuedOpenAIClient(
+            [
+                "UNANSWERABLE: Bảng sales và geo không có cột ZipCode / mã bưu chính.",
+                "UNANSWERABLE: Bảng sales và geo không có cột ZipCode / mã bưu chính.",
+            ]
+        )
+        res_unans = run_agent(
+            user_query="Thống kê doanh thu theo mã bưu chính ZipCode của khách hàng?",
+            client=client_unans,
+            provider="Ollama (Local AI Offline)",
+            model_name="qwen2.5-coder:3b",
+            engine=engine,
+            schema_context=schema_txt,
+            dialect=dialect,
+        )
+        self.assertIsNone(res_unans.get("df"))
+        self.assertIsNone(res_unans.get("sql"))
+        self.assertIn("🛡️", res_unans.get("explanation", ""))
+        self.assertEqual((res_unans.get("evaluator") or {}).get("verdict"), "UNANSWERABLE_BLOCKED")
+
+        # Evaluator defense-in-depth must also reject partial/hallucinated SQL on missing schema attrs
+        ev = evaluate_execution(
+            user_query="Phân tích doanh thu theo độ tuổi và giới tính của khách hàng.",
+            sql_query="SELECT Product, SUM(Amount) FROM sales JOIN products ON sales.PID = products.PID GROUP BY Product",
+            df=pd.DataFrame({"Product": ["Milk Bars"], "Total": [1000]}),
+            schema_context=schema_txt,
+            lang="vi",
+        )
+        self.assertEqual(ev.get("verdict"), "UNANSWERABLE_BLOCKED")
+        self.assertEqual(ev.get("score"), 0)
+        engine.dispose()
+
+    def test_awesome_chocolates_crm_tickets_and_dimensions_not_hijacked(self) -> None:
+        import pandas as pd
+        from src.database.schema import auto_extract_schema
+        from src.llm.agent import (
+            auto_fix_chocolates_monthly_sales_query,
+            auto_fix_chocolates_pnl_query,
+            auto_fix_chocolates_team_sales_and_boxes_query,
+            auto_fix_chocolates_top_rankings_query,
+            auto_fix_chocolates_top_transactions_query,
+            auto_fix_sales_performance_comparison_query,
+            run_agent,
+        )
+        from src.llm.evaluator import evaluate_execution
+
+        engine, _knowledge, dialect, *_ = resolve_database_connection(
+            use_demo=True,
+            db_host="",
+            db_port="3306",
+            db_user="",
+            db_pass="",
+            db_name="awesome chocolates",
+            use_ssl=False,
+        )
+        schema_txt = auto_extract_schema(engine)
+
+        # 1. End-to-end Q11 CRM tickets must NOT be hijacked by monthly_sales ("thời gian", "số lượng", "rep" in FirstReplyMinutes)
+        q11 = (
+            "Thống kê số lượng ticket theo Kênh hỗ trợ (Channel) và Trạng thái (Status), "
+            "kèm thời gian phản hồi đầu tiên trung bình (FirstReplyMinutes)"
+        )
+        q11_sql = (
+            "SELECT Channel, Status, COUNT(TicketID) AS TicketCount, "
+            "ROUND(AVG(FirstReplyMinutes), 2) AS AvgFirstReplyMinutes "
+            "FROM crm_tickets GROUP BY Channel, Status ORDER BY TicketCount DESC"
+        )
+        client_q11 = _QueuedOpenAIClient([
+            "DIRECT_SQL: Query crm_tickets grouped by Channel and Status.",
+            q11_sql,
+        ])
+        res_q11 = run_agent(
+            user_query=q11,
+            client=client_q11,
+            provider="Ollama (Local AI Offline)",
+            model_name="qwen2.5-coder:3b",
+            engine=engine,
+            schema_context=schema_txt,
+            dialect=dialect,
+        )
+        self.assertIn("crm_tickets", (res_q11.get("sql") or "").lower())
+        self.assertNotIn("salesperson", (res_q11.get("sql") or "").lower())
+        df_q11 = res_q11.get("df")
+        self.assertIsNotNone(df_q11)
+        self.assertFalse(df_q11.empty)
+        cols_q11 = {c.lower() for c in df_q11.columns}
+        self.assertTrue({"channel", "status", "ticketcount", "avgfirstreplyminutes"}.issubset(cols_q11))
+
+        # 2. Evaluator defense-in-depth rejects CRM ticket query if SQL drifted to sales/people, then repairs cleanly
+        ev_drift = evaluate_execution(
+            user_query=q11,
+            sql_query="SELECT pe.Salesperson, SUM(s.Amount) FROM sales s JOIN people pe ON s.SPID = pe.SPID GROUP BY pe.Salesperson",
+            df=pd.DataFrame({"Salesperson": ["A"], "Amount": [100]}),
+            schema_context=schema_txt,
+            lang="vi",
+        )
+        self.assertFalse(ev_drift["criteria"]["semantic_alignment"]["passed"])
+        self.assertLess(ev_drift.get("score", 100), 100)
+
+        client_drift = _QueuedOpenAIClient([
+            "DIRECT_SQL: Ticket summary",
+            "SELECT pe.Salesperson, SUM(s.Boxes) AS Boxes FROM sales s JOIN people pe ON s.SPID = pe.SPID GROUP BY pe.Salesperson",
+            q11_sql,
+        ])
+        res_repaired = run_agent(
+            user_query=q11,
+            client=client_drift,
+            provider="Ollama (Local AI Offline)",
+            model_name="qwen2.5-coder:3b",
+            engine=engine,
+            schema_context=schema_txt,
+            dialect=dialect,
+        )
+        self.assertIn("crm_tickets", (res_repaired.get("sql") or "").lower())
+        self.assertEqual((res_repaired.get("evaluator") or {}).get("verdict"), "PASS")
+
+        # 3. Direct preservation checks across Q1, Q3, Q5, Q7, Q9, Q10, Q12, Q13
+        preservation_cases = [
+            (
+                "Tổng doanh thu và tổng số hộp (Boxes) theo từng quốc gia",
+                "SELECT g.Geo, SUM(s.Amount) AS TotalAmount, SUM(s.Boxes) AS TotalBoxes FROM sales s JOIN geo g ON s.GeoID = g.GeoID GROUP BY g.Geo ORDER BY TotalAmount DESC",
+            ),
+            (
+                "So sánh doanh thu trung bình trên mỗi hộp giữa các kích thước (Size) sản phẩm",
+                "SELECT pr.Size, ROUND(CAST(SUM(s.Amount) AS FLOAT) / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox FROM sales s JOIN products pr ON s.PID = pr.PID GROUP BY pr.Size ORDER BY AvgRevenuePerBox DESC",
+            ),
+            (
+                "Mỗi Team (Yummies, Delish, Jucies) có bao nhiêu nhân viên và tổng doanh thu bao nhiêu?",
+                "SELECT pe.Team, COUNT(DISTINCT pe.SPID) AS NumEmployees, SUM(s.Amount) AS TotalRevenue FROM people pe LEFT JOIN sales s ON pe.SPID = s.SPID WHERE pe.Team IN ('Yummies', 'Delish', 'Jucies') GROUP BY pe.Team ORDER BY TotalRevenue DESC",
+            ),
+            (
+                "Phân tích xu hướng doanh thu theo từng tháng từ 2021 đến 2023 và chỉ ra các tháng dị biệt (outliers)",
+                "SELECT strftime('%Y-%m', s.SaleDate) AS Month, SUM(s.Amount) AS TotalRevenue FROM sales s GROUP BY Month ORDER BY Month ASC",
+            ),
+            (
+                "Thống kê số lượng hộp bán được theo khu vực APAC và Europe",
+                "SELECT g.Region, SUM(s.Boxes) AS TotalBoxes FROM sales s JOIN geo g ON s.GeoID = g.GeoID WHERE g.Region IN ('APAC', 'Europe') GROUP BY g.Region ORDER BY TotalBoxes DESC",
+            ),
+            (
+                "Tính doanh thu, ước tính tổng giá vốn (Boxes * Cost_per_box) và biên lợi nhuận gộp theo từng Category",
+                "SELECT pr.Category, SUM(s.Amount) AS TotalRevenue, SUM(s.Boxes * pr.Cost_per_box) AS TotalCOGS, ROUND((SUM(s.Amount) - SUM(s.Boxes * pr.Cost_per_box)) * 100.0 / NULLIF(SUM(s.Amount), 0), 2) AS GrossMarginPct FROM sales s JOIN products pr ON s.PID = pr.PID GROUP BY pr.Category ORDER BY TotalRevenue DESC",
+            ),
+            (
+                "Khách hàng nào thuộc nhóm khách hàng mua lặp lại hoặc từng gửi ticket? Hãy thống kê tổng doanh thu, số giao dịch và số ticket của Top 10 CustomerID",
+                "SELECT s.CustomerID, SUM(s.Amount) AS TotalRevenue, COUNT(*) AS NumTransactions, COUNT(DISTINCT t.TicketID) AS NumTickets FROM sales s LEFT JOIN crm_tickets t ON s.CustomerID = t.CustomerID GROUP BY s.CustomerID ORDER BY TotalRevenue DESC LIMIT 10",
+            ),
+        ]
+        for q_text, sql_text in preservation_cases:
+            for fn in (
+                lambda s, q: auto_fix_chocolates_pnl_query(s, q, dialect="SQLite"),
+                lambda s, q: auto_fix_chocolates_monthly_sales_query(s, q, dialect="SQLite"),
+                lambda s, q: auto_fix_sales_performance_comparison_query(s, q, dialect="SQLite"),
+                lambda s, q: auto_fix_chocolates_team_sales_and_boxes_query(s, q, dialect="SQLite"),
+                lambda s, q: auto_fix_chocolates_top_transactions_query(s, q, dialect="SQLite"),
+                lambda s, q: auto_fix_chocolates_top_rankings_query(s, q, dialect="SQLite"),
+            ):
+                self.assertEqual(fn(sql_text, q_text), sql_text, f"Auto-fix unexpectedly altered SQL for: {q_text}")
+
+        # 4. Edge repairs keep ALL requested metrics/ranges/dimensions
+        q1_fixed = auto_fix_chocolates_top_rankings_query(
+            "SELECT g.Geo, SUM(Amount) AS TotalAmount FROM sales JOIN geo g USING(GeoID) GROUP BY g.Geo",
+            "Tổng doanh thu và tổng số hộp (Boxes) theo từng quốc gia",
+            dialect="SQLite",
+        ).lower()
+        self.assertIn("sum(s.amount)", q1_fixed)
+        self.assertIn("sum(s.boxes)", q1_fixed)
+
+        q7_fixed = auto_fix_chocolates_monthly_sales_query(
+            "SELECT strftime('%m', s.SaleDate) AS Month, SUM(s.Amount) FROM sales s WHERE YEAR(s.SaleDate) = 2021 GROUP BY Month",
+            "Phân tích xu hướng doanh thu theo từng tháng từ 2021 đến 2023 và chỉ ra các tháng dị biệt (outliers)",
+            dialect="SQLite",
+        ).lower()
+        self.assertIn("between '2021' and '2023'", q7_fixed)
+        self.assertIn("%y-%m", q7_fixed)
+
+        q10_fixed = auto_fix_chocolates_pnl_query(
+            "SELECT pr.Category, SUM(s.Amount) FROM sales s JOIN products pr ON s.PID = pr.PID GROUP BY pr.Category",
+            "Tính doanh thu, ước tính tổng giá vốn (Boxes * Cost_per_box) và biên lợi nhuận gộp theo từng Category",
+            dialect="SQLite",
+        ).lower()
+        self.assertIn("pr.category", q10_fixed)
+        self.assertIn("cost_per_box", q10_fixed)
+        engine.dispose()
+
+    def test_q3_q5_q9_q11_q12_unassigned_team_and_evaluator_guards(self) -> None:
+        import pandas as pd
+        from sqlalchemy import inspect, text
+        from src.database.demo_data import build_demo_engine
+        from src.llm.agent import auto_fix_chocolates_unassigned_team_filter
+        from src.llm.client import call_llm
+        from src.llm.evaluator import evaluate_execution
+        from src.llm.few_shot_selector import select_dynamic_few_shots
+        from src.llm.prompts import get_db_specific_rules, get_targeted_hint
+        from src.llm.sql_sanitizer import sanitize_sql_for_live_db
+
+        engine = build_demo_engine()
+        insp = inspect(engine)
+        schema_lines = ["CSDL: SQLite Demo"]
+        for t in insp.get_table_names():
+            cols = [c["name"] for c in insp.get_columns(t)]
+            schema_lines.append(f"- Bảng `{t}`: {', '.join(cols)}")
+        schema_txt = "\n".join(schema_lines)
+
+        # 1. auto_fix_chocolates_unassigned_team_filter must insert WHERE BEFORE \nGROUP BY and execute cleanly
+        q5_sql = (
+            "SELECT pe.Team, COUNT(DISTINCT pe.SPID) AS Employees, SUM(s.Amount) AS TotalSales, SUM(s.Boxes) AS TotalBoxes\n"
+            "FROM people pe\n"
+            "JOIN sales s ON pe.SPID = s.SPID\n"
+            "GROUP BY pe.Team\n"
+            "ORDER BY TotalSales DESC"
+        )
+        fixed_q5 = auto_fix_chocolates_unassigned_team_filter(q5_sql, "Mỗi Team có bao nhiêu nhân viên và doanh thu?", dialect="SQLite")
+        self.assertLess(fixed_q5.lower().index("where"), fixed_q5.lower().index("group by"))
+        with engine.connect() as conn:
+            df_q5 = pd.read_sql(text(fixed_q5), conn)
+        self.assertFalse(df_q5.empty)
+        self.assertTrue((df_q5["Team"].astype(str).str.strip() != "").all())
+
+        # Alias p.Team preserved and CTE untouched at outer tail
+        q_alias_sql = "SELECT p.Team, SUM(s.Amount) AS TotalSales\nFROM sales s\nJOIN people p ON s.SPID = p.SPID\nGROUP BY p.Team"
+        fixed_alias = auto_fix_chocolates_unassigned_team_filter(q_alias_sql, dialect="SQLite")
+        self.assertIn("p.Team != ''", fixed_alias)
+        self.assertLess(fixed_alias.lower().index("where"), fixed_alias.lower().index("group by"))
+
+        # 2. sql_sanitizer must NOT silently replace unknown table on Chocolates with fake products.Cost_per_box
+        fake_tbl_sql = "SELECT r.Region, SUM(s.Amount) FROM sales s JOIN regions r ON s.GeoID = r.GeoID GROUP BY r.Region"
+        sanitized = sanitize_sql_for_live_db(fake_tbl_sql, engine, schema_txt, user_query="Doanh thu theo Region", dialect="SQLite")
+        self.assertNotIn("Cost_per_box", sanitized)
+        self.assertNotIn("AS Nhom", sanitized)
+
+        # 3. Evaluator Critic catches Q5/Q9 products.Category drift, Q3 AVG(Amount) per-box misuse, and TIMESTAMPDIFF on FirstReplyMinutes
+        fake_df = pd.DataFrame({"Nhom": ["Bars", "Bites"], "TongGiaTri": [100.0, 80.0], "SoLuong": [10, 12]})
+        ev_q5 = evaluate_execution(
+            "Mỗi đội ngũ (Team) có bao nhiêu nhân viên, đóng góp tổng doanh thu và số hộp là bao nhiêu?",
+            "SELECT Category AS Nhom, ROUND(SUM(Cost_per_box), 2) AS TongGiaTri, COUNT(*) AS SoLuong FROM products GROUP BY Category",
+            fake_df, schema_context=schema_txt, lang="vi",
+        )
+        self.assertNotEqual(ev_q5["verdict"], "PASS")
+
+        ev_q9 = evaluate_execution(
+            "Phân bổ doanh thu theo từng Category sản phẩm và theo từng Khu vực (Region IN ('APAC', 'Europe')).",
+            "SELECT Category AS Nhom, ROUND(SUM(Cost_per_box), 2) AS TongGiaTri, COUNT(*) AS SoLuong FROM products GROUP BY Category",
+            fake_df, schema_context=schema_txt, lang="vi",
+        )
+        self.assertNotEqual(ev_q9["verdict"], "PASS")
+
+        q3_bad_df = pd.DataFrame({"Size": ["SMALL", "LARGE"], "TotalRevenue": [1000.0, 2000.0], "AverageRevenuePerBox": [200.0, 250.0]})
+        ev_q3_bad = evaluate_execution(
+            "Phân tích doanh thu theo kích thước sản phẩm (Size) và tính doanh thu trung bình trên mỗi hộp theo từng Size.",
+            "SELECT pr.Size, SUM(s.Amount) AS TotalRevenue, AVG(s.Amount) AS AverageRevenuePerBox FROM sales s JOIN products pr ON s.PID = pr.PID GROUP BY pr.Size",
+            q3_bad_df, schema_context=schema_txt, lang="vi",
+        )
+        self.assertNotEqual(ev_q3_bad["verdict"], "PASS")
+
+        ev_q3_ok = evaluate_execution(
+            "Phân tích doanh thu theo kích thước sản phẩm (Size) và tính doanh thu trung bình trên mỗi hộp theo từng Size.",
+            "SELECT pr.Size, SUM(s.Amount) AS TotalRevenue, ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox FROM sales s JOIN products pr ON s.PID = pr.PID GROUP BY pr.Size",
+            q3_bad_df, schema_context=schema_txt, lang="vi",
+        )
+        self.assertEqual(ev_q3_ok["verdict"], "PASS")
+
+        ev_q11_ts = evaluate_execution(
+            "Thống kê số lượng ticket theo Channel và Status, kèm thời gian phản hồi đầu tiên trung bình (FirstReplyMinutes).",
+            "SELECT t.Channel, t.Status, COUNT(*) AS TicketCount, AVG(TIMESTAMPDIFF(MINUTE, t.CreatedAt, t.FirstReplyMinutes)) AS AvgFirstReply FROM crm_tickets t GROUP BY t.Channel, t.Status",
+            pd.DataFrame({"Channel": ["Email"], "Status": ["Solved"], "TicketCount": [10], "AvgFirstReply": [None]}),
+            schema_context=schema_txt, lang="vi",
+        )
+        self.assertNotEqual(ev_q11_ts["verdict"], "PASS")
+
+        # 4. Q11/Q12 CRM isolation: no pe.Team hint hijack, concise CRM rules, and CRM-only few-shots
+        q11 = "Thống kê số lượng ticket theo Kênh hỗ trợ (Channel) và Trạng thái (Status), kèm thời gian phản hồi đầu tiên trung bình (FirstReplyMinutes)"
+        q12 = "So sánh tỷ lệ giải quyết xong (Status = 'Solved') và thời gian xử lý trung bình (FullResolveHours) giữa nhóm khách hàng mới (New) và khách hàng quay lại (Returned)"
+        for q_crm in (q11, q12):
+            hint_crm = get_targeted_hint(q_crm, schema_txt, dialect="SQLite")
+            rules_crm = get_db_specific_rules(schema_txt, user_query=q_crm)
+            fs_crm = select_dynamic_few_shots(q_crm, schema_context=schema_txt, dialect="SQLite", top_k=2)
+            self.assertIn("crm_tickets", hint_crm.lower())
+            self.assertNotIn("pe.team", hint_crm.lower())
+            self.assertLess(len(rules_crm), 2000)
+            self.assertTrue(fs_crm)
+            for ex in fs_crm:
+                self.assertIn("crm_tickets", (ex.get("selected_sql") or "").lower())
+
+        # 4b. Q5 with 'đóng góp' + headcount + boxes must NOT be overwritten by auto_fix_contribution_percentage_query, and Q3/Q5/Q9 hints align accurately
+        from src.llm.agent import auto_fix_contribution_percentage_query
+        q5_txt = "Mỗi đội ngũ (Team) có bao nhiêu nhân viên, đóng góp tổng doanh thu và số hộp là bao nhiêu?"
+        self.assertEqual(auto_fix_contribution_percentage_query(q5_sql, q5_txt, dialect="SQLite"), q5_sql)
+
+        h_q3 = get_targeted_hint("Phân tích doanh thu theo kích thước sản phẩm (Size) và tính doanh thu trung bình trên mỗi hộp theo từng Size.", schema_txt, dialect="SQLite").lower()
+        h_q5 = get_targeted_hint(q5_txt, schema_txt, dialect="SQLite").lower()
+        h_q9 = get_targeted_hint("Phân bổ doanh thu theo từng Category sản phẩm và theo từng Khu vực (Region IN ('APAC', 'Europe')).", schema_txt, dialect="SQLite").lower()
+        self.assertIn("pr.size", h_q3)
+        self.assertIn("sum(s.boxes)", h_q3)
+        self.assertIn("count(distinct pe.spid)", h_q5)
+        self.assertIn("sum(s.boxes)", h_q5)
+        self.assertIn("g.region", h_q9)
+        self.assertIn("pr.category", h_q9)
+
+        # 5. Ollama client sets deterministic temperature & enlarged num_ctx
+        q_client = _QueuedOpenAIClient(["SELECT 1"])
+        out_txt, err_txt = call_llm(q_client, "Ollama (Local AI Offline)", "qwen2.5-coder:3b", "SELECT 1")
+        self.assertIsNone(err_txt)
+        self.assertEqual(out_txt, "SELECT 1")
+        self.assertEqual(q_client.calls[0].get("temperature"), 0.1)
+        self.assertEqual(((q_client.calls[0].get("extra_body") or {}).get("options") or {}).get("num_ctx"), 12288)
+        engine.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()

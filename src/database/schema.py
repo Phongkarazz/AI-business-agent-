@@ -9,6 +9,23 @@ from src.config import MAX_TABLES_SCHEMA
 
 
 _SCHEMA_CACHE = {}
+_TABLE_NAMES_CACHE = {}
+_COLS_INFO_CACHE = {}
+
+
+def _engine_cache_key(engine) -> tuple:
+    return (
+        id(engine),
+        str(getattr(engine, "url", "")),
+        int(getattr(engine, "_veraxus_cache_epoch", 0)),
+    )
+
+
+def clear_schema_caches() -> None:
+    """Clear in-process cached table names, columns, and schema prompts on reconnect."""
+    _SCHEMA_CACHE.clear()
+    _TABLE_NAMES_CACHE.clear()
+    _COLS_INFO_CACHE.clear()
 
 
 def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA, force_refresh: bool = False) -> str:
@@ -16,7 +33,7 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA, force_refre
     if not engine:
         return "Chưa kết nối Cơ sở dữ liệu."
 
-    cache_key = id(engine)
+    cache_key = _engine_cache_key(engine)
     if not force_refresh and cache_key in _SCHEMA_CACHE:
         return _SCHEMA_CACHE[cache_key]
 
@@ -103,15 +120,11 @@ def auto_extract_schema(engine, max_tables: int = MAX_TABLES_SCHEMA, force_refre
         return f"Không thể tự động đọc schema: {e}"
 
 
-_TABLE_NAMES_CACHE = {}
-_COLS_INFO_CACHE = {}
-
-
 def get_table_names(engine) -> list[str]:
     """Lấy danh sách tất cả các bảng trong database đang kết nối."""
     if not engine:
         return []
-    cache_key = id(engine)
+    cache_key = _engine_cache_key(engine)
     if cache_key in _TABLE_NAMES_CACHE:
         return _TABLE_NAMES_CACHE[cache_key]
     try:
@@ -127,7 +140,7 @@ def get_table_columns_info(engine, table_name: str) -> list[dict]:
     """Lấy danh sách chi tiết các cột và kiểu dữ liệu của một bảng."""
     if not engine or not table_name:
         return []
-    cache_key = f"{id(engine)}_{table_name}"
+    cache_key = (*_engine_cache_key(engine), table_name)
     if cache_key in _COLS_INFO_CACHE:
         return _COLS_INFO_CACHE[cache_key]
     try:

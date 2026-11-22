@@ -38,6 +38,7 @@ def attach_datamate_sqlite_udfs(engine: Engine) -> Engine:
     def _on_connect(dbapi_conn, _conn_record):  # pragma: no cover - verified via query execution
         try:
             dbapi_conn.create_function("NORM_VN", 1, lambda s: norm_vn(str(s)) if s is not None else "")
+            dbapi_conn.create_function("ROUND_HALF_UP", 1, lambda x: round_half_up(x, 0))
             dbapi_conn.create_function("ROUND_HALF_UP", 2, round_half_up)
         except sqlite3.Error:
             pass
@@ -61,6 +62,12 @@ def save_uploaded_business_files(
     if target_dir.exists():
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
+    for stale_cache in (
+        WORKSPACE_CACHE_ROOT / f"{slug}.sqlite",
+        WORKSPACE_CACHE_ROOT / f"{slug}.manifest.json",
+    ):
+        if stale_cache.exists():
+            stale_cache.unlink()
 
     saved_count = 0
     for fobj in uploaded_files or []:

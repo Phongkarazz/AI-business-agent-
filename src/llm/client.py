@@ -228,12 +228,31 @@ def _call_gemini_impl(client, model_name: str, prompt: str, max_tokens: int = 20
     return ""
 
 
-def _call_openai_compatible_impl(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
-    completion = client.chat.completions.create(
-        model=model_name,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=max_tokens
-    )
+def _call_openai_compatible_impl(
+    client,
+    model_name: str,
+    prompt: str,
+    max_tokens: int = 2048,
+    is_ollama: bool = False,
+) -> str:
+    base_url = str(getattr(client, "base_url", "") or "").lower()
+    use_ollama_opts = is_ollama or ("11434" in base_url)
+    create_kwargs = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+    }
+    if use_ollama_opts:
+        create_kwargs["temperature"] = 0.1
+        create_kwargs["extra_body"] = {"options": {"num_ctx": 12288, "temperature": 0.1}}
+    try:
+        completion = client.chat.completions.create(**create_kwargs)
+    except Exception as exc:
+        if use_ollama_opts and ("extra_body" in str(exc) or "options" in str(exc) or isinstance(exc, TypeError)):
+            create_kwargs.pop("extra_body", None)
+            completion = client.chat.completions.create(**create_kwargs)
+        else:
+            raise
     return completion.choices[0].message.content
 
 
@@ -242,9 +261,14 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
     if not client:
         return None, "Chưa khởi tạo client AI."
 
+    base_url_low = str(getattr(client, "base_url", "")).lower()
     is_openrouter = (
         provider == "OpenRouter"
-        or ("openrouter.ai" in str(getattr(client, "base_url", "")).lower())
+        or ("openrouter.ai" in base_url_low)
+    )
+    is_ollama = (
+        "ollama" in (provider or "").lower()
+        or ("11434" in base_url_low)
     )
 
     if is_openrouter:
@@ -257,7 +281,10 @@ def call_llm(client, provider: str, model_name: str, prompt: str, max_retries: i
 
     for attempt in range(max_retries):
         try:
-            raw = impl(client, model_name, prompt, max_tokens=current_max_tokens)
+            call_kwargs = {"max_tokens": current_max_tokens}
+            if impl is _call_openai_compatible_impl and is_ollama:
+                call_kwargs["is_ollama"] = True
+            raw = impl(client, model_name, prompt, **call_kwargs)
             cleaned = extract_clean_content(raw)
             return cleaned, None
         except Exception as e:

@@ -16,6 +16,29 @@ from src.ui.connection_dialog import show_connecting_dialog
 from src.database.connection import try_connect
 from src.database.business_upload import save_uploaded_business_files
 
+_ONBOARDING_PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+
+
+def _resolve_workspace_dir_candidate(raw_candidate: str) -> pathlib.Path | None:
+    """Resolve user-entered absolute, relative, or named workspace folder (e.g. 'cafe_pho_viet/')."""
+    raw = (raw_candidate or "").strip().strip('"').strip("'")
+    if not raw:
+        return None
+    p = pathlib.Path(raw).expanduser()
+    candidates = [
+        p,
+        _ONBOARDING_PROJECT_ROOT / raw.rstrip("/\\"),
+        _ONBOARDING_PROJECT_ROOT / "data" / "demo_businesses" / raw.rstrip("/\\"),
+        _ONBOARDING_PROJECT_ROOT / "data" / "uploaded_workspaces" / raw.rstrip("/\\"),
+    ]
+    for cand in candidates:
+        try:
+            if cand.exists() and cand.is_dir():
+                return cand.resolve()
+        except OSError:
+            continue
+    return None
+
 
 def render_onboarding():
     """Hiển thị màn hình Onboarding / Cài đặt cấu hình độc lập toàn trang."""
@@ -159,6 +182,7 @@ def render_onboarding():
                 run_local = (db_source == "🖥️ MySQL Máy tính này (Localhost)")
                 uploaded_biz_files = None
                 custom_ws_dir_input = ""
+                btn_apply_custom_upload = False
 
                 if is_yen_demo:
                     db_host = ""
@@ -217,6 +241,18 @@ def render_onboarding():
                             key="onboarding_custom_dir",
                         )
                     db_name = (custom_ws_name_input or "my_business").strip()
+                    if uploaded_biz_files:
+                        f_preview = ", ".join(f"`{getattr(f, 'name', '')}`" for f in uploaded_biz_files[:5])
+                        st.info(
+                            f"📎 Đã chọn **{len(uploaded_biz_files)}** file ({f_preview}). "
+                            "Bấm nút **🚀 Nạp Dữ Liệu & Kết Nối Ngay** bên dưới để nạp vào Veraxus!"
+                        )
+                    btn_apply_custom_upload = st.button(
+                        "🚀 Nạp Dữ Liệu & Kết Nối Ngay",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_apply_custom_upload",
+                    )
                 elif run_local:
                     db_host = "localhost"
                     use_ssl = False
@@ -470,7 +506,7 @@ def render_onboarding():
         )
 
     # B. Xử lý nút Kết nối Tùy chỉnh (Enterprise / Custom Mode)
-    if btn_custom_connect:
+    if btn_custom_connect or btn_apply_custom_upload:
         effective_provider = "OpenRouter" if is_openrouter_key else provider
         if effective_provider == "Ollama (Local AI Offline)" and not clean_api_key:
             clean_api_key = "ollama"
@@ -480,6 +516,7 @@ def render_onboarding():
         upload_error = ""
         if is_custom_upload:
             dir_candidate = (custom_ws_dir_input or "").strip()
+            resolved_dir_path = _resolve_workspace_dir_candidate(dir_candidate) if dir_candidate else None
             if uploaded_biz_files:
                 try:
                     resolved_ws_dir = str(
@@ -490,12 +527,12 @@ def render_onboarding():
                     )
                 except Exception as up_err:
                     upload_error = str(up_err)
-            elif dir_candidate and pathlib.Path(dir_candidate).is_dir():
-                resolved_ws_dir = str(pathlib.Path(dir_candidate))
+            elif resolved_dir_path is not None:
+                resolved_ws_dir = str(resolved_dir_path)
             else:
                 upload_error = (
                     "Vui lòng tải lên ít nhất 1 file (.csv, .xlsx, .sqlite, .db) "
-                    "hoặc nhập đường dẫn thư mục dữ liệu hợp lệ!"
+                    "hoặc nhập đường dẫn thư mục dữ liệu hợp lệ (VD: cafe_pho_viet)!"
                 )
 
         if not clean_api_key and effective_provider != "Ollama (Local AI Offline)":

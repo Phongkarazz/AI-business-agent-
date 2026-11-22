@@ -237,6 +237,9 @@ def extract_requested_limit(user_query: str) -> int | None:
     """Trích xuất số lượng N mà người dùng yêu cầu (ví dụ: Top 10, Top 5, 10 nhân viên, danh sách 10...)."""
     if not user_query:
         return None
+    from datamate.agent import extract_ordinal_rank
+    if extract_ordinal_rank(user_query) is not None:
+        return None
     # Bỏ qua nếu là bách phân vị Top N% hoặc Top N phần trăm
     cleaned_query = re.sub(r"\btop\s*\d+\s*(?:%|phần\s*trăm|percent)", "", user_query, flags=re.IGNORECASE)
 
@@ -289,6 +292,10 @@ def enforce_top_n_limit(sql: str, user_query: str) -> str:
     Nếu là câu hỏi chuỗi thời gian qua các tháng/năm mà không yêu cầu Top N, tự động gỡ bỏ LIMIT để không bị cắt xén dữ liệu.
     Nếu là câu hỏi Kép 2 Đầu Cực Trị (Top N Cao Nhất VÀ Bottom M Thấp Nhất), bảo toàn toàn bộ N + M dòng."""
     if not sql or not user_query:
+        return sql
+    from datamate.agent import extract_ordinal_rank, rewrite_ranked_entity_sql
+    sql = rewrite_ranked_entity_sql(sql, user_query, use_round_half_up=False)
+    if extract_ordinal_rank(user_query) is not None:
         return sql
     from src.llm.prompts import parse_top_bottom_extremes
     is_dual_ext, top_n_ext, bot_n_ext = parse_top_bottom_extremes(user_query)
@@ -4562,11 +4569,239 @@ ORDER BY SalarySpread DESC;""".strip()
         return sql
 
 
+def _is_crm_tickets_intent(user_query: str = "", sql: str = "") -> bool:
+    """Return True when the query or SQL targets CRM support tickets (`crm_tickets`) rather than Chocolates sales/people/products."""
+    q_low = (user_query or "").lower()
+    sql_low = (sql or "").lower()
+    crm_query_kws = [
+        "ticket", "crm_tickets", "phiếu hỗ trợ", "kênh hỗ trợ", "độ ưu tiên",
+        "phản hồi đầu tiên", "thời gian phản hồi", "thời gian xử lý", "xử lý hoàn tất",
+        "firstreply", "fullresolve", "customertype", "loại khách hàng",
+        "khách hàng mua lặp lại", "từng gửi ticket",
+    ]
+    if any(k in q_low for k in crm_query_kws):
+        return True
+    if "crm_tickets" in sql_low:
+        return True
+    return False
+
+
+def auto_fix_chocolates_sales_crm_tickets_query(
+    sql: str,
+    user_query: str,
+    schema_context: str = "",
+    dialect: str = "MySQL",
+) -> str:
+    """Repair drifted/Cartesian SQL for cross-domain sales + crm_tickets queries using pre-aggregated 2-CTE SQL."""
+    if not user_query:
+        return sql
+    q_low = user_query.lower()
+    sch_low = (schema_context or "").lower()
+    if sch_low and ("crm_tickets" not in sch_low or "sales" not in sch_low):
+        return sql
+
+    has_crm_kw = any(k in q_low for k in ["ticket", "crm_tickets", "phiếu hỗ trợ"]) or bool(
+        re.search(r"\b(?:bug|setup|features?)\b", q_low) and any(k in q_low for k in ["loại", "type", "hỗ trợ", "cskh", "crm"])
+    )
+    q_no_ticket_sales = re.sub(r"(?:loại|type)\s*=?\s*['\"]?sales\b", "", q_low)
+    has_sales_kw = any(k in q_no_ticket_sales for k in ["doanh thu", "doanh số", "revenue", "sales", "boxes", "hộp", "thùng"])
+    if not (has_crm_kw and has_sales_kw):
+        return sql
+
+    # Preserve valid CustomerID queries (e.g. CRM + sales customer lookup)
+    if any(k in q_low for k in ["customerid", "mã khách hàng", "từng gửi ticket"]):
+        return sql
+
+    is_sqlite = "sqlite" in (dialect or "").lower() or "sqlite" in sch_low
+    sql_low = (sql or "").lower()
+    sql_compact = re.sub(r"\s+", "", sql_low)
+
+    req_years = list(dict.fromkeys(re.findall(r"\b(20\d{2})\b", q_low)))
+    wants_geo = any(k in q_low for k in ["quốc gia", "geo", "country", "thị trường", "khu vực", "region"])
+    wants_people = any(k in q_low for k in ["nhân viên", "salesperson", "team", "đội ngũ"]) and not wants_geo
+    matched_types = []
+    if re.search(r"\bbug\b", q_low):
+        matched_types.append("Bug")
+    if re.search(r"\bsetup\b", q_low):
+        matched_types.append("Setup")
+    if re.search(r"\bfeatures?\b", q_low):
+        matched_types.append("Features")
+    if re.search(r"(?:loại|type)\s*=?\s*['\"]?sales\b", q_low):
+        matched_types.append("Sales")
+
+    is_singular_top = bool(
+        re.search(
+            r"\b(?:quốc gia|nước|thị trường|nhân viên|người|đội ngũ|đội|team|khu vực)(?:\s*\([^)]+\))?\s+nào\b",
+            q_low,
+        )
+        and any(k in q_low for k in ["cao nhất", "lớn nhất", "nhiều nhất", "thấp nhất", "ít nhất", "dẫn đầu"])
+        and not any(k in q_low for k in ["từng", "mỗi", "các ", "danh sách", "top "])
+    )
+    top_m = re.search(r"(?:top\s*|danh\s+sách\s*)(\d+)", q_low)
+
+    # Check whether existing SQL is already structurally valid and aligned
+    has_cte_or_subq = ("with " in sql_low) or ("(select" in sql_compact)
+    dim_ok = True
+    if wants_geo:
+        dim_ok = ("geo" in sql_low) and ("products" not in sql_low or any(k in q_low for k in ["sản phẩm", "product", "category"]))
+    elif wants_people:
+        dim_ok = "people" in sql_low
+
+    years_ok = True
+    if len(req_years) == 1:
+        yr = req_years[0]
+        years_ok = (yr in sql_low) and ("saledate" in sql_low) and ("createdat" in sql_low)
+    elif len(req_years) >= 2:
+        years_ok = min(req_years) in sql_low and max(req_years) in sql_low
+
+    type_ok = True
+    if len(matched_types) == 1:
+        type_ok = matched_types[0].lower() in sql_low
+
+    limit_ok = True
+    if is_singular_top and not top_m:
+        limit_ok = bool(re.search(r"\blimit\s+1\b", sql_low))
+
+    if (
+        sql_low
+        and "crm_tickets" in sql_low
+        and "sales" in sql_low
+        and has_cte_or_subq
+        and dim_ok
+        and years_ok
+        and type_ok
+        and limit_ok
+    ):
+        return sql
+
+    # Reconstruct canonical Cartesian-safe 2-CTE query
+    s_yr_where = ""
+    t_conds: list[str] = []
+    if len(req_years) == 1:
+        yr = req_years[0]
+        s_yr_where = f"\n    WHERE strftime('%Y', s.SaleDate) = '{yr}'" if is_sqlite else f"\n    WHERE YEAR(s.SaleDate) = {yr}"
+        t_conds.append(f"strftime('%Y', t.CreatedAt) = '{yr}'" if is_sqlite else f"YEAR(t.CreatedAt) = {yr}")
+    elif len(req_years) >= 2:
+        y1, y2 = min(req_years), max(req_years)
+        s_yr_where = (
+            f"\n    WHERE strftime('%Y', s.SaleDate) BETWEEN '{y1}' AND '{y2}'"
+            if is_sqlite else f"\n    WHERE YEAR(s.SaleDate) BETWEEN {y1} AND {y2}"
+        )
+        t_conds.append(
+            f"strftime('%Y', t.CreatedAt) BETWEEN '{y1}' AND '{y2}'"
+            if is_sqlite else f"YEAR(t.CreatedAt) BETWEEN {y1} AND {y2}"
+        )
+
+    ticket_alias = "TotalTickets"
+    if len(matched_types) == 1:
+        t_type = matched_types[0]
+        t_conds.append(f"t.Type = '{t_type}'")
+        ticket_alias = f"{t_type}Tickets"
+
+    if (any(k in q_low for k in ["đã giải quyết", "giải quyết xong"]) or re.search(r"\bsolved\b", q_low)) and not any(
+        k in q_low for k in ["tỷ lệ", "rate"]
+    ):
+        t_conds.append("t.Status = 'Solved'")
+
+    t_where = ("\n    WHERE " + " AND ".join(t_conds)) if t_conds else ""
+
+    asks_boxes = any(k in q_low for k in ["hộp", "boxes", "thùng"])
+    asks_sales = any(k in q_low for k in ["doanh thu", "doanh số", "revenue", "sales"]) or not asks_boxes
+    sales_expr = "SUM(s.Boxes)" if (asks_boxes and not asks_sales) else "SUM(s.Amount)"
+    sales_col = "TotalBoxes" if (asks_boxes and not asks_sales) else "TotalSales"
+    order_col = ticket_alias if any(k in q_low for k in ["nhiều ticket nhất", "nhiều bug nhất", "nhiều lỗi nhất"]) else sales_col
+
+    if top_m:
+        limit_clause = f"\nLIMIT {int(top_m.group(1))}"
+    elif is_singular_top:
+        limit_clause = "\nLIMIT 1"
+    else:
+        limit_clause = ""
+
+    if wants_people:
+        is_team = any(k in q_low for k in ["team", "đội ngũ"]) and not any(k in q_low for k in ["nhân viên", "salesperson"])
+        select_dim = "pe.Team AS Team" if is_team else "pe.Salesperson AS Salesperson, pe.Team AS Team"
+        grp_expr = "pe.Team" if is_team else "pe.SPID, pe.Salesperson, pe.Team"
+        team_where = "\nWHERE pe.Team != '' AND pe.Team IS NOT NULL" if is_team else ""
+        return f"""WITH SalesAgg AS (
+    SELECT s.SPID, {sales_expr} AS {sales_col}
+    FROM sales s{s_yr_where}
+    GROUP BY s.SPID
+),
+TicketAgg AS (
+    SELECT t.SPID, COUNT(DISTINCT t.TicketID) AS {ticket_alias}
+    FROM crm_tickets t{t_where}
+    GROUP BY t.SPID
+)
+SELECT
+    {select_dim},
+    SUM(COALESCE(sa.{sales_col}, 0)) AS {sales_col},
+    SUM(COALESCE(ta.{ticket_alias}, 0)) AS {ticket_alias}
+FROM people pe
+JOIN SalesAgg sa ON pe.SPID = sa.SPID
+LEFT JOIN TicketAgg ta ON pe.SPID = ta.SPID{team_where}
+GROUP BY {grp_expr}
+ORDER BY {order_col} DESC{limit_clause};""".strip()
+
+    is_region = any(k in q_low for k in ["khu vực", "region"]) and not any(k in q_low for k in ["quốc gia", "geo", "country"])
+    geo_select = "g.Region AS Region" if is_region else "g.Geo AS Country"
+    geo_grp = "g.Region" if is_region else "g.GeoID, g.Geo"
+    return f"""WITH SalesAgg AS (
+    SELECT s.GeoID, {sales_expr} AS {sales_col}
+    FROM sales s{s_yr_where}
+    GROUP BY s.GeoID
+),
+TicketAgg AS (
+    SELECT t.GeoID, COUNT(DISTINCT t.TicketID) AS {ticket_alias}
+    FROM crm_tickets t{t_where}
+    GROUP BY t.GeoID
+)
+SELECT
+    {geo_select},
+    SUM(COALESCE(sa.{sales_col}, 0)) AS {sales_col},
+    SUM(COALESCE(ta.{ticket_alias}, 0)) AS {ticket_alias}
+FROM geo g
+JOIN SalesAgg sa ON g.GeoID = sa.GeoID
+LEFT JOIN TicketAgg ta ON g.GeoID = ta.GeoID
+GROUP BY {geo_grp}
+ORDER BY {order_col} DESC{limit_clause};""".strip()
+
+
+def _extract_single_or_range_years(q_low: str) -> tuple[Optional[str], Optional[tuple[str, str]]]:
+    """Return `(single_year, None)` when 1 distinct year appears, `(None, (min_y, max_y))` for multi-year ranges, else `(None, None)`."""
+    years = list(dict.fromkeys(re.findall(r'\b(20\d{2})\b', q_low or "")))
+    if len(years) == 1:
+        return years[0], None
+    if len(years) >= 2:
+        return None, (min(years), max(years))
+    return None, None
+
+
+def _build_saledate_year_cond(
+    q_low: str, is_sqlite: bool, alias: str = "s"
+) -> tuple[str, Optional[str], Optional[tuple[str, str]]]:
+    """Build SQLite/MySQL year or year-range WHERE predicate for SaleDate without truncating multi-year ranges."""
+    single_y, yr_range = _extract_single_or_range_years(q_low)
+    col = f"{alias}.SaleDate" if alias else "SaleDate"
+    if single_y:
+        cond = f"strftime('%Y', {col}) = '{single_y}'" if is_sqlite else f"YEAR({col}) = {single_y}"
+        return cond, single_y, None
+    if yr_range:
+        y1, y2 = yr_range
+        cond = (
+            f"strftime('%Y', {col}) BETWEEN '{y1}' AND '{y2}'"
+            if is_sqlite
+            else f"YEAR({col}) BETWEEN {y1} AND {y2}"
+        )
+        return cond, None, yr_range
+    return "", None, None
+
+
 def auto_fix_chocolates_dual_extreme_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động phát hiện và chuẩn hóa các câu truy vấn Kép 2 Đầu Cực Trị (Top N Cao Nhất VÀ Bottom M Thấp Nhất)
     trên CSDL Awesome Chocolates, đảm bảo luôn trả về đầy đủ cả N đối tượng cao nhất và M đối tượng thấp nhất
     bằng CTE 2 bước (BaseStats -> RankedStats) kèm cột phân loại `Nhóm Xếp Hạng`."""
-    if not user_query:
+    if not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
     from src.llm.prompts import build_chocolates_dual_extreme_sql
     dual_sql = build_chocolates_dual_extreme_sql(user_query, dialect=dialect)
@@ -4579,8 +4814,8 @@ def auto_fix_chocolates_pnl_query(sql: str, user_query: str, dialect: str = "MyS
     """Tự động phát hiện và chuẩn hóa câu truy vấn Báo cáo kết quả kinh doanh / Lãi, Lỗ / Doanh thu - Chi phí - Lợi nhuận (P&L)
     trên CSDL Awesome Chocolates. Đảm bảo JOIN bảng products pr ON s.PID = pr.PID để lấy pr.Cost_per_box,
     tính đầy đủ 4 chỉ số tài chính: Doanh Thu, Chi Phí, Lợi Nhuận (hoặc Lợi Nhuận Ròng), Tỷ Suất Lợi Nhuận,
-    và các chiều Sản Phẩm/Đội Ngũ/Quốc Gia/Tháng/Quý/Năm."""
-    if not sql or not user_query:
+    và các chiều Sản Phẩm/Danh Mục/Kích Thước/Đội Ngũ/Quốc Gia/Khu Vực/Tháng/Quý/Năm."""
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     from src.llm.prompts import parse_top_bottom_extremes
@@ -4601,13 +4836,13 @@ def auto_fix_chocolates_pnl_query(sql: str, user_query: str, dialect: str = "MyS
         "chi phí", "cost", "giá vốn", "cogs", "lợi nhuận ròng", "net profit"
     ]) or (
         any(k in q_low for k in ["lợi nhuận", "profit", "biên lợi nhuận", "tỷ suất lợi nhuận", "tỉ suất lợi nhuận"])
-        and any(k in q_low for k in ["tháng", "quý", "năm", "month", "quarter", "báo cáo", "doanh thu", "chi phí", "từng", "sản phẩm", "product"])
+        and any(k in q_low for k in ["tháng", "quý", "năm", "month", "quarter", "báo cáo", "doanh thu", "chi phí", "từng", "sản phẩm", "product", "category", "danh mục", "size", "kích thước"])
     )
 
     if not is_pnl_q:
         return sql
 
-    is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "thị trường", "quốc gia", "country", "geo", "cost_per_box", "chi phí", "giá vốn", "sản phẩm"])
+    is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "thị trường", "quốc gia", "country", "geo", "cost_per_box", "chi phí", "giá vốn", "sản phẩm", "category", "danh mục"])
     if not is_chocolates:
         return sql
 
@@ -4619,20 +4854,21 @@ def auto_fix_chocolates_pnl_query(sql: str, user_query: str, dialect: str = "MyS
         "CONCAT(YEAR(s.SaleDate), '-Q', QUARTER(s.SaleDate))"
     )
 
-    year_match = re.search(r'\b(20\d{2})\b', q_low)
-    year_val = year_match.group(1) if year_match else None
-    year_cond = (f"strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {year_val}") if year_val else ""
+    year_cond, year_val, year_range = _build_saledate_year_cond(q_low, is_sqlite=is_sqlite, alias="s")
 
     has_month = any(k in q_low for k in ["tháng", "month"])
     has_quarter = any(k in q_low for k in ["quý", "quarter"])
     has_country = any(k in q_low for k in ["quốc gia", "country", "thị trường", "geo", "nước"])
-    has_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"])
-    has_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"])
+    has_category = any(k in q_low for k in ["category", "danh mục", "nhóm sản phẩm", "nhóm hàng"])
+    has_size = any(k in q_low for k in ["kích thước", "cỡ hộp"]) or bool(re.search(r"\bsize\b", q_low))
+    has_region = bool(re.search(r"\bregion\b", q_low)) or any(k in q_low for k in ["khu vực", "apac", "europe", "americas"])
+    has_product = any(k in q_low for k in ["sản phẩm", "product", "mặt hàng"]) and not has_category and not has_size
+    has_team = any(k in q_low for k in ["team", "đội ngũ"]) or ("nhóm" in q_low and not has_category and not any(k in q_low for k in ["nhóm khách hàng", "nhóm ticket"]))
 
     profit_alias = "Lợi Nhuận Ròng ($)" if any(k in q_low for k in ["ròng", "net"]) else "Lợi Nhuận ($)"
 
     has_cost = "cost_per_box" in sql_low
-    has_profit_calc = ("amount -" in sql_low or "amount-" in sql_low or "lợi nhuận" in sql_low or "profit" in sql_low)
+    has_profit_calc = ("amount -" in sql_low or "amount-" in sql_low or "lợi nhuận" in sql_low or "profit" in sql_low or "grossmargin" in sql_low or "biên lợi nhuận" in sql_low)
     has_full_dims = True
     if has_quarter and ("quarter" not in sql_low and "quý" not in sql_low):
         has_full_dims = False
@@ -4640,15 +4876,21 @@ def auto_fix_chocolates_pnl_query(sql: str, user_query: str, dialect: str = "MyS
         has_full_dims = False
     if has_country and ("geo" not in sql_low and "quốc gia" not in sql_low and "country" not in sql_low):
         has_full_dims = False
+    if has_category and ("category" not in sql_low and "danh mục" not in sql_low):
+        has_full_dims = False
+    if has_size and ("size" not in sql_low and "kích thước" not in sql_low):
+        has_full_dims = False
+    if has_region and ("region" not in sql_low and "khu vực" not in sql_low):
+        has_full_dims = False
     if has_product and ("product" not in sql_low and "sản phẩm" not in sql_low):
         has_full_dims = False
     if has_team and ("team" not in sql_low and "đội ngũ" not in sql_low):
         has_full_dims = False
 
     has_standard_vi_aliases = (
-        ("tổng doanh thu" in sql_low or "doanh thu" in sql_low or "totalsales" in sql_low)
-        and ("tổng chi phí" in sql_low or "chi phí" in sql_low or "totalcost" in sql_low)
-        and ("lợi nhuận" in sql_low or "lãi" in sql_low or "profit" in sql_low)
+        any(k in sql_low for k in ["tổng doanh thu", "doanh thu", "totalsales", "totalrevenue", "revenue"])
+        and any(k in sql_low for k in ["tổng chi phí", "chi phí", "giá vốn", "totalcost", "totalcogs", "cogs"])
+        and any(k in sql_low for k in ["lợi nhuận", "lãi", "biên lợi nhuận", "profit", "grossmargin", "margin"])
     )
     has_weird_en_alias = any(k in sql_low for k in ["total_returns", "total returns", "packaging_cost", "packaging cost", "box_cost", "box cost"])
 
@@ -4771,6 +5013,37 @@ JOIN people pe ON s.SPID = pe.SPID
 {where_clause}GROUP BY {group_cols}
 ORDER BY {order_col}{limit_clause}"""
 
+    # 3b. Báo cáo P&L theo Danh mục (Category) / Kích thước (Size) / Khu vực (Region)
+    if has_category or has_size:
+        dim_col = "pr.Category" if has_category else "pr.Size"
+        dim_alias = "Danh Mục" if has_category else "Kích Thước"
+        conds = [year_cond] if year_cond else []
+        where_clause = f"WHERE {' AND '.join(conds)}\n" if conds else ""
+        if has_month:
+            time_cols = f"    {date_expr} AS `Tháng`,\n    {dim_col} AS `{dim_alias}`,"
+            group_cols = f"`Tháng`, `{dim_alias}`"
+            order_col = f"`Tháng` ASC, `{profit_alias}` DESC"
+        elif has_quarter:
+            time_cols = f"    {qtr_expr} AS `Quý`,\n    {dim_col} AS `{dim_alias}`,"
+            group_cols = f"`Quý`, `{dim_alias}`"
+            order_col = f"`Quý` ASC, `{profit_alias}` DESC"
+        else:
+            time_cols = f"    {dim_col} AS `{dim_alias}`,"
+            group_cols = dim_col
+            order_col = "`Tổng Doanh Thu ($)` DESC" if any(k in q_low for k in ["doanh thu", "doanh số"]) else f"`{profit_alias}` DESC"
+
+        limit_clause = f"\nLIMIT {top_m.group(1)}" if top_m else ""
+        return f"""SELECT 
+{time_cols}
+    SUM(s.Amount) AS `Tổng Doanh Thu ($)`,
+    ROUND(SUM(s.Boxes * pr.Cost_per_box), 2) AS `Tổng Chi Phí ($)`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box), 2) AS `{profit_alias}`,
+    ROUND(SUM(s.Amount - s.Boxes * pr.Cost_per_box) * 100.0 / NULLIF(SUM(s.Amount), 0), 2) AS `Tỷ Suất Lợi Nhuận (%)`
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+{where_clause}GROUP BY {group_cols}
+ORDER BY {order_col}{limit_clause}"""
+
     # 4. Báo cáo P&L theo Thời gian (Tháng / Quý) hoặc Toàn công ty
     conds = []
     if year_cond:
@@ -4809,7 +5082,7 @@ def auto_fix_chocolates_monthly_spread_query(sql: str, user_query: str, dialect:
     có sự thay đổi / biến động / dao động doanh thu lớn nhất giữa các tháng trong năm trên CSDL Awesome Chocolates.
     Ví dụ: 'Sản phẩm có sự thay đổi doanh thu lớn nhất trong các tháng đối với năm 2021'
     """
-    if not user_query:
+    if not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
     q_low = user_query.lower()
     sql_low = (sql or "").lower()
@@ -4825,14 +5098,12 @@ def auto_fix_chocolates_monthly_spread_query(sql: str, user_query: str, dialect:
     is_sqlite = "sqlite" in (dialect or "").lower()
     date_expr = "strftime('%Y-%m', s.SaleDate)" if is_sqlite else "DATE_FORMAT(s.SaleDate, '%Y-%m')"
 
-    year_match = re.search(r'\b(20\d{2})\b', q_low)
-    year_val = year_match.group(1) if year_match else None
-    year_cond = (f"strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {year_val}") if year_val else ""
+    year_cond, year_val, _ = _build_saledate_year_cond(q_low, is_sqlite=is_sqlite, alias="s")
 
     is_boxes = any(k in q_low for k in ["hộp", "boxes", "thùng"]) and not any(k in q_low for k in ["doanh số", "doanh thu", "tiền", "số tiền", "amount", "giá trị"])
     metric_col = "s.Boxes" if is_boxes else "s.Amount"
 
-    is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "người bán", "salesperson", "rep"])
+    is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "người bán", "salesperson"]) or bool(re.search(r"\brep\b", q_low))
     is_geo = any(k in q_low for k in ["quốc gia", "thị trường", "country", "geo"])
     is_team = any(k in q_low for k in ["team", "đội ngũ", "nhóm"]) and not is_person
 
@@ -5210,7 +5481,7 @@ ORDER BY TargetPeriodSales DESC;""".strip()
 def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo tháng (theo Quốc gia, Sản phẩm, Nhân viên, hoặc Số lượng hộp/thùng bán ra) trên CSDL Awesome Chocolates.
     Loại bỏ triệt để CTE bị vỡ (WITH ...), JOIN trùng lặp và chuyển thành câu SELECT đơn trực tiếp định dạng YYYY-MM hoặc Month số."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -5265,20 +5536,32 @@ def auto_fix_chocolates_monthly_sales_query(sql: str, user_query: str, dialect: 
         return auto_fix_chocolates_monthly_spread_query(sql, user_query, dialect=dialect)
 
     # Kiểm tra xem có phải câu hỏi theo tháng / thời gian trên Chocolates DB không
-    has_monthly = any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "thời gian", "xu hướng", "thay đổi", "biến động"])
-    has_sales = any(k in q_low for k in ["doanh thu", "doanh số", "sales", "tiền bán", "amount", "bán hàng", "tiền"]) or any(k in sql_low for k in ["sales", "totalsales", "totalrevenue", "amount"])
-    has_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes", "số lượng"]) or any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
+    has_non_trend_time = any(k in q_low for k in ["thời gian phản hồi", "thời gian xử lý", "response time", "resolve time", "reply time"])
+    has_monthly = (
+        any(k in q_low for k in ["tháng", "month", "qua các tháng", "từng tháng", "theo tháng", "theo thời gian", "qua thời gian", "dòng thời gian", "xu hướng", "thay đổi", "biến động"])
+        and not (has_non_trend_time and not any(k in q_low for k in ["tháng", "month", "từng tháng", "theo tháng"]))
+    )
+    has_sales = (
+        any(k in q_low for k in ["doanh thu", "doanh số", "tiền bán", "amount", "bán hàng", "tiền"])
+        or bool(re.search(r"\b(?:sales|revenue)\b", q_low))
+        or any(k in sql_low for k in ["s.amount", "totalsales", "totalrevenue", "amount"])
+        or bool(re.search(r"\bfrom\s+sales\b", sql_low))
+    )
+    has_non_box_qty = any(k in q_low for k in ["ticket", "nhân viên", "nhân sự", "khách hàng", "đơn hàng", "giao dịch"])
+    has_boxes = (
+        any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"])
+        or ("số lượng" in q_low and not has_non_box_qty)
+        or any(k in sql_low for k in ["s.boxes", "totalboxes", "boxessold"])
+    )
     has_both = has_sales and has_boxes
 
-    if not (has_monthly and (has_sales or has_boxes or "sales" in sql_low or "amount" in sql_low or "boxes" in sql_low)):
+    if not (has_monthly and (has_sales or has_boxes)):
         return sql
 
     is_sqlite = "sqlite" in (dialect or "").lower()
     date_expr = "strftime('%Y-%m', s.SaleDate)" if is_sqlite else "DATE_FORMAT(s.SaleDate, '%Y-%m')"
 
-    year_match = re.search(r'\b(20\d{2})\b', q_low)
-    year_val = year_match.group(1) if year_match else None
-    year_cond = (f"strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {year_val}") if year_val else ""
+    year_cond, year_val, year_range = _build_saledate_year_cond(q_low, is_sqlite=is_sqlite, alias="s")
 
     # 0. Doanh thu của một Team cụ thể (Yummies, Delish, Jucies) qua các tháng
     specific_team = None
@@ -5552,7 +5835,13 @@ JOIN products pr ON s.PID = pr.PID
 ORDER BY Month ASC, {order_col} DESC"""
 
     # 3. Doanh thu theo nhân viên / chuyên viên bán hàng qua các tháng
-    is_person = any(k in q_low for k in ["nhân viên", "nhân sự", "chuyên viên", "chuyên viên bán hàng", "salesperson", "sales person", "người bán", "thành viên", "sales rep", "rep"]) or "people" in sql_low or "spid" in sql_low or "salesperson" in sql_low
+    is_person = (
+        any(k in q_low for k in ["nhân viên", "nhân sự", "chuyên viên", "chuyên viên bán hàng", "salesperson", "sales person", "người bán", "thành viên", "sales rep"])
+        or bool(re.search(r"\brep\b", q_low))
+        or "people" in sql_low
+        or "spid" in sql_low
+        or "salesperson" in sql_low
+    )
     if is_person and not specific_person and not any(k in q_low for k in ["quốc gia", "country", "sản phẩm", "product"]):
         if has_both:
             metric_part = "SUM(s.Amount) AS TotalRevenue,\n    SUM(s.Boxes) AS TotalBoxesSold"
@@ -5587,10 +5876,12 @@ ORDER BY Month ASC, {order_col} DESC"""
     # 4 & 5. Doanh thu và/hoặc số lượng thùng/hộp qua các tháng (không phân nhóm đối tượng)
     is_general = not (is_country or is_product or is_person or is_team or specific_team or specific_country or specific_product or specific_person)
     if is_general:
-        year_match = re.search(r'\b(20\d{2})\b', q_low)
-        if year_match:
-            yr = year_match.group(1)
-            year_filter = f"WHERE strftime('%Y', s.SaleDate) = '{yr}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {yr}"
+        is_outlier_q = any(k in q_low for k in ["dị biệt", "outlier", "outliers", "bất thường", "anomaly", "z-score", "zscore"])
+        has_ym_expr = ("date_format" in sql_low and not is_sqlite) or ("strftime('%y-%m'" in sql_low and is_sqlite) or ("strftime(\"%y-%m\"" in sql_low and is_sqlite)
+        if is_outlier_q and ("with " in sql_low) and has_ym_expr:
+            return sql
+        if year_val:
+            year_filter = f"WHERE strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"WHERE YEAR(s.SaleDate) = {year_val}"
             month_expr = "CAST(strftime('%m', s.SaleDate) AS INTEGER)" if is_sqlite else "MONTH(s.SaleDate)"
             if has_both:
                 return f"""SELECT 
@@ -5618,13 +5909,20 @@ FROM sales s
 GROUP BY Month
 ORDER BY Month ASC"""
         else:
+            range_clause = f"WHERE {year_cond}\n" if year_cond else ""
+            missing_range = bool(
+                year_range
+                and "where " in sql_low
+                and (year_range[0] not in sql_low or year_range[1] not in sql_low)
+            )
             if has_both:
                 needs_fix = (
-                    "with " in sql_low
+                    ("with " in sql_low and not is_outlier_q)
                     or ("year(" in sql_low and "month(" in sql_low)
                     or ("date_format" not in sql_low and not is_sqlite)
                     or ("strftime" not in sql_low and is_sqlite)
                     or "limit" in sql_low
+                    or missing_range
                     or "boxes" not in sql_low
                     or ("amount" not in sql_low and "totalsales" not in sql_low and "totalrevenue" not in sql_low)
                 )
@@ -5634,15 +5932,16 @@ ORDER BY Month ASC"""
     SUM(s.Amount) AS TotalRevenue,
     SUM(s.Boxes) AS TotalBoxesSold
 FROM sales s
-GROUP BY Month
+{range_clause}GROUP BY Month
 ORDER BY Month ASC"""
             elif has_boxes and not has_sales:
                 needs_fix = (
-                    "with " in sql_low
+                    ("with " in sql_low and not is_outlier_q)
                     or ("year(" in sql_low and "month(" in sql_low)
                     or ("date_format" not in sql_low and not is_sqlite)
                     or ("strftime" not in sql_low and is_sqlite)
                     or "limit" in sql_low
+                    or missing_range
                     or "boxes" not in sql_low
                 )
                 if needs_fix:
@@ -5650,15 +5949,16 @@ ORDER BY Month ASC"""
     {date_expr} AS Month,
     SUM(s.Boxes) AS TotalBoxesSold
 FROM sales s
-GROUP BY Month
+{range_clause}GROUP BY Month
 ORDER BY Month ASC"""
             else:
                 needs_fix = (
-                    "with " in sql_low
+                    ("with " in sql_low and not is_outlier_q)
                     or ("year(" in sql_low and "month(" in sql_low)
                     or ("date_format" not in sql_low and not is_sqlite)
                     or ("strftime" not in sql_low and is_sqlite)
                     or "limit" in sql_low
+                    or missing_range
                     or ("amount" not in sql_low and "totalsales" not in sql_low and "totalrevenue" not in sql_low)
                 )
                 if needs_fix:
@@ -5666,7 +5966,7 @@ ORDER BY Month ASC"""
     {date_expr} AS Month,
     SUM(s.Amount) AS TotalSales
 FROM sales s
-GROUP BY Month
+{range_clause}GROUP BY Month
 ORDER BY Month ASC"""
 
     if has_monthly and not extract_requested_limit(user_query):
@@ -5986,7 +6286,7 @@ ORDER BY GrowthPct DESC{limit_clause}"""
 def auto_fix_chocolates_quarterly_sales_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và sửa lỗi câu truy vấn doanh thu theo quý (theo Quốc gia, Sản phẩm, Team, hoặc Toàn công ty)
     trên CSDL Awesome Chocolates. Đảm bảo GROUP BY đúng Quarter và ORDER BY Quarter ASC để vẽ biểu đồ đường xu hướng."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -6226,7 +6526,7 @@ def auto_fix_datetime_year_filters(sql: str, dialect: str = "MySQL") -> str:
             return f"YEAR({col}) = {yr1}"
         return f"YEAR({col}) BETWEEN {yr1} AND {yr2}"
 
-    date_col_pattern = r'(\b(?:[a-zA-Z_]\w*\.)?(?:SaleDate|sale_date|hire_date|from_date|to_date|birth_date|order_date))'
+    date_col_pattern = r'(\b(?:[a-zA-Z_]\w*\.)?(?:SaleDate|sale_date|hire_date|from_date|to_date|birth_date|order_date|CreatedAt|created_at))'
 
     # BETWEEN 2021 AND 2021 or BETWEEN '2021' AND '2021'
     sql = re.sub(
@@ -6426,7 +6726,7 @@ ORDER BY TotalSalaryBudget DESC"""
 def auto_fix_chocolates_dominant_market_top_product_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động phát hiện và chuẩn hóa truy vấn tìm thị trường chiếm tỷ trọng lớn (> X% doanh số toàn cầu)
     kèm sản phẩm bán chạy nhất tại thị trường đó."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -6609,7 +6909,7 @@ ORDER BY CASE WHEN co.`Nhóm Đơn Hàng` = '{target_label}' THEN 0 ELSE 1 END;"
 def auto_fix_contribution_percentage_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và đảm bảo câu truy vấn Tỷ lệ đóng góp / Tỷ trọng (Category, Country, Team, Product)
     trên CSDL Awesome Chocolates luôn trả về đầy đủ cột Tỷ lệ (Percentage) và Doanh số (TotalSales)."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -6634,10 +6934,24 @@ def auto_fix_contribution_percentage_query(sql: str, user_query: str, dialect: s
     if any(k in q_low for k in ["đơn hàng", "giao dịch", "mỗi đơn", "các đơn", "orders", "transactions", "đơn"]) and any(k in q_low for k in ["trung bình", "bình quân", "avg", "average", "lớn hơn", "lướn hơn", "lơn hơn", "lon hon", "nhỏ hơn", "nho hon", "vượt", "trên", "dưới", ">", "<"]):
         return sql
 
-    is_ratio_question = any(k in q_low for k in [
-        "tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "percent", "tỷ trọng", "tỉ trọng", 
-        "cơ cấu", "share", "ratio", "đóng góp"
+    from src.llm.datamate_bridge import has_headcount_qualifier_conflict
+
+    if (
+        any(k in q_low for k in ["nhân viên", "nhân sự", "employee", "staff"])
+        and has_headcount_qualifier_conflict(q_low)
+        and not any(k in q_low for k in ["đóng góp", "doanh thu", "doanh số", "bán hàng", "revenue", "sales", "boxes", "hộp", "lợi nhuận", "margin", "tỷ trọng", "tỉ trọng"])
+    ):
+        return sql
+
+    is_explicit_ratio = any(k in q_low for k in [
+        "tỉ lệ", "tỷ lệ", "phần trăm", "percentage", "percent", "%", "tỷ trọng", "tỉ trọng",
+        "cơ cấu", "share", "ratio", "đóng góp bao nhiêu phần trăm", "đóng góp %"
     ])
+    asks_multi_metrics = any(k in q_low for k in [
+        "bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "headcount",
+        "số hộp", "boxes", "khu vực", "region", "size", "kích thước",
+    ])
+    is_ratio_question = is_explicit_ratio or ("đóng góp" in q_low and not asks_multi_metrics)
     if not is_ratio_question:
         return sql
 
@@ -6690,7 +7004,7 @@ ORDER BY TotalSales DESC{limit_clause}"""
 
     # 3. Tỷ lệ đóng góp theo Đội ngũ bán hàng (Team)
     is_team = any(k in q_low for k in ["team", "đội ngũ", "đội", "nhóm bán hàng", "nhóm kinh doanh"])
-    if is_team and not is_category and not is_country:
+    if is_team and not is_category and not is_country and not asks_multi_metrics:
         needs_fix = (
             not has_percentage_in_sql 
             or "with " in sql_low 
@@ -6731,7 +7045,7 @@ ORDER BY TotalSales DESC{limit_prod}"""
 
     # 5. Tỷ lệ đóng góp theo Nhân viên bán hàng (Salesperson)
     is_person = (
-        any(k in q_low for k in ["nhân viên", "nhân sự", "người bán", "salesperson", "sales person", "sales rep", "rep", "từng nhân viên", "mỗi nhân viên"])
+        (any(k in q_low for k in ["nhân viên", "nhân sự", "người bán", "salesperson", "sales person", "sales rep", "từng nhân viên", "mỗi nhân viên"]) or bool(re.search(r"\brep\b", q_low)))
         and not is_category and not is_country and not is_team and not is_product
     )
     if is_person:
@@ -6828,6 +7142,15 @@ def auto_fix_sales_performance_comparison_query(sql: str, user_query: str, diale
 
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"]) or any(k in q_low for k in ["bán hàng", "doanh số", "doanh thu", "hộp", "thùng", "kẹo", "socola", "chocolate", "thị trường", "mỹ", "ấn độ", "india", "usa"])
     if not is_chocolates:
+        return sql
+
+    # Không can thiệp nếu người dùng yêu cầu phân nhóm rõ ràng theo Size (Kích thước) hoặc Region (Khu vực)
+    if (
+        any(k in q_low for k in ["kích thước", "cỡ hộp"])
+        or bool(re.search(r"\bsize\b", q_low))
+        or bool(re.search(r"\bregion\b", q_low))
+        or any(k in q_low for k in ["apac", "europe", "americas"])
+    ):
         return sql
 
     # 1. So sánh hiệu quả giữa các thị trường / quốc gia
@@ -7051,7 +7374,7 @@ ORDER BY TotalRevenue DESC
 LIMIT {req_limit}"""
 
     # 6. Hiệu quả bán hàng theo Nhân viên (Salesperson: Đơn giá trung bình / AvgPricePerBox hoặc Giá trị đơn hàng trung bình)
-    elif any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai bán", "ai là", "ai có", "thành viên", "sales rep", "rep"]):
+    elif any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai bán", "ai là", "ai có", "thành viên", "sales rep"]) or bool(re.search(r"\brep\b", q_low)):
         is_sqlite = "sqlite" in (dialect or "").lower()
         calc_avg_box = (
             "ROUND(CAST(SUM(s.Amount) AS FLOAT) / NULLIF(SUM(s.Boxes), 0), 2)"
@@ -7143,7 +7466,7 @@ def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "My
     """Tự động chuẩn hóa câu truy vấn đếm số lượng nhân viên bán hàng (Headcount)
     theo từng Đội ngũ (Team) hoặc Khu vực (Location) trên CSDL Awesome Chocolates.
     Ngăn chặn tuyệt đối việc tính nhầm sang SUM(Boxes) hay SUM(Amount) từ bảng sales."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -7154,6 +7477,11 @@ def auto_fix_sales_headcount_query(sql: str, user_query: str, dialect: str = "My
         any(k in q_low for k in ["phòng ban", "phòng", "department", "chức danh", "title", "thâm niên", "lương"])
         or any(k in sql_low for k in ["departments", "dept_emp", "titles", "salaries", "dept_manager"])
     ):
+        return sql
+
+    from src.llm.datamate_bridge import has_headcount_qualifier_conflict
+
+    if has_headcount_qualifier_conflict(q_low):
         return sql
 
     # Nhận diện câu hỏi về đếm số lượng nhân viên / headcount / quy mô nhân sự
@@ -7209,7 +7537,7 @@ def auto_fix_chocolates_segment_large_orders_query(sql: str, user_query: str, di
     """Tự động phát hiện và chuẩn hóa các câu truy vấn phân tích đơn hàng lớn theo phân khúc
     kết hợp giữa Ngưỡng số lượng hộp đơn hàng (>= 500, 1000) với Danh mục sản phẩm (Bites, Bars)
     và/hoặc Thị trường (USA, Canada, India...)."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -7618,13 +7946,13 @@ def auto_fix_chocolates_team_sales_and_boxes_query(sql: str, user_query: str, di
     - Bổ sung chỉ số hiệu quả ROUND(SUM(s.Amount) / SUM(s.Boxes), 2) AS AvgPricePerBox.
     - Sắp xếp ORDER BY TotalSales DESC.
     """
-    if not user_query:
+    if not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
     q_low = user_query.lower()
 
     is_team_q = (
         any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "các team", "giữa các team", "giữa nhóm", "giữa các nhóm", "nhóm cao nhất", "nhóm thấp nhất", "theo nhóm", "từng nhóm", "mỗi nhóm"])
-        or ("nhóm" in q_low and not any(k in q_low for k in ["nhóm kẹo", "nhóm sản phẩm", "nhóm bars", "nhóm bites", "nhóm hàng", "nhóm danh mục", "phòng ban", "chức danh"]))
+        or ("nhóm" in q_low and not any(k in q_low for k in ["nhóm kẹo", "nhóm sản phẩm", "nhóm bars", "nhóm bites", "nhóm hàng", "nhóm danh mục", "nhóm khách hàng", "nhóm đơn", "nhóm ticket", "nhóm ưu tiên", "phòng ban", "chức danh"]))
     )
     has_sales_kw = any(k in q_low for k in ["doanh số", "doanh thu", "sales", "tiền"])
     has_boxes_kw = any(k in q_low for k in ["hộp", "thùng", "boxes", "số lượng"])
@@ -7717,7 +8045,7 @@ ORDER BY TotalSales DESC;"""
 def auto_fix_chocolates_top_transactions_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa câu truy vấn Top N giao dịch / đơn hàng cá nhân có giá trị hoặc sản lượng lớn nhất.
     Đảm bảo 100% không dùng GROUP BY (trả về từng dòng giao dịch độc lập) và JOIN đủ các bảng people, products, geo."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -7728,7 +8056,9 @@ def auto_fix_chocolates_top_transactions_query(sql: str, user_query: str, dialec
         and any(k in q_low for k in ["top", "cao nhất", "lớn nhất", "nhiều nhất", "giá trị nhất", "giá trị đơn hàng cao nhất", "khủng nhất", "đỉnh nhất", "thông tin top"])
         and not any(k in q_low for k in [
             "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình trên mỗi giao dịch", "trung bình mỗi giao dịch", "aov",
-            "bao nhiêu đơn", "có bao nhiêu", "đếm số đơn", "số lượng đơn", "tỷ lệ", "tổng doanh thu từ các đơn hàng",
+            "bao nhiêu đơn", "có bao nhiêu", "đếm số đơn", "số lượng đơn", "số giao dịch", "tổng số giao dịch",
+            "tổng doanh thu", "tổng doanh số", "tỷ lệ", "tổng doanh thu từ các đơn hàng",
+            "customerid", "customer_id", "mã khách hàng", "ma khach hang", "mỗi khách hàng", "theo khách hàng",
             "từ 500", "từ 1000", "từ 1,000", "từ 500 hộp", "trên 1000 hộp", "trên 500 hộp"
         ])
     )
@@ -8087,7 +8417,7 @@ ORDER BY gs.TotalSales DESC;""".strip()
 def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: str = "MySQL") -> str:
     """Tự động chuẩn hóa và đảm bảo câu truy vấn bảng xếp hạng Top N (Nhân viên, Sản phẩm, Quốc gia, Đội ngũ)
     trên CSDL Awesome Chocolates luôn trả về dữ liệu chuẩn xác 100%, đúng bảng và đúng cú pháp lọc năm."""
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     from src.llm.prompts import parse_top_bottom_extremes
@@ -8097,13 +8427,25 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     q_low = user_query.lower()
     sql_low = sql.lower()
 
+    # Không can thiệp nếu người dùng hỏi rõ theo Size (Kích thước) hoặc Region (Khu vực địa lý APAC/Europe/Americas)
+    if (
+        any(k in q_low for k in ["kích thước", "cỡ hộp"])
+        or bool(re.search(r"\bsize\b", q_low))
+        or bool(re.search(r"\bregion\b", q_low))
+        or any(k in q_low for k in ["apac", "europe", "americas"])
+        or ("khu vực" in q_low and ("g.region" in sql_low or not any(k in q_low for k in ["quốc gia", "country"])))
+    ):
+        return sql
+
     # Không can thiệp nếu là câu hỏi Top N giao dịch / đơn hàng cá nhân (đã có auto_fix_chocolates_top_transactions_query xử lý)
     is_top_tx = (
         any(k in q_low for k in ["giao dịch", "đơn hàng", "orders", "transactions"])
         and any(k in q_low for k in ["top", "cao nhất", "lớn nhất", "nhiều nhất", "giá trị nhất", "giá trị đơn hàng cao nhất", "khủng nhất", "đỉnh nhất", "thông tin top"])
         and not any(k in q_low for k in [
             "giá trị đơn hàng trung bình", "đơn hàng trung bình", "trung bình trên mỗi giao dịch", "trung bình mỗi giao dịch", "aov",
-            "bao nhiêu đơn", "có bao nhiêu", "đếm số đơn", "số lượng đơn", "tỷ lệ", "tổng doanh thu từ các đơn hàng",
+            "bao nhiêu đơn", "có bao nhiêu", "đếm số đơn", "số lượng đơn", "số giao dịch", "tổng số giao dịch",
+            "tổng doanh thu", "tổng doanh số", "tỷ lệ", "tổng doanh thu từ các đơn hàng",
+            "customerid", "customer_id", "mã khách hàng", "ma khach hang", "mỗi khách hàng", "theo khách hàng",
             "từ 500", "từ 1000", "từ 1,000", "từ 500 hộp", "trên 1000 hộp", "trên 500 hộp"
         ])
     )
@@ -8239,9 +8581,8 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     is_sqlite = "sqlite" in (dialect or "").lower()
 
-    # Trích xuất năm nếu có (VD: 2021, 2022)
-    year_match = re.search(r'\b(20\d{2})\b', q_low)
-    year_val = year_match.group(1) if year_match else None
+    # Trích xuất năm đơn lẻ hoặc khoảng năm (VD: 2021, hoặc 2021 đến 2023)
+    year_cond, year_val, year_range = _build_saledate_year_cond(q_low, is_sqlite=is_sqlite, alias="s")
 
     # Trích xuất quý nếu có (VD: "Quý 4", "Q4", "quarter 4")
     qtr_match = re.search(r'(?:quý|quarter|q)\s*(\d)', q_low, re.IGNORECASE)
@@ -8249,24 +8590,29 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     year_clause = ""
     time_where_parts = []
-    if year_val:
-        time_where_parts.append(f"strftime('%Y', s.SaleDate) = '{year_val}'" if is_sqlite else f"YEAR(s.SaleDate) = {year_val}")
+    if year_cond:
+        time_where_parts.append(year_cond)
     if qtr_val:
         time_where_parts.append(f"((CAST(strftime('%m', s.SaleDate) AS INTEGER) + 2) / 3) = {qtr_val}" if is_sqlite else f"QUARTER(s.SaleDate) = {qtr_val}")
     if time_where_parts:
         year_clause = "WHERE " + " AND ".join(time_where_parts)
 
-    # Xác định chỉ số đo lường: Hộp/Thùng (Boxes) hay Doanh số/Tiền mặt (Sales Amount / Cash)
+    # Xác định chỉ số đo lường: Hộp/Thùng (Boxes), Doanh số (Amount), hoặc CẢ HAI
     has_explicit_sales = any(k in q_low for k in ["tiền mặt", "tiền", "amount", "doanh số", "doanh thu", "sales", "cash", "chi tiêu", "revenue", "dollar", "$", "giá trị"])
-    has_explicit_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"]) or (any(k in q_low for k in ["số lượng", "so luong"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "người bán", "khách hàng", "customer"]))
+    has_explicit_boxes = any(k in q_low for k in ["hộp", "hop", "thùng", "thung", "boxes"]) or (any(k in q_low for k in ["số lượng", "so luong"]) and not any(k in q_low for k in ["nhân viên", "nhân sự", "headcount", "salesperson", "người bán", "khách hàng", "customer", "ticket"]))
+    wants_both_top = has_explicit_sales and has_explicit_boxes
     if has_explicit_sales and not has_explicit_boxes:
         has_boxes = False
     elif has_explicit_boxes:
         has_boxes = True
     else:
         has_boxes = any(k in sql_low for k in ["boxes", "totalboxes", "boxessold"])
-    metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
-    order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
+    if wants_both_top:
+        metric_expr = "SUM(s.Amount) AS TotalSales,\n    SUM(s.Boxes) AS TotalBoxesSold"
+        order_col = "TotalSales"
+    else:
+        metric_expr = "SUM(s.Boxes) AS TotalBoxesSold" if has_boxes else "SUM(s.Amount) AS TotalSales"
+        order_col = "TotalBoxesSold" if has_boxes else "TotalSales"
 
     # Xác định chiều sắp xếp: DESC (cao nhất/nhiều nhất) hay ASC (thấp nhất/ít nhất)
     is_asc = (
@@ -8282,20 +8628,24 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     limit_clause = f"LIMIT {limit}" if limit else ""
 
     # 1. Bảng xếp hạng Nhân viên bán hàng (Salesperson / People)
-    is_asking_team = (
+    mentioned_teams = [tm for tm in ["yummies", "delish", "jucies"] if tm in q_low]
+    is_multi_team_group = len(mentioned_teams) >= 2 or any(k in q_low for k in ["mỗi team", "từng team", "theo team", "các team", "mỗi đội", "từng đội", "theo đội"])
+    is_asking_team = is_multi_team_group or (
         any(k in q_low for k in ["team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "nhóm", "giữa nhóm", "các nhóm", "giữa các nhóm"])
+        and not any(k in q_low for k in ["nhóm kẹo", "nhóm sản phẩm", "nhóm bars", "nhóm bites", "nhóm hàng", "nhóm danh mục", "nhóm khách hàng", "nhóm ticket", "nhóm đơn"])
         and not any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai", "thành viên"])
     )
     is_person = (
         any(k in q_low for k in [
-            "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai bán", 
-            "ai có doanh số", "ai doanh thu", "nhân sự bán", "sales rep", "rep", "thành viên",
+            "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "ai bán",
+            "ai có doanh số", "ai doanh thu", "nhân sự bán", "sales rep", "thành viên",
             "ai có", "người"
         ])
-        or any(k in q_low for k in ["yummies", "delish", "jucies"])
+        or bool(re.search(r"\brep\b", q_low))
+        or (len(mentioned_teams) == 1 and not is_multi_team_group)
         or (any(k in sql_low for k in ["salesperson", "employeename", "first_name", "last_name", "sales_person"]) and "pe.team" not in sql_low and not is_asking_team)
     )
-    if is_person and not is_asking_team and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country", "customer", "customers", "khách hàng"]):
+    if is_person and not is_asking_team and not is_multi_team_group and not any(k in q_low for k in ["sản phẩm", "product", "quốc gia", "country", "customer", "customers", "khách hàng"]):
         specific_team = None
         for tm in ["yummies", "delish", "jucies"]:
             if tm in q_low:
@@ -8379,11 +8729,14 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
 
     # 2. Bảng xếp hạng Danh mục sản phẩm (Category)
     is_category = any(k in q_low for k in ["category", "danh mục", "nhóm sản phẩm", "nhóm hàng"])
-    if is_category and not any(k in q_low for k in [
-        "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "quốc gia", 
-        "country", "yummies", "delish", "jucies", "thành viên", "sales rep", "rep",
-        "team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "customer", "customers", "khách hàng"
-    ]):
+    if is_category and not (
+        any(k in q_low for k in [
+            "nhân viên", "nhân sự", "salesperson", "sales person", "người bán", "quốc gia",
+            "country", "yummies", "delish", "jucies", "thành viên", "sales rep",
+            "team", "đội ngũ", "nhóm bán hàng", "nhóm kinh doanh", "customer", "customers", "khách hàng"
+        ])
+        or bool(re.search(r"\brep\b", q_low))
+    ):
         needs_fix = (
             "with " in sql_low
             or "pr.category" not in sql_low
@@ -8391,6 +8744,7 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             or "sales s" not in sql_low
             or ("saledate =" in sql_low and "year(" not in sql_low and "strftime(" not in sql_low)
             or (year_val and f"{year_val}" not in sql_low)
+            or (wants_both_top and ("boxes" not in sql_low or "amount" not in sql_low))
             or "group by" not in sql_low
             or "order by" not in sql_low
         )
@@ -8507,7 +8861,7 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
         return "\n".join(lines)
 
     is_country = (
-        any(k in q_low for k in ["quốc gia", "country", "thị trường", "nước nào", "đất nước", "khu vực", "geo"])
+        any(k in q_low for k in ["quốc gia", "country", "thị trường", "nước nào", "đất nước", "geo"])
         or (("geo" in sql_low or "geoid" in sql_low) and not any(k in q_low for k in ["team", "đội ngũ", "nhóm", "đội"]))
     )
     if is_country and not any(k in q_low for k in ["nhân viên", "salesperson", "sản phẩm", "product", "team", "đội ngũ", "nhóm", "đội"]):
@@ -8519,6 +8873,7 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             or "sales s" not in sql_low
             or ("saledate =" in sql_low and "year(" not in sql_low and "strftime(" not in sql_low)
             or (year_val and f"{year_val}" not in sql_low)
+            or (wants_both_top and ("boxes" not in sql_low or "amount" not in sql_low))
             or "group by" not in sql_low
             or "order by" not in sql_low
         )
@@ -8539,10 +8894,14 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
             return "\n".join(lines)
 
     # 4. Bảng xếp hạng Đội ngũ bán hàng (Team)
+    has_headcount_mix = any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "count(distinct pe.spid)"]) or "count(" in sql_low
     is_team = (
-        any(k in q_low for k in ["đội ngũ", "team", "nhóm bán hàng", "nhóm kinh doanh", "các team", "giữa các team", "giữa nhóm", "giữa các nhóm", "nhóm cao nhất", "nhóm thấp nhất", "theo nhóm", "từng nhóm", "mỗi nhóm"])
-        or ("nhóm" in q_low and not any(k in q_low for k in ["nhóm kẹo", "nhóm sản phẩm", "nhóm bars", "nhóm bites", "nhóm hàng", "nhóm danh mục", "phòng ban", "chức danh", "lương"]))
-        or ("team" in sql_low and not any(k in q_low for k in ["quốc gia", "country", "thị trường"]))
+        not has_headcount_mix
+        and (
+            any(k in q_low for k in ["đội ngũ", "team", "nhóm bán hàng", "nhóm kinh doanh", "các team", "giữa các team", "giữa nhóm", "giữa các nhóm", "nhóm cao nhất", "nhóm thấp nhất", "theo nhóm", "từng nhóm", "mỗi nhóm"])
+            or ("nhóm" in q_low and not any(k in q_low for k in ["nhóm kẹo", "nhóm sản phẩm", "nhóm bars", "nhóm bites", "nhóm hàng", "nhóm danh mục", "nhóm khách hàng", "nhóm đơn", "nhóm ticket", "nhóm ưu tiên", "phòng ban", "chức danh", "lương"]))
+            or ("team" in sql_low and not any(k in q_low for k in ["quốc gia", "country", "thị trường"]))
+        )
     )
     if is_team:
         has_both = (
@@ -8590,52 +8949,158 @@ def auto_fix_chocolates_top_rankings_query(sql: str, user_query: str, dialect: s
     return sql
 
 
+def _find_top_level_sql_clauses(sql_text: str) -> dict[str, tuple[int, int]]:
+    """Tìm vị trí (start, end) ở cấp cao nhất (depth=0, ngoài chuỗi/comment) của WHERE/GROUP BY/HAVING/ORDER BY/LIMIT."""
+    clauses: dict[str, tuple[int, int]] = {}
+    n = len(sql_text)
+    i = 0
+    depth = 0
+    in_single = False
+    in_double = False
+    in_backtick = False
+    kw_pat = re.compile(r"(?is)(where|group\s+by|having|order\s+by|limit)\b")
+
+    while i < n:
+        ch = sql_text[i]
+        nxt = sql_text[i + 1] if i + 1 < n else ""
+
+        if in_single:
+            if ch == "\\" and nxt:
+                i += 2
+                continue
+            if ch == "'":
+                if nxt == "'":
+                    i += 2
+                    continue
+                in_single = False
+            i += 1
+            continue
+        if in_double:
+            if ch == "\\" and nxt:
+                i += 2
+                continue
+            if ch == '"':
+                if nxt == '"':
+                    i += 2
+                    continue
+                in_double = False
+            i += 1
+            continue
+        if in_backtick:
+            if ch == "`":
+                in_backtick = False
+            i += 1
+            continue
+
+        if ch == "-" and nxt == "-":
+            nl = sql_text.find("\n", i + 2)
+            i = n if nl == -1 else nl + 1
+            continue
+        if ch == "/" and nxt == "*":
+            end_cmt = sql_text.find("*/", i + 2)
+            i = n if end_cmt == -1 else end_cmt + 2
+            continue
+        if ch == "'":
+            in_single = True
+            i += 1
+            continue
+        if ch == '"':
+            in_double = True
+            i += 1
+            continue
+        if ch == "`":
+            in_backtick = True
+            i += 1
+            continue
+        if ch == "(":
+            depth += 1
+            i += 1
+            continue
+        if ch == ")":
+            depth = max(0, depth - 1)
+            i += 1
+            continue
+
+        if depth == 0 and (i == 0 or not (sql_text[i - 1].isalnum() or sql_text[i - 1] == "_")):
+            m = kw_pat.match(sql_text, i)
+            if m:
+                key = re.sub(r"\s+", "_", m.group(1).lower())
+                if key not in clauses:
+                    clauses[key] = (m.start(), m.end())
+                i = m.end()
+                continue
+        i += 1
+
+    return clauses
+
+
 def auto_fix_chocolates_unassigned_team_filter(sql: str, user_query: str = "", dialect: str = "MySQL") -> str:
     """Tự động kiểm tra và tiêm mệnh đề lọc loại bỏ các bản ghi Team rỗng/chưa xác định (WHERE pe.Team != '' AND pe.Team IS NOT NULL)
     khi câu lệnh SQL truy vấn hoặc nhóm theo Team trong CSDL Chocolates, đảm bảo không bao giờ xuất hiện dòng (Chưa xác định)."""
     if not sql:
         return sql
-    
+
     sql_low = sql.lower()
-    
+
     # Chỉ áp dụng cho các câu lệnh có liên quan đến bảng people / Team trong CSDL Chocolates
-    has_team_col = bool(re.search(r'\b(pe\.team|people\.team|`team`|team)\b', sql_low))
-    has_people_table = "people" in sql_low or "pe." in sql_low or "pe " in sql_low
+    has_team_col = bool(re.search(r'\b(pe\.team|people\.team|[a-z_][a-z0-9_]*\.team|`team`|team)\b', sql_low))
+    has_people_table = bool(re.search(r'\bpeople\b|\bpe\.', sql_low))
     is_chocolates = any(k in sql_low for k in ["sales", "people", "products", "geo", "spid", "pid", "geoid", "boxes"])
-    
+
     if not (is_chocolates and has_team_col and has_people_table):
         return sql
-        
+
     # Kiểm tra xem đã có điều kiện loại bỏ Team rỗng chưa
-    has_team_filter = (
-        ("team !=" in sql_low or "team <>" in sql_low or "team is not null" in sql_low or "length(team)" in sql_low or "trim(team)" in sql_low or "team in (" in sql_low or "team = '" in sql_low)
-        and ("is not null" in sql_low or "team in (" in sql_low or "team = '" in sql_low or "team !=" in sql_low or "team <>" in sql_low)
+    has_team_filter = bool(
+        re.search(
+            r"(?:\bteam\s*(?:!=|<>|=|in\s*\(|is\s+not\s+null)|(?:length|char_length|trim)\s*\([^)]*\bteam\b[^)]*\))",
+            sql_low,
+        )
     )
-    
+
     if has_team_filter:
         return sql
 
-    # Xác định tiền tố alias của bảng people (pe.Team hoặc people.Team hoặc Team)
-    team_expr = "pe.Team" if ("pe." in sql_low or "pe " in sql_low) else ("people.Team" if "people." in sql_low else "Team")
-    team_clean_cond = f"{team_expr} != '' AND {team_expr} IS NOT NULL"
-    
-    # Tiêm điều kiện vào WHERE
-    if " where " in sql_low:
-        # Chèn thêm AND condition ngay sau WHERE
-        sql = re.sub(r'(?i)\bwhere\s+', f"WHERE {team_clean_cond} AND ", sql, count=1)
-    elif " group by " in sql_low:
-        # Chèn WHERE trước GROUP BY
-        sql = re.sub(r'(?i)\bgroup\s+by\s+', f"WHERE {team_clean_cond}\nGROUP BY ", sql, count=1)
-    elif " order by " in sql_low:
-        # Chèn WHERE trước ORDER BY
-        sql = re.sub(r'(?i)\border\s+by\s+', f"WHERE {team_clean_cond}\nORDER BY ", sql, count=1)
-    elif " limit " in sql_low:
-        # Chèn WHERE trước LIMIT
-        sql = re.sub(r'(?i)\blimit\s+', f"WHERE {team_clean_cond}\nLIMIT ", sql, count=1)
+    # Xác định chính xác bí danh cột Team đang được sử dụng trong SQL
+    col_alias_m = re.search(r'(?i)\b([a-z_][a-z0-9_]*)\.team\b', sql)
+    if col_alias_m:
+        team_expr = f"{col_alias_m.group(1)}.Team"
     else:
-        sql += f"\nWHERE {team_clean_cond}"
-        
-    return sql
+        tbl_alias_m = re.search(
+            r'(?i)\b(?:from|join)\s+(?:`?[\w.]+`?\.)?`?people`?(?:\s+(?:as\s+)?`?([a-z_][a-z0-9_]*)`?)?',
+            sql,
+        )
+        alias = tbl_alias_m.group(1) if tbl_alias_m else None
+        sql_kw_stop = {"on", "where", "join", "inner", "left", "right", "cross", "full", "group", "order", "limit", "having", "union", "set"}
+        if alias and alias.lower() not in sql_kw_stop:
+            team_expr = f"{alias}.Team"
+        else:
+            team_expr = "people.Team" if re.search(r'\bpeople\b', sql_low) else "Team"
+    team_clean_cond = f"{team_expr} != '' AND {team_expr} IS NOT NULL"
+
+    # Tìm vị trí mệnh đề ở cấp cao nhất (depth=0) để không bao giờ chèn WHERE sau \nGROUP BY hoặc chèn nhầm vào CTE
+    clauses = _find_top_level_sql_clauses(sql)
+    if "where" in clauses:
+        _, end_pos = clauses["where"]
+        return f"{sql[:end_pos]} {team_clean_cond} AND{sql[end_pos:]}"
+    if "group_by" in clauses:
+        start_pos, _ = clauses["group_by"]
+        return f"{sql[:start_pos]}WHERE {team_clean_cond}\n{sql[start_pos:]}"
+    if "having" in clauses:
+        start_pos, _ = clauses["having"]
+        return f"{sql[:start_pos]}WHERE {team_clean_cond}\n{sql[start_pos:]}"
+    if "order_by" in clauses:
+        start_pos, _ = clauses["order_by"]
+        return f"{sql[:start_pos]}WHERE {team_clean_cond}\n{sql[start_pos:]}"
+    if "limit" in clauses:
+        start_pos, _ = clauses["limit"]
+        return f"{sql[:start_pos]}WHERE {team_clean_cond}\n{sql[start_pos:]}"
+
+    # Nếu truy vấn dùng CTE (WITH ...) và outer query không join trực tiếp people, tránh nối WHERE pe.Team làm hỏng outer query
+    if sql_low.lstrip().startswith("with "):
+        return sql
+
+    return f"{sql.rstrip()}\nWHERE {team_clean_cond}"
 
 
 def is_safe_select(sql: str) -> bool:
@@ -8965,7 +9430,17 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
         return []
 
     # 1. Chuẩn bị các câu hỏi bám sát thực thể có thật 100% trong kết quả truy vấn
-    grounded_questions = generate_grounded_fallback_followups(df, schema_context=schema_context, lang=lang)
+    grounded_questions = generate_grounded_fallback_followups(
+        df,
+        schema_context=schema_context,
+        current_query=user_query,
+        lang=lang,
+    )
+
+    try:
+        from src.llm.datamate_bridge import detect_legacy_schema_gap
+    except Exception:
+        detect_legacy_schema_gap = None
 
     # 2. Gọi AI để sinh thêm gợi ý (nếu có)
     ai_questions = []
@@ -8996,6 +9471,9 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
                         continue
                     if not is_employees_db and any(k in q_low for k in ["mức lương", "salary", "salaries", "phòng ban", "departments"]):
                         continue
+                    if schema_context and detect_legacy_schema_gap is not None:
+                        if detect_legacy_schema_gap(q_str, schema_context=schema_context, lang=lang) is not None:
+                            continue
 
                     ai_questions.append(q_str)
     except Exception:
@@ -9004,11 +9482,10 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
     # 3. ƯU TIÊN 100% CÁC CÂU HỎI BÁM SÁT CSDL ĐỂ ĐẢM BẢO CHẠY THÀNH CÔNG (VÀ LOẠI BỎ CÂU HỎI TRÙNG VỚI CÂU HIỆN TẠI)
     uq_clean = re.sub(r"[^\w\s]", "", (user_query or "").lower()).strip()
     combined = []
-    for q in grounded_questions:
-        q_clean = re.sub(r"[^\w\s]", "", q.lower()).strip()
-        if q_clean != uq_clean and q not in combined:
-            combined.append(q)
-    for q in ai_questions:
+    for q in grounded_questions + ai_questions:
+        if schema_context and detect_legacy_schema_gap is not None:
+            if detect_legacy_schema_gap(q, schema_context=schema_context, lang=lang) is not None:
+                continue
         q_clean = re.sub(r"[^\w\s]", "", q.lower()).strip()
         if q_clean != uq_clean and q not in combined:
             combined.append(q)
@@ -9027,7 +9504,7 @@ def auto_fix_sakila_query(sql: str, user_query: str, dialect: str = "MySQL") -> 
     - Chuẩn hóa truy vấn tỷ lệ đóng góp doanh thu theo tháng / theo thể loại
     - Chuẩn hóa truy vấn biến động doanh thu theo tháng
     """
-    if not sql or not user_query:
+    if not sql or not user_query or _is_crm_tickets_intent(user_query, sql):
         return sql
 
     q_low = user_query.lower()
@@ -9858,6 +10335,12 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
         )
         result["df"] = None
         result["sql"] = None
+        result["evaluator"] = {
+            "verdict": "UNANSWERABLE_BLOCKED",
+            "score": 100,
+            "critique": "Câu hỏi ngoài phạm vi cơ sở dữ liệu kinh doanh.",
+        }
+        result["agent_trace"]["evaluator"] = result["evaluator"]
         return result
 
     if any(k in valid_tbls_low for k in ["order_details", "orders_status", "inventory_transactions", "purchase_orders"]) or (("products" in valid_tbls_low or "product" in valid_tbls_low) and ("orders" in valid_tbls_low or "customers" in valid_tbls_low)):
@@ -9929,8 +10412,74 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
         )
         return result
 
+    # 0.1b Kiểm tra năng lực lược đồ tổng quát (chống bịa số khi câu hỏi yêu cầu cột/thuộc tính không tồn tại)
+    from src.llm.datamate_bridge import build_legacy_unanswerable_result, detect_legacy_schema_gap
+
+    def _extract_unanswerable_reason(raw_text: str) -> Optional[str]:
+        if not raw_text:
+            return None
+        cleaned_raw = re.sub(r"<think>[\s\S]*?</think>", "", str(raw_text), flags=re.IGNORECASE).strip()
+        cleaned_raw = cleaned_raw.strip("`\"' \n")
+        if re.match(r"^(?:SELECT|WITH)\b", cleaned_raw, re.IGNORECASE):
+            return None
+        m_unans = re.search(r"(?:^|\n)\s*UNANSWERABLE\s*[:\-]?\s*(.+)", cleaned_raw, flags=re.IGNORECASE)
+        if m_unans:
+            return m_unans.group(1).strip().splitlines()[0].strip()
+        if is_conversational_explanation(cleaned_raw):
+            return cleaned_raw.splitlines()[0].strip()
+        return None
+
+    def _return_unanswerable(
+        reason_text: str,
+        tag: str = "Model Abstention",
+        eval_override: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        clean_reason = (reason_text or "").strip() or (
+            "CSDL hiện tại không có đủ cột/dữ liệu để trả lời chính xác câu hỏi này."
+            if lang != "en"
+            else "Current database schema lacks required columns to answer this question accurately."
+        )
+        res_abs = build_legacy_unanswerable_result(
+            user_query=user_query,
+            reason=clean_reason,
+            valid_tables=valid_tables,
+            lang=lang,
+            source_tag=tag,
+        )
+        res_abs["logs"] = list(result.get("logs", [])) + res_abs["logs"]
+        res_abs["plan"] = result.get("plan")
+        res_abs["agent_trace"]["router"] = result["agent_trace"].get("router")
+        res_abs["agent_trace"]["planner"] = result["agent_trace"].get("planner")
+        if eval_override:
+            res_abs["evaluator"] = eval_override
+            res_abs["agent_trace"]["evaluator"] = eval_override
+        return res_abs
+
+    def _maybe_abstain_response(raw_text: str, tag: str = "Model Abstention") -> Optional[Dict[str, Any]]:
+        abst = _extract_unanswerable_reason(raw_text)
+        if not abst:
+            return None
+        return _return_unanswerable(abst, tag=tag)
+
+    legacy_gap_reason = detect_legacy_schema_gap(
+        user_query=user_query,
+        engine=engine,
+        schema_context=schema_context,
+        lang=lang,
+    )
+    if legacy_gap_reason:
+        return build_legacy_unanswerable_result(
+            user_query=user_query,
+            reason=legacy_gap_reason,
+            valid_tables=valid_tables,
+            lang=lang,
+            source_tag="Schema Capability Guard",
+        )
+
     def _apply_domain_auto_fixes(sql_cur: str) -> str:
         sql_cur = sql_cur or ""
+        if legacy_gap_reason:
+            return sql_cur
         # 0. Global guard: Khắc phục triệt để lỗi tách 2 cột Year1 / Year2 / AvgSalary1
         if bool(re.search(r"\b(year\s*[12]|year_[12]|avgsalary\s*[12]|avg_salary\s*[12]|salary\s*[12]|salary_[12]|salarychange|salary_change)\b", str(sql_cur), re.IGNORECASE)):
             sql_cur = auto_fix_yearly_salary_trend_query(sql_cur, user_query, dialect=dialect)
@@ -10013,34 +10562,45 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             sql_cur = auto_fix_salary_spread_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
         elif is_chocolates_db:
-            sql_cur = auto_fix_chocolates_order_benchmark_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_top_employee_per_year_query(sql_cur, user_query, schema_context=schema_context, dialect=dialect)
-            sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
-            sql_cur = auto_fix_chocolates_dual_extreme_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_pnl_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_half_year_comparison_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_consecutive_growth_streak_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_new_products_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_monthly_spread_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_monthly_sales_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_product_quarterly_consistency_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_product_quarterly_rankings_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_quarterly_growth_comparison_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_quarterly_sales_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_dominant_market_top_product_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_contribution_percentage_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_sales_performance_comparison_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_sales_headcount_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_team_spread_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_team_sales_and_boxes_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_segment_large_orders_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_threshold_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_top_transactions_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_top_rankings_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_above_average_query(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_chocolates_unassigned_team_filter(sql_cur, user_query, dialect=dialect)
-            sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
+            from src.llm.datamate_bridge import get_ungrounded_headcount_tokens
+
+            if get_ungrounded_headcount_tokens(user_query, schema_context):
+                return sql_cur
+            if _is_crm_tickets_intent(user_query, sql_cur):
+                sql_cur = auto_fix_chocolates_sales_crm_tickets_query(
+                    sql_cur, user_query, schema_context=schema_context, dialect=dialect
+                )
+                sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
+                sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
+            else:
+                sql_cur = auto_fix_chocolates_order_benchmark_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_top_employee_per_year_query(sql_cur, user_query, schema_context=schema_context, dialect=dialect)
+                sql_cur = auto_fix_datetime_year_filters(sql_cur, dialect=dialect)
+                sql_cur = auto_fix_chocolates_dual_extreme_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_pnl_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_half_year_comparison_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_consecutive_growth_streak_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_new_products_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_monthly_spread_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_monthly_sales_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_product_quarterly_consistency_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_product_quarterly_rankings_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_quarterly_growth_comparison_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_quarterly_sales_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_dominant_market_top_product_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_contribution_percentage_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_sales_performance_comparison_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_sales_headcount_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_team_spread_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_team_sales_and_boxes_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_segment_large_orders_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_threshold_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_top_transactions_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_top_rankings_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_above_average_query(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_chocolates_unassigned_team_filter(sql_cur, user_query, dialect=dialect)
+                sql_cur = auto_fix_missing_metric_in_having_query(sql_cur, user_query)
         elif is_sakila_db:
             sql_cur = auto_fix_sakila_query(sql_cur, user_query, dialect=dialect)
             sql_cur = auto_fix_pareto_cumulative_query(sql_cur, user_query, dialect=dialect)
@@ -10122,6 +10682,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
     prompt_user_query = augment_vietnamese_query_with_temporal(user_query)
     initial_prompt = build_sql_prompt(effective_schema, dialect, prompt_user_query, lang=lang)
     sql_query, err = call_llm(client, provider, model_name, initial_prompt, max_tokens=2048)
+    abst_init = _maybe_abstain_response(sql_query or "")
+    if abst_init is not None:
+        return abst_init
     if sql_query:
         sql_query = clean_sql_query(sql_query)
         sql_query = enforce_top_n_limit(sql_query, user_query)
@@ -10173,12 +10736,20 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                 result["sql"] = sql_query
                 return result
 
+            prev_sql_for_fix = (
+                sql_query
+                if re.search(r"(?i)\b(?:select|with)\b", sql_query or "")
+                else "(Phản hồi trước chưa phải câu lệnh SQL SELECT/WITH)"
+            )
             fix_prompt = build_fix_prompt(
-                schema_context, dialect, user_query, sql_query,
+                schema_context, dialect, user_query, prev_sql_for_fix,
                 "BẮT BUỘC chỉ trả về duy nhất 1 câu lệnh SQL SELECT hoặc WITH ... AS hợp lệ theo 3 Quy tắc Phân rã Nghiệp vụ, TUYỆT ĐỐI KHÔNG xin lỗi, không giải thích, không dùng markdown!" if lang != "en" else "MUST return raw executable SELECT/WITH statement. Do NOT apologize, do NOT explain!",
                 lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt, max_tokens=800)
+            abst_fix1 = _maybe_abstain_response(fixed_sql or "")
+            if abst_fix1 is not None:
+                return abst_fix1
             if fixed_sql:
                 fixed_sql = clean_sql_query(fixed_sql)
                 fixed_sql = _apply_domain_auto_fixes(fixed_sql)
@@ -10198,6 +10769,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                 schema_context, dialect, user_query, sql_query, paren_err, lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+            abst_fix2 = _maybe_abstain_response(fixed_sql or "")
+            if abst_fix2 is not None:
+                return abst_fix2
             if fixed_sql:
                 fixed_sql = clean_sql_query(fixed_sql)
                 fixed_sql = _apply_domain_auto_fixes(fixed_sql)
@@ -10246,6 +10820,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                     schema_context, dialect, user_query, sql_query, empty_fix_reason, lang=lang
                 )
                 fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+                abst_fix3 = _maybe_abstain_response(fixed_sql or "")
+                if abst_fix3 is not None:
+                    return abst_fix3
                 sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
                 continue
 
@@ -10325,6 +10902,13 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             result["evaluator"] = eval_res
             result["agent_trace"]["evaluator"] = eval_res
 
+            if eval_res.get("verdict") == "UNANSWERABLE_BLOCKED":
+                return _return_unanswerable(
+                    eval_res.get("critique") or eval_res.get("actionable_feedback") or "",
+                    tag="Auditor Schema Guard",
+                    eval_override=eval_res,
+                )
+
             # Nếu Evaluator chưa đạt điểm tuyệt đối 100/100 và chưa đạt tối đa số lần thử -> Kích hoạt Vòng Phản tỉnh (Self-Correction Reflection Loop)
             if (eval_res.get("score", 100) < 100 or eval_res.get("verdict") != "PASS") and attempt < 3:
                 critique_msg = eval_res.get("critique", "")
@@ -10346,6 +10930,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                     schema_context, dialect, user_query, sql_query, eval_fix_reason, lang=lang
                 )
                 fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+                abst_fix4 = _maybe_abstain_response(fixed_sql or "")
+                if abst_fix4 is not None:
+                    return abst_fix4
                 sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
                 sql_query = _apply_domain_auto_fixes(sql_query)
                 sql_query = sanitize_sql_for_live_db(
@@ -10419,6 +11006,13 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                             "Doanh số bán hàng phân bổ theo từng quốc gia năm 2021"
                         ]
 
+            if eval_res.get("verdict") == "UNANSWERABLE_BLOCKED":
+                return _return_unanswerable(
+                    eval_res.get("critique") or eval_res.get("actionable_feedback") or "",
+                    tag="Auditor Schema Guard",
+                    eval_override=eval_res,
+                )
+
             # Đồng bộ lại kết quả Thẩm định của Auditor nếu DataFrame sau khi được bù đắp chuẩn mực đã đạt tiêu chí
             if eval_res.get("score", 100) < 100:
                 re_eval = evaluate_execution(
@@ -10429,11 +11023,51 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                     plan=plan,
                     lang=lang
                 )
+                if re_eval.get("verdict") == "UNANSWERABLE_BLOCKED":
+                    return _return_unanswerable(
+                        re_eval.get("critique") or re_eval.get("actionable_feedback") or "",
+                        tag="Auditor Schema Guard",
+                        eval_override=re_eval,
+                    )
                 if re_eval.get("score", 0) > eval_res.get("score", 0):
                     eval_res = re_eval
                     result["evaluator"] = eval_res
                     result["agent_trace"]["evaluator"] = eval_res
                     result["logs"].append(f"🛡️ [Auditor Alignment] Dữ liệu sau khi hoàn thiện đạt chuẩn {eval_res.get('score')}/100 ({eval_res.get('verdict')}).")
+
+            # 2.5 CỔNG AN TOÀN FAIL-CLOSED: Chặn xuất biểu đồ / số liệu sai lệch nếu sau 3 vòng vẫn không vượt qua kiểm định thực thể hoặc thời gian
+            final_criteria = eval_res.get("criteria") or {}
+            semantic_ok = (final_criteria.get("semantic_alignment") or {}).get("passed", True)
+            temporal_ok = (final_criteria.get("temporal_validity") or {}).get("passed", True)
+            if eval_res.get("verdict") == "FAIL" or not semantic_ok or not temporal_ok:
+                critique_note = eval_res.get("critique") or eval_res.get("actionable_feedback") or ""
+                eval_score = eval_res.get("score", 0)
+                result["logs"].append(
+                    f"🛡️ [Auditor Fail-Closed Gate] Chặn hiển thị kết quả lệch ngữ nghĩa/mốc thời gian ({eval_score}/100 — {eval_res.get('verdict')}): {critique_note}"
+                )
+                result["df"] = None
+                result["sql"] = sql_query
+                result["error"] = None
+                result["explanation"] = (
+                    f"🛡️ **Kết quả truy vấn chưa đạt chuẩn kiểm toán (Điểm Auditor: {eval_score}/100 — {eval_res.get('verdict')})** nên hệ thống tự động chặn hiển thị bảng/biểu đồ để tránh cung cấp số liệu sai lệch.\n\n"
+                    f"- **Lý do kiểm toán:** {critique_note}\n\n"
+                    f"👉 Vui lòng diễn đạt lại câu hỏi rõ hơn hoặc chọn một gợi ý tương thích bên dưới:"
+                    if lang != "en"
+                    else
+                    f"🛡️ **Query output failed strict Auditor verification ({eval_score}/100 — {eval_res.get('verdict')})** and was withheld to prevent displaying inaccurate metrics/charts.\n\n"
+                    f"- **Audit reason:** {critique_note}\n\n"
+                    f"👉 Please rephrase your question or select a schema-compatible suggestion below:"
+                )
+                try:
+                    from src.analytics.heuristics import generate_starter_prompts
+                    from src.llm.datamate_bridge import build_legacy_unanswerable_followups
+                    fups = build_legacy_unanswerable_followups(valid_tables, lang=lang)
+                    if not fups:
+                        fups = generate_starter_prompts(schema_context, is_en=(lang == "en"))[:4]
+                    result["followups"] = fups
+                except Exception:
+                    pass
+                return result
 
             # 3. Tự động phát hiện bất thường (Agent 4: Anomaly Detective) & Cố vấn chiến lược (Agent 5: Strategy Advisor)
             if df is not None and not df.empty:
@@ -10456,9 +11090,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                         from src.analytics.heuristics import split_insight_sections
                         sec = split_insight_sections("", df=df, user_query=user_query, is_en=(lang == "en"))
                         result["insights"] = (
-                            f"### 2.1. 🚨 Phát hiện Bất thường & Xu hướng Chính\n{sec['anomaly']}\n\n"
-                            f"### 2.2. 🔍 Giả thuyết & Nguyên nhân Tiềm năng\n{sec['hypothesis']}\n\n"
-                            f"### 2.3. 🎯 Kế hoạch Hành động & Đề xuất Ưu tiên\n{sec['action_plan']}"
+                            f"### 2.1. Phát hiện Bất thường & Xu hướng Chính\n{sec['anomaly']}\n\n"
+                            f"### 2.2. Giả thuyết & Nguyên nhân Tiềm năng\n{sec['hypothesis']}\n\n"
+                            f"### 2.3. Kế hoạch Hành động & Đề xuất Ưu tiên\n{sec['action_plan']}"
                         )
                     else:
                         # Với Cloud (Gemini / OpenRouter): Gọi API
@@ -10470,61 +11104,34 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             error_msg = sanitize_error(str(e), db_pass)
             result["logs"].append(f"❌ Lỗi thực thi SQL: {error_msg}")
             if attempt == 3:
-                # Kích hoạt Autonomous Adaptive Recovery: Tự động chuyển đổi sang truy vấn hợp lệ trên CSDL thực tế
-                adaptive_sql = sanitize_sql_for_live_db(
-                    sql="SELECT * FROM table1",
-                    engine=engine,
-                    schema_context=schema_context,
-                    user_query=user_query,
-                    dialect=dialect
-                )
-                if adaptive_sql and is_safe_select(adaptive_sql) and engine is not None:
-                    try:
-                        df_adaptive, _ = read_sql_capped(adaptive_sql, engine, cap=MAX_ROWS_CAP)
-                        if df_adaptive is not None and not df_adaptive.empty:
-                            df_adaptive = ensure_full_twelve_months(df_adaptive, user_query)
-                            df_adaptive = ensure_full_four_quarters(df_adaptive, user_query)
-                            df_adaptive = ensure_ratio_column_if_requested(df_adaptive, user_query)
-                            df_adaptive = ensure_efficiency_columns_if_requested(df_adaptive, user_query)
-                            result["df"] = df_adaptive
-                            result["sql"] = adaptive_sql
-                            result["logs"].append("⚡ [Autonomous Domain Healing] Tự động chuyển đổi thành công sang phân tích số liệu trên cấu trúc thực tế của CSDL.")
-                            result["explanation"] = (
-                                f"💡 **Thông báo tối ưu hóa:** Do câu hỏi chứa các thuật ngữ chưa có trực tiếp trong CSDL hiện tại, "
-                                f"Veraxus đã tự động phân tích chỉ số kinh doanh tương đương gần nhất trên các bảng dữ liệu thực tế của hệ thống để trực quan hóa kết quả cho bạn."
-                                if lang != "en" else
-                                f"💡 **Optimization Notice:** Since the query referenced entities not present in this database, "
-                                f"Veraxus autonomously adapted the analysis to the closest business metrics available in your dataset."
-                            )
-                            if enable_auto_insights:
-                                anomalies_info = analyze_data_anomalies(df_adaptive)
-                                result["anomalies_info"] = anomalies_info
-                                result["insights"] = generate_auto_insights(client, provider, model_name, user_query, df_adaptive, anomalies_info, lang=lang)
-                            raw_fups = generate_grounded_fallback_followups(df_adaptive, schema_context=schema_context, current_query=user_query, lang=lang)
-                            result["followups"] = [sanitize_followup_question(q) for q in raw_fups]
-                            return result
-                    except Exception:
-                        pass
-
-                # Kích hoạt Zero-Red-Error Fallback: Chuyển đổi sang Chế độ Tư vấn Nghiệp vụ (Advisory Mode)
-                result["logs"].append(f"🛡️ [Zero-Red-Error Fallback] Kích hoạt Chế độ Cố vấn Dữ liệu thay thế cho lỗi kỹ thuật.")
+                # Dừng an toàn thay vì bịa đặt bảng/cột thay thế khi truy vấn thiếu dữ liệu tương thích
+                result["logs"].append("🛡️ [Schema Abstention Fallback] Dừng truy vấn an toàn do thiếu bảng/cột tương thích trong CSDL.")
                 advisory_msg = (
-                    f"**Chẩn đoán Dữ liệu từ Veraxus AI:**\n\n"
-                    f"Hệ thống đã phân tích cơ sở dữ liệu hiện tại để xử lý câu hỏi: *\"{user_query}\"*.\n\n"
-                    f"• **Nguyên nhân:** Cấu trúc dữ liệu hiện tại chưa có các trường tương thích hoàn toàn với chỉ số được yêu cầu (Chi tiết kỹ thuật: `{error_msg}`).\n"
-                    f"• **Khuyến nghị:** Bạn có thể thử một trong các câu hỏi phù hợp nhất với dữ liệu thực tế bên dưới hoặc chọn bảng từ Explorer Sidebar để xem cấu trúc chi tiết."
+                    f"🛡️ **Dữ liệu không đủ thông tin để trả lời chính xác:** Cấu trúc CSDL hiện tại chưa có trường dữ liệu phù hợp với câu hỏi *\"{user_query}\"* "
+                    f"(chi tiết kỹ thuật: `{error_msg}`).\n\n"
+                    f"👉 Vui lòng chọn một trong các câu hỏi gợi ý tương thích bên dưới:"
                     if lang != "en" else
-                    f"**Data Diagnostics from Veraxus AI:**\n\n"
-                    f"Veraxus analyzed the connected database for query: *\"{user_query}\"*.\n\n"
-                    f"• **Diagnostics:** The requested metrics need explicit schema mapping or compatible fields (Technical note: `{error_msg}`).\n"
-                    f"• **Recommendation:** You can explore the compatible starter queries below:"
+                    f"🛡️ **Insufficient data to answer accurately:** The connected database does not contain compatible columns/tables for *\"{user_query}\"* "
+                    f"(technical note: `{error_msg}`).\n\n"
+                    f"👉 Please try one of the schema-compatible suggestions below:"
                 )
                 result["explanation"] = advisory_msg
+                result["df"] = None
                 result["sql"] = sql_query
                 result["error"] = None
+                result["evaluator"] = {
+                    "verdict": "UNANSWERABLE_BLOCKED",
+                    "score": 0,
+                    "critique": error_msg,
+                    "details": {},
+                }
                 try:
                     from src.analytics.heuristics import generate_starter_prompts
-                    result["followups"] = generate_starter_prompts(schema_context, is_en=(lang == "en"))[:4]
+                    from src.llm.datamate_bridge import build_legacy_unanswerable_followups
+                    fups = build_legacy_unanswerable_followups(valid_tables, lang=lang)
+                    if not fups:
+                        fups = generate_starter_prompts(schema_context, is_en=(lang == "en"))[:4]
+                    result["followups"] = fups
                 except Exception:
                     pass
                 return result
@@ -10678,6 +11285,9 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                 schema_context, dialect, user_query, sql_query, augmented_error, lang=lang
             )
             fixed_sql, _ = call_llm(client, provider, model_name, fix_prompt)
+            abst_fix5 = _maybe_abstain_response(fixed_sql or "")
+            if abst_fix5 is not None:
+                return abst_fix5
             sql_query = clean_sql_query(fixed_sql) if fixed_sql else sql_query
 
     return result

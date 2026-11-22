@@ -4,10 +4,12 @@ Allows clicking on any historical question to view its result directly.
 """
 
 import textwrap
+import time
 import streamlit as st
 from src.database.business_upload import compose_connection_schema, resolve_database_connection
 from src.database.schema import (
     auto_extract_schema,
+    clear_schema_caches,
     get_table_names,
     get_table_columns_info,
     get_table_sample_df,
@@ -48,6 +50,12 @@ def perform_connection(
         )
 
         client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
+        clear_schema_caches()
+        setattr(engine, "_veraxus_cache_epoch", time.time_ns())
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
         extracted_schema = auto_extract_schema(engine, force_refresh=True)
         final_schema = compose_connection_schema(
             extracted_schema, schema_context_input, knowledge
@@ -73,7 +81,19 @@ def perform_connection(
             "query_cache": {},
             "focused_turn_idx": None,
             "pending_prompt": None,
+            "generic_dashboard_layer": "overview",
+            "northwind_dashboard_layer": "overview",
+            "sales_dashboard_layer": "overview",
+            "hr_dashboard_layer": "overview",
         })
+        for _stale_key in (
+            "generic_timeline_years",
+            "northwind_timeline_years",
+            "sales_timeline_years",
+            "sidebar_selected_table",
+            "dialog_preview_selected_table",
+        ):
+            st.session_state.pop(_stale_key, None)
         return True, final_model_name
     except Exception as e:
         st.session_state["connected"] = False

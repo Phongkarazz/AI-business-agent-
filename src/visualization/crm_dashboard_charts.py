@@ -841,20 +841,26 @@ def build_sales_dual_axis_chart(
     x_col: str = "Month",
     rev_col: str = "Revenue",
     box_col: str = "Boxes",
-    height: int = 280
+    height: int = 280,
+    rev_name: str = None,
+    box_name: str = None,
+    rev_prefix: str = "$",
+    rev_suffix: str = "",
+    box_unit: str = None,
 ) -> go.Figure:
-    """Biểu đồ sóng kép phối hợp Cột (Doanh số $) và Đường Spline (Số lượng hộp)."""
+    """Biểu đồ sóng kép phối hợp Cột (Giá trị chính) và Đường Spline (Sản lượng / Số lượng)."""
     is_en = (get_current_language() == "en")
     if df is None or df.empty:
         return _build_empty_dark_figure(height)
     fig = go.Figure()
 
     x_vals = df[x_col].tolist()
-    rev_name = "Revenue ($)" if is_en else "Doanh Số ($)"
-    box_name = "Boxes Sold" if is_en else "Số Lượng Hộp"
-    box_unit = "boxes" if is_en else "hộp"
+    rev_name = rev_name or ("Revenue ($)" if is_en else "Doanh Số ($)")
+    box_name = box_name or ("Boxes Sold" if is_en else "Số Lượng Hộp")
+    box_unit = box_unit if box_unit is not None else ("boxes" if is_en else "hộp")
+    box_unit_pad = f" {box_unit}" if box_unit else ""
 
-    # 1. Bar Trace: Revenue ($)
+    # 1. Bar Trace: Primary Metric
     if rev_col in df.columns:
         fig.add_trace(go.Bar(
             x=x_vals,
@@ -866,10 +872,10 @@ def build_sales_dual_axis_chart(
                 line=dict(color="#FFFFFF", width=1)
             ),
             yaxis="y",
-            hovertemplate=f"<b>%{{x}}</b><br>{rev_name}: <b>$%{{y:,.0f}}</b><extra></extra>"
+            hovertemplate=f"<b>%{{x}}</b><br>{rev_name}: <b>{rev_prefix}%{{y:,.0f}}{rev_suffix}</b><extra></extra>"
         ))
 
-    # 2. Line Trace: Boxes Sold
+    # 2. Line Trace: Volume / Secondary Metric
     if box_col in df.columns:
         fig.add_trace(go.Scatter(
             x=x_vals,
@@ -879,7 +885,7 @@ def build_sales_dual_axis_chart(
             line=dict(color="#E879F9", width=3, shape="spline", smoothing=1.3),
             marker=dict(size=7, color="#E879F9", line=dict(color="#FFFFFF", width=1.5)),
             yaxis="y2",
-            hovertemplate=f"<b>%{{x}}</b><br>{box_name}: <b>%{{y:,.0f}} {box_unit}</b><extra></extra>"
+            hovertemplate=f"<b>%{{x}}</b><br>{box_name}: <b>%{{y:,.0f}}{box_unit_pad}</b><extra></extra>"
         ))
 
     fig.update_layout(

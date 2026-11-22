@@ -5,6 +5,7 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 1-Click Copy Error button, and conversational AI explanation handling.
 """
 
+import hashlib
 import re
 import streamlit as st
 import pandas as pd
@@ -23,6 +24,7 @@ from src.analytics.heuristics import (
     has_keyword,
     format_entity_label,
     _is_status_or_eval_column,
+    is_vnd_context_dataframe,
 )
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.forecasting import forecast_series
@@ -4979,9 +4981,16 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             hc_candidates = [c for c in measure_cols if any(k in str(c).lower() for k in ["employee", "headcount", "nhân sự", "nhân viên", "emp_count", "employeecount"])]
             m_col = hc_candidates[0]
         else:
-            curr_like_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["revenue", "sales", "amount", "salary", "lương", "doanh", "cost", "profit", "quỹ", "tiền"])]
-            count_like_cols = [c for c in measure_cols if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
-            total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "count_all", "all"])]
+            non_diff_ms = [
+                c for c in measure_cols
+                if not (
+                    any(k in str(c).lower() for k in ["chenh_lech", "chenhlech", "chênh lệch", "diff", "spread", "gap"])
+                    and pd.to_numeric(df[c], errors="coerce").dropna().nunique() <= 1
+                )
+            ] or measure_cols
+            curr_like_cols = [c for c in non_diff_ms if any(k in str(c).lower() for k in ["revenue", "sales", "amount", "salary", "lương", "doanh", "cost", "profit", "quỹ", "tiền", "thanh_tien", "tong_tien", "tien_nhap", "cong_no"])]
+            count_like_cols = [c for c in non_diff_ms if not any(k in str(c).lower() for k in ["percent", "percentage", "pct", "tỷ lệ", "phan_tram", "rate", "ratio"])]
+            total_like_cols = [c for c in count_like_cols if any(k in str(c).lower() for k in ["total", "tổng", "tong_", "count_all", "all"])]
             total_curr_cols = [c for c in total_like_cols if c in curr_like_cols]
             if total_curr_cols:
                 m_col = total_curr_cols[0]
@@ -4992,7 +5001,7 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             elif count_like_cols:
                 m_col = count_like_cols[0]
             else:
-                m_col = measure_cols[0]
+                m_col = non_diff_ms[0]
         
         # Tách camelCase và chuẩn hóa tên chỉ số hiển thị chuyên nghiệp
         try:
@@ -5069,8 +5078,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         # Phát hiện truy vấn so sánh cực trị (lớn nhất VÀ nhỏ nhất, highest AND lowest)
         _uq_low = (user_query or "").lower()
         is_comparison_query = (
-            (any(k in _uq_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "highest", "largest", "most"])
-             and any(k in _uq_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "lowest", "smallest", "least"]))
+            (any(k in _uq_low for k in ["lớn nhất", "cao nhất", "nhiều nhất", "bán chạy nhất", "dẫn đầu", "đứng đầu", "highest", "largest", "most"])
+             and any(k in _uq_low for k in ["nhỏ nhất", "thấp nhất", "ít nhất", "bán chậm nhất", "kém nhất", "cuối bảng", "lowest", "smallest", "least"]))
             or ("và" in _uq_low and any(k in _uq_low for k in ["lớn nhất", "nhỏ nhất", "cao nhất", "thấp nhất"]))
         )
         if is_comparison_query and total_rows == 2:
@@ -5084,8 +5093,11 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
         # Ký hiệu tiền tệ và tỷ lệ phần trăm
         _m_col_lower = str(m_col).lower()
         _is_pct_measure = any(k in _m_col_lower for k in ["margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "tỉ trọng", "tỷ trọng", "phần trăm"])
-        is_currency = (not _is_pct_measure) and (any(k in _m_col_lower for k in ["salary", "lương", "budget", "quỹ", "tiền", "cost", "revenue", "sales", "doanh", "amount", "chi phí", "thu nhập", "spend"]) or "profitperbox" in _m_col_lower or "ordervalue" in _m_col_lower)
-        curr_symbol = "$" if is_currency else ""
+        is_currency = (not _is_pct_measure) and (any(k in _m_col_lower for k in ["salary", "lương", "budget", "quỹ", "tiền", "thanh_tien", "tong_tien", "tien_nhap", "cong_no", "cost", "revenue", "sales", "doanh", "amount", "chi phí", "thu nhập", "spend"]) or "profitperbox" in _m_col_lower or "ordervalue" in _m_col_lower)
+        _sql_ctx = str(sql_query or "")
+        is_vnd_currency = is_currency and is_vnd_context_dataframe(df, str(m_col), sql=_sql_ctx)
+        curr_symbol = "" if is_vnd_currency else ("$" if is_currency else "")
+        curr_suffix = " đ" if is_vnd_currency else ""
 
         valid_vals = pd.to_numeric(df[m_col], errors="coerce").dropna()
         if not valid_vals.empty:
@@ -5125,13 +5137,13 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     if compact:
                         if abs(fv) >= 1_000_000_000:
                             unit = " Tỷ" if not is_en else "B"
-                            return f"{curr_symbol}{fv / 1_000_000_000:,.2f}{unit}"
+                            return f"{curr_symbol}{fv / 1_000_000_000:,.2f}{unit}{curr_suffix}"
                         elif abs(fv) >= 10_000_000 or (abs(fv) >= 1_000_000 and is_currency):
                             unit = " Tr" if not is_en else "M"
-                            return f"{curr_symbol}{fv / 1_000_000:,.2f}{unit}"
+                            return f"{curr_symbol}{fv / 1_000_000:,.2f}{unit}{curr_suffix}"
                     if fv.is_integer() or fv > 100:
-                        return f"{curr_symbol}{fv:,.0f}"
-                    return f"{curr_symbol}{fv:,.2f}"
+                        return f"{curr_symbol}{fv:,.0f}{curr_suffix}"
+                    return f"{curr_symbol}{fv:,.2f}{curr_suffix}"
                 except Exception:
                     return str(v)
 
@@ -5141,8 +5153,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     if _is_pct_measure:
                         return f"{fv:,.2f}%"
                     if fv.is_integer() or fv > 100:
-                        return f"{curr_symbol}{fv:,.0f}"
-                    return f"{curr_symbol}{fv:,.2f}"
+                        return f"{curr_symbol}{fv:,.0f}{curr_suffix}"
+                    return f"{curr_symbol}{fv:,.2f}{curr_suffix}"
                 except Exception:
                     return str(v)
 
@@ -5244,10 +5256,15 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                         target_name = lbl_str
                         break
 
+            _has_dual_rank_col = any(
+                any(k in str(c).lower() for k in ["nhom_xep_hang", "nhóm xếp hạng", "nhomxephang", "rank_group", "rankgroup"])
+                for c in df.columns
+            )
+
             col1, col2, col3, col4 = st.columns(4)
 
-            # --- LAYOUT SO SÁNH CỰC TRỊ (lớn nhất VÀ nhỏ nhất, chỉ 2-3 dòng) ---
-            if is_comparison_query and total_rows <= 3 and not is_time_dim:
+            # --- LAYOUT SO SÁNH CỰC TRỊ (lớn nhất VÀ nhỏ nhất, hoặc bảng có cột Nhóm Xếp Hạng cực trị) ---
+            if ((is_comparison_query and (total_rows <= 3 or (_has_dual_rank_col and total_rows <= 20))) or (_has_dual_rank_col and total_rows <= 20)) and not is_time_dim:
                 # Chọn icon phù hợp theo ngữ cảnh
                 if is_currency:
                     _cmp_icon = "💰"
@@ -5749,35 +5766,58 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             st.write("")
 
     elif total_rows == 1 and measure_cols:
-        from src.visualization.charts import VI_COLUMN_MAP
+        _sql_ctx_1row = str(sql_query or "")
+
+        def _fmt_1row_val(c_name, raw_v):
+            c_title = format_col_title(str(c_name))
+            try:
+                f_val = float(raw_v)
+                c_low = (str(c_name) + " " + c_title).lower()
+                is_curr = any(k in c_low for k in ["$", "doanh thu", "doanh số", "tiền", "lương", "chi phí", "giá", "revenue", "sales", "amount", "salary", "cost", "profit", "lợi nhuận"])
+                is_cnt = any(k in c_low for k in ["nhân sự", "nhân viên", "số lượng", "đơn", "count", "orders", "hộp", "boxes", "món"]) and not is_curr
+                if is_cnt or (f_val.is_integer() and not is_curr):
+                    return c_title, f"{int(f_val):,}"
+                if is_curr:
+                    if is_vnd_context_dataframe(df, str(c_name), sql=_sql_ctx_1row):
+                        clean_title = c_title.replace(" ($)", "").strip()
+                        return clean_title, (f"{f_val:,.0f} đ" if (abs(f_val) >= 100 or f_val.is_integer()) else f"{f_val:,.2f} đ")
+                    return c_title, (f"${f_val:,.0f}" if abs(f_val) >= 100 else f"${f_val:,.2f}")
+                if abs(f_val) >= 100:
+                    return c_title, f"{f_val:,.0f}"
+                return c_title, f"{f_val:,.2f}"
+            except Exception:
+                return c_title, str(raw_v)
+
         # Nếu có từ 3 cột trở lên trong kết quả 1 dòng, render layout 4 thẻ cấp điều hành (Executive 4-Card Grid)
-        if len(df.columns) >= 3:
+        if len(df.columns) >= 3 and label_cols:
             # 1. Cột nhãn / đối tượng chính
-            label_col = label_cols[0] if label_cols else df.columns[0]
+            label_col = label_cols[0]
             label_val = str(df[label_col].iloc[0])
-            lbl_norm = str(label_col).lower().replace("_", "")
-            lbl_title = VI_COLUMN_MAP.get(lbl_norm, str(label_col).replace("_", " ").title())
+            lbl_title = format_col_title(str(label_col))
 
             # 2. Cột quy mô / số lượng (Headcount / Orders / Count)
-            cnt_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["count", "employee", "nhân sự", "nhân viên", "headcount", "orders", "đơn hàng", "bản ghi"])]
+            cnt_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["count", "employee", "nhân sự", "nhân viên", "headcount", "orders", "đơn", "bản ghi", "số lượng"])]
             cnt_col = cnt_cols[0] if cnt_cols else None
             cnt_val = int(pd.to_numeric(df[cnt_col].iloc[0], errors="coerce") or 0) if cnt_col else None
-            cnt_norm = str(cnt_col).lower().replace("_", "") if cnt_col else ""
-            cnt_title = VI_COLUMN_MAP.get(cnt_norm, str(cnt_col).replace("_", " ").title()) if cnt_col else "Quy Mô"
+            cnt_title = format_col_title(str(cnt_col)) if cnt_col else "Quy Mô"
 
             # 3. Cột tổng tiền / doanh thu chính (Total Amount / Sales / Revenue)
-            tot_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["totalsales", "totalrevenue", "totalamount", "amountdue", "doanh thu", "sales", "revenue", "salary", "lương"]) and not any(k in str(c).lower() for k in ["avg", "mean", "trung bình", "surplus", "deficit"])]
+            tot_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["totalsales", "totalrevenue", "totalamount", "amountdue", "doanh thu", "doanh_thu", "sales", "revenue", "salary", "lương"]) and not any(k in str(c).lower() for k in ["avg", "mean", "trung bình", "surplus", "deficit"])]
             tot_col = tot_cols[0] if tot_cols else measure_cols[0]
             tot_val = float(pd.to_numeric(df[tot_col].iloc[0], errors="coerce") or 0.0)
-            tot_norm = str(tot_col).lower().replace("_", "")
-            tot_title = VI_COLUMN_MAP.get(tot_norm, str(tot_col).replace("_", " ").title())
+            tot_title = format_col_title(str(tot_col))
+            is_tot_vnd = is_vnd_context_dataframe(df, str(tot_col), sql=_sql_ctx_1row)
+            if is_tot_vnd:
+                tot_title = tot_title.replace(" ($)", "").strip()
+                tot_fmt = f"{tot_val:,.0f} đ" if (abs(tot_val) >= 100 or tot_val.is_integer()) else f"{tot_val:,.2f} đ"
+            else:
+                tot_fmt = f"${tot_val:,.0f}" if tot_val >= 100 else f"${tot_val:,.2f}"
 
             # 4. Cột hiệu quả / trung bình / chênh lệch (Avg / Surplus / Benchmark)
             eff_cols = [c for c in measure_cols if c not in [tot_col, cnt_col] and any(k in str(c).lower() for k in ["avg", "trung bình", "surplus", "vượt", "difference", "chênh lệch", "rate", "ratio"])]
             eff_col = eff_cols[0] if eff_cols else (measure_cols[1] if len(measure_cols) > 1 else None)
             eff_val = float(pd.to_numeric(df[eff_col].iloc[0], errors="coerce") or 0.0) if eff_col else None
-            eff_norm = str(eff_col).lower().replace("_", "") if eff_col else ""
-            eff_title = VI_COLUMN_MAP.get(eff_norm, str(eff_col).replace("_", " ").title()) if eff_col else None
+            eff_title = format_col_title(str(eff_col)) if eff_col else None
 
             k1, k2, k3, k4 = st.columns(4)
             with k1:
@@ -5789,35 +5829,53 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 else:
                     st.metric("📋 " + ("Số Lượng Bản Ghi" if not is_en else "Record Count"), "1")
             with k3:
-                st.metric(f"💰 {tot_title}", f"${tot_val:,.0f}" if tot_val >= 100 else f"${tot_val:,.2f}", delta="Doanh số ghi nhận" if not is_en else "Recorded Revenue")
+                st.metric(f"💰 {tot_title}", tot_fmt, delta="Doanh số ghi nhận" if not is_en else "Recorded Revenue")
             with k4:
                 if eff_val is not None and eff_title:
-                    is_eff_curr = any(k in eff_title.lower() for k in ["$", "lương", "doanh thu", "tiền", "surplus", "vượt"])
-                    fmt_eff = (f"${eff_val:,.2f}" if eff_val < 100 else f"${eff_val:,.0f}") if is_eff_curr else f"{eff_val:.2f}"
+                    eff_low = (eff_title + " " + str(eff_col)).lower()
+                    is_eff_curr = any(k in eff_low for k in ["$", "lương", "salary", "doanh thu", "doanh_thu", "revenue", "sales", "amount", "cost", "tiền", "surplus", "vượt"])
+                    if is_eff_curr and eff_col and is_vnd_context_dataframe(df, str(eff_col), sql=_sql_ctx_1row):
+                        eff_title = eff_title.replace(" ($)", "").strip()
+                        fmt_eff = f"{eff_val:,.0f} đ" if (abs(eff_val) >= 100 or eff_val.is_integer()) else f"{eff_val:,.2f} đ"
+                    else:
+                        fmt_eff = (f"${eff_val:,.2f}" if eff_val < 100 else f"${eff_val:,.0f}") if is_eff_curr else f"{eff_val:.2f}"
                     st.metric(f"📈 {eff_title}", fmt_eff, delta="Chỉ số hiệu quả" if not is_en else "Performance Metric")
                 else:
                     st.metric("⭐ " + ("Độ Tin Cậy" if not is_en else "Confidence"), "100%", delta="Dữ liệu toàn vẹn" if not is_en else "Data verified")
-        else:
-            m_col = measure_cols[0]
-            m_norm = str(m_col).lower().replace("_", "")
-            m_clean = VI_COLUMN_MAP.get(m_norm, str(m_col).replace("_", " ").title())
-            val = df[m_col].iloc[0]
-            try:
-                f_val = float(val)
-                if f_val.is_integer() or any(k in m_clean.lower() for k in ["nhân sự", "nhân viên", "số lượng", "đơn hàng", "count"]):
-                    fmt_val = f"{int(f_val):,}"
-                elif f_val > 100:
-                    fmt_val = f"{f_val:,.0f}"
-                else:
-                    fmt_val = f"{f_val:,.2f}"
-            except Exception:
-                fmt_val = str(val)
+        elif len(measure_cols) >= 2 and not label_cols:
+            # Khi kết quả 1 dòng có từ 2 chỉ số đo lường trở lên (VD: Tổng Doanh Thu + Số Đơn Hợp Lệ), hiển thị trực tiếp các chỉ số KPI
+            top_measures = measure_cols[:4]
+            cols_ui = st.columns(len(top_measures))
+            icons = ["💰", "📦", "📈", "⭐"]
+            for idx_m, m_c in enumerate(top_measures):
+                m_title, m_fmt = _fmt_1row_val(m_c, df[m_c].iloc[0])
+                with cols_ui[idx_m]:
+                    st.metric(f"{icons[idx_m % len(icons)]} {m_title}", m_fmt)
+        elif len(df.columns) == 2 and label_cols and len(measure_cols) == 1:
+            from datamate.agent import extract_ordinal_rank
 
+            ord_r = extract_ordinal_rank(user_query or "")
+            lbl_c = label_cols[0]
+            lbl_title = format_col_title(str(lbl_c))
+            lbl_val = str(df[lbl_c].iloc[0])
+            m_title, m_fmt = _fmt_1row_val(measure_cols[0], df[measure_cols[0]].iloc[0])
+            rank_prefix = "🏆"
+            if ord_r is not None:
+                rn_val = ord_r[0]
+                medal_icon = {2: "🥈", 3: "🥉"}.get(rn_val, "🏅")
+                rank_prefix = f"{medal_icon} Hạng #{rn_val} •" if not is_en else f"{medal_icon} Rank #{rn_val} •"
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(f"{rank_prefix} {lbl_title}", lbl_val)
+            with col2:
+                st.metric(f"🎯 {m_title}", m_fmt)
+        else:
+            m_title, fmt_val = _fmt_1row_val(measure_cols[0], df[measure_cols[0]].iloc[0])
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("📋 " + ("Số lượng bản ghi" if not is_en else "Record Count"), "1")
             with col2:
-                st.metric("🎯 " + m_clean, fmt_val)
+                st.metric("🎯 " + m_title, fmt_val)
         st.write("")
 
 
@@ -5844,7 +5902,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         raw_lines = [l.strip() for l in text.split("\n") if l.strip()]
         formatted_lines = []
         for l in raw_lines:
-            l = re.sub(r"^[•\.\-\s]+", "", l).strip()
+            l = re.sub(r"^[•\.\-\s🔴🟡🟢]+", "", l).strip()
             if not l:
                 continue
             l = re.sub(r"^(?!\*\*)([^\n\*:]+)\*\*\s*:", r"**\1**:", l)
@@ -5852,21 +5910,11 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             formatted_lines.append(l)
         return escape_markdown_currency_symbols("\n\n".join(formatted_lines))
 
-    st.markdown("---")
-    st.markdown("#### 🤖 Strategic Insights & Hypothesis-Driven Action Plan:" if is_en else "#### 🤖 Chẩn Đoán Giả Thuyết & Kế Hoạch Hành Động Phân Tầng:")
-
-    # Card 1: Phát hiện bất thường & Xu hướng
-    if p21:
-        with st.container(border=True):
-            title_21 = "🚨 1. Key Discoveries & Trend Anomalies" if is_en else "🚨 1. Phát hiện Bất thường & Xu hướng Chính"
-            st.markdown(f"<h4 style='color: #F87171; margin: 2px 0 10px 0; font-size: 1.08rem; font-weight: 800;'>{title_21}</h4>", unsafe_allow_html=True)
-            st.markdown(format_card_markdown(p21))
-
-    # Card 2: Sơ đồ Cây Giả Thuyết (Diagnostic Hypothesis Issue Tree)
     from src.analytics.heuristics import (
         generate_hypothesis_tree,
         generate_persona_action_plan,
         extract_selectable_units,
+        generate_data_grounded_action_plan,
     )
     tree_data = generate_hypothesis_tree(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {}
     branches = tree_data.get("branches", [])
@@ -5879,187 +5927,78 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
         s_val = re.sub(r"`([^`]+)`", r"<code style='background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); padding: 1px 6px; border-radius: 5px; color: #67E8F9; font-size: 0.75rem; font-weight: 700; font-family: inherit;'>\1</code>", s_val)
         return s_val
 
-    with st.container(border=True):
-        title_22 = "🔬 2. Diagnostic Hypothesis Issue Tree (Hypothesis → Data Test → Verdict)" if is_en else "🔬 2. Sơ đồ Cây Giả Thuyết & Kiểm Định Nguyên Nhân (3 Giả Thuyết Đối Chứng)"
-        st.markdown(f"<h4 style='color: #38BDF8; margin: 2px 0 8px 0; font-size: 1.05rem; font-weight: 800;'>{title_22}</h4>", unsafe_allow_html=True)
-
-        if branches:
-            prob_stmt = _clean_md_inline(tree_data.get("problem_statement", ""))
-            st.markdown(f"""
-            <div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 9px; padding: 9px 14px; margin-bottom: 10px;">
-                <span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; margin-right: 6px;">
-                    {'🎯 BÀI TOÁN KIỂM ĐỊNH:' if not is_en else '🎯 ROOT PROBLEM:'}
-                </span>
-                <span style="font-size: 0.86rem; font-weight: 700; color: #F8FAFC;">
-                    {prob_stmt}
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-
-            b_cards_html = []
-            for b in branches:
-                status = b.get("status", "PARTIAL")
-                if status == "CONFIRMED":
-                    border_c, bg_c, badge_bg, badge_c = "#10B981", "rgba(16, 185, 129, 0.08)", "rgba(16, 185, 129, 0.2)", "#34D399"
-                elif status == "PARTIAL":
-                    border_c, bg_c, badge_bg, badge_c = "#F59E0B", "rgba(245, 158, 11, 0.07)", "rgba(245, 158, 11, 0.2)", "#FBBF24"
-                else:
-                    border_c, bg_c, badge_bg, badge_c = "#64748B", "rgba(100, 116, 139, 0.06)", "rgba(100, 116, 139, 0.2)", "#94A3B8"
-
-                conf_pct = b.get("confidence", 50)
-                imp_pct = b.get("impact", 50)
-                prio_score = b.get("priority_score", 50)
-                conf_lbl = "Độ chính xác" if not is_en else "Confidence"
-                imp_lbl = "Tác động" if not is_en else "Impact"
-                prio_lbl = "Ưu tiên" if not is_en else "Priority"
-                b_title_clean = _clean_md_inline(b.get("title", ""))
-                b_evid_clean = _clean_md_inline(b.get("evidence", ""))
-                ev_summary_lbl = "▸ Xem bằng chứng số liệu kiểm định" if not is_en else "▸ View quantitative test evidence"
-
-                b_cards_html.append(f"""
-                <div style="background: {bg_c}; border: 1px solid {border_c}55; border-top: 3px solid {border_c}; border-radius: 10px; padding: 11px 13px; display: flex; flex-direction: column; justify-content: space-between;">
-                    <div>
-                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
-                            <span style="font-size: 0.69rem; font-weight: 800; color: {badge_c}; background: {badge_bg}; border: 1px solid {border_c}88; padding: 2px 7px; border-radius: 5px;">{b.get('status_label')}</span>
-                            <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.28); padding: 1px 7px; border-radius: 5px; font-size: 0.69rem; font-weight: 700;">🏆 {prio_lbl}: {prio_score}/100</span>
-                        </div>
-                        <div style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC; line-height: 1.42; margin-bottom: 8px;">
-                            {b_title_clean}
-                        </div>
-                    </div>
-                    <div>
-                        <div style="display: flex; justify-content: space-between; font-size: 0.73rem; color: #94A3B8; margin-bottom: 3px;">
-                            <span>🎯 {conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
-                            <span>⚡ {imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
-                        </div>
-                        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
-                            <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
-                        </div>
-                        <details style="font-size: 0.74rem; color: #94A3B8;">
-                            <summary style="cursor: pointer; color: #7DD3FC; font-weight: 600; outline: none; user-select: none;">{ev_summary_lbl}</summary>
-                            <div style="margin-top: 5px; padding: 6px 8px; background: rgba(15, 23, 42, 0.85); border-radius: 5px; color: #CBD5E1; line-height: 1.48; font-size: 0.76rem;">
-                                {b_evid_clean}
-                            </div>
-                        </details>
-                    </div>
-                </div>
-                """)
-
-            grid_tree_html = f"""
-            <div style="font-family: {vn_font_stack}; display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                {''.join(b_cards_html)}
-            </div>
-            """
-            st.markdown(re.sub(r'\n\s*', ' ', grid_tree_html).strip(), unsafe_allow_html=True)
-
-            concl = _clean_md_inline(tree_data.get("conclusion", ""))
-            if concl:
-                st.markdown(f"""
-                <div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10B981; border-radius: 6px; padding: 8px 12px; margin-top: 4px; font-size: 0.81rem; color: #ECFDF5; line-height: 1.45;">
-                    💡 <b>{concl}</b>
-                </div>
-                """, unsafe_allow_html=True)
-
-            if p22:
-                with st.expander("📖 Xem thêm phân tích ngữ cảnh bổ trợ từ AI" if not is_en else "📖 View Additional AI Contextual Notes", expanded=False):
-                    st.markdown(format_card_markdown(p22))
-        elif p22:
-            st.markdown(format_card_markdown(p22))
-
-    # Card 3: Đề xuất Chiến lược Phân tầng theo Đối tượng (Persona-Targeted Action Plan: CEO/CFO vs Team Lead/KAM)
     if not p23 and df is not None and not df.empty:
-        from src.analytics.heuristics import generate_data_grounded_action_plan
         p23 = generate_data_grounded_action_plan(df, is_en=is_en, user_query=user_query)
 
+    # TẦNG 1: HIỂN THỊ MẶC ĐỊNH GỌN SẠCH (1. Điểm nổi bật từ số liệu + 2. Việc cần làm ngay)
+    # Khối 1: Điểm nổi bật từ số liệu + 1 câu Kết luận chính
+    takeaway_raw = tree_data.get("summary_takeaway") or tree_data.get("conclusion") or ""
+    if p21 or takeaway_raw:
+        with st.container(border=True):
+            title_21 = "1. Key Findings & Takeaways" if is_en else "1. Điểm nổi bật từ số liệu"
+            st.markdown(f"<h4 style='color: #F87171; margin: 2px 0 10px 0; font-size: 1.06rem; font-weight: 800;'>{title_21}</h4>", unsafe_allow_html=True)
+            if p21:
+                st.markdown(format_card_markdown(p21))
+            takeaway_html = _clean_md_inline(takeaway_raw)
+            if takeaway_html:
+                st.markdown(
+                    f"""<div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10B981; border-radius: 6px; padding: 8px 12px; margin-top: 8px; font-size: 0.83rem; color: #ECFDF5; line-height: 1.48;"><b>{takeaway_html}</b></div>""",
+                    unsafe_allow_html=True,
+                )
+
+    # Khối 2: Việc cần làm ngay (2 dropdown đồng bộ: Góc nhìn | Phạm vi xem)
     with st.container(border=True):
-        title_23 = "🎯 3. Role-Targeted & Unit-Scoped Action Plan" if is_en else "🎯 3. Kế Hoạch Hành Động Theo Vai Trò & Đơn Vị Phụ Trách"
-        st.markdown(f"<h4 style='color: #34D399; margin: 2px 0 8px 0; font-size: 1.05rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
+        title_23 = "2. Priority Actions" if is_en else "2. Việc cần làm ngay"
+        st.markdown(f"<h4 style='color: #34D399; margin: 2px 0 8px 0; font-size: 1.06rem; font-weight: 800;'>{title_23}</h4>", unsafe_allow_html=True)
 
         units_info = extract_selectable_units(df, user_query=user_query, is_en=is_en) if (df is not None and not df.empty) else {"has_units": False}
         has_units_chat = bool(units_info.get("has_units"))
 
         persona_options = [
-            "🎯 Quản lý Trực tiếp (Vùng / Team / KAM) — Thực thi Cục bộ" if not is_en else "🎯 Operational Lead (Region / Team / KAM) — Local Execution",
-            "🏛️ Ban Điều Hành (CEO / CFO) — Chiến lược Vĩ mô & Nguồn vốn" if not is_en else "🏛️ C-Level (CEO / CFO) — Macro Strategy & Capital Allocation",
-            "⚖️ Đối chiếu song song 2 góc nhìn (CEO & Quản lý)" if not is_en else "⚖️ Side-by-Side Dual View (CEO & Lead)"
+            "Owner / Executive Overview" if is_en else "Chủ cửa hàng / Quản lý chung",
+            "Operations / Unit Manager" if is_en else "Quản lý bán hàng / Phụ trách nhóm hàng",
+            "Side-by-Side Dual View" if is_en else "Xem song song 2 góc nhìn",
         ]
 
-        # Thanh điều khiển 1 hàng ngang (1-Line Control Bar: Vai trò | Đơn vị phụ trách)
-        chat_c1, chat_c2 = st.columns([1.35, 1.25])
+        chat_c1, chat_c2 = st.columns([1.25, 1.35])
         with chat_c1:
             sel_persona = st.selectbox(
-                "👤 Vai trò nhận khuyến nghị:" if not is_en else "👤 Target Persona:",
+                "Perspective:" if is_en else "Góc nhìn:",
                 options=persona_options,
-                index=0 if has_units_chat else 1,
-                key=f"persona_radio_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+                index=0,
+                key=f"persona_radio_{turn_id}_{abs(hash(user_query or 'q')) % 100000}",
             )
 
-        selected_unit_val = None
+        selected_unit_val = "ALL"
         with chat_c2:
-            if sel_persona in (persona_options[0], persona_options[2]) and has_units_chat:
+            if has_units_chat:
                 unit_opts_list = units_info.get("unit_options", [])
                 all_lbl = units_info.get("all_option_label", "ALL")
-                label_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in unit_opts_list}
-                label_to_val[all_lbl] = "ALL"
-                select_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in unit_opts_list] + [all_lbl]
-                default_u = units_info.get("default_unit")
-                default_idx = 0
-                for idx_u, u_item in enumerate(unit_opts_list):
-                    if u_item["value"] == default_u:
-                        default_idx = idx_u
-                        break
+                label_to_val = {all_lbl: "ALL"}
+                for u_item in unit_opts_list:
+                    lbl_u = u_item.get("label") or u_item.get("display") or str(u_item.get("value", ""))
+                    label_to_val[lbl_u] = u_item.get("value", "")
+                select_labels = [all_lbl] + [
+                    (u_item.get("label") or u_item.get("display") or str(u_item.get("value", "")))
+                    for u_item in unit_opts_list
+                ]
                 chosen_lbl = st.selectbox(
-                    "📍 Đơn vị / Vùng phụ trách:" if not is_en else "📍 Assigned Unit / Region:",
+                    "Scope:" if is_en else "Phạm vi xem:",
                     options=select_labels,
-                    index=default_idx,
-                    key=f"unit_scope_sel_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+                    index=0,
+                    key=f"unit_scope_sel_{turn_id}_{abs(hash(user_query or 'q')) % 100000}",
                 )
                 selected_unit_val = label_to_val.get(chosen_lbl, "ALL")
             else:
                 st.selectbox(
-                    "📍 Phạm vi điều hành:" if not is_en else "📍 Governance Scope:",
-                    options=["🌐 Toàn hệ thống (Macro P&L)" if not is_en else "🌐 Enterprise-Wide (Macro P&L)"],
+                    "Scope:" if is_en else "Phạm vi xem:",
+                    options=["Overall Business Scope" if is_en else "Toàn cửa hàng / Tổng quan"],
                     disabled=True,
-                    key=f"unit_scope_macro_{turn_id}_{abs(hash(user_query or 'q')) % 100000}"
+                    key=f"unit_scope_macro_{turn_id}_{abs(hash(user_query or 'q')) % 100000}",
                 )
 
-        # Dải Status Pill 1 dòng cho Cổng Kiểm Chứng Giả Thuyết
-        if branches:
-            confirmed_b = [b for b in branches if b.get("status") == "CONFIRMED"]
-            partial_b = [b for b in branches if b.get("status") == "PARTIAL"]
-            rejected_b = [b for b in branches if b.get("status") == "REJECTED"]
-            top_b = confirmed_b[0] if confirmed_b else branches[0]
-            sec_b = partial_b[0] if partial_b else (confirmed_b[1] if len(confirmed_b) > 1 else None)
-            rej_b = rejected_b[0] if rejected_b else None
-            top_t_clean = _clean_md_inline(re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(top_b.get("title", "H1")), flags=re.IGNORECASE))
-            top_c_pct = int(top_b.get("confidence", 88))
-            sec_badge_html = ""
-            if sec_b:
-                sec_id = sec_b.get("id", "H2")
-                sec_c_pct = int(sec_b.get("confidence", 74))
-                sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.38); color: #FBBF24; padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;'>⚡ {sec_id} ({sec_c_pct}%)</span>"
-            rej_badge_html = ""
-            if rej_b:
-                rej_id = rej_b.get("id", "H3")
-                rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.35); color: #94A3B8; padding: 2px 8px; border-radius: 5px; font-size: 0.71rem; font-weight: 500;'>❌ {'Loại trừ' if not is_en else 'Ruled out'} {rej_id}</span>"
-            gate_html = f"""
-            <div style="font-family: {vn_font_stack}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: rgba(6, 78, 59, 0.22); border: 1px solid rgba(16, 185, 129, 0.38); border-left: 3px solid #10B981; border-radius: 8px; padding: 6px 12px; margin-top: 2px; margin-bottom: 10px;">
-                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #34D399; text-transform: uppercase;">
-                        🔒 {'Căn cứ kiểm định:' if not is_en else 'Verified Root Cause:'}
-                    </span>
-                    <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">
-                        ✅ {top_b.get('id', 'H1')}: {top_t_clean} ({top_c_pct}%)
-                    </span>
-                    {sec_badge_html}
-                    {rej_badge_html}
-                </div>
-            </div>
-            """
-            st.markdown(re.sub(r'\n\s*', ' ', gate_html).strip(), unsafe_allow_html=True)
-
-        def _render_persona_box(p_code: str, border_col: str, badge_col: str):
-            u_arg = selected_unit_val if p_code == "lead" else None
+        def _render_persona_box(p_code: str, border_col: str, badge_col: str, force_unit: str | None = None):
+            u_arg = (force_unit if force_unit is not None else selected_unit_val) if p_code == "lead" else None
             p_data = generate_persona_action_plan(df, persona=p_code, user_query=user_query, is_en=is_en, target_unit=u_arg)
             unit_diag = p_data.get("unit_diagnostic")
             unit_strip_html = ""
@@ -6071,7 +6010,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 vs_m_col = "#34D399" if vs_m >= 0 else "#FBBF24"
                 sec_m_list = unit_diag.get("secondary_metrics", [])
                 sec_m_html = "".join(
-                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.71rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
+                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.71rem; padding: 2px 8px; border-radius: 5px;'>{sm}</span>"
                     for sm in sec_m_list
                 )
                 sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;'>{sec_m_html}</div>" if sec_m_html else ""
@@ -6081,7 +6020,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
                         <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
-                            🎯 {f"ĐỊNH CHUẨN {u_lbl_vi.upper()}:" if not is_en else f"{u_lbl_en.upper()} SCORECARD:"} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
+                            {f"ĐỐI CHIẾU {u_lbl_vi.upper()}:" if not is_en else f"{u_lbl_en.upper()} SCORECARD:"} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
                         </span>
                         <span style="font-size: 0.71rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
                             {unit_diag.get('status_badge')}
@@ -6093,7 +6032,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                             <div style="font-size: 0.85rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.69rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
                         </div>
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
-                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Chuẩn TB' if not is_en else 'vs. Company Mean'} ({unit_diag.get('mean_val_fmt')})</div>
+                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với trung bình' if not is_en else 'vs. Company Mean'} ({unit_diag.get('mean_val_fmt')})</div>
                             <div style="font-size: 0.85rem; font-weight: 800; color: {vs_m_col};">{vs_m:+.1f}% <span style="font-size: 0.69rem; color: #CBD5E1; font-weight: 500;">({unit_diag.get('pct_of_mean'):.1f}%)</span></div>
                         </div>
                         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
@@ -6101,12 +6040,12 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                             <div style="font-size: 0.85rem; font-weight: 800; color: #E2E8F0;">{unit_diag.get('pct_of_top'):.1f}% <span style="font-size: 0.69rem; color: #94A3B8; font-weight: 500;">(Δ {unit_diag.get('gap_to_top_fmt')})</span></div>
                         </div>
                         <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 6px 8px;">
-                            <div style="font-size: 0.68rem; color: #6EE7B7;">{'Chỉ tiêu Kỳ tới (Target)' if not is_en else 'Next-Period Quota'}</div>
+                            <div style="font-size: 0.68rem; color: #6EE7B7;">{'Mục tiêu kỳ tới' if not is_en else 'Next-Period Quota'}</div>
                             <div style="font-size: 0.85rem; font-weight: 800; color: #34D399;">{unit_diag.get('next_target_fmt')}</div>
                         </div>
                     </div>
                     <div style="font-size: 0.7rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
-                        <span>{'Tỷ lệ tiệm cận Top #1 (' if not is_en else 'Ratio vs. #1 ('}{unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
+                        <span>{'Tỷ lệ so với Top #1 (' if not is_en else 'Ratio vs. #1 ('}{unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
                         <b style="color: #F8FAFC;">{unit_diag.get('pct_of_top'):.1f}%</b>
                     </div>
                     <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
@@ -6117,7 +6056,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 """
             else:
                 kpis_chips = "".join(
-                    f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.35;'>📌 {_clean_md_inline(k)}</span>"
+                    f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.35;'>{_clean_md_inline(k)}</span>"
                     for k in p_data.get("kpis", [])
                 )
                 kpis_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;'>{kpis_chips}</div>"
@@ -6128,19 +6067,19 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 for ma in micro_list:
                     p_col = ma.get("priority_color", "#38BDF8")
                     p_lbl = ma.get("priority_label", "")
-                    p_icon = ma.get("priority_icon", "🔹")
+                    dot_html = f"<span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:{p_col};margin-right:7px;vertical-align:middle;'></span>"
                     hl_html = _clean_md_inline(ma.get("headline", ""))
                     brief_html = _clean_md_inline(ma.get("brief_action", ""))
                     det_html = _clean_md_inline(ma.get("detail_note", ""))
                     t_pill = _clean_md_inline(ma.get("target_pill", ""))
                     l_pill = _clean_md_inline(ma.get("lever_pill", ""))
                     e_pill = _clean_md_inline(ma.get("evidence_pill", ""))
-                    det_label = "▸ Xem số liệu đối chiếu & hướng dẫn chi tiết" if not is_en else "▸ View full comparative metrics & execution details"
+                    det_label = "Xem số liệu đối chiếu & cách thực hiện" if not is_en else "View comparative metrics & execution steps"
                     cards_list_html.append(f"""
                     <div style="background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(255,255,255,0.08); border-left: 3.5px solid {p_col}; border-radius: 9px; padding: 10px 14px; margin-bottom: 8px;">
                         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
                             <div style="font-size: 0.87rem; font-weight: 700; color: #F8FAFC; line-height: 1.4;">
-                                {p_icon} {hl_html}
+                                {dot_html}{hl_html}
                             </div>
                             <span style="font-size: 0.67rem; font-weight: 800; color: {p_col}; background: {p_col}1A; border: 1px solid {p_col}55; padding: 1px 7px; border-radius: 5px; letter-spacing: 0.03em;">
                                 {p_lbl}
@@ -6149,15 +6088,15 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                         <div style="font-size: 0.81rem; color: #CBD5E1; line-height: 1.48; margin-bottom: 7px;">
                             {brief_html}
                         </div>
-                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                             <span style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #6EE7B7; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 5px;">{t_pill}</span>
-                            <span style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.32); color: #7DD3FC; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{l_pill}</span>
-                            <span style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.28); color: #CBD5E1; font-size: 0.71rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{e_pill}</span>
+                            <span style="font-size: 0.72rem; color: #94A3B8; font-weight: 500;">• {l_pill}</span>
                         </div>
                         <details style="margin-top: 6px; font-size: 0.75rem; color: #94A3B8;">
                             <summary style="cursor: pointer; color: #38BDF8; font-weight: 600; outline: none; user-select: none;">{det_label}</summary>
                             <div style="margin-top: 5px; padding: 7px 10px; background: rgba(15, 23, 42, 0.85); border-left: 2px solid #38BDF8; border-radius: 5px; color: #E2E8F0; line-height: 1.52; font-size: 0.79rem;">
                                 {det_html}
+                                <div style="margin-top: 6px; padding-top: 5px; border-top: 1px dashed rgba(148,163,184,0.22); font-size: 0.71rem; color: #94A3B8;">{e_pill}</div>
                             </div>
                         </details>
                     </div>
@@ -6170,7 +6109,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 )
 
             box_header = f"""
-            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 14px 16px; margin-top: 6px; margin-bottom: 10px;">
+            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 14px 16px; margin-top: 6px; margin-bottom: 6px;">
                 <div style="font-family: {vn_font_stack}; font-size: 0.9rem; font-weight: 800; color: {badge_col}; margin-bottom: 3px; line-height: 1.4;">
                     {_clean_md_inline(p_data.get('role_title'))}
                 </div>
@@ -6187,40 +6126,196 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
             st.markdown(re.sub(r'\n\s*', ' ', box_header).strip(), unsafe_allow_html=True)
 
         if df is not None and not df.empty:
-            if sel_persona == persona_options[0]:
-                _render_persona_box("lead", "#10B981", "#34D399")
-            elif sel_persona == persona_options[1]:
-                _render_persona_box("ceo", "#00F0FF", "#38BDF8")
-            else:
+            if sel_persona == persona_options[2]:
                 col_p1, col_p2 = st.columns(2)
+                lead_dual_unit = selected_unit_val if (selected_unit_val and selected_unit_val != "ALL") else units_info.get("default_unit")
                 with col_p1:
-                    _render_persona_box("ceo", "#00F0FF", "#38BDF8")
+                    _render_persona_box("ceo", "#00F0FF", "#38BDF8", force_unit="ALL")
                 with col_p2:
-                    _render_persona_box("lead", "#10B981", "#34D399")
-
-            if p23:
-                with st.expander("📑 Chi tiết lộ trình 3 giai đoạn (Cấp bách | Trung hạn | Dài hạn)" if not is_en else "📑 Detailed 3-Horizon Roadmap (Urgent | Medium | Long-term)", expanded=False):
-                    st.markdown(format_card_markdown(p23))
+                    _render_persona_box("lead", "#10B981", "#34D399", force_unit=lead_dual_unit)
+            elif selected_unit_val and selected_unit_val != "ALL":
+                _render_persona_box("lead", "#10B981", "#34D399", force_unit=selected_unit_val)
+            elif sel_persona == persona_options[0]:
+                _render_persona_box("ceo", "#00F0FF", "#38BDF8", force_unit="ALL")
+            else:
+                _render_persona_box("lead", "#10B981", "#34D399", force_unit="ALL")
         elif p23:
+            st.markdown(format_card_markdown(p23))
+
+    # TẦNG 2: PHÂN TÍCH CHUYÊN SÂU (Mặc định thu gọn, mở 1 click khi cần)
+    if branches or p22:
+        exp1_title = (
+            "Deep Dive: Root-Cause Verification (3 Competing Hypotheses)"
+            if is_en else
+            "Phân tích chuyên sâu: Kiểm chứng nguyên nhân (3 giả thuyết đối chứng)"
+        )
+        with st.expander(exp1_title, expanded=False):
+            if branches:
+                confirmed_b = [b for b in branches if b.get("status") == "CONFIRMED"]
+                partial_b = [b for b in branches if b.get("status") == "PARTIAL"]
+                rejected_b = [b for b in branches if b.get("status") == "REJECTED"]
+                top_b = confirmed_b[0] if confirmed_b else branches[0]
+                sec_b = partial_b[0] if partial_b else (confirmed_b[1] if len(confirmed_b) > 1 else None)
+                rej_b = rejected_b[0] if rejected_b else None
+                top_t_clean = _clean_md_inline(re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(top_b.get("title", "H1")), flags=re.IGNORECASE))
+                top_c_pct = int(top_b.get("confidence", 88))
+                sec_badge_html = ""
+                if sec_b:
+                    sec_id = sec_b.get("id", "H2")
+                    sec_c_pct = int(sec_b.get("confidence", 74))
+                    sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.38); color: #FBBF24; padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;'>{sec_id} ({sec_c_pct}%)</span>"
+                rej_badge_html = ""
+                if rej_b:
+                    rej_id = rej_b.get("id", "H3")
+                    rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.35); color: #94A3B8; padding: 2px 8px; border-radius: 5px; font-size: 0.71rem; font-weight: 500;'>{'Loại trừ' if not is_en else 'Ruled out'} {rej_id}</span>"
+                gate_html = f"""
+                <div style="font-family: {vn_font_stack}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: rgba(6, 78, 59, 0.22); border: 1px solid rgba(16, 185, 129, 0.38); border-left: 3px solid #10B981; border-radius: 8px; padding: 6px 12px; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                        <span style="font-size: 0.72rem; font-weight: 800; color: #34D399; text-transform: uppercase;">
+                            {'Căn cứ kiểm định:' if not is_en else 'Verified Root Cause:'}
+                        </span>
+                        <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">
+                            {top_b.get('id', 'H1')}: {top_t_clean} ({top_c_pct}%)
+                        </span>
+                        {sec_badge_html}
+                        {rej_badge_html}
+                    </div>
+                </div>
+                """
+                st.markdown(re.sub(r'\n\s*', ' ', gate_html).strip(), unsafe_allow_html=True)
+
+                prob_stmt = _clean_md_inline(tree_data.get("problem_statement", ""))
+                st.markdown(f"""
+                <div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 9px; padding: 9px 14px; margin-bottom: 10px;">
+                    <span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; margin-right: 6px;">
+                        {'BÀI TOÁN KIỂM ĐỊNH:' if not is_en else 'ROOT PROBLEM:'}
+                    </span>
+                    <span style="font-size: 0.86rem; font-weight: 700; color: #F8FAFC;">
+                        {prob_stmt}
+                    </span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                b_cards_html = []
+                for b in branches:
+                    status = b.get("status", "PARTIAL")
+                    if status == "CONFIRMED":
+                        border_c, bg_c, badge_bg, badge_c = "#10B981", "rgba(16, 185, 129, 0.08)", "rgba(16, 185, 129, 0.2)", "#34D399"
+                    elif status == "PARTIAL":
+                        border_c, bg_c, badge_bg, badge_c = "#F59E0B", "rgba(245, 158, 11, 0.07)", "rgba(245, 158, 11, 0.2)", "#FBBF24"
+                    else:
+                        border_c, bg_c, badge_bg, badge_c = "#64748B", "rgba(100, 116, 139, 0.06)", "rgba(100, 116, 139, 0.2)", "#94A3B8"
+
+                    conf_pct = b.get("confidence", 50)
+                    imp_pct = b.get("impact", 50)
+                    prio_score = b.get("priority_score", 50)
+                    conf_lbl = "Độ chính xác" if not is_en else "Confidence"
+                    imp_lbl = "Tác động" if not is_en else "Impact"
+                    prio_lbl = "Ưu tiên" if not is_en else "Priority"
+                    b_title_clean = _clean_md_inline(b.get("title", ""))
+                    b_evid_clean = _clean_md_inline(b.get("evidence", ""))
+                    ev_summary_lbl = "Xem bằng chứng số liệu kiểm định" if not is_en else "View quantitative test evidence"
+
+                    b_cards_html.append(f"""
+                    <div style="background: {bg_c}; border: 1px solid {border_c}55; border-top: 3px solid {border_c}; border-radius: 10px; padding: 10px 11px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
+                                <span style="font-size: 0.69rem; font-weight: 800; color: {badge_c}; background: {badge_bg}; border: 1px solid {border_c}88; padding: 2px 7px; border-radius: 5px;">{b.get('status_label')}</span>
+                                <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.28); padding: 1px 7px; border-radius: 5px; font-size: 0.69rem; font-weight: 700;">{prio_lbl}: {prio_score}/100</span>
+                            </div>
+                            <div style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC; line-height: 1.42; margin-bottom: 8px;">
+                                {b_title_clean}
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display: flex; justify-content: space-between; font-size: 0.73rem; color: #94A3B8; margin-bottom: 3px;">
+                                <span>{conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
+                                <span>{imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
+                            </div>
+                            <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
+                                <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
+                            </div>
+                            <details style="font-size: 0.74rem; color: #94A3B8;">
+                                <summary style="cursor: pointer; color: #7DD3FC; font-weight: 600; outline: none; user-select: none;">{ev_summary_lbl}</summary>
+                                <div style="margin-top: 5px; padding: 6px 8px; background: rgba(15, 23, 42, 0.85); border-radius: 5px; color: #CBD5E1; line-height: 1.48; font-size: 0.76rem;">
+                                    {b_evid_clean}
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                    """)
+
+                grid_tree_html = f"""
+                <div style="font-family: {vn_font_stack}; display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 8px; margin-bottom: 10px;">
+                    {''.join(b_cards_html)}
+                </div>
+                """
+                st.markdown(re.sub(r'\n\s*', ' ', grid_tree_html).strip(), unsafe_allow_html=True)
+
+                concl = _clean_md_inline(tree_data.get("conclusion", ""))
+                if concl:
+                    st.markdown(f"""
+                    <div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10B981; border-radius: 6px; padding: 8px 12px; margin-top: 4px; font-size: 0.81rem; color: #ECFDF5; line-height: 1.45;">
+                        <b>{concl}</b>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                if p22:
+                    p22_html_items = "".join(
+                        f"<div style='margin-bottom: 6px;'>{_clean_md_inline(line)}</div>"
+                        for line in format_card_markdown(p22).split("\n\n") if line.strip()
+                    )
+                    ai_notes_lbl = "Xem thêm phân tích ngữ cảnh bổ trợ từ AI" if not is_en else "View Additional AI Contextual Notes"
+                    st.markdown(
+                        f"<details style='margin-top: 10px; font-family: {vn_font_stack}; font-size: 0.8rem; color: #CBD5E1;'><summary style='cursor: pointer; color: #38BDF8; font-weight: 600;'>{ai_notes_lbl}</summary><div style='margin-top: 6px; padding: 8px 12px; background: rgba(15,23,42,0.7); border-radius: 6px; line-height: 1.5;'>{p22_html_items}</div></details>",
+                        unsafe_allow_html=True,
+                    )
+            elif p22:
+                st.markdown(format_card_markdown(p22))
+
+    if p23 and df is not None and not df.empty:
+        exp2_title = (
+            "3-Horizon Implementation Roadmap (Immediate • Medium • Long-term)"
+            if is_en else
+            "Lộ trình triển khai 3 giai đoạn (Ngắn hạn • Trung hạn • Dài hạn)"
+        )
+        with st.expander(exp2_title, expanded=False):
             st.markdown(format_card_markdown(p23))
 
 
 def render_agent_workflow_badges(result: dict, turn_id: str):
-    """Hiển thị huy hiệu bảo chứng tính toàn vẹn và tin cậy của dữ liệu (Trust & Integrity Seal),
-    chuẩn triết lý Đơn giản - Tin cậy - Trực quan của ông Vương Quang Khải.
-    """
+    """Hiển thị huy hiệu bảo chứng tính toàn vẹn và tin cậy của dữ liệu (Trust & Integrity Seal)."""
     lang = result.get("lang", "vi")
     is_en = (lang == "en")
+    evaluator = result.get("evaluator") or {}
+    eval_score = evaluator.get("score", 100) if isinstance(evaluator, dict) else 100
+    eval_verdict = str(evaluator.get("verdict", "PASS") if isinstance(evaluator, dict) else "PASS")
+    is_fully_verified = (eval_score >= 100 and eval_verdict == "PASS")
 
-    seal_title = "✓ Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)" if not is_en else "✓ Verified Data Integrity (100% Trust Score)"
+    if is_fully_verified:
+        seal_title = "✓ Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)" if not is_en else "✓ Verified Data Integrity (100% Trust Score)"
+        seal_color = "#00DF8F"
+        seal_bg = "rgba(0, 223, 143, 0.15)"
+        seal_border = "rgba(0, 223, 143, 0.3)"
+        seal_icon = "✓"
+    else:
+        seal_title = (
+            f"⚠️ Kết quả đạt kiểm định {eval_score}/100 ({eval_verdict}) — Vui lòng kiểm tra SQL & đối chiếu"
+            if not is_en
+            else f"⚠️ Audit Score {eval_score}/100 ({eval_verdict}) — Please inspect SQL & verify"
+        )
+        seal_color = "#F59E0B"
+        seal_bg = "rgba(245, 158, 11, 0.15)"
+        seal_border = "rgba(245, 158, 11, 0.35)"
+        seal_icon = "!"
     source_label = "Nguồn: CSDL Doanh Nghiệp" if not is_en else "Source: Enterprise Database"
     hint_label = "Xem chi tiết SQL & Tiến trình tại tab 🧭" if not is_en else "View full SQL & trace in 🧭 tab"
 
     st.markdown(f"""
     <div style="background: #151A30; border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 12px; padding: 10px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="font-weight: 700; font-size: 0.86rem; color: #00DF8F; display: inline-flex; align-items: center; gap: 6px;">
-                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 223, 143, 0.15); color: #00DF8F; font-size: 0.75rem; font-weight: 800; border: 1px solid rgba(0, 223, 143, 0.3);">✓</span>
+            <span style="font-weight: 700; font-size: 0.86rem; color: {seal_color}; display: inline-flex; align-items: center; gap: 6px;">
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: {seal_bg}; color: {seal_color}; font-size: 0.75rem; font-weight: 800; border: 1px solid {seal_border};">{seal_icon}</span>
                 {seal_title}
             </span>
             <span style="color: rgba(255, 255, 255, 0.2);">•</span>
@@ -6235,6 +6330,60 @@ def render_agent_workflow_badges(result: dict, turn_id: str):
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def _render_followup_query_buttons(
+    followups,
+    turn_id: str,
+    header_markdown: str,
+    icon: str = "👉",
+    key_prefix: str = "btn_fup",
+    max_cols: int = 3,
+    is_en: bool = False,
+) -> bool:
+    """Render clickable suggested follow-up buttons wired to st.session_state['pending_prompt']."""
+    if not followups or isinstance(followups, (str, bytes)):
+        return False
+
+    clean_items: list[str] = []
+    seen: set[str] = set()
+    for q_raw in followups:
+        if isinstance(q_raw, dict):
+            q_val = q_raw.get("question") or q_raw.get("prompt") or q_raw.get("query") or ""
+        else:
+            q_val = str(q_raw or "")
+        clean_q = sanitize_followup_question(q_val)
+        if clean_q and clean_q not in seen:
+            seen.add(clean_q)
+            clean_items.append(clean_q)
+        if len(clean_items) >= max_cols:
+            break
+
+    if not clean_items:
+        return False
+
+    if header_markdown:
+        st.markdown(header_markdown)
+
+    cols = st.columns(len(clean_items))
+    for idx, (col_f, clean_q) in enumerate(zip(cols, clean_items)):
+        digest = hashlib.md5(clean_q.encode("utf-8")).hexdigest()[:8]
+
+        def _on_followup_click(q_target: str = clean_q):
+            st.session_state["pending_prompt"] = q_target
+            st.session_state["submitted_query"] = None
+            st.session_state["view_mode"] = "chat"
+
+        with col_f:
+            help_text = f'Run query: "{clean_q}"' if is_en else f'Chạy tiếp: "{clean_q}"'
+            st.button(
+                f"{icon} {clean_q}",
+                key=f"{key_prefix}_{turn_id}_{idx}_{digest}",
+                use_container_width=True,
+                help=help_text,
+                on_click=_on_followup_click,
+            )
+    return True
 
 
 def render_result(result: dict, turn_id: str):
@@ -6283,14 +6432,16 @@ def render_result(result: dict, turn_id: str):
         if not has_df:
             followups = result.get("followups", [])
             if followups:
-                st.markdown("##### 🚀 " + ("Compatible Suggested Queries:" if is_en else "Câu hỏi gợi ý tương thích:"))
-                cols = st.columns(min(len(followups), 4))
-                for idx, (col_f, q_text) in enumerate(zip(cols, followups[:4])):
-                    with col_f:
-                        clean_q = sanitize_followup_question(q_text)
-                        if st.button(f"💬 {clean_q}", key=f"btn_exp_followup_{turn_id}_{idx}", use_container_width=True):
-                            st.session_state["submitted_query"] = clean_q
-                            st.rerun()
+                header_compat = "##### " + ("Compatible Suggested Queries:" if is_en else "Câu hỏi gợi ý tương thích:")
+                _render_followup_query_buttons(
+                    followups,
+                    turn_id=turn_id,
+                    header_markdown=header_compat,
+                    icon="💬",
+                    key_prefix="btn_exp_followup",
+                    max_cols=4,
+                    is_en=is_en,
+                )
 
             # Hiển thị chi tiết kỹ thuật & nhật ký kiểm toán nếu có
             if result.get("sql") or result.get("logs"):
@@ -6348,6 +6499,18 @@ def render_result(result: dict, turn_id: str):
 
     if df is None or df.empty:
         st.warning("⚠️ No data returned for this query." if is_en else "⚠️ Không có dữ liệu nào trả về cho câu hỏi này.")
+        followups = result.get("followups", [])
+        if followups:
+            header_compat = "##### " + ("Compatible Suggested Queries:" if is_en else "Câu hỏi gợi ý tương thích:")
+            _render_followup_query_buttons(
+                followups,
+                turn_id=turn_id,
+                header_markdown=header_compat,
+                icon="💬",
+                key_prefix="btn_empty_followup",
+                max_cols=4,
+                is_en=is_en,
+            )
         if sql_query:
             with st.expander("🛠️ SQL Query Details" if is_en else "🛠️ Chi tiết Câu lệnh SQL", expanded=False):
                 st.code(sql_query, language="sql")
@@ -6433,7 +6596,10 @@ def render_result(result: dict, turn_id: str):
         and any("team" in str(c).lower() for c in df.columns)
     )
 
-    is_suppressed_single_row = (len(df) == 1 and not is_single_pct_chk and not is_same_unit_bm_chk and not is_team_flagship_chk)
+    is_suppressed_single_row = (
+        (len(df) == 1 and not is_single_pct_chk and not is_same_unit_bm_chk and not is_team_flagship_chk)
+        or (not m_cols_chk)
+    )
 
     chart_fig = None
     if not is_suppressed_single_row:
@@ -6474,17 +6640,17 @@ def render_result(result: dict, turn_id: str):
 
     if chart_fig and has_anomaly:
         n_findings = len(anomalies_info.get("findings", []))
-        caption_anom = f"🚨 **Detected {n_findings} statistical anomalies/trends**. See details in **'Insights & Analysis'** tab." if is_en else f"🚨 **Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Xem chi tiết tại tab **'Insight & Hành động'**."
+        caption_anom = f"**Detected {n_findings} statistical anomalies/trends**. See details in **'Insights & Analysis'** tab." if is_en else f"**Phát hiện {n_findings} điểm/xu hướng bất thường** trên dữ liệu. Xem chi tiết tại tab **'Insight & Hành động'**."
         st.caption(caption_anom)
 
     # Dải tiến trình Tác tử Tự chủ (Autonomous Agent Trace Badges)
     render_agent_workflow_badges(result, turn_id)
 
     # 5. Cụm Tab Phân loại Thông tin (Progressive Disclosure Tabs)
-    tab_data_label = "📋 Bảng số liệu & Báo cáo" if not is_en else "📋 Data Table & Reports"
-    tab_insight_label = "💡 Insight & Hành động 🚨" if (has_anomaly and not is_en) else ("💡 Insight & Phân tích" if not is_en else ("💡 Insights & Anomalies 🚨" if has_anomaly else "💡 Insights & Analysis"))
-    tab_forecast_label = "🔮 Dự báo xu hướng" if not is_en else "🔮 Forecast"
-    tab_sql_label = "🏛️ Hội đồng 5 Agent & SQL" if not is_en else "🏛️ 5-Agent Matrix & SQL"
+    tab_data_label = "Bảng số liệu & Báo cáo" if not is_en else "Data Table & Reports"
+    tab_insight_label = "Insight & Hành động (Có cảnh báo)" if (has_anomaly and not is_en) else ("Insight & Phân tích" if not is_en else ("Insights & Action Plan (Alert)" if has_anomaly else "Insights & Analysis"))
+    tab_forecast_label = "Dự báo xu hướng" if not is_en else "Forecast"
+    tab_sql_label = "Hội đồng 5 Agent & SQL" if not is_en else "5-Agent Matrix & SQL"
 
     tab_data, tab_insight, tab_forecast, tab_sql = st.tabs([tab_data_label, tab_insight_label, tab_forecast_label, tab_sql_label])
 
@@ -6563,7 +6729,15 @@ def render_result(result: dict, turn_id: str):
                     "những chức danh", "các chức danh", "chức danh nào", "vượt trên", "vượt mức", "vượt", "trên mức trung bình"
                 ])
             )
-            if is_ranking and len(display_df) <= 50:
+            from datamate.agent import extract_ordinal_rank
+
+            ord_rank_tbl = extract_ordinal_rank(user_query or "")
+            if ord_rank_tbl is not None and len(display_df) == 1:
+                rn_tbl = ord_rank_tbl[0]
+                medals_ord = {1: "🥇 #1", 2: "🥈 #2", 3: "🥉 #3"}
+                display_df.index = [medals_ord.get(rn_tbl, f"#{rn_tbl}")]
+                display_df.index.name = "Xếp hạng" if not is_en else "Rank"
+            elif is_ranking and len(display_df) <= 50:
                 medals = {0: "🥇 #1", 1: "🥈 #2", 2: "🥉 #3"}
                 display_df.index = [medals.get(i, f"#{i+1}") for i in range(len(display_df))]
                 display_df.index.name = "Xếp hạng" if not is_en else "Rank"
@@ -6613,6 +6787,18 @@ def render_result(result: dict, turn_id: str):
                 except Exception:
                     pass
 
+            _sql_ctx_tbl = str(sql_query or "")
+            _df_has_money_col = any(
+                any(
+                    k in str(c).lower()
+                    for k in [
+                        "salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "tien",
+                        "cost", "revenue", "chi phí", "sales", "amount", "profit",
+                        "doanh", "gia_", "lợi nhuận", "$"
+                    ]
+                )
+                for c in display_df.columns
+            )
             column_config = {}
             for col in display_df.columns:
                 c_low = str(col).lower()
@@ -6664,13 +6850,23 @@ def render_result(result: dict, turn_id: str):
                     "salary", "lương", "thu nhập", "budget", "quỹ", "tiền", "cost", "revenue", "chi phí", "sales",
                     "amount", "profit", "ordervalue", "doanh thu", "doanh số", "doanh", "lợi nhuận", "lãi", "lỗ",
                     "giá vốn", "cogs", "$", "biên độ thay đổi", "tháng cao nhất", "tháng thấp nhất"
-                ]):
+                ]) or (_df_has_money_col and any(k in c_low for k in ["chenh_lech", "chenhlech", "chênh lệch"])):
                     if is_num:
                         has_dec = display_df[col].dropna().apply(lambda x: float(x) != int(float(x)) if pd.notna(x) else False).any() if not display_df[col].dropna().empty else False
-                        column_config[col] = st.column_config.NumberColumn(
-                            col_label,
-                            format="$%,.2f" if has_dec else "$%,.0f"
-                        )
+                        if is_vnd_context_dataframe(df, str(col), sql=_sql_ctx_tbl) or (_df_has_money_col and any(k in c_low for k in ["chenh_lech", "chenhlech", "chênh lệch"]) and is_vnd_context_dataframe(df, "", sql=_sql_ctx_tbl)):
+                            if " ($)" in col_label:
+                                col_label = col_label.replace(" ($)", " (đ)")
+                            elif " (đ)" not in col_label:
+                                col_label = f"{col_label} (đ)"
+                            column_config[col] = st.column_config.NumberColumn(
+                                col_label,
+                                format="%,.2f đ" if has_dec else "%,.0f đ"
+                            )
+                        else:
+                            column_config[col] = st.column_config.NumberColumn(
+                                col_label,
+                                format="$%,.2f" if has_dec else "$%,.0f"
+                            )
                     else:
                         column_config[col] = st.column_config.Column(col_label)
                 elif is_num:
@@ -6875,40 +7071,52 @@ def render_result(result: dict, turn_id: str):
     # TAB 2: INSIGHT & HÀNH ĐỘNG
     # -----------------------------------------------------
     with tab_insight:
-        title_insight_header = "💡 Executive Business Insight & Anomaly Report" if is_en else "💡 Báo cáo Phân tích Insight & Phát hiện Bất thường"
+        title_insight_header = "Business Insights & Action Plan" if is_en else "Phân tích Insight & Kế hoạch Hành động"
         st.subheader(title_insight_header)
 
         stats = anomalies_info.get("summary_stats", {})
         if stats:
-            y_col_stat = anomalies_info.get("y_col", "")
-            is_cur_money = any(k in str(y_col_stat).lower() for k in ["salary", "lương", "revenue", "sales", "doanh", "tiền", "cost", "budget", "quỹ", "chi phí", "thu nhập", "amount", "$"])
+            y_col_stat_raw = str(anomalies_info.get("metric_col") or anomalies_info.get("y_col") or "")
+            y_col_stat = y_col_stat_raw.lower()
+            is_vnd_money = is_vnd_context_dataframe(df, y_col_stat_raw, sql=str(sql_query or ""))
+            is_cur_money = (not is_vnd_money) and any(
+                k in y_col_stat
+                for k in ["salary", "lương", "revenue", "sales", "cost", "budget", "quỹ", "thu nhập", "amount", "$"]
+            )
             prefix = "$" if is_cur_money else ""
+            suffix = " đ" if is_vnd_money else ""
 
             def _fmt_stat(val, is_avg=False):
                 if val is None:
                     return "0"
                 if not is_avg and abs(val - round(val)) < 1e-5:
-                    return f"{prefix}{int(round(val)):,d}"
-                return f"{prefix}{val:,.2f}"
+                    return f"{prefix}{int(round(val)):,d}{suffix}"
+                if is_vnd_money and abs(val) >= 100:
+                    return f"{int(round(val)):,d}{suffix}"
+                return f"{prefix}{val:,.2f}{suffix}"
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Rows" if is_en else "Tổng số dòng", f"{stats.get('count', 0):,}")
-            c2.metric("Mean" if is_en else "Trung bình (Mean)", _fmt_stat(stats.get('mean', 0), is_avg=True))
-            c3.metric("Max" if is_en else "Lớn nhất (Max)", _fmt_stat(stats.get('max', 0)))
-            c4.metric("Min" if is_en else "Nhỏ nhất (Min)", _fmt_stat(stats.get('min', 0)))
+            c1.metric("Total Rows" if is_en else "Số mục", f"{stats.get('count', 0):,}")
+            c2.metric("Mean" if is_en else "Trung bình", _fmt_stat(stats.get('mean', 0), is_avg=True))
+            c3.metric("Max" if is_en else "Cao nhất", _fmt_stat(stats.get('max', 0)))
+            c4.metric("Min" if is_en else "Thấp nhất", _fmt_stat(stats.get('min', 0)))
 
         if has_anomaly:
-            st.markdown("#### 🚨 Statistical Anomaly Findings:" if is_en else "#### 🚨 Các phát hiện bất thường từ thuật toán:")
+            st.markdown("#### Statistical Anomaly Findings:" if is_en else "#### Các phát hiện bất thường từ thuật toán:")
             for f in anomalies_info.get("findings", []):
                 st.warning(f"• {f.get('message')}")
         else:
-            st.success("✅ No extreme anomalies or spikes detected in this dataset." if is_en else "✅ Thuật toán không phát hiện điểm đột biến hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
+            st.caption(
+                "Data distribution is stable with no extreme anomalies detected."
+                if is_en else
+                "Số liệu phân bổ ổn định, chưa ghi nhận đột biến bất thường."
+            )
 
         insights = result.get("insights", "")
         if insights or (df is not None and not df.empty):
             render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""), turn_id=f"tab2_{turn_id}")
         else:
-            btn_insight_text = "🔍 Generate Executive Insights & Priority Action Plan" if is_en else "🔍 Yêu cầu Veraxus phân tích Insight & Đề xuất hành động"
+            btn_insight_text = "Generate Executive Insights & Priority Action Plan" if is_en else "Yêu cầu Veraxus phân tích Insight & Đề xuất hành động"
             if st.button(btn_insight_text, key=f"gen_insight_{turn_id}"):
                 client = st.session_state.get("client")
                 provider = st.session_state.get("provider")
@@ -7140,20 +7348,20 @@ def render_result(result: dict, turn_id: str):
                 c4.metric("Sàn thấp nhất (Min)", f"{stats.get('min', 0):,.2f}")
 
             if has_anomaly:
-                st.markdown("#### 🚨 Phát hiện Dị biệt & Biến động Đáng chú ý:")
+                st.markdown("#### Phát hiện Dị biệt & Biến động Đáng chú ý:")
                 for f in anomalies_info.get("findings", []):
                     st.warning(f"• {f.get('message')}")
             else:
-                st.success("✅ Thuật toán không phát hiện điểm dị biệt hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
+                st.success("Thuật toán không phát hiện điểm dị biệt hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
 
-        # AGENT 5: 💡 EXECUTIVE STRATEGY ADVISOR
-        with st.expander("💡 **Agent 5: Executive Strategy Advisor** (Cố vấn Chiến lược & Nghị quyết Điều hành C-Level)", expanded=False):
+        # AGENT 5: EXECUTIVE STRATEGY ADVISOR
+        with st.expander("**Agent 5: Executive Strategy Advisor** (Cố vấn Chiến lược & Nghị quyết Điều hành)" if not is_en else "**Agent 5: Executive Strategy Advisor**", expanded=False):
             insights = result.get("insights", "")
             if insights or (df is not None and not df.empty):
-                st.markdown("#### 💡 Khuyến nghị Trọng tâm & Kế hoạch Hành động:")
+                st.markdown("#### Khuyến nghị Trọng tâm & Kế hoạch Hành động:")
                 render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""), turn_id=f"tab4_{turn_id}")
             else:
-                st.info("Chuyển sang tab 'Insight & Hành động' để xem phân tích chi tiết từ Strategy Advisor.")
+                st.info("Chuyển sang tab 'Insight & Phân tích' để xem phân tích chi tiết từ Strategy Advisor.")
 
         # NHẬT KÝ CHI TIẾT (ACTIVITY LOGS)
         logs = result.get("logs", [])
@@ -7175,28 +7383,17 @@ def render_result(result: dict, turn_id: str):
             pass
 
     if followups:
-        st.markdown("<div style='margin-top: 20px; margin-bottom: 8px;'>", unsafe_allow_html=True)
-        header_fup = "💡 **Gợi ý phân tích tiếp theo (Nhấp để chạy ngay):**" if not is_en else "💡 **Suggested Follow-up Questions (Click to run):**"
-        st.markdown(header_fup)
-
-        cols = st.columns(min(len(followups), 3))
-        for idx, (col_f, q_text) in enumerate(zip(cols, followups[:3])):
-            clean_q = sanitize_followup_question(q_text)
-            if not clean_q:
-                continue
-            def _on_fup_click(q_target=clean_q):
-                st.session_state["pending_prompt"] = q_target
-
-            with col_f:
-                help_text = f"Chạy tiếp: \"{clean_q}\"" if not is_en else f"Run query: \"{clean_q}\""
-                st.button(
-                    f"👉 {clean_q}",
-                    key=f"btn_fup_{turn_id}_{idx}_{abs(hash(clean_q)) % 1000000}",
-                    use_container_width=True,
-                    help=help_text,
-                    on_click=_on_fup_click
-                )
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+        header_fup = "**Gợi ý phân tích tiếp theo** *(Nhấp để chạy ngay):*" if not is_en else "**Suggested Follow-up Questions** *(Click to run):*"
+        _render_followup_query_buttons(
+            followups,
+            turn_id=turn_id,
+            header_markdown=header_fup,
+            icon="👉",
+            key_prefix="btn_fup",
+            max_cols=3,
+            is_en=is_en,
+        )
 
     # 7. VÒNG LẶP TIẾN HÓA TRI THỨC (Tầng 2: Continuous Learning & Dynamic Memory)
     _user_q = result.get("query", "")

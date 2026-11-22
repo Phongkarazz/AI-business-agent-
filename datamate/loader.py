@@ -23,6 +23,8 @@ from __future__ import annotations
 import csv
 import dataclasses
 import datetime as dt
+import hashlib
+import json
 import os
 import pathlib
 import re
@@ -703,6 +705,20 @@ def _normalize_column_values(
     return "text", out_txt
 
 
+def _is_binary_blob_value(v: Any) -> bool:
+    """Detect raw binary bytes or hex/JPEG BLOB payloads so they never bloat LLM prompts."""
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return True
+    if not isinstance(v, str):
+        return False
+    s = v.strip()
+    if s.startswith(("b'\\x", 'b"\\x', "\\xff\\xd8", "\\x89PNG")):
+        return True
+    if len(s) > 180 and ("\\x" in s[:80] or " " not in s[:100]):
+        return True
+    return False
+
+
 def _build_column_profiles(
     conn: sqlite3.Connection,
     table_name: str,
@@ -721,7 +737,11 @@ def _build_column_profiles(
             f"SELECT {q_col}, COUNT(*) AS c FROM {q_tbl} WHERE {q_col} IS NOT NULL "
             f"GROUP BY {q_col} ORDER BY c DESC LIMIT 12"
         ).fetchall()
-        samples = [r[0] for r in top_rows[:5]]
+        safe_top = [
+            ("<binary>" if _is_binary_blob_value(r[0]) else r[0], r[1])
+            for r in top_rows
+        ]
+        samples = [v for v, _ in safe_top[:5] if v != "<binary>"]
         profiles.append(
             ColumnProfile(
                 raw_name=raw_h,
@@ -729,7 +749,7 @@ def _build_column_profiles(
                 inferred_type=dtype,
                 null_count=null_cnt,
                 distinct_count=dist_cnt,
-                top_values=[(r[0], r[1]) for r in top_rows],
+                top_values=safe_top,
                 sample_values=samples,
             )
         )
@@ -1015,6 +1035,23 @@ def _ingest_sqlite_normalized(
         dest_conn.close()
 
 
+def _compute_workspace_fingerprint(
+    bdir: pathlib.Path,
+    data_files: Sequence[pathlib.Path],
+    readme_text: str,
+) -> str:
+    """Compute a deterministic fingerprint over all non-hidden source files and README in a workspace."""
+    items = []
+    for fpath in sorted(data_files, key=lambda p: p.name):
+        try:
+            st = fpath.stat()
+            items.append([normalize_nfc(fpath.name), int(st.st_size), int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))])
+        except OSError:
+            items.append([normalize_nfc(fpath.name), -1, -1])
+    payload = json.dumps({"v": 2, "readme": readme_text, "files": items}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def load_business_workspace(
     business_dir: str | pathlib.Path,
     cache_dir: Optional[str | pathlib.Path] = None,
@@ -1039,10 +1076,32 @@ def load_business_workspace(
     out_dir = pathlib.Path(cache_dir) if cache_dir else pathlib.Path(tempfile.gettempdir()) / "datamate_cache"
     out_dir.mkdir(parents=True, exist_ok=True)
     db_path = out_dir / f"{business_id}.sqlite"
+    manifest_path = out_dir / f"{business_id}.manifest.json"
+    current_fp = _compute_workspace_fingerprint(bdir, data_files, readme_text)
+
+    def _cache_is_fresh() -> bool:
+        if force_rebuild or not db_path.exists() or db_path.stat().st_size <= 0:
+            return False
+        if not manifest_path.exists():
+            return False
+        try:
+            saved_fp = json.loads(manifest_path.read_text(encoding="utf-8")).get("fingerprint")
+            return bool(saved_fp and saved_fp == current_fp)
+        except Exception:
+            return False
+
+    def _write_manifest() -> None:
+        try:
+            manifest_path.write_text(
+                json.dumps({"fingerprint": current_fp, "business_id": business_id}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     if sqlite_files and not tabular_files:
         db_file = sqlite_files[0]
-        if not force_rebuild and db_path.exists() and db_path.stat().st_size > 0:
+        if _cache_is_fresh():
             try:
                 profiles = _profile_existing_sqlite(
                     db_path,
@@ -1060,7 +1119,10 @@ def load_business_workspace(
                     )
             except sqlite3.Error:
                 pass
+        if db_path.exists():
+            db_path.unlink()
         profiles = _ingest_sqlite_normalized(db_file, db_path)
+        _write_manifest()
         return BusinessWorkspace(
             business_id=business_id,
             business_dir=bdir,
@@ -1070,8 +1132,8 @@ def load_business_workspace(
             source_kind="sqlite_normalized",
         )
 
-    # Fast cache check: reuse existing SQLite if non-empty and built cleanly, unless force_rebuild
-    if not force_rebuild and db_path.exists() and db_path.stat().st_size > 0:
+    # Fast cache check: reuse existing SQLite ONLY when source files fingerprint matches
+    if _cache_is_fresh():
         try:
             profiles = _profile_existing_sqlite(
                 db_path,
@@ -1208,6 +1270,7 @@ def load_business_workspace(
     finally:
         conn.close()
 
+    _write_manifest()
     return BusinessWorkspace(
         business_id=business_id,
         business_dir=bdir,

@@ -21,6 +21,9 @@ _ENGLISH_KEEP_WORDS = frozenset(
         "pcs", "ok", "cod", "vat", "zalo", "store", "cash", "phone", "mail",
         "admin", "soda", "extra", "special", "gold", "silver", "max", "mini",
         "pro", "care", "gel", "cream", "spray", "oil", "gas", "led", "pvc",
+        "categories", "category", "employees", "employee", "customers", "customer",
+        "products", "product", "suppliers", "shippers", "regions", "territories",
+        "sales", "revenue", "price", "prices", "status", "details", "units",
     }
 )
 
@@ -148,6 +151,102 @@ _SUBJECTIVE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_OUT_OF_SCOPE_ACCENTED_RE = re.compile(
+    r"\b(?:"
+    r"thời\s+tiết|mưa|trời\s+mưa|có\s+mưa|mưa\s+không|mưa\s+rào|mưa\s+to|trời\s+nắng|nắng\s+nóng|"
+    r"nhiệt\s+độ|khí\s+hậu|cơn\s+bão|bão\s+số|áp\s+thấp|độ\s+ẩm|sương\s+mù|tuyết\s+rơi|gió\s+mùa|dự\s+báo\s+thời\s+tiết|"
+    r"weather|rain|raining|rainy|sunny|storm|typhoon|humidity|"
+    r"giá\s+vàng|giá\s+xăng|bitcoin|ethereum|crypto|tiền\s+ảo|chứng\s+khoán|cổ\s+phiếu|vn-?index|xổ\s+số|vietlott|lô\s+đề|"
+    r"bóng\s+đá|world\s+cup|ngoại\s+hạng\s+anh|thủ\s+đô|tổng\s+thống|chủ\s+tịch\s+nước|"
+    r"làm\s+thơ|bài\s+thơ|kể\s+chuyện|truyện\s+cười|bài\s+hát|công\s+thức\s+nấu|cách\s+nấu|nấu\s+ăn|"
+    r"viết\s+code|viết\s+chương\s+trình|thuật\s+toán|dijkstra|lập\s+trình|mấy\s+giờ\s+rồi|what\s+time\s+is\s+it"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_OUT_OF_SCOPE_UNACCENTED_RE = re.compile(
+    r"\b(?:"
+    r"thoi\s+tiet|nhiet\s+do|khi\s+hau|du\s+bao\s+thoi\s+tiet|troi\s+(?:mua|nang|lanh|nong|am\s+u)|"
+    r"con\s+bao|ap\s+thap|suong\s+mu|tuyet\s+roi|gio\s+mua|"
+    r"gia\s+vang|gia\s+xang|bitcoin|ethereum|crypto|tien\s+ao|chung\s+khoan|co\s+phieu|vn-?index|xo\s+so|vietlott|lo\s+de|"
+    r"bong\s+da|world\s+cup|ngoai\s+hang\s+anh|thu\s+do\s+cua|tong\s+thong|chu\s+tich\s+nuoc|"
+    r"lam\s+tho|bai\s+tho|ke\s+chuyen|truyen\s+cuoi|bai\s+hat|cong\s+thuc\s+nau|cach\s+nau|nau\s+an|"
+    r"viet\s+code|viet\s+chuong\s+trinh|thuat\s+toan|dijkstra|lap\s+trinh|"
+    r"bi\s+om|bi\s+sot|dau\s+dau|dau\s+bung|dau\s+hong|buon\s+ngu|kham\s+benh|benh\s+vien"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_NAMED_GEO_PLACE_RE = re.compile(
+    r"\b(?:ha\s+noi|hanoi|tp\s*hcm|tphcm|ho\s+chi\s+minh|sai\s+gon|da\s+nang|hai\s+phong|can\s+tho|"
+    r"nha\s+trang|da\s+lat|vung\s+tau|bien\s+hoa|binh\s+duong|dong\s+nai|quang\s+ninh|ha\s+long|"
+    r"bac\s+ninh|hai\s+duong|nam\s+dinh|thai\s+binh|nghe\s+an|thanh\s+hoa|quy\s+nhon|buon\s+ma\s+thuot|phu\s+quoc|"
+    r"tokyo|seoul|bangkok|singapore|beijing|shanghai|london|paris|berlin|new\s+york|seattle|boston|chicago|hyderabad|bangalore|mumbai)\b",
+    re.IGNORECASE,
+)
+
+_BUSINESS_RELEVANCE_RE = re.compile(
+    r"\b(?:"
+    r"doanh\s+thu|doanh\s+so|ban|mua|don|ma\s+don|hang|mon|san\s+pham|mat\s+hang|nhom|danh\s+muc|loai|"
+    r"khach|nhan\s+vien|nhan\s+su|luong|tien|gia|chi\s+phi|loi\s+nhuan|lai|lo|ton|kho|nhap|xuat|"
+    r"no|chua\s+tra|da\s+tra|con\s+thieu|phai\s+thu|thu|chi|tra|huy|hoan|thanh\s+toan|chuyen\s+khoan|tien\s+mat|cod|"
+    r"phieu|hoa\s+don|so\s+luong|san\s+luong|hop|thung|chai|goi|vien|loc|tui|cay|tan|m3|bao|lieu|ke\s+don|thuoc|hoat\s+chat|lo\s+hang|han\s+dung|"
+    r"dot|giao|chiet\s+khau|giam\s+gia|khuyen\s+mai|thue|vat|kenh|cua\s+hang|chi\s+nhanh|ncc|nha\s+cung\s+cap|"
+    r"bang|cot|dong|du\s+lieu|csdl|thong\s+ke|bao\s+cao|chi\s+so|ty\s+le|ti\s+le|ty\s+trong|phan\s+tram|dong\s+gop|"
+    r"trung\s+binh|binh\s+quan|tong|top|xep\s+hang|xu\s+huong|danh\s+sach|cao\s+nhat|thap\s+nhat|chenh\s+lech|"
+    r"revenue|sales|order|orders|product|products|customer|customers|employee|employees|salary|salaries|department|"
+    r"price|cost|profit|stock|inventory|debt|payment|ticket|tickets|boxes|amount|category|categories|table|column"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def check_out_of_scope_or_irrelevant(
+    question: str,
+    knowledge: Optional[WorkspaceKnowledge] = None,
+) -> Optional[str]:
+    """Return block reason if question asks about weather/non-business topics or has zero business/schema relevance."""
+    q_nfc = normalize_nfc(question or "").strip()
+    if not q_nfc:
+        return "Câu hỏi rỗng hoặc không hợp lệ."
+    q_low = q_nfc.lower()
+    qn = normalize_vn_question(q_nfc)
+
+    if _OUT_OF_SCOPE_ACCENTED_RE.search(q_low) or _OUT_OF_SCOPE_UNACCENTED_RE.search(qn):
+        return "Câu hỏi thuộc chủ đề ngoài phạm vi dữ liệu kinh doanh của CSDL hiện tại (ví dụ: thời tiết, đời sống, tin tức chung)."
+
+    if re.search(r"\bco\s+mua\s+(?:khong|ko|k)\b", qn) and not re.search(
+        r"\b(?:hang|mon|don|san\s+pham|mat\s+hang|khach|ca\s+phe|tra|thuoc|vat\s+lieu|xi\s+mang|cat|gach|da|thep|yen|socola|hop|chai|goi|thung|loc|vien|bao)\b",
+        qn,
+    ):
+        return "Câu hỏi thuộc chủ đề ngoài phạm vi dữ liệu kinh doanh của CSDL hiện tại (ví dụ: thời tiết, đời sống, tin tức chung)."
+
+    # Mask accented weather homographs ('mưa' -> rain, 'nắng' -> sunny, 'bão' -> storm) before unaccented business token check
+    q_masked = re.sub(r"\b(?:mưa|trời\s+mưa)\b", "weather_rain", q_low)
+    q_masked = re.sub(r"\b(?:nắng|trời\s+nắng)\b", "weather_sunny", q_masked)
+    q_masked = re.sub(r"\b(?:bão|cơn\s+bão)\b", "weather_storm", q_masked)
+    qn_masked = normalize_vn_question(q_masked)
+
+    has_biz_token = bool(_BUSINESS_RELEVANCE_RE.search(qn_masked))
+    has_schema_or_entity = False
+    if knowledge is not None:
+        ws_tokens = {t.lower() for t in knowledge.workspace.tables} | {
+            getattr(c, "sql_name", str(c)).lower()
+            for t in knowledge.workspace.tables.values()
+            for c in t.columns
+        }
+        has_schema_or_entity = any(
+            len(tok) >= 3 and re.search(rf"\b{re.escape(tok)}\b", qn_masked)
+            for tok in ws_tokens
+        )
+        if not has_schema_or_entity:
+            has_schema_or_entity = bool(ground_query_entities(q_nfc, knowledge, max_matches=3))
+
+    if not has_biz_token and not has_schema_or_entity:
+        return "Câu hỏi nằm ngoài phạm vi dữ liệu kinh doanh của cơ sở dữ liệu hiện tại."
+
+    return None
+
 
 @dataclass
 class AgentConfig:
@@ -174,6 +273,7 @@ class QuestionAnalysis:
     temporal_summary: str = ""
     prior_needed_start: Optional[str] = None
     bounded_period: Optional[Tuple[str, str]] = None
+    extreme_comparison: Optional[Tuple[int, int, bool]] = None  # (top_n, bottom_n, wants_diff)
 
 
 @dataclass
@@ -185,6 +285,196 @@ class AgentResult:
     sql_attempts: int = 0
     error: str = ""
     notes: List[str] = field(default_factory=list)
+
+
+_VN_ORDINAL_WORD_MAP: Dict[str, int] = {
+    "nhat": 1,
+    "nhi": 2,
+    "hai": 2,
+    "ba": 3,
+    "tu": 4,
+    "bon": 4,
+    "nam": 5,
+    "sau": 6,
+    "bay": 7,
+    "tam": 8,
+    "chin": 9,
+    "muoi": 10,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+}
+
+
+def _parse_ordinal_token(tok: str) -> Optional[int]:
+    t = (tok or "").strip().lower()
+    if not t:
+        return None
+    if t.isdigit():
+        val = int(t)
+        return val if 2 <= val <= 50 else None
+    val = _VN_ORDINAL_WORD_MAP.get(t)
+    return val if (val is not None and 2 <= val <= 50) else None
+
+
+def extract_ordinal_rank(question: str) -> Optional[Tuple[int, str]]:
+    """
+    Detect singular N-th ordinal ranking intent (e.g. 'cao thứ 3', 'lớn thứ 2', 'thấp thứ 2', 'đứng thứ 3', 'á quân').
+    Excludes day-of-week expressions ('ngày thứ 3', 'hôm thứ 3', 'thứ 3 tuần trước').
+    Returns (rank_n, 'DESC' | 'ASC') when 2 <= rank_n <= 50, else None.
+    """
+    if not question:
+        return None
+    qn = normalize_vn_question(normalize_nfc(question))
+    if not qn:
+        return None
+
+    # Exclude plural "top N" / "N sản phẩm đầu" unless explicitly asking "top thứ N"
+    if re.search(r"\btop\s+\d+\b", qn) and not re.search(r"\btop\s+thu\s+\d+\b", qn):
+        return None
+
+    # Strip Vietnamese day-of-week phrases ('ngày thứ 3', 'hôm thứ 4', 'thứ 3 tuần trước', 'thứ 2 đến thứ 6')
+    qn_clean = re.sub(
+        r"\b(?:ngay|hom|bua|sang|trua|chieu|toi|dem|vao|dau|cuoi|tu|den)\s+thu\s+(?:[2-7]|hai|ba|tu|nam|sau|bay)\b",
+        " ",
+        qn,
+    )
+    qn_clean = re.sub(
+        r"\bthu\s+(?:[2-7]|hai|ba|tu|nam|sau|bay)\s+(?:tuan|nay|truoc|toi|qua|vua\s+qua|roi|hang\s+tuan)\b",
+        " ",
+        qn_clean,
+    )
+
+    ord_tok_pat = r"(\d+|nhi|hai|ba|tu|bon|nam|sau|bay|tam|chin|muoi)"
+
+    # 1. Descending superlative + thứ N (e.g. 'cao thứ 3', 'nhiều thứ 2', 'bán chạy thứ 3', 'lớn thứ 2')
+    m_desc = re.search(
+        rf"\b(?:cao|lon|nhieu|manh|tot|ban\s+chay|dat|nhanh|chay|dong\s+gop\s+cao|doanh\s+thu\s+cao|doanh\s+so\s+cao|loi\s+nhuan\s+cao|so\s+luong\s+nhieu|mua\s+nhieu|chi\s+tieu\s+nhieu|no\s+nhieu)\s+thu\s+{ord_tok_pat}\b",
+        qn_clean,
+    )
+    if m_desc:
+        rn = _parse_ordinal_token(m_desc.group(1))
+        if rn:
+            return (rn, "DESC")
+
+    if re.search(r"\b(?:cao|lon|nhieu|ban\s+chay|dat)\s+nhi\b", qn_clean):
+        return (2, "DESC")
+
+    # 2. Ascending superlative + thứ N (e.g. 'thấp thứ 2', 'ít thứ 3', 'nhỏ thứ 2', 'kém thứ 2')
+    m_asc = re.search(
+        rf"\b(?:thap|it|nho|kem|yeu|cham|re|te|ban\s+cham|doanh\s+thu\s+thap|so\s+luong\s+it)\s+thu\s+{ord_tok_pat}\b",
+        qn_clean,
+    )
+    if m_asc:
+        rn = _parse_ordinal_token(m_asc.group(1))
+        if rn:
+            return (rn, "ASC")
+
+    if re.search(r"\b(?:thap|it|nho|kem|re)\s+nhi\b", qn_clean):
+        return (2, "ASC")
+
+    # 3. Explicit rank position ('đứng thứ N', 'xếp thứ N', 'xếp hạng N', 'xếp hạng thứ N', 'vị trí thứ N', 'hạng N', 'á quân', 'đứng nhì')
+    default_dir = (
+        "ASC"
+        if re.search(r"\b(?:thap|it|nho|kem|yeu|cham|re|te|cuoi|duoi|lowest|smallest|least|worst)\b", qn_clean)
+        else "DESC"
+    )
+    if re.search(r"\b(?:a\s+quan|dung\s+nhi|xep\s+nhi|hang\s+nhi)\b", qn_clean):
+        return (2, default_dir)
+
+    m_pos = re.search(
+        rf"\b(?:dung\s+thu|xep\s+thu|xep\s+hang\s+thu|xep\s+hang|dung\s+hang|hang\s+thu|vi\s+tri\s+thu|vi\s+tri\s+so|top\s+thu)\s+{ord_tok_pat}\b",
+        qn_clean,
+    )
+    if m_pos:
+        rn = _parse_ordinal_token(m_pos.group(1))
+        if rn:
+            return (rn, default_dir)
+
+    # 4. Entity + thứ N when accompanied by a metric/ranking cue (e.g. 'sản phẩm thứ 3 về doanh thu')
+    if re.search(
+        r"\b(?:doanh\s+thu|doanh\s+so|so\s+luong|ban\s+chay|thanh\s+tien|gia\s+tri|loi\s+nhuan|chi\s+tieu|cong\s+no|luong|cao|lon|nhieu|thap|it)\b",
+        qn_clean,
+    ):
+        m_ent = re.search(
+            rf"\b(?:san\s+pham|mat\s+hang|mon|khach\s+hang|khach|nhan\s+vien|nhom|danh\s+muc|kenh|chi\s+nhanh|cua\s+hang|quoc\s+gia|thanh\s+pho)\s+thu\s+{ord_tok_pat}\b",
+            qn_clean,
+        )
+        if m_ent:
+            rn = _parse_ordinal_token(m_ent.group(1))
+            if rn:
+                return (rn, default_dir)
+
+    # 5. English ordinal superlative ('2nd highest', '3rd highest', 'second highest', 'third lowest')
+    m_en = re.search(
+        r"\b(?:(\d+)\s*(?:nd|rd|th)|(second|third|fourth|fifth))\s+(highest|largest|most|biggest|best|top|lowest|smallest|least|worst)\b",
+        qn_clean,
+    )
+    if m_en:
+        tok_en = m_en.group(1) or m_en.group(2)
+        rn = _parse_ordinal_token(tok_en)
+        if rn:
+            dir_en = "ASC" if m_en.group(3) in ("lowest", "smallest", "least", "worst") else "DESC"
+            return (rn, dir_en)
+
+    return None
+
+
+def extract_extreme_comparison_intent(question: str) -> Optional[Tuple[int, int, bool]]:
+    """Detect queries asking for BOTH highest (Top N) AND lowest (Bottom M) extremes (and optional spread/diff)."""
+    if not question:
+        return None
+    qn = normalize_vn_question(normalize_nfc(question))
+    if not qn:
+        return None
+
+    # Exclude cross-filter / percentile / pure yes-no predicate questions
+    if re.search(r"\b(?:nhung|ma lai|tuy nhien|trong so|bach phan vi|percentile)\b", qn):
+        return None
+    if re.search(r"\btop\s*\d+\s*%", qn):
+        return None
+    if (
+        re.search(r"(?:co\s+[^?]*\bkhong\b|co\s+[^?]*\bk\??$|co\s+[^?]*\bhong\??$)", qn)
+        and not re.search(r"\b(?:bao nhieu|may|nao|ai|gi|chi|chenh lech|so sanh|phan tich|in ra|liet ke|danh sach)\b", qn)
+    ):
+        return None
+
+    high_re = (
+        r"\b(?:cao\s+nhat|lon\s+nhat|nhieu\s+nhat|ban\s+chay\s+nhat|tot\s+nhat|dat\s+nhat|"
+        r"dan\s+dau|dung\s+dau|highest|largest|most|best|top\s+\d+)\b"
+    )
+    low_re = (
+        r"\b(?:thap\s+nhat|nho\s+nhat|it\s+nhat(?!\s*\d)|ban\s+cham\s+nhat|kem\s+nhat|re\s+nhat|"
+        r"te\s+nhat|cuoi\s+bang|doi\s+so|lowest|smallest|least|worst|bottom\s+\d+)\b"
+    )
+    m_high = re.search(high_re, qn)
+    m_low = re.search(low_re, qn)
+    if not (m_high and m_low):
+        return None
+
+    qn_clean = re.sub(r"\b(?:19\d{2}|20\d{2})\b", " ", qn)
+    qn_clean = re.sub(r"\b(?:nam|thang|quy|ngay|year|month|quarter)\s+\d+\b", " ", qn_clean)
+    qn_clean = re.sub(r"\d+(?:[.,]\d+)?\s*%", " ", qn_clean)
+    nums = [int(x) for x in re.findall(r"\b(\d+)\b", qn_clean) if 1 <= int(x) <= 20]
+
+    if len(nums) >= 2:
+        if m_high.start() <= m_low.start():
+            top_n, bottom_n = nums[0], nums[1]
+        else:
+            top_n, bottom_n = nums[1], nums[0]
+    elif len(nums) == 1:
+        top_n = bottom_n = nums[0]
+    else:
+        top_n = bottom_n = 1
+
+    wants_diff = bool(
+        re.search(
+            r"\b(?:chenh\s+lech|do\s+chenh|khoang\s+cach|bien\s+do|phan\s+hoa|so\s+sanh|hon\s+kem|hieu\s+so|diff|difference|spread|gap)\b",
+            qn,
+        )
+    )
+    return (top_n, bottom_n, wants_diff)
 
 
 def classify_expected_type(question: str) -> QuestionAnalysis:
@@ -215,11 +505,17 @@ def classify_expected_type(question: str) -> QuestionAnalysis:
         )
     ) and not is_percent
 
-    # 1. Table (explicit table prompt or multi-metric per object)
+    # 1. Table (explicit table prompt, extreme comparison high+low, or multi-metric per object)
     q_low_nfc = q_nfc.lower()
+    ext_cmp = extract_extreme_comparison_intent(question)
+    if ext_cmp is not None and not (
+        is_percent and not re.search(r"\b(?:danh sach|in ra|liet ke|bang|phan tich|so sanh)\b", qn)
+    ):
+        return QuestionAnalysis(expected_type="table", money_like=money_like, extreme_comparison=ext_cmp)
+
     if (
         re.search(r"\b(?:cho|xuất|lập|tạo)\s+bảng\b|\bbảng\s*\d+\b", q_low_nfc)
-        or re.search(r"(?:kem so tien|so no cua tung|moi nguoi con no|kem doanh thu|kem so luong)", qn)
+        or re.search(r"(?:kem so tien|so no cua tung|moi nguoi con no|kem doanh thu|kem so luong|\bva\s+doanh\s+thu\b|\bva\s+so\s+luong\b)", qn)
     ):
         cols = ["khach_hang", "so_tien_no"] if re.search(r"\bno\b", qn) else None
         return QuestionAnalysis(expected_type="table", money_like=money_like, expected_table_cols=cols)
@@ -241,9 +537,9 @@ def classify_expected_type(question: str) -> QuestionAnalysis:
 
     # 4. Date ("ngày nào" / "tháng nào")
     if re.search(r"\bthang nao\b", qn) and not re.search(r"\bngay nao\b", qn):
-        return QuestionAnalysis(expected_type="date", date_granularity="month")
+        return QuestionAnalysis(expected_type="date", date_granularity="month", money_like=money_like)
     if re.search(r"\b(?:ngay nao|hom nao|bua nao)\b", qn):
-        return QuestionAnalysis(expected_type="date", date_granularity="day")
+        return QuestionAnalysis(expected_type="date", date_granularity="day", money_like=money_like)
 
     # 5. List variants (carefully exclude 4-digit years & drug packaging sizes!)
     if re.search(r"\b(?:chan|nguyen)\b", qn) and re.search(r"\ble\b", qn) and re.search(r"\b(?:ton|con|duoc|may|bao nhieu)\b", qn):
@@ -265,20 +561,24 @@ def classify_expected_type(question: str) -> QuestionAnalysis:
         r"(?<!/)(?<!\d)\b(?:[2-9]|1\d|20)\s+(?:mat hang|hang hoa|hang|mon|san pham|khach hang|khach|nhan vien|nha cung cap|nhom hang|lo\b(?!\s*x\s*\d)))",
         qn_for_topk,
     )
-    if plural_top_match:
-        return QuestionAnalysis(expected_type="list")
+    if plural_top_match and extract_ordinal_rank(question) is None:
+        return QuestionAnalysis(expected_type="list", money_like=money_like)
 
-    # 6. String (single named customer/item/staff/supplier/batch)
+    # 6. String (single named customer/item/staff/supplier/batch or N-th ranked entity)
     if (
         re.search(
             r"(?:la ai|ai la|ai trong|\bai\b.*\bnhat\b|khach(?: hang)? nao|mat hang nao|hang nao|san pham nao|mon nao|"
-            r"nhan vien nao|nha cung cap nao|nhom hang nao|lo nao|"
+            r"nhan vien nao|nha cung cap nao|nhom hang nao|nhom mon nao|danh muc nao|kenh nao|lo nao|"
             r"\b(?:san pham|mat hang|hang|mon|khach hang|nhan vien|nha cung cap)\b.*\b(?:la gi|la chi|la ai)\b)",
             qn,
         )
         and not re.search(r"\b(?:bao nhieu|may|nhung ai|top)\b", qn)
+    ) or (
+        extract_ordinal_rank(question) is not None
+        and re.search(r"\b(?:san\s+pham|mat\s+hang|hang|mon|khach\s+hang|khach|nhan\s+vien|nha\s+cung\s+cap|nhom\s+hang|nhom\s+mon|danh\s+muc|kenh|cua\s+hang|chi\s+nhanh|lo)\b", qn)
+        and not re.search(r"^(?:doanh\s+thu|tong\s+doanh\s+thu|so\s+luong|tong\s+so\s+luong|gia\s+tri|so\s+tien|muc\s+luong)\b|\b(?:bao\s+nhieu|may)\b", qn)
     ):
-        return QuestionAnalysis(expected_type="string")
+        return QuestionAnalysis(expected_type="string", money_like=money_like)
 
     return QuestionAnalysis(expected_type="number", money_like=money_like)
 
@@ -451,6 +751,163 @@ def extract_temporal_context(
     return windows, "\n".join(summary_lines), bounded_period, prior_needed_start
 
 
+def _check_schema_capability_gap(
+    question: str,
+    knowledge: WorkspaceKnowledge,
+) -> Optional[str]:
+    """
+    Validate whether requested domain entities & attributes exist in populated columns/tables.
+    Shared by both preflight unanswerable blocking and the SQL semantic auditor.
+    """
+    q_nfc = normalize_nfc(question or "")
+    q_low_nfc = q_nfc.lower()
+    qn = normalize_vn_question(q_nfc)
+    caps = knowledge.capabilities
+    readme_n = norm_vn(knowledge.workspace.readme_text)
+    ws_cols = {
+        getattr(c, "sql_name", str(c)).lower()
+        for t in knowledge.workspace.tables.values()
+        for c in t.columns
+    }
+    ws_tbl_and_cols = {t.lower() for t in knowledge.workspace.tables} | ws_cols
+    tbl_preview = ", ".join(f"`{t}`" for t in sorted(knowledge.valid_tables)[:6])
+
+    has_gender_cap = (
+        caps["has_customer_gender"]
+        if "has_customer_gender" in caps
+        else any(re.search(r"^(?:gioi_?tinh|gender|sex|nam_?nu|namnu|phai)$", c) for c in ws_cols)
+    )
+    has_staff_cap = (
+        caps["has_staff"]
+        if "has_staff" in caps
+        else any(
+            re.search(
+                r"(?:nhan_?vien|nhan_?su|ma_?nv|ten_?nv|ho_?ten_?nv|nguoi_?ban|chuc_?vu|chuc_?danh|"
+                r"thu_?ngan|employees?|emp_?no|staff|salesperson|sales_?rep|spid|job_?title|cashier|worker|salaries|titles|dept_?emp)",
+                tok,
+            )
+            for tok in ws_tbl_and_cols
+        )
+    )
+    has_customers_cap = (
+        caps["has_customers"]
+        if "has_customers" in caps
+        else any(re.search(r"(?:khach|customer|ben_?mua|doi_?tac|client)", tok) for tok in ws_tbl_and_cols)
+    )
+
+    # Gender attribute (customer, staff, or general demographic breakdown)
+    asks_gender = bool(
+        re.search(
+            r"\b(?:khach(?:\s+hang)?\s+nu|nhan\s*(?:vien|su)\s+nu|nu\s+nhan\s*(?:vien|su)|nu\s+gioi|"
+            r"phai\s+nu|phai\s+nam|nam\s+gioi|gioi\s+tinh|gender|sex|female|male)\b",
+            qn,
+        )
+        or re.search(
+            r"\b(?:khách(?:\s+hàng)?|nhân\s*(?:viên|sự)|người)\s+(?:nam|nữ)\b|\b(?:nữ|nam\s+giới|nữ\s+giới|phái\s+nam|phái\s+nữ|giới\s+tính)\b",
+            q_low_nfc,
+        )
+    )
+    if asks_gender and not has_gender_cap:
+        if re.search(r"\b(?:nhan\s*(?:vien|su)|employee|employees|staff|salesperson|cashier)\b", qn) and not has_staff_cap:
+            return (
+                f"Dữ liệu hiện tại không lưu danh sách nhân viên và cũng không ghi cột giới tính "
+                f"(các bảng hiện có: {tbl_preview})."
+            )
+        return "Dữ liệu hiện tại không ghi nhận thông tin giới tính (nam/nữ)."
+
+    # Staff / Employee table or columns
+    if (
+        re.search(
+            r"\b(?:nhan\s*vien|nhan\s*su|thu\s*ngan|pha\s*che|employee|employees|staff|salesperson|sales\s*rep|cashier|headcount)\b",
+            qn,
+        )
+        and not has_staff_cap
+    ):
+        return (
+            f"Dữ liệu hiện tại không ghi nhận bảng hay cột dữ liệu về nhân viên / nhân sự "
+            f"(các bảng hiện có: {tbl_preview})."
+        )
+
+    # Employee salary / bonus / commission / KPI (use accented 'lương'/'thưởng' to avoid 'số lượng'/'thường')
+    if (
+        re.search(
+            r"\b(?:lương|mức\s+lương|tiền\s+lương|bảng\s+lương|quỹ\s+lương|tăng\s+lương|thưởng|tiền\s+thưởng|mức\s+thưởng)\b",
+            q_low_nfc,
+        )
+        or re.search(r"\b(?:hoa\s+hong|salary|salaries|wage|payroll|bonus|bonuses|commission|kpi|quota)\b", qn)
+    ):
+        if not any(re.search(r"(?:salar|wage|payroll|luong|bonus|thuong|commiss|hoa_?hong|kpi|quota)", c) for c in ws_cols):
+            return "Dữ liệu hiện tại không ghi nhận thông tin lương, thưởng, hoa hồng hoặc chỉ tiêu KPI nhân viên."
+
+    if re.search(r"\b(?:do\s+tuoi|nhom\s+tuoi|lua\s+tuoi|tuoi\s+tac|bao\s+nhieu\s+tuoi|theo\s+tuoi)\b", qn):
+        if not any(re.search(r"\b(?:age|do_tuoi|tuoi|birth_date|dob|ngay_sinh|nam_sinh)\b", ac) for ac in ws_cols):
+            return "Dữ liệu shop không ghi thông tin độ tuổi khách hàng/nhân sự."
+    if re.search(r"(?:o\s+duong\s+|dia\s+chi\b)", qn) and not caps.get("has_customer_address"):
+        return "Dữ liệu shop không ghi địa chỉ khách hàng."
+    if re.search(r"(?:khach\s+nhom\s+|nhom\s+khach)", qn) and not caps.get("has_customer_group"):
+        return "Dữ liệu shop không có cột phân nhóm khách hàng."
+    if re.search(r"(?:ban\s+qua\s+dien\s+thoai|ban\s+qua\s+zalo|kenh\s+ban|tai\s+quay)", qn) and not caps.get("has_channel"):
+        return "Dữ liệu shop không ghi kênh bán hàng."
+    if re.search(r"(?:tra\s+bang\s+(?:cod|tien mat|chuyen khoan)|phuong\s+thuc\s+thanh\s+toan|hinh\s+thuc\s+thanh\s+toan)", qn) and not caps.get("has_payment_method"):
+        return "Dữ liệu shop không ghi hình thức thanh toán."
+    if re.search(r"(?:tra\s+hang\s+vi|tra\s+vi\s+|ly\s+do\s+tra|nguyen\s+nhan\s+tra)", qn) and not caps.get("has_return_reason"):
+        return "Dữ liệu shop không ghi nguyên nhân trả hàng."
+    if re.search(r"(?:han\s+dung|han\s+su\s+dung|het\s+han\s+trong)", qn) and not caps.get("has_expiry"):
+        return "Dữ liệu shop không ghi hạn sử dụng."
+    if re.search(r"(?:ton\s+kho|ton\s+cuoi|trong\s+kho\s+con|con\s+lai\s+may|con\s+ton)", qn) and not caps.get("has_inventory"):
+        return "Dữ liệu shop không có bảng/cột theo dõi tồn kho."
+    if re.search(r"(?:gia\s+von|lai\s+gop)", qn) and not caps.get("has_cost_price"):
+        return "Dữ liệu shop không ghi giá vốn nên không tính được lãi gộp/giá trị theo giá vốn."
+    if re.search(r"\blai\s+rong\b", qn) and not (caps.get("has_cost_price") and caps.get("has_expenses")):
+        return "Dữ liệu shop thiếu giá vốn hoặc sổ chi phí nên không tính được lãi ròng."
+    if re.search(r"(?:tien\s+nhap|gia\s+nhap|phieu\s+nhap|nhap\s+vao\s+gia|nhap\s+.*binh\s+quan)", qn):
+        if not caps.get("has_import") or (
+            re.search(r"(?:tien|gia|binh\s+quan)", qn) and not caps.get("has_import_price") and "gia_nhap" not in readme_n
+        ):
+            return "Dữ liệu shop không ghi đơn giá/giá trị phiếu nhập hàng."
+    if re.search(r"(?:con\s+thieu|con\s+no|ghi\s+no|mua\s+chiu|tra\s+no|thu\s+hoi.*no|tuoi\s+no|no\s+(?:nhieu|lon)\s+nhat|khach\s+no|so\s+tien\s+no)", qn) and not caps.get("has_debt_or_payments"):
+        return "Dữ liệu shop không có thông tin thu tiền/công nợ."
+    if re.search(r"(?:\bkhach(?:\s+hang)?\s+nao|\bbao\s+nhieu\s+khach|so\s+khach|khach\s+da\s+mua|\bai\s+la\s+khach|chi\s+tieu\s+nhieu)", qn) and not has_customers_cap:
+        return "Dữ liệu shop không lưu danh tính/mã khách hàng trên đơn."
+
+    if re.search(
+        r"\b(?:nghi\s+viec|thoi\s+viec|bo\s+viec|nghi\s+huu|sa\s+thai|resign(?:ed|ation)?|attrition|turnover|terminat(?:ed|ion)|layoff)\b",
+        qn,
+    ) or (
+        re.search(r"\b(?:nhan\s+vien|nhan\s+su|employee|staff)\b", qn)
+        and re.search(r"\b(?:roi\s+(?:di|khoi|cong\s+ty)|da\s+nghi|nghi\s+lam|left\s+(?:the\s+)?company|quit)\b", qn)
+    ):
+        if not any(
+            re.search(r"(?:to_?date|end_?date|leave_?date|resign|terminat|attrition|nghi_?viec|thoi_?viec|is_?active|employment_?status)", c)
+            for c in ws_cols
+        ):
+            return "Dữ liệu hiện tại không ghi nhận trạng thái nghỉ việc hoặc ngày kết thúc công tác của nhân viên."
+    if re.search(r"\b(?:nghi\s+phep|ngay\s+phep|cham\s+cong|di\s+muon|tang\s+ca|overtime|attendance|sick\s+leave|annual\s+leave)\b", qn):
+        if not any(re.search(r"(?:attendance|cham_?cong|nghi_?phep|ngay_?phep|overtime|tang_?ca|absent|leave_?days)", c) for c in ws_cols):
+            return "Dữ liệu hiện tại không ghi nhận thông tin chấm công hoặc ngày nghỉ phép."
+
+    has_geo_schema = caps.get("has_customer_address", False) or any(
+        re.search(
+            r"(?:geo|country|region|city|town|location|address|addr|state|province|district|territory|market|zone|area|branch|store|ship_?city|ship_?country|ship_?region|khu_?vuc|vung|mien|tinh|thanh_?pho|quan|huyen|phuong|quoc_?gia|thi_?truong|dia_?chi|dia_?diem|chi_?nhanh|cua_?hang)",
+            tok,
+        )
+        for tok in ws_tbl_and_cols
+    )
+    if re.search(
+        r"\b(?:thanh\s+pho|tinh\s+thanh|quan\s+huyen|phuong\s+xa|quoc\s+gia|khu\s+vuc|vung\s+mien|chi\s+nhanh|tung\s+cua\s+hang|theo\s+cua\s+hang|moi\s+cua\s+hang|city|cities|country|countries|province|provinces|region|regions|territory|branch|branches)\b",
+        qn,
+    ):
+        if not has_geo_schema:
+            return "Dữ liệu hiện tại không ghi nhận thông tin địa bàn, thành phố, khu vực hoặc chi nhánh."
+    m_named_place = _NAMED_GEO_PLACE_RE.search(qn)
+    if m_named_place and not has_geo_schema:
+        place_tok = m_named_place.group(0).lower()
+        grounded_vals = [norm_vn(str(v)) for _, _, v in ground_query_entities(question, knowledge, max_matches=8)]
+        if place_tok not in readme_n and not any(place_tok in gv for gv in grounded_vals):
+            return "Dữ liệu hiện tại không ghi nhận thông tin địa bàn, thành phố, khu vực hoặc chi nhánh."
+    return None
+
+
 def check_preflight_unanswerable(
     question: str,
     as_of_date: str,
@@ -463,8 +920,11 @@ def check_preflight_unanswerable(
     """
     q_nfc = normalize_nfc(question)
     qn = normalize_vn_question(q_nfc)
-    caps = knowledge.capabilities
-    readme_n = norm_vn(knowledge.workspace.readme_text)
+
+    # 0. Out-of-scope / non-business / weather / general-world questions
+    oos_reason = check_out_of_scope_or_irrelevant(question, knowledge)
+    if oos_reason:
+        return oos_reason
 
     # 1. Subjective qualitative attributes never present in structured POS tables
     if _SUBJECTIVE_RE.search(qn):
@@ -481,37 +941,509 @@ def check_preflight_unanswerable(
         if analysis.prior_needed_start is not None and analysis.prior_needed_start < knowledge.data_min_date:
             return f"Kỳ đối chiếu liền trước (kết thúc {analysis.prior_needed_start}) nằm ngoài phạm vi dữ liệu bắt đầu từ {knowledge.data_min_date}."
 
-    # 3. Missing schema capability checks (using active-column capabilities + normalized question)
-    if re.search(r"\bkhach(?:\s+hang)?\s+(?:nam|nu)\b", qn) and not caps["has_customer_gender"]:
-        return "Dữ liệu shop không ghi thông tin giới tính khách hàng."
-    if re.search(r"(?:o\s+duong\s+|dia\s+chi\b)", qn) and not caps["has_customer_address"]:
-        return "Dữ liệu shop không ghi địa chỉ khách hàng."
-    if re.search(r"(?:khach\s+nhom\s+|nhom\s+khach)", qn) and not caps["has_customer_group"]:
-        return "Dữ liệu shop không có cột phân nhóm khách hàng."
-    if re.search(r"(?:ban\s+qua\s+dien\s+thoai|ban\s+qua\s+zalo|kenh\s+ban|tai\s+quay)", qn) and not caps["has_channel"]:
-        return "Dữ liệu shop không ghi kênh bán hàng."
-    if re.search(r"(?:tra\s+bang\s+(?:cod|tien mat|chuyen khoan)|phuong\s+thuc\s+thanh\s+toan|hinh\s+thuc\s+thanh\s+toan)", qn) and not caps["has_payment_method"]:
-        return "Dữ liệu shop không ghi hình thức thanh toán."
-    if re.search(r"(?:tra\s+hang\s+vi|tra\s+vi\s+|ly\s+do\s+tra|nguyen\s+nhan\s+tra)", qn) and not caps["has_return_reason"]:
-        return "Dữ liệu shop không ghi nguyên nhân trả hàng."
-    if re.search(r"(?:han\s+dung|han\s+su\s+dung|het\s+han\s+trong)", qn) and not caps["has_expiry"]:
-        return "Dữ liệu shop không ghi hạn sử dụng."
-    if re.search(r"(?:ton\s+kho|ton\s+cuoi|trong\s+kho\s+con|con\s+lai\s+may|con\s+ton)", qn) and not caps["has_inventory"]:
-        return "Dữ liệu shop không có bảng/cột theo dõi tồn kho."
-    if re.search(r"(?:gia\s+von|lai\s+gop)", qn) and not caps["has_cost_price"]:
-        return "Dữ liệu shop không ghi giá vốn nên không tính được lãi gộp/giá trị theo giá vốn."
-    if re.search(r"\blai\s+rong\b", qn) and not (caps["has_cost_price"] and caps["has_expenses"]):
-        return "Dữ liệu shop thiếu giá vốn hoặc sổ chi phí nên không tính được lãi ròng."
-    if re.search(r"(?:tien\s+nhap|gia\s+nhap|phieu\s+nhap|nhap\s+vao\s+gia|nhap\s+.*binh\s+quan)", qn):
-        if not caps["has_import"] or (
-            re.search(r"(?:tien|gia|binh\s+quan)", qn) and not caps["has_import_price"] and "gia_nhap" not in readme_n
-        ):
-            return "Dữ liệu shop không ghi đơn giá/giá trị phiếu nhập hàng."
-    if re.search(r"(?:con\s+thieu|con\s+no|ghi\s+no|mua\s+chiu|tra\s+no|thu\s+hoi.*no|tuoi\s+no|no\s+(?:nhieu|lon)\s+nhat|khach\s+no|so\s+tien\s+no)", qn) and not caps["has_debt_or_payments"]:
-        return "Dữ liệu shop không có thông tin thu tiền/công nợ."
-    if re.search(r"(?:\bkhach(?:\s+hang)?\s+nao|\bbao\s+nhieu\s+khach|so\s+khach|khach\s+da\s+mua|\bai\s+la\s+khach|chi\s+tieu\s+nhieu)", qn) and not caps["has_customers"]:
-        return "Dữ liệu shop không lưu danh tính/mã khách hàng trên đơn."
+    # 3. Missing schema capability checks (staff, gender, salary, age, debt, inventory, geo, etc.)
+    return _check_schema_capability_gap(question, knowledge)
+
+
+_DIMENSION_PHRASE_COL_MAP = (
+    ("nhom mon", r"nhom_?mon"),
+    ("nhom hang", r"nhom_?hang|danh_?muc|category"),
+    ("nhom thuoc", r"nhom_?thuoc|loai_?thuoc"),
+    ("danh muc", r"danh_?muc|nhom_?hang|nhom_?mon|category"),
+    ("kenh ban", r"kenh_?ban|kenh|channel"),
+)
+
+_ENTITY_WHICH_LOOKUP_RE = re.compile(
+    r"\b(?:ngay|thang|nam|tuan|quy|mon|nhom|san\s+pham|mat\s+hang|khach\s+hang|khach|"
+    r"nhan\s+vien|cua\s+hang|chi\s+nhanh|quoc\s+gia|kenh|doi\s+ngu|team|danh\s+muc|category|loai)\s+nao\b"
+)
+
+
+def _match_requested_dimension_col(
+    qn: str,
+    knowledge: WorkspaceKnowledge,
+) -> Optional[Tuple[str, str, str]]:
+    """Return (q_phrase, table_name, column_name) if question explicitly asks for a grouped dimension present in schema."""
+    for q_phrase, col_pat in _DIMENSION_PHRASE_COL_MAP:
+        if re.search(rf"\b{q_phrase}\b", qn):
+            matched_dim = next(
+                (
+                    (tp.table_name, getattr(c, "sql_name", str(c)))
+                    for tp in knowledge.workspace.tables.values()
+                    for c in tp.columns
+                    if re.search(rf"^(?:{col_pat})$", getattr(c, "sql_name", str(c)).lower())
+                ),
+                None,
+            )
+            if matched_dim:
+                return q_phrase, matched_dim[0], matched_dim[1]
     return None
+
+
+def _split_top_level_select_exprs(select_head: str) -> List[str]:
+    """Split top-level SELECT expressions ignoring commas inside function calls or single quotes."""
+    body = re.sub(r"^\s*select\s+(?:distinct\s+)?(?:top\s+\d+\s+)?", "", select_head.strip(), flags=re.IGNORECASE)
+    parts: List[str] = []
+    cur: List[str] = []
+    depth = 0
+    in_sq = False
+    for ch in body:
+        if ch == "'":
+            in_sq = not in_sq
+        elif not in_sq:
+            if ch == "(":
+                depth += 1
+            elif ch == ")" and depth > 0:
+                depth -= 1
+            elif ch == "," and depth == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+                continue
+        cur.append(ch)
+    if cur:
+        parts.append("".join(cur).strip())
+    return [p for p in parts if p]
+
+
+_BARE_SUMMABLE_METRIC_RE = re.compile(
+    r"^(?:[a-z_][a-z0-9_]*\.)?(?:thanh_?tien|tong_?tien|doanh_?thu|tien_?hang|total_?amount|amount|revenue|sales|so_?luong|sl|qty|quantity|so_?hop|boxes|con_?no|chua_?tra)$",
+    re.IGNORECASE,
+)
+
+
+def _infer_ranked_metric_alias(order_expr: str, qn: str) -> str:
+    oe_low = (order_expr or "").lower()
+    if re.search(r"(?:thanh_?tien|tong_?tien|doanh_?thu|tien_?hang|amount|revenue|sales|price|don_?gia|gia_?ban)", oe_low) or "doanh thu" in qn:
+        return "tong_doanh_thu"
+    if re.search(r"(?:so_?luong|sl|qty|quantity|so_?hop|boxes)", oe_low) or re.search(r"\b(?:so luong|ban chay)\b", qn):
+        return "tong_so_luong"
+    if re.search(r"(?:con_?no|chua_?tra|no\b|debt)", oe_low) or re.search(r"\bno\b", qn):
+        return "tong_cong_no"
+    if re.search(r"(?:luong|salary)", oe_low):
+        return "muc_luong"
+    if re.search(r"\bcount\s*\(", oe_low):
+        return "so_luong_don" if "don" in qn else "so_luong"
+    return "gia_tri"
+
+
+def rewrite_ranked_entity_sql(sql: str, question: str, use_round_half_up: bool = True) -> str:
+    """
+    Deterministically enrich ranked entity queries so that:
+    1. Single-column entity SELECTs with GROUP BY + ORDER BY <metric> automatically include the
+       aggregated metric column in SELECT (and wrap bare summable metric columns in SUM(...) in ORDER BY).
+    2. Ordinal rank queries ('cao thứ 3', 'lớn thứ 2', 'đứng thứ N') use LIMIT 1 OFFSET {N - 1}
+       instead of returning all top N rows with LIMIT N.
+    """
+    if not sql or not isinstance(sql, str):
+        return sql
+    s = sql.strip()
+    if not s:
+        return sql
+
+    has_semi = s.endswith(";")
+    body = s.rstrip(";").strip()
+    body_low = re.sub(r"\s+", " ", body).lower()
+    qn = normalize_vn_question(normalize_nfc(question or ""))
+    ord_rank = extract_ordinal_rank(question or "")
+
+    # Part A: Enrich single-column entity SELECT (or unaggregated 2nd metric col) when GROUP BY and ORDER BY exist
+    if (
+        body_low.startswith("select ")
+        and " from " in body_low
+        and " group by " in body_low
+        and " order by " in body_low
+        and " union " not in body_low
+    ):
+        m_from = re.search(r"\bfrom\b", body, flags=re.IGNORECASE)
+        m_group = re.search(r"\bgroup\s+by\b", body, flags=re.IGNORECASE)
+        m_order = re.search(r"\border\s+by\b", body, flags=re.IGNORECASE)
+        if m_from and m_group and m_order and m_from.start() < m_group.start() < m_order.start():
+            select_head = body[: m_from.start()].strip()
+            select_exprs = _split_top_level_select_exprs(select_head)
+            group_clause_only = body[m_group.end() : m_order.start()].strip().lower()
+            order_tail = body[m_order.end() :].strip()
+            order_clause_only = re.split(r"\blimit\b", order_tail, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+            first_order_item = _split_top_level_select_exprs("SELECT " + order_clause_only)
+            raw_order_expr = (
+                re.sub(
+                    r"(?:\s+(?:asc|desc))?(?:\s+nulls\s+(?:first|last))?\s*$",
+                    "",
+                    first_order_item[0].strip(),
+                    flags=re.IGNORECASE,
+                ).strip()
+                if first_order_item
+                else ""
+            )
+
+            if len(select_exprs) == 1 and raw_order_expr:
+                first_sel = select_exprs[0]
+                is_sel_agg = bool(
+                    re.search(r"\b(?:sum|count|avg|min|max|total|group_concat)\s*\(", first_sel, flags=re.IGNORECASE)
+                )
+                if not is_sel_agg:
+                    is_order_agg = bool(
+                        re.search(r"\b(?:sum|count|avg|min|max|total)\s*\(", raw_order_expr, flags=re.IGNORECASE)
+                    )
+                    is_bare_summable = bool(_BARE_SUMMABLE_METRIC_RE.match(raw_order_expr)) and (
+                        raw_order_expr.lower() not in group_clause_only
+                    )
+
+                    agg_expr_for_select: Optional[str] = None
+                    if is_order_agg:
+                        agg_expr_for_select = raw_order_expr
+                    elif is_bare_summable:
+                        agg_expr_for_select = f"SUM({raw_order_expr})"
+                        order_part_updated = re.sub(
+                            rf"\b{re.escape(raw_order_expr)}\b",
+                            f"SUM({raw_order_expr})",
+                            body[m_order.start() :],
+                            count=1,
+                        )
+                        body = body[: m_order.start()] + order_part_updated
+                        m_from = re.search(r"\bfrom\b", body, flags=re.IGNORECASE)
+
+                    if agg_expr_for_select and m_from:
+                        alias = _infer_ranked_metric_alias(agg_expr_for_select, qn)
+                        if (
+                            use_round_half_up
+                            and re.search(r"\b(?:sum|avg|total)\s*\(", agg_expr_for_select, flags=re.IGNORECASE)
+                            and "round" not in agg_expr_for_select.lower()
+                        ):
+                            metric_col_sql = f"ROUND_HALF_UP({agg_expr_for_select}, 0) AS {alias}"
+                        else:
+                            metric_col_sql = f"{agg_expr_for_select} AS {alias}"
+                        body = f"{body[:m_from.start()].rstrip()}, {metric_col_sql} {body[m_from.start():].lstrip()}"
+
+            elif len(select_exprs) == 2:
+                has_any_agg = any(
+                    re.search(r"\b(?:sum|count|avg|min|max|total|group_concat)\s*\(", ex, flags=re.IGNORECASE)
+                    for ex in select_exprs
+                )
+                if not has_any_agg:
+                    sec_core = re.sub(r"\s+as\s+[`\"']?[a-z0-9_]+[`\"']?\s*$", "", select_exprs[1].strip(), flags=re.IGNORECASE).strip()
+                    if _BARE_SUMMABLE_METRIC_RE.match(sec_core) and sec_core.lower() not in group_clause_only:
+                        alias = _infer_ranked_metric_alias(sec_core, qn)
+                        wrapped_sel = (
+                            f"ROUND_HALF_UP(SUM({sec_core}), 0) AS {alias}"
+                            if use_round_half_up
+                            else f"SUM({sec_core}) AS {alias}"
+                        )
+                        if _BARE_SUMMABLE_METRIC_RE.match(raw_order_expr) and raw_order_expr.lower() == sec_core.lower():
+                            order_part_updated = re.sub(
+                                rf"\b{re.escape(raw_order_expr)}\b",
+                                f"SUM({raw_order_expr})",
+                                body[m_order.start() :],
+                                count=1,
+                            )
+                            body = body[: m_order.start()] + order_part_updated
+                            m_from = re.search(r"\bfrom\b", body, flags=re.IGNORECASE)
+                        if m_from:
+                            body = f"SELECT {select_exprs[0]}, {wrapped_sel} {body[m_from.start():].lstrip()}"
+
+    # Part B: Enforce LIMIT 1 OFFSET {rank_n - 1} for ordinal rank queries ('cao thứ 3', 'đứng thứ 2', etc.)
+    if ord_rank is not None:
+        rank_n, _ = ord_rank
+        offset_val = rank_n - 1
+        body_low_cur = re.sub(r"\s+", " ", body).lower()
+        has_valid_offset = bool(
+            re.search(rf"\blimit\s+1\s+offset\s+{offset_val}\b", body_low_cur)
+            or re.search(rf"\blimit\s+{offset_val}\s*,\s*1\b", body_low_cur)
+            or re.search(rf"\b(?:rn|rk|rank|thu_hang|hang|rnum|row_num)\s*=\s*{rank_n}\b", body_low_cur)
+        )
+        if not has_valid_offset and " order by " in body_low_cur:
+            if re.search(r"\blimit\s+\d+(?:\s+offset\s+\d+)?\s*$", body, flags=re.IGNORECASE):
+                body = re.sub(
+                    r"\blimit\s+\d+(?:\s+offset\s+\d+)?\s*$",
+                    f"LIMIT 1 OFFSET {offset_val}",
+                    body,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                body = f"{body} LIMIT 1 OFFSET {offset_val}"
+
+    return f"{body};" if has_semi else body
+
+
+def _quote_sqlite_ident(ident: str) -> str:
+    s = str(ident or "").strip()
+    if " " in s or "-" in s or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", s):
+        return f'"{s}"'
+    return s
+
+
+def _find_join_key(fact_tbl: Any, other_tbl: Any) -> Optional[str]:
+    ignore = {"ngay", "thang", "nam", "ghi_chu", "trang_thai", "status", "note", "notes"}
+    fact_cols = [getattr(c, "sql_name", str(c)) for c in getattr(fact_tbl, "columns", [])]
+    other_map = {getattr(c, "sql_name", str(c)).lower(): getattr(c, "sql_name", str(c)) for c in getattr(other_tbl, "columns", [])}
+    for fc in fact_cols:
+        fl = fc.lower()
+        if fl in ignore:
+            continue
+        if fl in other_map:
+            return fc
+    return None
+
+
+def build_extreme_comparison_sql_spec(
+    question: str,
+    knowledge: WorkspaceKnowledge,
+    analysis: QuestionAnalysis,
+) -> Optional[Dict[str, Any]]:
+    """Build deterministic CTE SQL + metadata for extreme comparison queries (highest vs lowest + diff)."""
+    if not analysis.extreme_comparison or not knowledge or not getattr(knowledge, "workspace", None):
+        return None
+    tables_dict = getattr(knowledge.workspace, "tables", None) or {}
+    if not tables_dict:
+        return None
+
+    top_n, bottom_n, wants_diff = analysis.extreme_comparison
+    qn = normalize_vn_question(normalize_nfc(question or ""))
+
+    # 1. Pick primary fact table
+    tables_list = list(tables_dict.values())
+    wants_import = bool(re.search(r"\b(?:nhap|phieu nhap|gia nhap|tien nhap|nha cung cap|ncc)\b", qn))
+    fact_profile = None
+    if wants_import:
+        for tp in tables_list:
+            tlow = tp.table_name.lower()
+            cols_l = {getattr(c, "sql_name", str(c)).lower() for c in tp.columns}
+            if re.search(r"(?:phieu_?nhap|nhap_?hang)", tlow) or ("gia_nhap" in cols_l and "nha_cung_cap" in cols_l):
+                fact_profile = tp
+                break
+    if fact_profile is None and getattr(knowledge, "order_status_targets", None):
+        for tgt in knowledge.order_status_targets:
+            tname = tgt.get("table", "")
+            for tp in tables_list:
+                if tp.table_name.lower() == tname.lower():
+                    fact_profile = tp
+                    break
+            if fact_profile is not None:
+                break
+    if fact_profile is None:
+        money_pats = re.compile(r"(?:doanh_?thu|thanh_?tien|tong_?tien|tien_?hang|amount|sales|revenue|salary|luong|chi_?phi|tien)", re.IGNORECASE)
+        fact_profile = max(
+            tables_list,
+            key=lambda tp: (
+                any(money_pats.search(getattr(c, "sql_name", str(c))) for c in tp.columns),
+                int(getattr(tp, "row_count", 0) or 0),
+            ),
+        )
+
+    fact_cols = [getattr(c, "sql_name", str(c)) for c in fact_profile.columns]
+    fact_cols_low = {c.lower(): c for c in fact_cols}
+
+    # 2. Pick metric expression on fact table
+    asks_qty = bool(re.search(r"\b(?:so luong|sl\b|so hop|so chai|so goi|so vien|ban chay)\b", qn))
+    asks_money = bool(re.search(r"\b(?:doanh thu|doanh so|tien|gia tri|cong no|revenue|sales|amount)\b", qn))
+    asks_debt = bool(re.search(r"\b(?:cong no|con no|con thieu|chua tra|\bno\b)\b", qn))
+
+    money_priority = (
+        "doanh_thu", "doanhthu", "thanh_tien", "thanhtien", "tong_tien", "tongtien",
+        "tien_hang", "tienhang", "tong_doanh_thu", "revenue", "total_revenue",
+        "sales", "total_sales", "amount", "total_amount", "gia_tri", "profit",
+        "loi_nhuan", "salary", "chi_phi",
+    )
+    qty_priority = ("so_luong_nhap", "so_luong", "soluong", "sl", "qty", "quantity", "so_hop", "boxes")
+    debt_priority = ("con_no", "cong_no", "chua_tra", "con_thieu", "debt")
+
+    money_col = next((fact_cols_low[k] for k in money_priority if k in fact_cols_low), None)
+    if money_col is None:
+        money_col = next(
+            (c for c in fact_cols if re.search(r"(?:doanh_?thu|thanh_?tien|tong_?tien|tien_?hang|revenue|sales|amount|profit|salary)", c.lower()) and not re.search(r"(?:pct|ratio|ty_le)", c.lower())),
+            None,
+        )
+    qty_col = next((fact_cols_low[k] for k in qty_priority if k in fact_cols_low), None)
+    debt_col = next((fact_cols_low[k] for k in debt_priority if k in fact_cols_low), None)
+    paid_col = next((fact_cols_low[k] for k in ("da_thanh_toan", "da_tra", "da_thu") if k in fact_cols_low), None)
+
+    is_money_metric = True
+    if wants_import and ("gia_nhap" in fact_cols_low) and qty_col and not (asks_qty and not asks_money):
+        pcol = fact_cols_low["gia_nhap"]
+        metric_expr = f"ROUND_HALF_UP(SUM(f.{qty_col} * f.{pcol}), 0)"
+        metric_alias = "tong_tien_nhap"
+    elif asks_debt:
+        if debt_col:
+            metric_expr = f"ROUND_HALF_UP(SUM(f.{debt_col}), 0)"
+            metric_alias = "tong_cong_no"
+        elif "tong_tien" in fact_cols_low and paid_col:
+            tcol = fact_cols_low["tong_tien"]
+            metric_expr = f"ROUND_HALF_UP(SUM(f.{tcol} - COALESCE(f.{paid_col}, 0)), 0)"
+            metric_alias = "tong_cong_no"
+        elif money_col:
+            metric_expr = f"ROUND_HALF_UP(SUM(f.{money_col}), 0)"
+            metric_alias = "tong_cong_no"
+        else:
+            return None
+    elif asks_qty and not asks_money and qty_col:
+        metric_expr = f"ROUND_HALF_UP(SUM(f.{qty_col}), 0)"
+        metric_alias = "tong_so_luong"
+        is_money_metric = False
+    elif money_col:
+        metric_expr = f"ROUND_HALF_UP(SUM(f.{money_col}), 0)"
+        metric_alias = "tong_doanh_thu"
+    elif qty_col:
+        metric_expr = f"ROUND_HALF_UP(SUM(f.{qty_col}), 0)"
+        metric_alias = "tong_so_luong"
+        is_money_metric = False
+    else:
+        num_cands = [
+            c for c in fact_profile.columns
+            if getattr(c, "inferred_type", "") in ("integer", "real", "number", "float", "numeric")
+            and not re.match(r"^(?:ma_|id$)|_id$", getattr(c, "sql_name", str(c)).lower())
+        ]
+        if not num_cands:
+            return None
+        ncol = getattr(num_cands[0], "sql_name", str(num_cands[0]))
+        metric_expr = f"ROUND_HALF_UP(SUM(f.{ncol}), 0)"
+        metric_alias = f"tong_{ncol.lower()}"
+        is_money_metric = False
+
+    # 3. Pick grouping dimension (supporting JOIN to companion lookup table like danhmucmon.nhom_mon)
+    candidate_tables: List[Tuple[Any, Optional[str]]] = [(fact_profile, None)]
+    for tp in tables_list:
+        if tp.table_name == fact_profile.table_name:
+            continue
+        jk = _find_join_key(fact_profile, tp)
+        if jk:
+            candidate_tables.append((tp, jk))
+
+    def _find_dim_by_regex(pat: str) -> Optional[Tuple[Any, str, Optional[str]]]:
+        rx = re.compile(pat, re.IGNORECASE)
+        for tp, jk in candidate_tables:
+            for col in tp.columns:
+                cname = getattr(col, "sql_name", str(col))
+                if rx.search(cname.lower()):
+                    return tp, cname, jk
+        return None
+
+    dim_pick: Optional[Tuple[Any, str, Optional[str]]] = None
+    explicit_dim_rules = (
+        (r"\bnhom\s+mon\b", r"^nhom_?mon$"),
+        (r"\b(?:nhom\s+thuoc|loai\s+thuoc)\b", r"^(?:nhom|loai)_?thuoc$"),
+        (r"\b(?:nhom\s+hang|danh\s+muc|category)\b", r"^(?:nhom_?hang|danh_?muc|category|categoryname)$"),
+        (r"\bkenh\b", r"^(?:kenh_?ban|kenh|channel)$"),
+        (r"\b(?:nha\s+cung\s+cap|ncc)\b", r"^(?:nha_?cung_?cap|ten_?ncc|supplier|companyname)$"),
+        (r"\bkhach(?:\s+hang)?\b", r"^(?:ten_?khach_?hang|khach_?hang|ten_?kh|customer|companyname)$"),
+        (r"\bthuoc\b", r"^(?:ten_?thuoc|thuoc)$"),
+        (r"\bmon\b", r"^(?:ten_?mon|mon)$"),
+        (r"\bvat\s+lieu\b", r"^(?:ten_?vl|vat_?lieu)$"),
+        (r"\b(?:san\s+pham|mat\s+hang|hang\s+hoa)\b", r"^(?:ten_?thuoc|ten_?mon|ten_?vl|vat_?lieu|ten_?hang|ten_?sp|san_?pham|productname|product)$"),
+        (r"\bnhan\s+vien\b", r"^(?:ten_?nhan_?vien|nhan_?vien|salesperson|employee)$"),
+        (r"\bdon\s+vi\b", r"^(?:don_?vi|don_?vi_?tinh)$"),
+        (r"\bngay\b", r"^(?:ngay_?gd|ngay_?ban|ngay_?dat|ngay_?nhap|ngay|orderdate)$"),
+    )
+    for q_pat, c_pat in explicit_dim_rules:
+        if re.search(q_pat, qn):
+            dim_pick = _find_dim_by_regex(c_pat)
+            if dim_pick is not None:
+                break
+
+    if dim_pick is None:
+        # Generic group/category column first (e.g. nhom_mon on cafe_pho_viet), then primary entity column on fact table
+        dim_pick = _find_dim_by_regex(
+            r"^(?:nhom_?mon|nhom_?thuoc|nhom_?hang|nhom_?sp|danh_?muc|danhmuc|loai_?mon|loai_?thuoc|loai_?hang|category|categoryname|team|dept_?name|department)$"
+        )
+    if dim_pick is None:
+        dim_pick = _find_dim_by_regex(
+            r"^(?:ten_?thuoc|ten_?mon|vat_?lieu|ten_?vl|ten_?hang|ten_?sp|san_?pham|productname|product)$"
+        )
+    if dim_pick is None:
+        dim_pick = _find_dim_by_regex(
+            r"^(?:ten_?khach_?hang|khach_?hang|kenh_?ban|nha_?cung_?cap)$"
+        )
+    if dim_pick is None:
+        for tp, jk in candidate_tables:
+            for col in tp.columns:
+                cname = getattr(col, "sql_name", str(col))
+                cl = cname.lower()
+                if getattr(col, "inferred_type", "text") == "text" and not re.match(
+                    r"^(?:ma_|id$|trang_?thai|status|ngay|date|ghi_?chu|note)", cl
+                ):
+                    dim_pick = (tp, cname, jk)
+                    break
+            if dim_pick is not None:
+                break
+
+    if dim_pick is None:
+        return None
+
+    dim_tbl, dim_col, join_key = dim_pick
+    fact_ref = _quote_sqlite_ident(fact_profile.table_name)
+    if dim_tbl.table_name == fact_profile.table_name:
+        dim_expr = f"f.{dim_col}"
+        join_sql = ""
+    else:
+        dim_expr = f"d.{dim_col}"
+        join_sql = f"\n    JOIN {_quote_sqlite_ident(dim_tbl.table_name)} d ON f.{join_key} = d.{join_key}"
+
+    # 4. Build safe WHERE predicates (status exclusion + bounded temporal filter + non-empty group)
+    where_conds: List[str] = []
+    if not _Q_ALLOW_ALL_STATUS_RE.search(qn) and getattr(knowledge, "order_status_targets", None):
+        for tgt in knowledge.order_status_targets:
+            if tgt.get("table", "").lower() == fact_profile.table_name.lower():
+                vfilt = tgt.get("valid_filter") or ""
+                scol = tgt.get("status_col") or ""
+                if vfilt and scol:
+                    where_conds.append(re.sub(rf"\b{re.escape(scol)}\b", f"f.{scol}", vfilt, flags=re.IGNORECASE))
+                break
+
+    if analysis.bounded_period is not None:
+        dcol = next(
+            (c for c in fact_cols if re.search(r"^(?:ngay_?gd|ngay_?ban|ngay_?dat|ngay_?nhap|ngay|orderdate|date)$", c.lower())),
+            None,
+        )
+        if dcol:
+            w_start, w_end = analysis.bounded_period
+            where_conds.append(f"f.{dcol} BETWEEN '{w_start}' AND '{w_end}'")
+
+    where_conds.append(f"{dim_expr} IS NOT NULL")
+    where_conds.append(f"TRIM(CAST({dim_expr} AS TEXT)) != ''")
+    where_sql = f"\n    WHERE {' AND '.join(where_conds)}"
+
+    high_lbl = "Cao nhất" if top_n == 1 else f"Top {top_n} Cao nhất"
+    low_lbl = "Thấp nhất" if bottom_n == 1 else f"Top {bottom_n} Thấp nhất"
+
+    diff_ranked_line = (
+        f",\n        ROUND_HALF_UP(MAX({metric_alias}) OVER () - MIN({metric_alias}) OVER (), 0) AS chenh_lech_cao_thap"
+        if wants_diff
+        else ""
+    )
+    diff_outer_line = ",\n    chenh_lech_cao_thap" if wants_diff else ""
+
+    suggested_sql = (
+        f"WITH grouped AS (\n"
+        f"    SELECT {dim_expr} AS {dim_col}, {metric_expr} AS {metric_alias}\n"
+        f"    FROM {fact_ref} f{join_sql}{where_sql}\n"
+        f"    GROUP BY {dim_expr}\n"
+        f"),\n"
+        f"ranked AS (\n"
+        f"    SELECT\n"
+        f"        {dim_col},\n"
+        f"        {metric_alias},\n"
+        f"        ROW_NUMBER() OVER (ORDER BY {metric_alias} DESC, {dim_col} ASC) AS rn_high,\n"
+        f"        ROW_NUMBER() OVER (ORDER BY {metric_alias} ASC, {dim_col} DESC) AS rn_low{diff_ranked_line}\n"
+        f"    FROM grouped\n"
+        f")\n"
+        f"SELECT\n"
+        f"    {dim_col},\n"
+        f"    CASE WHEN rn_high <= {top_n} THEN '{high_lbl}' ELSE '{low_lbl}' END AS nhom_xep_hang,\n"
+        f"    {metric_alias}{diff_outer_line}\n"
+        f"FROM ranked\n"
+        f"WHERE rn_high <= {top_n} OR rn_low <= {bottom_n}\n"
+        f"ORDER BY {metric_alias} DESC, rn_high ASC;"
+    )
+
+    return {
+        "fact_table": fact_profile.table_name,
+        "dim_table": dim_tbl.table_name,
+        "dim_col": dim_col,
+        "metric_alias": metric_alias,
+        "is_money": is_money_metric,
+        "top_n": top_n,
+        "bottom_n": bottom_n,
+        "wants_diff": wants_diff,
+        "suggested_sql": suggested_sql,
+    }
 
 
 def _select_rulebook_prompt(
@@ -523,33 +1455,55 @@ def _select_rulebook_prompt(
     """Assemble a concise, intent-specific rulebook prompt (cuts prefill tokens & prevents debt hallucination)."""
     qn = normalize_vn_question(question)
     caps = knowledge.capabilities
+    tables = list(knowledge.workspace.tables.values())
+    all_cols_low = {
+        getattr(c, "sql_name", str(c)).lower()
+        for t in tables
+        for c in t.columns
+    }
+    has_vn_shop_schema = any(
+        k in all_cols_low
+        for k in ("trang_thai", "thanh_tien", "chua_tra", "da_tra", "ma_don", "ngay_dat", "ngay_gd", "gia_von")
+    )
+    spaced_tables = [t.table_name for t in tables if " " in t.table_name or "-" in t.table_name]
+
     sections: List[str] = [
-        "Bạn là chuyên gia viết SQLite cho DataMate. CHỈ dùng tên bảng/cột có trong lược đồ. Có sẵn UDF: `NORM_VN(col)` và `ROUND_HALF_UP(val, d)`.",
+        "Bạn là chuyên gia viết SQLite cho DataMate. CHỈ dùng ĐÚNG tên bảng/cột có trong lược đồ (tuyệt đối không tự bịa bảng/cột không tồn tại). Có sẵn UDF: `NORM_VN(col)` và `ROUND_HALF_UP(val, d)`.",
         f"- Hôm nay (`as_of_date`) = `{as_of_date}`.",
     ]
+    if spaced_tables:
+        quoted_list = ", ".join(f'`"{t}"`' for t in spaced_tables)
+        sections.append(
+            f"- QUY TẮC DẤU NGOẶC KÉP BẮT BUỘC: Tên bảng có khoảng trắng ({quoted_list}) BẮT BUỘC đặt trong ngoặc kép đôi, viết ĐÚNG CHÍNH TẢ từng ký tự (VD: `JOIN \"Order Details\" od ON ...`)."
+        )
     if not analysis.temporal_windows and analysis.bounded_period is None:
         sections.append(
-            f"- QUAN TRỌNG: Câu hỏi KHÔNG hỏi riêng ngày hôm nay hay khoảng ngày cụ thể -> truy vấn TOÀN BỘ DỮ LIỆU lịch sử đến hết `{as_of_date}`. TUYỆT ĐỐI KHÔNG tự thêm `ngay = '{as_of_date}'`!"
+            f"- QUAN TRỌNG: Câu hỏi KHÔNG hỏi riêng ngày hôm nay hay khoảng ngày cụ thể -> truy vấn TOÀN BỘ DỮ LIỆU lịch sử. TUYỆT ĐỐI KHÔNG tự thêm `ngay = '{as_of_date}'` hay bộ lọc `Status` không có trong bảng!"
         )
-    if knowledge.data_max_date and knowledge.data_max_date > as_of_date:
+    if has_vn_shop_schema:
+        if knowledge.data_max_date and knowledge.data_max_date > as_of_date:
+            sections.append(
+                f"- Phát sinh đơn sau `{as_of_date}` coi như chưa xảy ra (chỉ dùng `<= '{as_of_date}'` cho câu lũy kế/cutoff; riêng câu hỏi đúng ngày/tháng dùng `=` hoặc `BETWEEN`)."
+            )
+        sections.append(_RULE_CORE)
+    else:
         sections.append(
-            f"- Phát sinh đơn sau `{as_of_date}` coi như chưa xảy ra (chỉ dùng `<= '{as_of_date}'` cho câu lũy kế/cutoff; riêng câu hỏi đúng ngày/tháng dùng `=` hoặc `BETWEEN`)."
+            "- Nếu câu hỏi bằng tiếng Việt nhưng bảng/dữ liệu bằng tiếng Anh (VD: cà phê -> coffee/Beverages), hãy ánh xạ ngữ nghĩa hoặc dùng `LOWER(col) LIKE '%keyword%'`, chỉ lọc những cột thực sự tồn tại trong lược đồ."
         )
-    sections.append(_RULE_CORE)
 
-    if re.search(r"\b(?:khach|ai|top|nhom)\b", qn) and caps.get("has_customers"):
+    if re.search(r"\b(?:khach|ai|top|nhom)\b", qn) and caps.get("has_customers") and has_vn_shop_schema:
         sections.append(_RULE_CUSTOMERS)
-    if caps.get("has_debt_or_payments") and re.search(
+    if caps.get("has_debt_or_payments") and has_vn_shop_schema and re.search(
         r"\b(?:no|chua tra|da tra|da thu|con thieu|phai thu|tuoi no|ghi no|tra no|thu hoi|thu no|so quy|tien mat|chuyen khoan|cod|pttt)\b",
         qn,
     ):
         sections.append(_RULE_DEBT)
-    if analysis.expected_type in ("string", "list", "table") or re.search(
-        r"\b(?:ban chay|top|hot|xep hang|don vi|thung|hop|loc|chai|vien|goi|ong|tui|cay|tan|m3|bao|phuc vu|ton)\b",
-        qn,
+    if has_vn_shop_schema and (
+        analysis.expected_type in ("string", "list", "table")
+        or re.search(r"\b(?:ban chay|top|hot|xep hang|don vi|thung|hop|loc|chai|vien|goi|ong|tui|cay|tan|m3|bao|phuc vu|ton)\b", qn)
     ):
         sections.append(_RULE_RANKING)
-    if re.search(r"\b(?:ton|kho|nhap|gia von|lai|han dung|het han|lo|gia ban|tang gia|khong ban duoc|hang e)\b", qn):
+    if has_vn_shop_schema and re.search(r"\b(?:ton|kho|nhap|gia von|lai|han dung|het han|lo|gia ban|tang gia|khong ban duoc|hang e)\b", qn):
         sections.append(_RULE_INVENTORY_COST)
     if caps.get("has_pharmacy_rx") and re.search(r"\b(?:ke don|hoat chat|lo|han dung|het han|thuoc)\b", qn):
         sections.append(_RULE_INDUSTRY_PHARMACY)
@@ -557,6 +1511,55 @@ def _select_rulebook_prompt(
         sections.append(_RULE_INDUSTRY_CAFE)
     if caps.get("has_delivery_schedule") and re.search(r"\b(?:dot|giao)\b", qn):
         sections.append(_RULE_INDUSTRY_VLXD)
+    if analysis.expected_type == "percent" and re.search(
+        r"\b(?:ty\s+le|ti\s+le|ty\s+trong|dong\s+gop|phan\s+tram|%|share|percent)\b", qn
+    ):
+        sections.append(
+            "- Tỷ lệ đóng góp / tỷ trọng (%) theo nhóm: TỬ SỐ VÀ MẪU SỐ PHẢI DÙNG CÙNG 1 CHỈ SỐ; mẫu số là tổng toàn bộ qua `SUM(SUM(cot_chi_so)) OVER ()` (VD: `ROUND_HALF_UP(SUM(thanh_tien) * 100.0 / SUM(SUM(thanh_tien)) OVER (), 2)`)."
+        )
+    dim_req = _match_requested_dimension_col(qn, knowledge)
+    if dim_req:
+        q_phrase, t_hit, c_hit = dim_req
+        join_key_hint = ""
+        tgt_tbl = next((t for t in tables if t.table_name == t_hit), None)
+        if tgt_tbl and len(tables) > 1:
+            tgt_cols = {getattr(c, "sql_name", str(c)) for c in tgt_tbl.columns}
+            for other in tables:
+                if other.table_name == t_hit:
+                    continue
+                common = [
+                    getattr(c, "sql_name", str(c))
+                    for c in other.columns
+                    if getattr(c, "sql_name", str(c)) in tgt_cols
+                    and getattr(c, "sql_name", str(c)).lower() not in {"ngay", "thang", "nam", "ghi_chu", "trang_thai"}
+                ]
+                if common:
+                    k = common[0]
+                    t_ref = f'"{t_hit}"' if (" " in t_hit or "-" in t_hit) else t_hit
+                    o_ref = f'"{other.table_name}"' if (" " in other.table_name or "-" in other.table_name) else other.table_name
+                    join_key_hint = f" (dùng `JOIN {t_ref} ON {o_ref}.{k} = {t_ref}.{k}` khi tính từ `{o_ref}`)"
+                    break
+        sections.append(
+            f"- Câu hỏi yêu cầu phân theo `{q_phrase}` -> BẮT BUỘC `GROUP BY {t_hit}.{c_hit}`{join_key_hint}, KHÔNG thay bằng tên mặt hàng chi tiết."
+        )
+    ext_spec = build_extreme_comparison_sql_spec(question, knowledge, analysis) if analysis.extreme_comparison else None
+    ord_rank = extract_ordinal_rank(question)
+    if ext_spec is not None:
+        top_n, bottom_n, wants_diff = analysis.extreme_comparison or (1, 1, True)
+        diff_note = " VÀ cột độ chênh lệch `chenh_lech_cao_thap` (bằng `MAX(...) - MIN(...)`)" if wants_diff else ""
+        sections.append(
+            f"- Câu hỏi SO SÁNH CỰC TRỊ (Cao nhất & Thấp nhất): BẮT BUỘC trả về DANH SÁCH GỒM CẢ nhóm/đối tượng Cao nhất (`Top {top_n}`) và nhóm/đối tượng Thấp nhất (`Top {bottom_n}`), kèm cột phân nhóm `nhom_xep_hang`, cột chỉ số tổng hợp `{ext_spec['metric_alias']}`{diff_note}. TUYỆT ĐỐI KHÔNG chỉ trả 1 con số chênh lệch đơn lẻ! Dùng mẫu CTE SQLite chuẩn sau:\n```sql\n{ext_spec['suggested_sql']}\n```"
+        )
+    elif ord_rank is not None:
+        rank_n, rank_dir = ord_rank
+        rank_lbl = "cao/nhiều" if rank_dir == "DESC" else "thấp/ít"
+        sections.append(
+            f"- Câu hỏi tìm đối tượng đứng THỨ {rank_n} ({rank_lbl} thứ {rank_n}): BẮT BUỘC chọn CẢ TÊN ĐỐI TƯỢNG VÀ CHỈ SỐ ĐO LƯỜNG trong `SELECT` (VD: `SELECT <cột_đối_tượng>, ROUND_HALF_UP(SUM(<cột_tiền_hoặc_sl>), 0) AS tong_doanh_thu ... GROUP BY <cột_đối_tượng> ORDER BY SUM(<cột_tiền_hoặc_sl>) {rank_dir} LIMIT 1 OFFSET {rank_n - 1}`). TUYỆT ĐỐI KHÔNG dùng `LIMIT {rank_n}`!"
+        )
+    elif _ENTITY_WHICH_LOOKUP_RE.search(qn):
+        sections.append(
+            "- Câu hỏi tìm đối tượng/ngày tháng nào đứng đầu/thấp nhất về tổng/số lượng: BẮT BUỘC chọn cả `<cột_đối_tượng_hoặc_ngày>` và cột chỉ số `SUM(...)/COUNT(...)` trong `SELECT`, có `GROUP BY <cột_đối_tượng_hoặc_ngày>` kết hợp `ORDER BY ... DESC/ASC LIMIT 1` (KHÔNG dùng `MAX(ngày)` + `SUM(...)` thiếu `GROUP BY`)."
+        )
 
     sections.append(
         'Trả về DUY NHẤT JSON hợp lệ: {"status": "ok", "sql": "SELECT ..."} '
@@ -626,6 +1629,14 @@ def verify_sql_semantics(
     qn = normalize_vn_question(question)
     sql_low = re.sub(r"\s+", " ", sql or "").strip().lower()
     where_part = sql_low.split("where", 1)[1] if "where" in sql_low else ""
+
+    oos_reason = check_out_of_scope_or_irrelevant(question, knowledge)
+    if oos_reason:
+        return (False, oos_reason, True)
+
+    cap_gap = _check_schema_capability_gap(question, knowledge)
+    if cap_gap:
+        return (False, cap_gap, True)
 
     # 1. Spurious debt/payment column filter when question does NOT ask about debt/payment
     if not _Q_DEBT_INTENT_RE.search(qn):
@@ -752,18 +1763,32 @@ def verify_sql_semantics(
             True,
         )
 
-    # 4b. Entity-ranking 'string' queries ('khách hàng nào nợ nhiều nhất', 'món nào...') missing GROUP BY
+    # 4b. Entity-ranking 'string'/'table' or ordinal-rank queries ('khách hàng nào nợ nhiều nhất', 'món nào...', 'cao thứ 3') missing GROUP BY
+    ord_rank = extract_ordinal_rank(question)
     if (
-        analysis.expected_type == "string"
+        (analysis.expected_type in ("string", "table") or ord_rank is not None)
         and "order by" in sql_low
         and "group by" not in sql_low
-        and re.search(r"\b(?:khach hang nao|ai |san pham nao|mon nao|thuoc nao|nha cung cap nao|nhom nao|kenh nao)\b", qn)
-        and re.search(r"\b(?:tong|doanh thu|no|nhieu nhat|cao nhat|lon nhat|thap nhat|it nhat|ban chay)\b", qn)
+        and re.search(r"\b(?:khach hang nao|ai |san pham|mat hang|mon|thuoc|nha cung cap|nhom|kenh)\b", qn)
+        and re.search(r"\b(?:tong|doanh thu|thanh tien|so luong|no|nhieu nhat|cao nhat|lon nhat|thap nhat|it nhat|ban chay|cao thu|thap thu|nhieu thu|it thu|lon thu|dung thu|xep thu)\b", qn)
         and not re.search(r"\b(?:don hang nao|hoa don nao|ma don nao|phieu nao)\b", qn)
     ):
         return (
             False,
-            "LỖI THIẾU GROUP BY: Một đối tượng (khách hàng/sản phẩm/kênh) có thể xuất hiện ở NHIỀU đơn hàng! Tìm tổng cao nhất/nhiều nhất BẮT BUỘC phải `GROUP BY` theo đối tượng và dùng `SUM(...)` (hoặc `COUNT(...)`), KHÔNG `ORDER BY` trên 1 dòng đơn lẻ!",
+            "LỖI THIẾU GROUP BY: Một đối tượng (khách hàng/sản phẩm/kênh) có thể xuất hiện ở NHIỀU đơn hàng! Tìm tổng cao nhất/nhiều nhất/đứng thứ N BẮT BUỘC phải `GROUP BY` theo đối tượng và dùng `SUM(...)` (hoặc `COUNT(...)`), KHÔNG `ORDER BY` trên 1 dòng đơn lẻ!",
+            True,
+        )
+
+    # 4c. Grouped entity ranking missing aggregate function (SUM/COUNT/AVG) in SELECT and ORDER BY
+    if (
+        "group by" in sql_low
+        and "order by" in sql_low
+        and re.search(r"\b(?:tong|doanh thu|thanh tien|so luong|ban chay|chi tieu|cong no)\b", qn)
+        and not re.search(r"\b(?:sum|count|avg|min|max|total)\s*\(", sql_low)
+    ):
+        return (
+            False,
+            "LỖI THIẾU HÀM TỔNG HỢP (SUM/COUNT): Khi `GROUP BY` theo sản phẩm/khách hàng/nhóm để xếp hạng doanh thu hoặc số lượng, BẮT BUỘC phải dùng `SUM(thanh_tien)` hoặc `SUM(so_luong)` trong cả `SELECT` và `ORDER BY`, KHÔNG dùng cột đơn lẻ chưa cộng gộp!",
             True,
         )
 
@@ -820,6 +1845,171 @@ def verify_sql_semantics(
                 False,
             )
 
+    # 8. Prevent double-multiplying quantity by an already-extended line/order total (so_luong * thanh_tien)
+    _qty_tok = r"(?:so_luong|sl|qty|quantity|so_hop|boxes)"
+    _line_total_tok = r"(?:thanh_tien|tong_tien|doanh_thu|tong_doanh_thu|subtotal|line_total)"
+    if re.search(
+        rf"(?:\b[a-z0-9_.]*{_qty_tok}\b\s*\*\s*[a-z0-9_.]*{_line_total_tok}\b|\b[a-z0-9_.]*{_line_total_tok}\b\s*\*\s*[a-z0-9_.]*{_qty_tok}\b)",
+        select_head,
+    ):
+        return (
+            False,
+            "LỖI NHÂN TRÙNG CHỈ SỐ: Cột `thanh_tien` / `tong_tien` ĐÃ là tổng tiền sau nhân số lượng; TUYỆT ĐỐI KHÔNG nhân thêm `so_luong * thanh_tien`! Hãy tính riêng `SUM(thanh_tien)` và `SUM(so_luong)`.",
+            True,
+        )
+
+    # 9. Respect explicit table name mentioned as 'bảng <table>'
+    for m_tbl in re.finditer(r"\bbang\s+[`'\"]?([a-z0-9_]+)[`'\"]?\b", qn):
+        req_t = m_tbl.group(1)
+        matched_t = next(
+            (tp.table_name for tp in knowledge.workspace.tables.values() if tp.table_name.lower() == req_t),
+            None,
+        )
+        if matched_t and not re.search(rf"\b(?:from|join)\s+[`\"]?{re.escape(req_t)}[`\"]?\b", sql_low):
+            return (
+                False,
+                f"LỖI CHỌN BẢNG: Câu hỏi yêu cầu thống kê trực tiếp bảng `{matched_t}`, nhưng SQL chưa đọc từ `{matched_t}`. Hãy truy vấn bảng `{matched_t}`!",
+                True,
+            )
+
+    # 10. Respect explicit grouping dimension mentioned in question when matching column exists (e.g. 'nhóm món' -> nhom_mon)
+    dim_req = _match_requested_dimension_col(qn, knowledge)
+    if dim_req:
+        q_phrase, t_hit, c_hit = dim_req
+        if not re.search(rf"\b{re.escape(c_hit.lower())}\b", sql_low):
+            return (
+                False,
+                f"LỖI NHÓM PHÂN TÍCH: Câu hỏi yêu cầu phân theo `{q_phrase}` — cột `{c_hit}` nằm ở bảng `{t_hit}`! Hãy `JOIN {t_hit}` (nếu ở bảng khác) và dùng `{c_hit}` thay vì tên mặt hàng chi tiết!",
+                True,
+            )
+
+    # 11. Quantity column guard: avoid COUNT(*) substituting for SUM(so_luong) when asking 'tổng số lượng' / item quantities
+    asks_qty_sum = bool(
+        re.search(
+            r"\b(?:tong\s+so\s+luong|so\s+luong\s+(?:ban|xuat|nhap|ton|theo|cua|cao\s+nhat|trung\s+binh|vuot|chenh\s+lech)|so\s+luong\s+va\s+(?:thanh\s+tien|doanh\s+thu)|(?:thanh\s+tien|doanh\s+thu)\s+va\s+so\s+luong)\b",
+            qn,
+        )
+        and not re.search(
+            r"\bso\s+luong\s+(?:don|hoa\s+don|giao\s+dich|ban\s+ghi|dong|khach|nhan\s+vien|san\s+pham|mon)\b",
+            qn,
+        )
+    )
+    if asks_qty_sum:
+        queried_qty_cols = [
+            getattr(c, "sql_name", str(c))
+            for tp in knowledge.workspace.tables.values()
+            if re.search(rf"\b(?:from|join)\s+[`\"]?{re.escape(tp.table_name.lower())}[`\"]?\b", sql_low)
+            for c in tp.columns
+            if re.search(r"^(?:so_?luong|sl|qty|quantity|so_?hop|boxes)$", getattr(c, "sql_name", str(c)).lower())
+        ]
+        if queried_qty_cols:
+            has_qty_agg = any(
+                re.search(rf"\b(?:sum|avg|max|min)\s*\([^)]*\b{re.escape(qc.lower())}\b", select_head)
+                for qc in queried_qty_cols
+            )
+            if not has_qty_agg:
+                return (
+                    False,
+                    f"LỖI CHỈ SỐ SỐ LƯỢNG: Bảng có cột `{queried_qty_cols[0]}` — không dùng `COUNT(*)` hay bỏ sót số lượng; hãy dùng `SUM({queried_qty_cols[0]})` (hoặc `AVG({queried_qty_cols[0]})` nếu hỏi trung bình)!",
+                    True,
+                )
+
+    # 12. Grouped percentage denominator guard: reject '/ SUM(...)' without OVER () or scalar subquery '(SELECT SUM'
+    if (
+        "group by" in sql_low
+        and "over" not in sql_low
+        and not re.search(r"\(\s*select\s+.*?\bsum\s*\(", sql_low)
+        and re.search(r"/\s*(?:nullif\s*\(\s*)?(?:cast\s*\(\s*)?sum\s*\(", select_head)
+        and re.search(r"\b(?:ty\s+le|ti\s+le|ty\s+trong|dong\s+gop|phan\s+tram|%|share|percent)\b", qn)
+    ):
+        m_plain_num = re.search(r"\bsum\s*\(\s*(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s*\)", select_head)
+        hint_expr = f"SUM(SUM({m_plain_num.group(1)})) OVER ()" if m_plain_num else "SUM(SUM(...)) OVER ()"
+        return (
+            False,
+            f"LỖI MẪU SỐ TỶ LỆ (%): Khi có `GROUP BY`, chia trực tiếp cho `SUM(...)` sẽ chia cho chính nhóm đó thay vì tổng toàn bộ! Phải chia cho tổng toàn cục của CÙNG CHỈ SỐ TỬ SỐ qua `{hint_expr}` hoặc `(SELECT SUM(...) FROM ...)` (cùng điều kiện lọc).",
+            True,
+        )
+
+    # 12b. Mismatched numerator/denominator metric in share-of-total (%) window or scalar subquery
+    if (
+        re.search(r"\b(?:ty\s+le|ti\s+le|ty\s+trong|dong\s+gop|phan\s+tram|%|share|percent)\b", qn)
+        and not re.search(r"\b(?:ty\s+suat|chuyen\s+doi|bien\s+loi\s+nhuan|margin|conversion|per\b|tren\s+moi|moi\s+(?:don|mon|san\s+pham|khach))\b", qn)
+    ):
+        m_share_cols = re.search(
+            r"\bsum\s*\(\s*(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s*\)"
+            r"(?:\s*(?:,\s*0|as\s+(?:real|float|numeric|double))?\s*\))*"
+            r"(?:\s*\*\s*100(?:\.0)?)?\s*/\s*(?:nullif\s*\(\s*)?(?:cast\s*\(\s*)?"
+            r"(?:sum\s*\(\s*sum\s*\(\s*(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s*\)\s*\)\s*over"
+            r"|\(\s*select\s+sum\s*\(\s*(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s*\))",
+            select_head,
+        )
+        if m_share_cols:
+            num_col = m_share_cols.group(1)
+            den_col = m_share_cols.group(2) or m_share_cols.group(3)
+            if den_col and num_col != den_col:
+                return (
+                    False,
+                    f"LỖI CỘT TỬ SỐ & MẪU SỐ (%): Tỷ trọng phần trăm (%) phải chia CÙNG MỘT CHỈ SỐ — tử số đang tính `{num_col}` nhưng mẫu số lại chia cho `{den_col}`! Hãy sửa mẫu số dùng `SUM(SUM({num_col})) OVER ()` (hoặc `(SELECT SUM({num_col}) FROM ...)`) thay vì `{den_col}`.",
+                    True,
+                )
+
+    # 13. Missing GROUP BY guard: reject SQLite mixed unaggregated column + SUM/COUNT/AVG or entity-peak query without GROUP BY
+    if "group by" not in sql_low:
+        select_exprs = _split_top_level_select_exprs(select_head)
+        has_agg_metric = any(
+            re.search(r"\b(?:sum|count|avg|total)\s*\(", e) and not re.search(r"\bover\s*\(", e)
+            for e in select_exprs
+        )
+        if has_agg_metric:
+            has_unagg_col = False
+            for e in select_exprs:
+                core = re.sub(r"\s+as\s+[`\"']?[a-z0-9_]+[`\"']?\s*$", "", e, flags=re.IGNORECASE).strip()
+                if not core or core.startswith("'") or re.match(r"^[+-]?\d+(?:\.\d+)?$", core):
+                    continue
+                if re.search(r"\b(?:sum|count|avg|min|max|total|group_concat)\s*\(", core) or re.search(r"\bover\s*\(", core):
+                    continue
+                if re.search(r"\b[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?\b", core):
+                    has_unagg_col = True
+                    break
+            if has_unagg_col or _ENTITY_WHICH_LOOKUP_RE.search(qn):
+                return (
+                    False,
+                    "LỖI THIẾU GROUP BY: Câu SQL dùng hàm tổng hợp (`SUM`/`COUNT`/`AVG`) cho câu hỏi tìm theo từng ngày/nhóm/đối tượng hoặc trộn cột phân loại mà THIẾU `GROUP BY` — khiến SQLite cộng dồn toàn bộ bảng vào 1 dòng! Phải thêm `GROUP BY <cột_nhóm>` rồi `ORDER BY ... DESC LIMIT 1`.",
+                    True,
+                )
+
+    # 14. Ordinal rank guard ('cao thứ 3', 'đứng thứ 2', etc.): must return exactly 1 row using LIMIT 1 OFFSET {rank_n - 1}
+    if ord_rank is not None:
+        rank_n, rank_dir = ord_rank
+        offset_val = rank_n - 1
+        has_wrong_limit = bool(
+            re.search(rf"\blimit\s+{rank_n}\b", sql_low) and f"offset {offset_val}" not in sql_low
+        )
+        if sql_res.row_count > 1 or has_wrong_limit:
+            return (
+                False,
+                f"LỖI XẾP HẠNG THỨ {rank_n}: Câu hỏi tìm đối tượng đứng THỨ {rank_n} (1 đối tượng duy nhất kèm chỉ số), KHÔNG phải lấy danh sách Top {rank_n}! Phải chọn cả cột tên đối tượng và cột chỉ số `SUM(...)` trong `SELECT`, dùng `GROUP BY <cột_đối_tượng> ORDER BY ... {rank_dir} LIMIT 1 OFFSET {offset_val}`.",
+                True,
+            )
+
+    # 15. Extreme comparison guard (highest + lowest list with optional diff): block 1-number scalar diff queries
+    if getattr(analysis, "extreme_comparison", None) is not None:
+        has_label_cell = any(
+            isinstance(cell, str) and bool(cell.strip()) and _coerce_float(cell) is None
+            for row in (sql_res.rows or [])[:10]
+            for cell in row
+        )
+        missing_group_by = "group by" not in sql_low
+        too_few_rows = sql_res.row_count < 2 and not ("rn_high" in sql_low and "rn_low" in sql_low)
+        if len(sql_res.columns) < 2 or missing_group_by or (not has_label_cell) or too_few_rows:
+            ext_spec = build_extreme_comparison_sql_spec(question, knowledge, analysis)
+            sample_hint = f"\nDùng chính xác CTE SQLite mẫu:\n{ext_spec['suggested_sql']}" if ext_spec else ""
+            return (
+                False,
+                f"LỖI THIẾU DANH SÁCH CỰC TRỊ: Câu hỏi yêu cầu IN RA cả đối tượng/nhóm CAO NHẤT và THẤP NHẤT kèm độ chênh lệch, KHÔNG được chỉ trả về 1 con số chênh lệch đơn lẻ! Phải `GROUP BY` theo đối tượng/nhóm và trả về các dòng Cao nhất + Thấp nhất kèm cột chênh lệch.{sample_hint}",
+                True,
+            )
+
     return True, "", False
 
 
@@ -874,7 +2064,7 @@ def format_sql_result(
         values: List[Any] = []
         if len(cols) == 1:
             values = [r[0] for r in rows]
-        elif len(rows) == 1 and len(cols) >= 2:
+        elif len(rows) == 1 and len(cols) >= 2 and not isinstance(rows[0][0], str):
             values = list(rows[0])
         else:
             # Multi-row ranking where SQL included metric column: take first column (label) if strings expected
@@ -1068,27 +2258,29 @@ class DataMateAgent:
                     continue
                 common.sort(key=lambda c: (0 if c.startswith(("ma_", "id", "ten_")) else 1))
                 key = common[0]
-                suggestions.append(f"JOIN {tgt.table_name} ON {src.table_name}.{key} = {tgt.table_name}.{key}")
+                t_ref = f'"{tgt.table_name}"' if (" " in tgt.table_name or "-" in tgt.table_name) else tgt.table_name
+                s_ref = f'"{src.table_name}"' if (" " in src.table_name or "-" in src.table_name) else src.table_name
+                suggestions.append(f"JOIN {t_ref} ON {s_ref}.{key} = {t_ref}.{key}")
             if not suggestions:
                 return ""
             return "Gợi ý JOIN tự động: `" + suggestions[0] + "`\n"
 
         repair_hints = []
-        m_missing_tbl = re.search(r"no such table:\s*([a-zA-Z0-9_.]+)", reason or "", re.IGNORECASE)
+        m_missing_tbl = re.search(r"no such table:\s*[\"`']?([a-zA-Z0-9_. ]+?)[\"`']?(?:\s*$|;|\))", reason or "", re.IGNORECASE)
         if m_missing_tbl:
-            bad_tbl = m_missing_tbl.group(1)
-            valid_tbls = [t.table_name for t in tables]
+            bad_tbl = m_missing_tbl.group(1).strip()
+            valid_tbls = [f'"{t.table_name}"' if (" " in t.table_name or "-" in t.table_name) else t.table_name for t in tables]
             tbl_cols_lines = [
-                f"- `{t.table_name}` ({', '.join(getattr(c, 'sql_name', str(c)) for c in t.columns)})"
+                f"- `{'\"' + t.table_name + '\"' if (' ' in t.table_name or '-' in t.table_name) else t.table_name}` ({', '.join(getattr(c, 'sql_name', str(c)) for c in t.columns)})"
                 for t in tables
             ]
             repair_hints.append(
                 f"Cảnh báo bảng sai: Bảng `{bad_tbl}` KHÔNG TỒN TẠI! "
-                f"CHỈ ĐƯỢC DÙNG đúng tên bảng sau (viết đúng chính tả, không tự thêm/bớt `_`): {', '.join(f'`{n}`' for n in valid_tbls)}.\n"
+                f"CHỈ ĐƯỢC DÙNG đúng tên bảng sau (đặt trong ngoặc kép đôi `\"...\"` nếu có khoảng trắng): {', '.join(f'`{n}`' for n in valid_tbls)}.\n"
                 + "\n".join(tbl_cols_lines)
             )
 
-        m_join_req = re.search(r"Hãy\s+[`'\"]?JOIN\s+([a-zA-Z0-9_]+)[`'\"]?", reason or "", re.IGNORECASE)
+        m_join_req = re.search(r"Hãy\s+[`'\"]?JOIN\s+[`'\"]?([a-zA-Z0-9_]+)[`'\"]?", reason or "", re.IGNORECASE)
         if m_join_req:
             auto_join = _suggest_join_sql(m_join_req.group(1).strip())
             if auto_join:
@@ -1152,7 +2344,7 @@ class DataMateAgent:
             f"{temp_block}"
             f"Tham khảo lược đồ & quy ước dưới đây để sửa SQL:\n"
             f"{schema_block}\n\n"
-            'Trả về JSON duy nhất: {"status": "ok", "sql": "SELECT ..."} hoặc {"status": "unanswerable", "reason": "..."}.'
+            'Hãy SỬA LẠI câu SQL theo đúng tên bảng và cột trong lược đồ trên (tên bảng có khoảng trắng phải đặt trong ngoặc kép `\"...\"`) và trả về JSON duy nhất: {"status": "ok", "sql": "SELECT ..."}.'
         )
 
     def _fallback_llm_format(
@@ -1306,6 +2498,7 @@ class DataMateAgent:
                 )
 
             candidate_sql = str(obj["sql"]) if (obj and isinstance(obj.get("sql"), str)) else raw_reply
+            candidate_sql = rewrite_ranked_entity_sql(candidate_sql, question, use_round_half_up=True)
             res = execute_sql_safe(
                 knowledge.workspace.open_connection,
                 candidate_sql,

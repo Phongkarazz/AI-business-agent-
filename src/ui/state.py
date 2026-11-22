@@ -13,6 +13,7 @@ def init_session_state():
         "query_cache": {},
         "focused_turn_idx": None,
         "pending_prompt": None,
+        "submitted_query": None,
         "connected": False,
         "view_mode": "chat",
         "engine": None,

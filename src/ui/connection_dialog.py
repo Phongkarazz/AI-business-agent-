@@ -2,13 +2,14 @@
 Connection progress and loading modal/view manager with cancellation and retry handling.
 """
 
+import time
 import streamlit as st
 from src.database.business_upload import (
     compose_connection_schema,
     describe_database_target,
     resolve_database_connection,
 )
-from src.database.schema import auto_extract_schema
+from src.database.schema import auto_extract_schema, clear_schema_caches
 from src.database.query_runner import sanitize_error
 from src.llm.client import get_llm_client, normalize_model_for_openrouter
 
@@ -96,6 +97,12 @@ def show_connecting_dialog(
 
         # Bước 3: Schema Extraction
         progress_bar.progress(90, text="3/3: Đang trích xuất cấu trúc bảng (Schema)...")
+        clear_schema_caches()
+        setattr(engine, "_veraxus_cache_epoch", time.time_ns())
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
         extracted_schema = auto_extract_schema(engine, force_refresh=True)
         final_schema = compose_connection_schema(
             extracted_schema, schema_context_input, knowledge
@@ -126,7 +133,20 @@ def show_connecting_dialog(
             "query_cache": {},
             "focused_turn_idx": None,
             "pending_prompt": None,
+            "generic_dashboard_layer": "overview",
+            "northwind_dashboard_layer": "overview",
+            "sales_dashboard_layer": "overview",
+            "hr_dashboard_layer": "overview",
         })
+        for _stale_key in (
+            "generic_timeline_years",
+            "northwind_timeline_years",
+            "sales_timeline_years",
+            "sidebar_selected_table",
+            "dialog_preview_selected_table",
+            "submitted_query",
+        ):
+            st.session_state.pop(_stale_key, None)
 
         if on_success_callback:
             on_success_callback(final_model_name)

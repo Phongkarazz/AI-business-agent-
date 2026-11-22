@@ -12,14 +12,26 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:
     from src.config import FORBIDDEN_KEYWORDS
-    from src.llm.sql_sanitizer import fuzzy_match_name, sanitize_common_sql_syntax
 except ImportError:
     FORBIDDEN_KEYWORDS = [
         "insert", "update", "delete", "drop", "alter",
         "truncate", "create", "grant", "revoke", "exec", "execute",
     ]
-    fuzzy_match_name = None
-    sanitize_common_sql_syntax = None
+
+fuzzy_match_name = None
+sanitize_common_sql_syntax = None
+
+
+def _get_sanitizer_fn(attr: str):
+    """Lazily resolve SQL sanitizer helpers to avoid circular imports with src.llm."""
+    fn = globals().get(attr)
+    if fn is not None:
+        return fn
+    try:
+        from src.llm import sql_sanitizer
+        return getattr(sql_sanitizer, attr, None)
+    except ImportError:
+        return None
 
 from datamate.llm_backend import strip_thinking
 from datamate.temporal import normalize_nfc
@@ -83,8 +95,9 @@ def extract_sql_from_response(raw: str) -> str:
     else:
         candidate = text.strip()
 
-    if sanitize_common_sql_syntax is not None:
-        candidate = sanitize_common_sql_syntax(candidate)
+    sanitizer_fn = _get_sanitizer_fn("sanitize_common_sql_syntax")
+    if sanitizer_fn is not None:
+        candidate = sanitizer_fn(candidate)
 
     m_kw = _FIRST_SQL_KW_RE.search(candidate)
     if m_kw and m_kw.start() > 0:
@@ -199,8 +212,9 @@ def heal_table_names(sql: str, valid_tables: Sequence[str]) -> str:
         if nl in lower_map or nl in cte_names:
             canonical = lower_map.get(nl, name)
             return f"{kw} {q1}{canonical}{q2}"
-        if fuzzy_match_name is not None:
-            fixed = fuzzy_match_name(name, list(valid_tables), cutoff=0.78)
+        fuzzy_fn = _get_sanitizer_fn("fuzzy_match_name")
+        if fuzzy_fn is not None:
+            fixed = fuzzy_fn(name, list(valid_tables), cutoff=0.78)
             if fixed:
                 return f"{kw} {q1}{fixed}{q2}"
         return match.group(0)

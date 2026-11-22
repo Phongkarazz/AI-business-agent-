@@ -3954,6 +3954,25 @@ def _render_northwind_layer_suppliers(engine):
 # UNIVERSAL AUTO-ADAPTIVE GENERIC DATABASE DASHBOARD
 # =========================================================================
 
+def _format_generic_metric_val(val: float, unit_style: str = "number") -> str:
+    """Format numeric KPI cleanly according to inferred unit style (vnd, usd, count, number)."""
+    try:
+        v = float(val or 0.0)
+    except Exception:
+        return str(val)
+    if unit_style == "vnd":
+        if abs(v) >= 1_000_000_000:
+            return f"{v / 1_000_000_000:,.2f}B đ"
+        return f"{v:,.0f} đ"
+    if unit_style == "usd":
+        if abs(v) >= 1000 and float(v).is_integer():
+            return f"${v:,.0f}"
+        return f"${v:,.2f}"
+    if float(v).is_integer():
+        return f"{int(v):,}"
+    return f"{v:,.2f}"
+
+
 def _render_generic_dashboard(engine):
     """Dashboard Đa Tầng Tự Động Sinh Thích Ứng Cho Mọi CSDL Mới Bất Kỳ (Bilingual)."""
     is_en = (get_current_language() == "en")
@@ -3961,6 +3980,7 @@ def _render_generic_dashboard(engine):
     tables = schema_meta.get("tables", [])
     min_year = schema_meta.get("min_year", 2020)
     max_year = schema_meta.get("max_year", 2024)
+    has_timeline = schema_meta.get("has_timeline", False)
 
     current_layer = st.session_state.get("generic_dashboard_layer", "overview")
 
@@ -4002,12 +4022,15 @@ def _render_generic_dashboard(engine):
         layer_title_curr = layer_names.get(current_layer, "Database Overview" if is_en else "Tổng quan CSDL")
         start_y_curr = st.session_state.get("generic_timeline_years", (min_year, max_year))[0]
         end_y_curr = st.session_state.get("generic_timeline_years", (min_year, max_year))[1]
-        t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
+        if has_timeline:
+            t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
+        else:
+            t_lbl_curr = "Snapshot"
         ctx_header = {
             "layer_title": layer_title_curr,
             "time_label": t_lbl_curr,
             "anomalies": [],
-            "kpis_summary": f"Viewing {layer_title_curr} during {t_lbl_curr}." if is_en else f"Đang xem {layer_title_curr} giai đoạn {t_lbl_curr}.",
+            "kpis_summary": f"Viewing {layer_title_curr} ({t_lbl_curr})." if is_en else f"Đang xem {layer_title_curr} ({t_lbl_curr}).",
             "data_summary": f"User opened Copilot from header on {layer_title_curr}." if is_en else f"Người dùng mở Copilot từ thanh Header trên tầng {layer_title_curr}."
         }
         if st.button(t("hr_btn_copilot"), type="primary", use_container_width=True, key="btn_generic_header_copilot", help=t("hr_copilot_help")):
@@ -4024,81 +4047,192 @@ def _render_generic_dashboard(engine):
     if current_layer == "overview":
         _render_generic_layer_overview(engine, schema_meta)
     elif current_layer.startswith("tbl_"):
-        tbl_name = current_layer.replace("tbl_", "")
+        tbl_name = current_layer[4:]
         _render_generic_layer_table(engine, tbl_name, schema_meta)
 
 
 def _render_generic_layer_overview(engine, schema_meta: dict):
-    """Trang chủ Tổng quan cho CSDL mới: 4 KPI, Biểu đồ phân phối tự động & Bảng dữ liệu (Bilingual)."""
+    """Trang chủ Tổng quan cho CSDL mới: 4 KPI nghiệp vụ thực tế, Sóng kép Thời gian, Phân bổ Danh mục/Trạng thái & Ma trận đa bảng."""
     is_en = (get_current_language() == "en")
     min_year = schema_meta.get("min_year", 2020)
     max_year = schema_meta.get("max_year", 2024)
+    has_timeline = schema_meta.get("has_timeline", False)
+    min_date = schema_meta.get("min_date")
+    max_date = schema_meta.get("max_date")
 
-    start_year, end_year = _render_timeline_slider("generic_ov", min_year=min_year, max_year=max_year, domain_key="generic")
+    if has_timeline:
+        start_year, end_year = _render_timeline_slider("generic_ov", min_year=min_year, max_year=max_year, domain_key="generic")
+        if min_date and max_date and min_year == max_year:
+            date_note = f"📅 Daily span detected: {min_date} → {max_date}" if is_en else f"📅 Khoảng dữ liệu thực tế: {min_date} → {max_date}"
+            st.markdown(f"<div style='font-size:0.84rem; color:#38BDF8; margin:-8px 0 12px 4px; font-weight:600;'>{date_note}</div>", unsafe_allow_html=True)
+    else:
+        start_year, end_year = None, None
+
     data = fetch_generic_overview_data(engine, schema_meta, start_year=start_year, end_year=end_year)
+    main_num_col = data.get("main_num_col")
+    unit_style = data.get("unit_style", "number")
+    sec_num_col = data.get("sec_num_col")
+    sec_unit_style = data.get("sec_unit_style", "number")
+    qty_col = data.get("qty_col")
+    main_cat_col = data.get("main_cat_col")
+    top_item_name = data.get("top_item_name")
+    top_item_val = data.get("top_item_val", 0.0)
+    outstanding_val = data.get("outstanding_val")
+    filtered_recs = int(data.get("filtered_records") or 0)
+    total_recs = max(1, int(data.get("total_records") or 0))
+    main_tbl_disp = data.get("main_table") or "N/A"
 
-    # 4 Thẻ KPI (Đồng bộ kích thước & Chẩn đoán hiệu suất)
+    # 4 Business KPI Cards
     col_k1, col_k2, col_k3, col_k4 = st.columns(4)
     with col_k1:
-        tbl_unit = "tables" if is_en else "bảng"
-        _render_diagnostic_kpi_card(
-            card_class="kpi-card-cyan",
-            title="TOTAL TABLES" if is_en else "TỔNG SỐ BẢNG",
-            val_html=f"{data['total_tables']} <span style='font-size:0.95rem;font-weight:700;opacity:0.85;'>{tbl_unit}</span>",
-            badge_text="Structure" if is_en else "Cấu trúc",
-            sub_text="Full Database" if is_en else "Toàn bộ CSDL",
-            bench_label="Schema Integrity" if is_en else "Độ toàn vẹn Schema",
-            bench_pct=100.0,
-            delta_str="100% Indexed",
-            delta_dir="up",
-            status_text="🟢 HEALTHY" if is_en else "🟢 CHUẨN HÓA",
-            status_level="good",
-            fill_color="linear-gradient(90deg, #06B6D4, #38BDF8)"
-        )
+        if main_num_col:
+            avg_txt = _format_generic_metric_val(data.get("avg_val", 0.0), unit_style)
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-cyan",
+                title=f"TOTAL {main_num_col.upper()}" if is_en else f"TỔNG {main_num_col.upper()}",
+                val_html=_format_generic_metric_val(data.get("sum_val", 0.0), unit_style),
+                badge_text=main_tbl_disp,
+                sub_text=f"Avg/row: {avg_txt}" if is_en else f"TB/dòng: {avg_txt}",
+                bench_label="Data Coverage" if is_en else "Độ phủ bản ghi",
+                bench_pct=100.0,
+                delta_str=f"{filtered_recs:,} rows" if is_en else f"{filtered_recs:,} dòng",
+                delta_dir="up",
+                status_text="🟢 LIVE SUM" if is_en else "🟢 TỔNG HỢP",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #06B6D4, #38BDF8)"
+            )
+        else:
+            tbl_unit = "tables" if is_en else "bảng"
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-cyan",
+                title="TOTAL TABLES" if is_en else "TỔNG SỐ BẢNG",
+                val_html=f"{data['total_tables']} <span style='font-size:0.95rem;font-weight:700;opacity:0.85;'>{tbl_unit}</span>",
+                badge_text="Structure" if is_en else "Cấu trúc",
+                sub_text="Full Database" if is_en else "Toàn bộ CSDL",
+                bench_label="Schema Integrity" if is_en else "Độ toàn vẹn Schema",
+                bench_pct=100.0,
+                delta_str="100% Indexed",
+                delta_dir="up",
+                status_text="🟢 HEALTHY" if is_en else "🟢 CHUẨN HÓA",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #06B6D4, #38BDF8)"
+            )
 
     with col_k2:
-        _render_diagnostic_kpi_card(
-            card_class="kpi-card-purple",
-            title="TOTAL RECORDS" if is_en else "TỔNG SỐ BẢN GHI",
-            val_html=f"{data['total_records']:,}",
-            badge_text="Capacity" if is_en else "Dung lượng",
-            sub_text="Total Rows" if is_en else "Tổng số dòng dữ liệu",
-            bench_label="Data Readiness" if is_en else "Độ sẵn sàng dữ liệu",
-            bench_pct=98.2,
-            delta_str="Live Sync",
-            delta_dir="up",
-            status_text="🟢 READY" if is_en else "🟢 SẴN SÀNG",
-            status_level="good",
-            fill_color="linear-gradient(90deg, #8B5CF6, #A855F7)"
-        )
+        if outstanding_val is not None:
+            billed = max(1.0, float(data.get("total_billed_val") or 0.0))
+            paid_v = float(data.get("paid_val") or 0.0)
+            coll_pct = round(paid_v / billed * 100.0, 1)
+            out_style = "vnd" if unit_style == "vnd" else ("usd" if unit_style == "usd" else "number")
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-purple",
+                title="OUTSTANDING RECEIVABLES" if is_en else "CÔNG NỢ CHƯA THU",
+                val_html=_format_generic_metric_val(outstanding_val, out_style),
+                badge_text="Receivables" if is_en else "Công nợ",
+                sub_text=f"Collected: {_format_generic_metric_val(paid_v, out_style)}" if is_en else f"Đã thu: {_format_generic_metric_val(paid_v, out_style)}",
+                bench_label="Collection Rate" if is_en else "Tỷ lệ đã thu hồi",
+                bench_pct=coll_pct,
+                delta_str=f"{coll_pct:.1f}% Paid",
+                delta_dir="up" if coll_pct >= 70 else "flat",
+                status_text=("🟢 HEALTHY" if is_en else "🟢 TỐT") if coll_pct >= 70 else ("🟡 TRACK" if is_en else "🟡 CẦN THEO DÕI"),
+                status_level="good" if coll_pct >= 70 else "warn",
+                fill_color="linear-gradient(90deg, #8B5CF6, #A855F7)"
+            )
+        elif qty_col and qty_col != main_num_col:
+            avg_qty = data.get("total_qty", 0.0) / max(1, filtered_recs)
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-purple",
+                title=f"TOTAL {qty_col.upper()}" if is_en else f"TỔNG {qty_col.upper()}",
+                val_html=_format_generic_metric_val(data.get("total_qty", 0.0), "count"),
+                badge_text="Volume" if is_en else "Sản lượng",
+                sub_text=f"Avg: {avg_qty:,.1f}/row" if is_en else f"TB: {avg_qty:,.1f}/giao dịch",
+                bench_label="Active Records" if is_en else "Tỷ lệ dữ liệu chính",
+                bench_pct=round(filtered_recs / total_recs * 100.0, 1),
+                delta_str=f"{filtered_recs:,} items" if is_en else f"{filtered_recs:,} lượt",
+                delta_dir="up",
+                status_text="🟢 VERIFIED" if is_en else "🟢 XÁC THỰC",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #8B5CF6, #A855F7)"
+            )
+        elif sec_num_col:
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-purple",
+                title=f"TOTAL {sec_num_col.upper()}" if is_en else f"TỔNG {sec_num_col.upper()}",
+                val_html=_format_generic_metric_val(data.get("sec_sum_val", 0.0), sec_unit_style),
+                badge_text="Secondary KPI",
+                sub_text=f"Table: {main_tbl_disp}" if is_en else f"Bảng: {main_tbl_disp}",
+                bench_label="Coverage" if is_en else "Độ phủ dữ liệu",
+                bench_pct=100.0,
+                delta_str=f"{filtered_recs:,} rows",
+                delta_dir="up",
+                status_text="🟢 READY" if is_en else "🟢 SẴN SÀNG",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #8B5CF6, #A855F7)"
+            )
+        else:
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-purple",
+                title="TOTAL RECORDS" if is_en else "TỔNG SỐ BẢN GHI",
+                val_html=f"{data['total_records']:,}",
+                badge_text="Capacity" if is_en else "Dung lượng",
+                sub_text="Total Rows" if is_en else "Tổng số dòng dữ liệu",
+                bench_label="Data Readiness" if is_en else "Độ sẵn sàng dữ liệu",
+                bench_pct=100.0,
+                delta_str="Live Sync",
+                delta_dir="up",
+                status_text="🟢 READY" if is_en else "🟢 SẴN SÀNG",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #8B5CF6, #A855F7)"
+            )
 
     with col_k3:
-        main_tbl_disp = data["main_table"] or "N/A"
-        _render_diagnostic_kpi_card(
-            card_class="kpi-card-emerald",
-            title="PRIMARY TABLE" if is_en else "BẢNG DỮ LIỆU CHÍNH",
-            val_html=main_tbl_disp,
-            badge_text="Focus" if is_en else "Trọng tâm",
-            sub_text="Largest dataset" if is_en else "Nhiều bản ghi nhất",
-            bench_label="Core Coverage" if is_en else "Tỷ trọng dữ liệu lõi",
-            bench_pct=92.5,
-            delta_str="Primary Fact",
-            delta_dir="up",
-            status_text="🟢 CORE" if is_en else "🟢 TRỌNG TÂM",
-            status_level="good",
-            fill_color="linear-gradient(90deg, #10B981, #34D399)"
-        )
+        if top_item_name:
+            short_name = top_item_name if len(top_item_name) <= 18 else f"{top_item_name[:16]}…"
+            denom = data.get("sum_val", 0.0) if (main_num_col and data.get("sum_val", 0.0) > 0) else max(1, int(data["cat_dist_df"]["Count"].sum()) if not data["cat_dist_df"].empty else 1)
+            share_pct = round(top_item_val / denom * 100.0, 1) if denom > 0 else 0.0
+            val_fmt = _format_generic_metric_val(top_item_val, unit_style if main_num_col else "count")
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-emerald",
+                title=f"TOP {main_cat_col.upper()}" if (is_en and main_cat_col) else (f"DẪN ĐẦU ({main_cat_col})" if main_cat_col else "NHÓM DẪN ĐẦU"),
+                val_html=short_name,
+                badge_text="Top Driver" if is_en else "Đứng đầu",
+                sub_text=f"{val_fmt} ({data.get('top_item_cnt', 0):,} dòng)",
+                bench_label="Share of Total" if is_en else "Tỷ trọng đóng góp",
+                bench_pct=share_pct,
+                delta_str=f"{share_pct:.1f}% Share",
+                delta_dir="up",
+                status_text="🟢 LEADER" if is_en else "🟢 DẪN ĐẦU",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #10B981, #34D399)"
+            )
+        else:
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-emerald",
+                title="PRIMARY TABLE" if is_en else "BẢNG DỮ LIỆU CHÍNH",
+                val_html=main_tbl_disp,
+                badge_text="Focus" if is_en else "Trọng tâm",
+                sub_text="Largest dataset" if is_en else "Nhiều bản ghi nhất",
+                bench_label="Core Coverage" if is_en else "Tỷ trọng dữ liệu lõi",
+                bench_pct=round(filtered_recs / total_recs * 100.0, 1),
+                delta_str="Primary Fact",
+                delta_dir="up",
+                status_text="🟢 CORE" if is_en else "🟢 TRỌNG TÂM",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #10B981, #34D399)"
+            )
 
     with col_k4:
+        scope_val = f"{data['total_records']:,} <span style='font-size:0.95rem;font-weight:700;opacity:0.85;'>{'rows' if is_en else 'dòng'} • {data['total_tables']} {'tbls' if is_en else 'bảng'}</span>"
+        period_sub = f"{min_date} → {max_date}" if (min_date and max_date) else (f"{start_year} — {end_year}" if has_timeline else ("Snapshot DB" if is_en else "Dữ liệu tĩnh"))
         _render_diagnostic_kpi_card(
             card_class="kpi-card-amber",
-            title="TIMELINE MILESTONE" if is_en else "MỐC THỜI GIAN",
-            val_html=f"{start_year} — {end_year}",
-            badge_text="Timeline",
-            sub_text="Filtered Period" if is_en else "Giai đoạn đang lọc",
-            bench_label="Window Coverage" if is_en else "Phạm vi khảo sát",
-            bench_pct=100.0,
-            delta_str="Active Filter",
+            title="DATABASE SCOPE" if is_en else "QUY MÔ & MỐC DỮ LIỆU",
+            val_html=scope_val,
+            badge_text=main_tbl_disp,
+            sub_text=period_sub,
+            bench_label="Core Table Share" if is_en else "Tỷ trọng bảng chính",
+            bench_pct=round(filtered_recs / total_recs * 100.0, 1),
+            delta_str=f"{data['exec_time_ms']:.0f} ms",
             delta_dir="up",
             status_text="🟢 SYNCED" if is_en else "🟢 ĐỒNG BỘ",
             status_level="good",
@@ -4108,56 +4242,133 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
     st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
     _render_sql_modal("Database Overview" if is_en else "Tổng Quan CSDL", data["sql"], data["exec_time_ms"], "generic_ov_sql")
 
-    # Biểu đồ tự động nếu có
-    has_cat = not data["cat_dist_df"].empty
-    has_trend = not data["trend_df"].empty
+    # Charts Row 1: Category Value Ranking + Adaptive Dual-Axis Time Trend
+    cat_dist_df = data.get("cat_dist_df", pd.DataFrame())
+    trend_df = data.get("trend_df", pd.DataFrame())
+    status_df = data.get("status_df", pd.DataFrame())
+    table_summary_df = data.get("table_summary_df", pd.DataFrame())
 
-    if has_cat and has_trend:
-        col_gc1, col_gc2 = st.columns(2)
-        with col_gc1:
-            fig_cat = build_horizontal_bar_chart(data["cat_dist_df"], y_col="Category", x_col="Count", name="Count" if is_en else "Số lượng", height=260)
-            cat_col_name = data.get("main_cat_col") or ("Category" if is_en else "Danh mục")
-            cat_chart_title = f"📊 Category Distribution ({cat_col_name})" if is_en else f"📊 Phân Bổ Theo Danh Mục ({cat_col_name})"
-            render_zoomable_chart_card(
-                title=cat_chart_title,
-                fig=fig_cat,
-                df=data["cat_dist_df"],
-                badge="Distribution",
-                explanation=f"Frequency counts by field {cat_col_name}." if is_en else f"Tần suất xuất hiện theo trường {cat_col_name}.",
-                key="gen_cat_chart"
-            )
-        with col_gc2:
-            fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": data["trend_df"]["TimePeriod"], "Total": data["trend_df"]["Count"]}), height=260)
-            render_zoomable_chart_card(
-                title="📈 Historical Record Volume Over Time" if is_en else "📈 Xu Hướng Bản Ghi Theo Thời Gian",
-                fig=fig_tr,
-                df=data["trend_df"],
-                badge="Time Series",
-                explanation="Volume of data generated across chronological periods." if is_en else "Khối lượng dữ liệu phát sinh theo từng mốc thời gian.",
-                key="gen_trend_chart"
-            )
-    elif has_cat:
-        fig_cat = build_horizontal_bar_chart(data["cat_dist_df"], y_col="Category", x_col="Count", name="Count" if is_en else "Số lượng", height=260)
-        cat_col_name = data.get("main_cat_col") or ("Category" if is_en else "Danh mục")
-        cat_chart_title = f"📊 Category Distribution ({cat_col_name})" if is_en else f"📊 Phân Bổ Theo Danh Mục ({cat_col_name})"
+    has_cat = not cat_dist_df.empty
+    has_trend = not trend_df.empty
+
+    def _render_cat_chart():
+        use_metric = bool(main_num_col and "MetricSum" in cat_dist_df.columns and cat_dist_df["MetricSum"].abs().sum() > 0)
+        x_field = "MetricSum" if use_metric else "Count"
+        metric_lbl = main_num_col if use_metric else ("Count" if is_en else "Số lượng")
+        fig_cat = build_horizontal_bar_chart(cat_dist_df, y_col="Category", x_col=x_field, name=metric_lbl, height=275)
+        cat_col_name = main_cat_col or ("Category" if is_en else "Danh mục")
+        title_txt = (
+            f"🏆 Top {cat_col_name} by {metric_lbl}" if is_en
+            else f"🏆 Xếp Hạng {cat_col_name} Theo {metric_lbl}"
+        )
+        expl_txt = (
+            f"Aggregated {metric_lbl} across '{cat_col_name}'." if is_en
+            else f"Tổng hợp {metric_lbl} và tần suất giao dịch theo '{cat_col_name}'."
+        )
         render_zoomable_chart_card(
-            title=cat_chart_title,
+            title=title_txt,
             fig=fig_cat,
-            df=data["cat_dist_df"],
-            badge="Distribution",
-            explanation=f"Frequency counts by field {cat_col_name}." if is_en else f"Tần suất xuất hiện theo trường {cat_col_name}.",
+            df=cat_dist_df,
+            badge="Top Ranking",
+            explanation=expl_txt,
             key="gen_cat_chart"
         )
-    elif has_trend:
-        fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": data["trend_df"]["TimePeriod"], "Total": data["trend_df"]["Count"]}), height=260)
+
+    def _render_trend_chart():
+        gran = data.get("trend_granularity", "month")
+        gran_lbl = ("Daily" if gran == "day" else "Monthly") if is_en else ("Theo Ngày" if gran == "day" else "Theo Tháng")
+        if main_num_col and "MetricSum" in trend_df.columns:
+            box_col = "QtySum" if (qty_col and "QtySum" in trend_df.columns) else "Count"
+            box_lbl = qty_col if qty_col else ("Records" if is_en else "Số giao dịch")
+            rev_pref = "$" if unit_style == "usd" else ""
+            rev_suf = " đ" if unit_style == "vnd" else ""
+            fig_tr = build_sales_dual_axis_chart(
+                trend_df,
+                x_col="TimePeriod",
+                rev_col="MetricSum",
+                box_col=box_col,
+                height=275,
+                rev_name=main_num_col,
+                box_name=box_lbl,
+                rev_prefix=rev_pref,
+                rev_suffix=rev_suf,
+                box_unit="",
+            )
+            title_txt = f"📈 {gran_lbl} {main_num_col} & Volume" if is_en else f"📈 Xu Hướng {main_num_col} & Số Lượng {gran_lbl}"
+            expl_txt = f"Chronological progression ({gran}) of {main_num_col} and volume." if is_en else f"Diễn biến {main_num_col} và khối lượng giao dịch {gran_lbl.lower()}."
+        else:
+            fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": trend_df["TimePeriod"], "Total": trend_df["Count"]}), height=275)
+            title_txt = f"📈 {gran_lbl} Record Volume" if is_en else f"📈 Xu Hướng Bản Ghi {gran_lbl}"
+            expl_txt = "Volume of data generated across chronological periods." if is_en else "Khối lượng dữ liệu phát sinh theo từng mốc thời gian."
         render_zoomable_chart_card(
-            title="📈 Historical Record Volume Over Time" if is_en else "📈 Xu Hướng Bản Ghi Theo Thời Gian",
+            title=title_txt,
             fig=fig_tr,
-            df=data["trend_df"],
-            badge="Time Series",
-            explanation="Volume of data generated across chronological periods." if is_en else "Khối lượng dữ liệu phát sinh theo từng mốc thời gian.",
+            df=trend_df,
+            badge="Daily Series" if gran == "day" else "Monthly Series",
+            explanation=expl_txt,
             key="gen_trend_chart"
         )
+
+    if has_cat and has_trend:
+        col_gc1, col_gc2 = st.columns([1.15, 1.2])
+        with col_gc1:
+            _render_trend_chart()
+        with col_gc2:
+            _render_cat_chart()
+    elif has_trend:
+        _render_trend_chart()
+    elif has_cat:
+        _render_cat_chart()
+
+    # Charts Row 2: Status/Channel Donut + Multi-Table Comparison Matrix
+    has_status = not status_df.empty
+    has_multi_tbl = len(table_summary_df) > 1 or (not has_cat and not has_trend and not table_summary_df.empty)
+    if has_status and has_multi_tbl:
+        col_s1, col_s2 = st.columns([1.0, 1.35])
+        with col_s1:
+            st_col_name = data.get("status_col") or ("Status" if is_en else "Phân nhóm")
+            use_m = bool(main_num_col and "MetricSum" in status_df.columns and status_df["MetricSum"].abs().sum() > 0)
+            fig_st = build_tickets_by_type_donut(status_df, label_col="Category", val_col=("MetricSum" if use_m else "Count"), height=260)
+            render_zoomable_chart_card(
+                title=f"🍩 Breakdown by {st_col_name}" if is_en else f"🍩 Cơ Cấu Theo {st_col_name}",
+                fig=fig_st,
+                df=status_df,
+                badge=st_col_name,
+                explanation=f"Share split across '{st_col_name}'." if is_en else f"Tỷ trọng đóng góp theo trường '{st_col_name}'.",
+                key="gen_status_donut"
+            )
+        with col_s2:
+            st.markdown(f"""
+            <div class="crm-card">
+                <div class="crm-card-title">
+                    <span>{"🗂️ Database Tables Portfolio" if is_en else "🗂️ Ma Trận Tổng Hợp Tất Cả Bảng CSDL"}</span>
+                    <span class="crm-badge-neon">{len(table_summary_df)} Tables</span>
+                </div>
+            """, unsafe_allow_html=True)
+            st.dataframe(table_summary_df, hide_index=True, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+    elif has_status:
+        st_col_name = data.get("status_col") or ("Status" if is_en else "Phân nhóm")
+        use_m = bool(main_num_col and "MetricSum" in status_df.columns and status_df["MetricSum"].abs().sum() > 0)
+        fig_st = build_tickets_by_type_donut(status_df, label_col="Category", val_col=("MetricSum" if use_m else "Count"), height=260)
+        render_zoomable_chart_card(
+            title=f"🍩 Breakdown by {st_col_name}" if is_en else f"🍩 Cơ Cấu Theo {st_col_name}",
+            fig=fig_st,
+            df=status_df,
+            badge=st_col_name,
+            explanation=f"Share split across '{st_col_name}'." if is_en else f"Tỷ trọng đóng góp theo trường '{st_col_name}'.",
+            key="gen_status_donut"
+        )
+    elif has_multi_tbl:
+        st.markdown(f"""
+        <div class="crm-card">
+            <div class="crm-card-title">
+                <span>{"🗂️ Database Tables Portfolio" if is_en else "🗂️ Ma Trận Tổng Hợp Tất Cả Bảng CSDL"}</span>
+                <span class="crm-badge-neon">{len(table_summary_df)} Tables</span>
+            </div>
+        """, unsafe_allow_html=True)
+        st.dataframe(table_summary_df, hide_index=True, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # Hiển thị mẫu dữ liệu bảng chính
     if not data["df"].empty:
@@ -4183,10 +4394,12 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
 
 
 def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
-    """Hiển thị chi tiết một bảng dữ liệu cụ thể trong CSDL mới (Bilingual)."""
+    """Hiển thị KPI, biểu đồ & dữ liệu chi tiết một bảng cụ thể trong CSDL mới (Bilingual)."""
     is_en = (get_current_language() == "en")
     min_year = schema_meta.get("min_year", 2020)
     max_year = schema_meta.get("max_year", 2024)
+    tbl_meta = schema_meta.get("meta", {}).get(table_name, {})
+    has_tbl_date = bool(tbl_meta.get("date_columns")) and schema_meta.get("has_timeline", False)
 
     c_bc1, c_bc2 = st.columns([6, 1])
     with c_bc1:
@@ -4198,9 +4411,166 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
         if st.button(back_btn_lbl, key=f"btn_back_gen_{table_name}", use_container_width=True):
             _set_layer("overview", domain_key="generic")
 
-    start_year, end_year = _render_timeline_slider(f"gen_tbl_{table_name}", min_year=min_year, max_year=max_year, domain_key="generic")
+    if has_tbl_date:
+        start_year, end_year = _render_timeline_slider(f"gen_tbl_{table_name}", min_year=min_year, max_year=max_year, domain_key="generic")
+    else:
+        start_year, end_year = None, None
+
     data = fetch_generic_table_data(engine, table_name, schema_meta, start_year=start_year, end_year=end_year)
     df = data["df"]
+    cat_df = data.get("cat_df", pd.DataFrame())
+    status_df = data.get("status_df", pd.DataFrame())
+    trend_df = data.get("trend_df", pd.DataFrame())
+    num_col = data.get("num_col")
+    unit_style = data.get("unit_style", "number")
+
+    # 3 Table KPI Cards
+    tk1, tk2, tk3 = st.columns(3)
+    with tk1:
+        _render_diagnostic_kpi_card(
+            card_class="kpi-card-cyan",
+            title="RECORDS" if is_en else "SỐ BẢN GHI",
+            val_html=f"{int(data.get('row_count', len(df))):,}",
+            badge_text=table_name,
+            sub_text=f"{len(df.columns)} columns" if is_en else f"{len(df.columns)} trường dữ liệu",
+            bench_label="Completeness" if is_en else "Sẵn sàng phân tích",
+            bench_pct=100.0,
+            delta_str=f"{data['exec_time_ms']:.0f} ms",
+            delta_dir="up",
+            status_text="🟢 LIVE",
+            status_level="good",
+            fill_color="linear-gradient(90deg, #06B6D4, #38BDF8)"
+        )
+    with tk2:
+        if num_col:
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-purple",
+                title=f"TOTAL {num_col.upper()}" if is_en else f"TỔNG {num_col.upper()}",
+                val_html=_format_generic_metric_val(data.get("sum_val", 0.0), unit_style),
+                badge_text="Metric Sum",
+                sub_text=f"Avg: {_format_generic_metric_val(data.get('avg_val', 0.0), unit_style)}",
+                bench_label="Coverage" if is_en else "Độ phủ số liệu",
+                bench_pct=100.0,
+                delta_str=num_col,
+                delta_dir="up",
+                status_text="🟢 SUMMED",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #8B5CF6, #A855F7)"
+            )
+        else:
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-purple",
+                title="FIELDS" if is_en else "SỐ TRƯỜNG DỮ LIỆU",
+                val_html=f"{len(df.columns)}",
+                badge_text="Schema",
+                sub_text="Attribute Count" if is_en else "Thuộc tính bảng",
+                bench_label="Indexed",
+                bench_pct=100.0,
+                delta_str="SQLite/SQL",
+                delta_dir="up",
+                status_text="🟢 READY",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #8B5CF6, #A855F7)"
+            )
+    with tk3:
+        if not cat_df.empty:
+            top_c_name = str(cat_df["Category"].iloc[0])
+            top_c_short = top_c_name if len(top_c_name) <= 18 else f"{top_c_name[:16]}…"
+            top_c_val = float(cat_df["MetricSum"].iloc[0]) if ("MetricSum" in cat_df.columns and num_col) else float(cat_df["Count"].iloc[0])
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-emerald",
+                title=f"TOP ({data.get('main_cat_col') or 'GROUP'})",
+                val_html=top_c_short,
+                badge_text="Leader" if is_en else "Dẫn đầu",
+                sub_text=_format_generic_metric_val(top_c_val, unit_style if num_col else "count"),
+                bench_label="Category Focus" if is_en else "Tâm điểm bảng",
+                bench_pct=100.0,
+                delta_str=f"{int(cat_df['Count'].iloc[0]):,} rows",
+                delta_dir="up",
+                status_text="🟢 TOP 1",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #10B981, #34D399)"
+            )
+        else:
+            _render_diagnostic_kpi_card(
+                card_class="kpi-card-emerald",
+                title="TABLE LAYER" if is_en else "TẦNG DỮ LIỆU",
+                val_html=table_name,
+                badge_text="Active",
+                sub_text="Live SQL Inspection" if is_en else "Truy vấn trực tiếp",
+                bench_label="Health",
+                bench_pct=100.0,
+                delta_str="Verified",
+                delta_dir="up",
+                status_text="🟢 ACTIVE",
+                status_level="good",
+                fill_color="linear-gradient(90deg, #10B981, #34D399)"
+            )
+
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+    # Charts for Table Layer
+    if not cat_df.empty and not status_df.empty:
+        tc1, tc2 = st.columns([1.2, 1.0])
+        with tc1:
+            use_m = bool(num_col and "MetricSum" in cat_df.columns and cat_df["MetricSum"].abs().sum() > 0)
+            fig_cat = build_horizontal_bar_chart(cat_df, y_col="Category", x_col=("MetricSum" if use_m else "Count"), name=(num_col if use_m else ("Count" if is_en else "Số lượng")), height=260)
+            render_zoomable_chart_card(
+                title=f"📊 Top {data.get('main_cat_col') or table_name}" if is_en else f"📊 Phân Bổ Theo {data.get('main_cat_col') or table_name}",
+                fig=fig_cat,
+                df=cat_df,
+                badge="Distribution",
+                explanation="Value and record breakdown." if is_en else "Phân bổ giá trị và tần suất giao dịch.",
+                key=f"gen_tbl_cat_{table_name}"
+            )
+        with tc2:
+            use_ms = bool(num_col and "MetricSum" in status_df.columns and status_df["MetricSum"].abs().sum() > 0)
+            fig_st = build_tickets_by_type_donut(status_df, label_col="Category", val_col=("MetricSum" if use_ms else "Count"), height=260)
+            render_zoomable_chart_card(
+                title=f"🍩 {data.get('status_col') or 'Group'} Share" if is_en else f"🍩 Tỷ Trọng Theo {data.get('status_col') or 'Nhóm'}",
+                fig=fig_st,
+                df=status_df,
+                badge="Share",
+                explanation="Share breakdown." if is_en else "Tỷ trọng đóng góp theo phân nhóm.",
+                key=f"gen_tbl_st_{table_name}"
+            )
+    elif not cat_df.empty:
+        use_m = bool(num_col and "MetricSum" in cat_df.columns and cat_df["MetricSum"].abs().sum() > 0)
+        fig_cat = build_horizontal_bar_chart(cat_df, y_col="Category", x_col=("MetricSum" if use_m else "Count"), name=(num_col if use_m else ("Count" if is_en else "Số lượng")), height=260)
+        render_zoomable_chart_card(
+            title=f"📊 Category Distribution: Table {table_name}" if is_en else f"📊 Phân Bổ Theo {data.get('main_cat_col') or 'Danh Mục'}: Bảng {table_name}",
+            fig=fig_cat,
+            df=cat_df,
+            badge="Distribution",
+            explanation="Distribution of records and metric value." if is_en else "Tần suất và giá trị phân bổ dữ liệu.",
+            key=f"gen_tbl_cat_{table_name}"
+        )
+
+    if not trend_df.empty:
+        gran = data.get("trend_granularity", "month")
+        if num_col and "MetricSum" in trend_df.columns:
+            fig_tr = build_sales_dual_axis_chart(
+                trend_df,
+                x_col="TimePeriod",
+                rev_col="MetricSum",
+                box_col="QtySum" if (data.get("qty_col") and "QtySum" in trend_df.columns) else "Count",
+                height=260,
+                rev_name=num_col,
+                box_name=data.get("qty_col") or ("Records" if is_en else "Số dòng"),
+                rev_prefix=("$" if unit_style == "usd" else ""),
+                rev_suffix=(" đ" if unit_style == "vnd" else ""),
+                box_unit="",
+            )
+        else:
+            fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": trend_df["TimePeriod"], "Total": trend_df["Count"]}), height=260)
+        render_zoomable_chart_card(
+            title=f"📈 Time Trend ({'Daily' if gran == 'day' else 'Monthly'})" if is_en else f"📈 Xu Hướng Thời Gian ({'Theo Ngày' if gran == 'day' else 'Theo Tháng'})",
+            fig=fig_tr,
+            df=trend_df,
+            badge="Timeline",
+            explanation="Chronological progression for this table." if is_en else "Diễn biến dữ liệu theo thời gian của bảng.",
+            key=f"gen_tbl_tr_{table_name}"
+        )
 
     rows_suf = "rows" if is_en else "dòng"
     cols_suf = "Columns" if is_en else "Cột Dữ Liệu"
@@ -4216,21 +4586,10 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
     if not df.empty:
         st.dataframe(df, hide_index=True, use_container_width=True)
     else:
-        st.info(f"Table '{table_name}' has no records in period {start_year} — {end_year}." if is_en else f"Bảng '{table_name}' không có dữ liệu trong khoảng thời gian {start_year} — {end_year}.")
+        st.info(f"Table '{table_name}' has no records." if is_en else f"Bảng '{table_name}' chưa có dữ liệu.")
     st.markdown("</div>", unsafe_allow_html=True)
 
     _render_sql_modal(f"Table {table_name}" if is_en else f"Bảng {table_name}", data["sql"], data["exec_time_ms"], f"gen_tbl_sql_{table_name}")
-
-    if not data["cat_df"].empty:
-        fig_cat = build_horizontal_bar_chart(data["cat_df"], y_col="Category", x_col="Count", name="Count" if is_en else "Số lượng", height=260)
-        render_zoomable_chart_card(
-            title=f"📊 Category Distribution: Table {table_name}" if is_en else f"📊 Phân Bổ Theo Danh Mục: Bảng {table_name}",
-            fig=fig_cat,
-            df=data["cat_df"],
-            badge="Distribution",
-            explanation="Frequency distribution of records." if is_en else "Tần suất phân bổ dữ liệu.",
-            key=f"gen_tbl_cat_{table_name}"
-        )
 
     render_smart_analyst_anomaly_panel(
         layer_id=f"table_{table_name}",

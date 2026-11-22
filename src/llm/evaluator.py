@@ -52,6 +52,136 @@ def evaluate_execution(
     fails = []
     actionable_feedbacks = []
 
+    try:
+        from src.llm.datamate_bridge import detect_legacy_schema_gap
+        schema_gap = detect_legacy_schema_gap(
+            user_query=user_query,
+            engine=None,
+            schema_context=schema_context,
+            lang=lang,
+        )
+    except Exception:
+        schema_gap = None
+
+    if schema_gap:
+        criteria["semantic_alignment"]["passed"] = False
+        criteria["semantic_alignment"]["detail"] = schema_gap
+        return {
+            "verdict": "UNANSWERABLE_BLOCKED",
+            "score": 0,
+            "criteria": criteria,
+            "critique": schema_gap,
+            "actionable_feedback": f"UNANSWERABLE: {schema_gap}",
+            "fails_count": 1,
+        }
+
+    from datamate.sql_executor import norm_vn as _ev_norm_vn
+
+    _ev_qn_ascii = _ev_norm_vn(user_query or "")
+    _asked_hr_lifecycle = bool(
+        re.search(
+            r"\b(?:nghi\s+viec|thoi\s+viec|nghi\s+huu|sa\s+thai|nghi\s+phep|thu\s+viec|thuc\s+tap|hop\s+dong\s+lao\s+dong|resign(?:ed|ation)?|attrition|turnover|terminat(?:ed|ion)|layoff|probation|intern(?:ship)?)\b",
+            _ev_qn_ascii,
+        )
+    )
+    if _asked_hr_lifecycle:
+        _ev_sql_low = (sql_query or "").lower()
+        _has_hr_filter_sql = any(
+            tok in _ev_sql_low
+            for tok in (
+                "to_date",
+                "end_date",
+                "leave_date",
+                "resign",
+                "terminat",
+                "attrition",
+                "status",
+                "active",
+                "contract",
+                "probation",
+                "nghi_viec",
+                "thoi_viec",
+                "trang_thai",
+            )
+        )
+        if not _has_hr_filter_sql:
+            from src.llm.datamate_bridge import _collect_schema_tables_and_cols
+
+            _tbls = _collect_schema_tables_and_cols(schema_context=schema_context)
+            _non_tkt = {c for t, cols in _tbls.items() if "ticket" not in t for c in cols}
+            _hr_tbl_cols = {
+                c
+                for t, cols in _tbls.items()
+                if re.search(r"(?:emp|staff|people|hr|nhan|salari|salary|dept|title|cham_?cong)", t)
+                and "ticket" not in t
+                for c in cols
+            }
+            _schema_supports_hr = any(
+                re.search(
+                    r"(?:to_?date|end_?date|leave_?date|resign|terminat|attrition|nghi_?viec|thoi_?viec|is_?active|probation|contract|employment_?status)",
+                    c,
+                )
+                for c in _non_tkt
+            ) or any(re.search(r"(?:status|trang_?thai|tinh_?trang|active)", c) for c in _hr_tbl_cols)
+            if not _schema_supports_hr:
+                msg = (
+                    "Data schema lacks employee attrition/status/contract columns required to answer this HR lifecycle question."
+                    if lang == "en"
+                    else "CSDL hiện tại không có cột trạng thái/ngày nghỉ việc, thử việc hay hợp đồng nhân sự để trả lời chính xác câu hỏi này."
+                )
+                criteria["semantic_alignment"]["passed"] = False
+                criteria["semantic_alignment"]["detail"] = msg
+                return {
+                    "verdict": "UNANSWERABLE_BLOCKED",
+                    "score": 0,
+                    "criteria": criteria,
+                    "critique": msg,
+                    "actionable_feedback": f"UNANSWERABLE: {msg}",
+                    "fails_count": 1,
+                }
+            msg = (
+                "SQL dropped the required HR status/end-date filter (e.g., to_date/resignation/probation) from the WHERE clause."
+                if lang == "en"
+                else "Câu SQL đã bỏ sót điều kiện lọc trạng thái nhân sự (ví dụ: to_date/nghỉ việc/thử việc) trong mệnh đề WHERE."
+            )
+            criteria["semantic_alignment"]["passed"] = False
+            criteria["semantic_alignment"]["detail"] = msg
+            return {
+                "verdict": "FAIL",
+                "score": 30,
+                "criteria": criteria,
+                "critique": msg,
+                "actionable_feedback": msg,
+                "fails_count": 1,
+            }
+
+    from src.llm.datamate_bridge import get_ungrounded_headcount_tokens
+
+    _ungrounded_hr = get_ungrounded_headcount_tokens(user_query, schema_context)
+    if _ungrounded_hr:
+        _sql_low_chk = (sql_query or "").lower()
+        _sql_norm = _ev_norm_vn(sql_query or "")
+        _has_extra_join = " join " in _sql_low_chk
+        _sql_no_empty_team = re.sub(r"\b[a-z_]*\.?team\s*(?:!=|<>)\s*''|\b[a-z_]*\.?team\s+is\s+not\s+null", "", _sql_low_chk)
+        _has_literal_filter = bool(re.search(r"(?:=|like\b|in\s*\(|>=|<=|>|<|between\b)", _sql_no_empty_team))
+        if (not any(tok in _sql_norm for tok in _ungrounded_hr)) and (not _has_extra_join) and (not _has_literal_filter):
+            tokens_disp = ", ".join(sorted(_ungrounded_hr)[:4])
+            msg = (
+                f"Data schema contains no columns or values for requested staff attribute ({tokens_disp})."
+                if lang == "en"
+                else f"CSDL hiện tại không ghi nhận thông tin về thuộc tính nhân sự được hỏi ({tokens_disp}) nên không thể thống kê chính xác."
+            )
+            criteria["semantic_alignment"]["passed"] = False
+            criteria["semantic_alignment"]["detail"] = msg
+            return {
+                "verdict": "UNANSWERABLE_BLOCKED",
+                "score": 0,
+                "criteria": criteria,
+                "critique": msg,
+                "actionable_feedback": f"UNANSWERABLE: {msg}",
+                "fails_count": 1,
+            }
+
     # -------------------------------------------------------------
     # PILLAR 1: DATA HEALTH & CARDINALITY (TÍNH LÀNH MẠNH CỦA DỮ LIỆU)
     # -------------------------------------------------------------
@@ -70,6 +200,114 @@ def evaluate_execution(
     # -------------------------------------------------------------
     if df is not None and not df.empty:
         cols_low = [str(c).lower() for c in df.columns]
+
+        # Kiểm tra 2.0: Người dùng hỏi về CRM Tickets / CSKH (crm_tickets), nhưng SQL lại truy vấn nhầm bảng khác hoặc JOIN Descartes với sales
+        q_no_ticket_sales_type = re.sub(r"(?:loại|type)\s*=?\s*['\"]?sales\b", "", q_low)
+        is_crm_ticket_eval = "crm_tickets" in schema_low and (
+            any(
+                k in q_low
+                for k in [
+                    "ticket",
+                    "crm_tickets",
+                    "phiếu hỗ trợ",
+                    "kênh hỗ trợ",
+                    "firstreply",
+                    "fullresolve",
+                    "phản hồi đầu tiên",
+                    "thời gian xử lý",
+                    "customertype",
+                    "loại khách hàng",
+                    "độ ưu tiên",
+                ]
+            )
+            or bool(re.search(r"\b(?:bug|setup|features?)\b", q_low) and any(k in q_low for k in ["loại", "type", "hỗ trợ", "cskh", "crm"]))
+        )
+        is_sales_and_crm_eval = is_crm_ticket_eval and "sales" in schema_low and any(
+            k in q_no_ticket_sales_type
+            for k in ["doanh thu", "doanh số", "revenue", "sales", "boxes", "hộp", "thùng", "lợi nhuận", "cost_per_box"]
+        )
+        has_cartesian_sales_crm = (
+            is_sales_and_crm_eval
+            and "crm_tickets" in sql_low
+            and "sales" in sql_low
+            and "with " not in sql_low
+            and "(select" not in re.sub(r"\s+", "", sql_low)
+            and any(k in sql_low for k in ["geoid", "spid", "geo", "people"])
+        )
+        has_type_filter_or_group = (
+            bool(re.search(r"['\"]%?\s*bug\s*%?['\"]", sql_low))
+            or bool(re.search(r"\btype\b", sql_low))
+        )
+        missing_bug_filter = (
+            is_crm_ticket_eval
+            and bool(re.search(r"\bbug\b", q_low))
+            and not has_type_filter_or_group
+        )
+        if is_crm_ticket_eval and "crm_tickets" not in sql_low:
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Câu hỏi yêu cầu dữ liệu Ticket hỗ trợ khách hàng (bảng `crm_tickets`), nhưng câu SQL lại bỏ qua bảng `crm_tickets` và truy vấn nhầm sang bảng khác."
+                if not is_en
+                else "User requested CRM support ticket data (`crm_tickets`), but SQL omitted `crm_tickets` and queried an unrelated table."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            if is_sales_and_crm_eval:
+                actionable_feedbacks.append(
+                    "BẮT BUỘC giữ cả doanh thu (`sales`) VÀ số lượng ticket (`crm_tickets`, các cột TicketID, Type, Status, CreatedAt, SPID, GeoID) bằng 2 CTE tách riêng (`SalesAgg` và `TicketAgg` nhóm theo `GeoID` hoặc `SPID`) trước khi JOIN với `geo`/`people`. TUYỆT ĐỐI KHÔNG thay bằng bảng `products` hay bảng ảo `bugs`!"
+                    if not is_en
+                    else "MUST query BOTH `sales` AND `crm_tickets` (TicketID, Type, Status, CreatedAt, SPID, GeoID) in 2 separate CTEs (`SalesAgg` and `TicketAgg` grouped by `GeoID`/`SPID`) before joining `geo`/`people`. Do NOT substitute `products` or non-existent `bugs` table!"
+                )
+            else:
+                actionable_feedbacks.append(
+                    "BẮT BUỘC truy vấn bảng `crm_tickets` (với các cột TicketID, CustomerID, CustomerType, Channel, Type, Status, CreatedAt, FirstReplyMinutes, FullResolveHours, SPID, GeoID). TUYỆT ĐỐI KHÔNG thay thế bằng bảng `sales` hay `people`!"
+                    if not is_en
+                    else "MUST query `crm_tickets` (columns: TicketID, CustomerID, CustomerType, Channel, Type, Status, CreatedAt, FirstReplyMinutes, FullResolveHours, SPID, GeoID). Do NOT substitute `sales` or `people`!"
+                )
+        elif has_cartesian_sales_crm:
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Câu SQL đang JOIN thô trực tiếp `sales` và `crm_tickets` theo `GeoID`/`SPID` khi chưa gom nhóm, gây nhân bản dòng Descartes (làm sai lệch hàng trăm lần tổng doanh thu và số ticket)."
+                if not is_en
+                else "SQL directly joins raw `sales` and `crm_tickets` on `GeoID`/`SPID` without pre-aggregation, causing a Cartesian product explosion."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "BẮT BUỘC tách thành 2 CTE riêng: `SalesAgg AS (SELECT s.GeoID, SUM(s.Amount) AS TotalSales FROM sales s ... GROUP BY s.GeoID)` và `TicketAgg AS (SELECT t.GeoID, COUNT(DISTINCT t.TicketID) AS TicketCount FROM crm_tickets t ... GROUP BY t.GeoID)`, rồi mới JOIN với `geo`/`people`!"
+                if not is_en
+                else "MUST pre-aggregate `SalesAgg` and `TicketAgg` in 2 separate CTEs grouped by `GeoID`/`SPID` before joining!"
+            )
+        elif missing_bug_filter:
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Câu hỏi yêu cầu lọc ticket loại Bug (`t.Type = 'Bug'`), nhưng câu SQL không có điều kiện lọc hoặc phân nhóm theo cột `Type`."
+                if not is_en
+                else "User requested Bug tickets (`t.Type = 'Bug'`), but SQL lacked a `Type` filter/breakdown."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "BẮT BUỘC lọc `t.Type = 'Bug'` trên bảng `crm_tickets t`!"
+                if not is_en
+                else "MUST filter `t.Type = 'Bug'` on `crm_tickets t`!"
+            )
+        elif is_crm_ticket_eval and any(fn in sql_low for fn in ["timestampdiff", "timediff", "datediff"]) and (
+            "firstreplyminutes" in sql_low or "fullresolvehours" in sql_low
+        ):
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Cột `FirstReplyMinutes` / `FullResolveHours` đã là số đo thời lượng dạng số (phút/giờ), KHÔNG phải DATETIME — việc dùng TIMESTAMPDIFF/TIMEDIFF làm sai hoặc NULL toàn bộ kết quả."
+                if not is_en
+                else "`FirstReplyMinutes`/`FullResolveHours` are already numeric durations; do not pass them to TIMESTAMPDIFF/TIMEDIFF."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "BẮT BUỘC dùng trực tiếp `ROUND(AVG(t.FirstReplyMinutes), 2)` và `ROUND(AVG(t.FullResolveHours), 2)`. TUYỆT ĐỐI KHÔNG dùng TIMESTAMPDIFF/TIMEDIFF/DATEDIFF trên hai cột này!"
+                if not is_en
+                else "Use `ROUND(AVG(t.FirstReplyMinutes), 2)` and `ROUND(AVG(t.FullResolveHours), 2)` directly without TIMESTAMPDIFF/TIMEDIFF."
+            )
 
         # Kiểm tra 2.1: Người dùng hỏi danh sách nhân viên nhưng kết quả lại chỉ có phòng ban
         is_dept_level_query = any(k in q_low for k in [
@@ -1096,11 +1334,118 @@ def evaluate_execution(
             )
             criteria["semantic_alignment"]["detail"] = msg
             fails.append(msg)
-            actionable_feedbacks.append(
-                "BẮT BUỘC: JOIN sales s với geo g ON s.GeoID = g.GeoID và nhóm theo g.Geo AS Country! TUYỆT ĐỐI KHÔNG JOIN bảng products hay nhóm theo pr.Product!"
-                if not is_en else
-                "MUST JOIN sales s with geo g ON s.GeoID = g.GeoID and GROUP BY g.Geo AS Country! DO NOT group by Product!"
+            if is_sales_and_crm_eval:
+                actionable_feedbacks.append(
+                    "BẮT BUỘC: Tổng hợp `SalesAgg` và `TicketAgg` theo `GeoID` rồi JOIN với `geo g ON g.GeoID = ...`, chọn `g.Geo AS Country`! TUYỆT ĐỐI KHÔNG JOIN bảng `products` hay nhóm theo `pr.Product`!"
+                    if not is_en else
+                    "MUST aggregate `SalesAgg` and `TicketAgg` by `GeoID` and JOIN `geo g` selecting `g.Geo AS Country`! Do NOT join `products` or group by `Product`!"
+                )
+            else:
+                actionable_feedbacks.append(
+                    "BẮT BUỘC: JOIN sales s với geo g ON s.GeoID = g.GeoID và nhóm theo g.Geo AS Country! TUYỆT ĐỐI KHÔNG JOIN bảng products hay nhóm theo pr.Product!"
+                    if not is_en else
+                    "MUST JOIN sales s with geo g ON s.GeoID = g.GeoID and GROUP BY g.Geo AS Country! DO NOT group by Product!"
+                )
+
+        # Kiểm tra 2.14a: Team & Headcount/Sales trên Awesome Chocolates (không để fallback sang products.Category)
+        asked_team_choco = is_choco_db and (
+            any(k in q_low for k in ["đội ngũ", "team", "yummies", "delish", "jucies"])
+            and not is_crm_ticket_eval
+        )
+        if asked_team_choco:
+            has_team_ref = ("team" in sql_low) or any(any(k in c for k in ["team", "đội ngũ", "đội"]) for c in cols_low)
+            wrong_products_only = ("products" in sql_low) and ("people" not in sql_low) and ("sales" not in sql_low)
+            asked_headcount_and_rev = (
+                any(k in q_low for k in ["bao nhiêu nhân viên", "số nhân viên", "số lượng nhân viên", "nhân sự", "headcount"])
+                and any(k in q_low for k in ["doanh thu", "doanh số", "số hộp", "boxes", "sales", "revenue"])
             )
+            missing_headcount_or_sales = asked_headcount_and_rev and (
+                "count(" not in sql_low or not any(k in sql_low for k in ["amount", "sales", "revenue"])
+            )
+            if not has_team_ref or wrong_products_only or missing_headcount_or_sales:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Câu hỏi yêu cầu phân tích theo Đội ngũ (`pe.Team`) kèm số nhân viên / doanh thu, nhưng SQL lại thiếu cột Team, dùng nhầm bảng `products`, hoặc thiếu COUNT(nhân viên)/SUM(Amount)."
+                    if not is_en
+                    else "User asked for Team breakdown (and headcount/sales), but SQL lacked Team column, queried `products`, or missed headcount/sales."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC JOIN `people pe` với `sales s ON pe.SPID = s.SPID`, lọc `pe.Team != '' AND pe.Team IS NOT NULL`, chọn `pe.Team`, `COUNT(DISTINCT pe.SPID) AS EmployeeCount`, `SUM(s.Amount) AS TotalSales`, `SUM(s.Boxes) AS TotalBoxes`, `GROUP BY pe.Team`!"
+                    if not is_en
+                    else "MUST JOIN `people pe` with `sales s ON pe.SPID = s.SPID`, filter non-empty `pe.Team`, select `COUNT(DISTINCT pe.SPID)`, `SUM(s.Amount)`, `SUM(s.Boxes)`, and `GROUP BY pe.Team`!"
+                )
+
+        # Kiểm tra 2.14b: Region / Khu vực (APAC, Europe, Americas) trên Awesome Chocolates
+        asked_region_choco = is_choco_db and (
+            any(k in q_low for k in ["khu vực", "region", "apac", "europe", "americas"])
+            and not is_crm_ticket_eval
+            and "location" not in q_low
+        )
+        if asked_region_choco:
+            has_region_ref = ("region" in sql_low) or any(any(k in c for k in ["region", "khu vực"]) for c in cols_low)
+            asks_sales_rev = any(k in q_low for k in ["doanh thu", "doanh số", "sales", "revenue", "phân bổ"])
+            fake_cost_only = asks_sales_rev and ("cost_per_box" in sql_low) and ("amount" not in sql_low)
+            if not has_region_ref or fake_cost_only:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Câu hỏi yêu cầu phân tích doanh thu theo Khu vực (`geo.Region`), nhưng SQL thiếu trường `Region` hoặc dùng nhầm `Cost_per_box` thay cho `sales.Amount`."
+                    if not is_en
+                    else "User requested sales analysis by `Region`, but SQL missed `geo.Region` or used `Cost_per_box` instead of `sales.Amount`."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC JOIN `sales s` với `geo g ON s.GeoID = g.GeoID` (và `products pr ON s.PID = pr.PID` nếu hỏi Category/Product), tính `SUM(s.Amount) AS TotalSales` và `GROUP BY pr.Category, g.Region` (hoặc `g.Region`)!"
+                    if not is_en
+                    else "MUST JOIN `sales s` with `geo g ON s.GeoID = g.GeoID` (and `products pr` if asked), sum `s.Amount`, and group by `g.Region`!"
+                )
+
+        # Kiểm tra 2.14c: Kích thước sản phẩm (`Size`) trên Awesome Chocolates
+        asked_size_choco = is_choco_db and bool(re.search(r"(?:kích\s+thước|\bsize\b)", q_low))
+        if asked_size_choco:
+            has_size_ref = ("size" in sql_low) or any(any(k in c for k in ["size", "kích thước"]) for c in cols_low)
+            if not has_size_ref:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Câu hỏi yêu cầu phân tích theo kích thước sản phẩm (`pr.Size`), nhưng kết quả thiếu cột `Size`."
+                    if not is_en
+                    else "User requested breakdown by product `Size`, but `Size` column is missing."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC JOIN `sales s` với `products pr ON s.PID = pr.PID` và chọn + nhóm theo `pr.Size`!"
+                    if not is_en
+                    else "MUST JOIN `sales s` with `products pr ON s.PID = pr.PID` and SELECT + GROUP BY `pr.Size`!"
+                )
+
+        # Kiểm tra 2.14d: Doanh thu trung bình trên mỗi hộp phải chia cho Boxes (SUM(s.Amount)/SUM(s.Boxes)), KHÔNG dùng AVG(s.Amount)
+        asked_rev_per_box = is_choco_db and any(
+            k in q_low for k in ["trên mỗi hộp", "mỗi hộp", "doanh thu mỗi hộp", "giá mỗi hộp", "revenue per box", "per box"]
+        )
+        if asked_rev_per_box:
+            has_div_by_boxes = bool(
+                re.search(
+                    r"/\s*(?:(?:nullif|coalesce|cast|sum|float|real)\s*\(\s*){0,3}(?:[a-z_]+\.)?`?[a-z0-9_]*boxes[a-z0-9_]*`?",
+                    sql_low,
+                )
+            )
+            if not has_div_by_boxes:
+                criteria["semantic_alignment"]["passed"] = False
+                msg = (
+                    "Câu hỏi yêu cầu 'doanh thu trung bình trên mỗi hộp', nhưng SQL không chia doanh thu cho tổng số hộp (`SUM(s.Amount) / SUM(s.Boxes)` — ví dụ dùng nhầm `AVG(s.Amount)` là trung bình mỗi giao dịch)."
+                    if not is_en
+                    else "User asked for revenue per box, but SQL did not divide revenue by `Boxes` (e.g., misused transaction `AVG(s.Amount)`)."
+                )
+                criteria["semantic_alignment"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    "BẮT BUỘC tính doanh thu trung bình trên mỗi hộp bằng `ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox`! TUYỆT ĐỐI KHÔNG dùng `AVG(s.Amount)`!"
+                    if not is_en
+                    else "MUST compute revenue per box as `ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox`, NOT `AVG(s.Amount)`!"
+                )
 
         # Kiểm tra 2.15: Người dùng yêu cầu xu hướng theo thời gian ("như thế nào") nhưng bị nhầm thành tính biên độ (MonthlySpread)
         asked_trend_time = (
@@ -1160,6 +1505,32 @@ def evaluate_execution(
                 "BẮT BUỘC xuất ra đúng 2 phòng ban tương ứng với 2 cực trị (MAX và MIN) bằng CTE kết hợp WHERE Headcount = MAX OR Headcount = MIN."
                 if not is_en else "MUST return both extreme benchmark rows (MAX and MIN) using CTE with WHERE metric = MAX OR metric = MIN."
             )
+        elif (
+            sql_query
+            and re.search(
+                r"\b(?:quốc gia|nước|thị trường|sản phẩm|nhân viên|người|đội ngũ|đội|team|khách hàng)(?:\s*\([^)]+\))?\s+nào\b",
+                q_low,
+            )
+            and (has_largest or has_smallest)
+            and not is_dual_eval
+            and not re.search(r"\btop\s*\d+\b", q_low)
+            and not any(k in q_low for k in ["từng", "mỗi", "các ", "danh sách", "so sánh", "liệt kê"])
+            and re.search(r"\blimit\s+(?:[2-9]|\d{2,})\b", sql_low)
+            and len(df) > 1
+        ):
+            criteria["comparative_sufficiency"]["passed"] = False
+            msg = (
+                f"Câu hỏi yêu cầu tìm 1 đối tượng dẫn đầu duy nhất nhưng SQL lại dùng LIMIT > 1 và trả về {len(df)} dòng."
+                if not is_en
+                else f"Query asked for a single top entity, but SQL applied LIMIT > 1 and returned {len(df)} rows."
+            )
+            criteria["comparative_sufficiency"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "BẮT BUỘC dùng `LIMIT 1` với sắp xếp `ORDER BY ... DESC` (hoặc `ASC`) khi câu hỏi tìm 1 thực thể đứng đầu duy nhất!"
+                if not is_en
+                else "MUST use `LIMIT 1` with `ORDER BY` when finding the single top entity!"
+            )
 
         # Kiểm tra 3.2: So sánh Quản lý vs Cấp dưới có lương cao hơn nhưng thiếu cấp dưới
         asked_mgr_sub = is_employees_db and any(k in q_low for k in ["manager", "quản lý", "trưởng phòng"]) and any(k in q_low for k in ["cấp dưới", "dưới quyền", "nhân viên"]) and any(k in q_low for k in ["thấp hơn", "cao hơn", "vượt", "chênh lệch"])
@@ -1209,12 +1580,88 @@ def evaluate_execution(
                         )
                         break
 
+        # Kiểm tra 4.3: Đối chiếu năm cụ thể trong câu hỏi (VD: 2023) với năm lọc trong SQL (chống tự ý đổi sang 2021 hoặc bỏ quên lọc năm)
+        req_years = list(dict.fromkeys(re.findall(r"\b(19\d{2}|20\d{2})\b", q_low)))
+        sql_years = [y for y in dict.fromkeys(re.findall(r"\b(19\d{2}|20\d{2})\b", sql_low)) if y != "9999"]
+        if len(req_years) == 1:
+            target_yr = req_years[0]
+            if sql_years and target_yr not in sql_years:
+                criteria["temporal_validity"]["passed"] = False
+                msg = (
+                    f"Câu hỏi yêu cầu dữ liệu năm {target_yr}, nhưng câu lệnh SQL lại lọc sai sang năm {', '.join(sql_years)}!"
+                    if not is_en
+                    else f"User requested year {target_yr}, but SQL filtered a different year ({', '.join(sql_years)})!"
+                )
+                criteria["temporal_validity"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    f"BẮT BUỘC sửa lại điều kiện lọc thời gian thành đúng năm {target_yr} (không tự ý đổi sang năm {', '.join(sql_years)})!"
+                    if not is_en
+                    else f"MUST filter exact year {target_yr} instead of {', '.join(sql_years)}!"
+                )
+            elif (
+                not sql_years
+                and not any(k in q_low for k in ["qua các năm", "từng năm", "theo từng năm", "các năm"])
+                and any(tbl in sql_low for tbl in ["sales", "crm_tickets", "rental", "payment", "orders", "employees", "salaries"])
+            ):
+                criteria["temporal_validity"]["passed"] = False
+                msg = (
+                    f"Câu hỏi giới hạn mốc thời gian năm {target_yr}, nhưng câu lệnh SQL bỏ qua điều kiện lọc năm {target_yr}!"
+                    if not is_en
+                    else f"User asked specifically for year {target_yr}, but SQL omitted the year filter!"
+                )
+                criteria["temporal_validity"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    f"BẮT BUỘC bổ sung điều kiện lọc năm {target_yr} (VD: `strftime('%Y', date_col) = '{target_yr}'` hoặc `YEAR(date_col) = {target_yr}`)!"
+                    if not is_en
+                    else f"MUST add year {target_yr} filter on the date column!"
+                )
+            elif (
+                "sales" in sql_low
+                and "crm_tickets" in sql_low
+                and target_yr in sql_years
+                and "saledate" in sql_low
+                and "createdat" not in sql_low
+                and any(k in q_low for k in [f"năm {target_yr}", f"in {target_yr}"])
+            ):
+                criteria["temporal_validity"]["passed"] = False
+                msg = (
+                    f"Câu SQL mới lọc năm {target_yr} trên `sales.SaleDate` nhưng bỏ sót điều kiện lọc năm {target_yr} trên `crm_tickets.CreatedAt`!"
+                    if not is_en
+                    else f"SQL filtered `sales.SaleDate` for {target_yr} but omitted `crm_tickets.CreatedAt` year filter!"
+                )
+                criteria["temporal_validity"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    f"BẮT BUỘC lọc năm {target_yr} trên CẢ `s.SaleDate` trong `SalesAgg` VÀ `t.CreatedAt` trong `TicketAgg`!"
+                    if not is_en
+                    else f"MUST filter year {target_yr} on BOTH `s.SaleDate` and `t.CreatedAt`!"
+                )
+        elif len(req_years) >= 2 and sql_years:
+            y_min, y_max = min(req_years), max(req_years)
+            if y_min not in sql_years or y_max not in sql_years:
+                criteria["temporal_validity"]["passed"] = False
+                msg = (
+                    f"Câu hỏi yêu cầu khoảng năm từ {y_min} đến {y_max}, nhưng SQL chỉ lọc {', '.join(sql_years)}!"
+                    if not is_en
+                    else f"Query requested years {y_min} to {y_max}, but SQL only filtered {', '.join(sql_years)}!"
+                )
+                criteria["temporal_validity"]["detail"] = msg
+                fails.append(msg)
+                actionable_feedbacks.append(
+                    f"BẮT BUỘC mở rộng điều kiện lọc thời gian bao phủ đủ từ {y_min} đến {y_max}!"
+                    if not is_en
+                    else f"MUST cover full year range {y_min} to {y_max}!"
+                )
+
     # -------------------------------------------------------------
     # TÍNH TOÁN ĐIỂM SỐ VÀ PHÁN QUYẾT (VERDICT & SCORE)
     # -------------------------------------------------------------
     num_passed = sum(1 for c in criteria.values() if c["passed"])
     score = int((num_passed / len(criteria)) * 100)
-    verdict = "PASS" if score >= 100 else ("FAIL" if score < 75 else "NEEDS_IMPROVEMENT")
+    has_severe_semantic_drift = (not criteria["semantic_alignment"]["passed"]) and len(fails) >= 2
+    verdict = "PASS" if score >= 100 else ("FAIL" if (score < 75 or has_severe_semantic_drift) else "NEEDS_IMPROVEMENT")
 
     if verdict == "PASS":
         critique = (

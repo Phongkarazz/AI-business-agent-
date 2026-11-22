@@ -31,9 +31,23 @@ _CATEGORICAL_COL_RE = re.compile(
 )
 
 _SKIP_CAT_COL_RE = re.compile(
-    r"(?:^|_)(?:ma_?so_?thue|mst|dien_?thoai|sdt|phone|so_?dien_?thoai|email|e_mail|cccd|cmnd|ma_?kh|ma_?hang|ma_?sku|ma_?vach|barcode|nguoi_?tao)(?:$|_)",
+    r"(?:^|_)(?:ma_?so_?thue|mst|dien_?thoai|sdt|phone|so_?dien_?thoai|email|e_mail|cccd|cmnd|ma_?kh|ma_?hang|ma_?sku|ma_?vach|barcode|nguoi_?tao|picture|photo|image|img|avatar|thumbnail|blob|binary)(?:$|_)",
     re.IGNORECASE,
 )
+
+
+def _safe_preview_val(v: Any, max_len: int = 64) -> Optional[str]:
+    """Filter out binary/JPEG BLOB payloads and clip overly long cell text for prompt safety."""
+    if v is None or isinstance(v, (bytes, bytearray, memoryview)):
+        return None
+    s = normalize_nfc(str(v)).strip()
+    if not s or s == "<binary>":
+        return None
+    if s.startswith(("b'\\x", 'b"\\x', "\\xff\\xd8", "\\x89PNG")):
+        return None
+    if len(s) > 180 and ("\\x" in s[:80] or " " not in s[:100]):
+        return None
+    return (s[: max_len - 1] + "…") if len(s) > max_len else s
 
 _ORDER_STATUS_COL_RE = re.compile(
     r"(?:^|_)(?:status|trang_?thai(?:_?don(?:_?hang)?|_?xu_?ly)?|ket_?qua|tinh_?trang(?:_?don)?|ghi_?chu_?tt|xu_?ly)(?:$|_)",
@@ -102,7 +116,7 @@ def _detect_capabilities(ws: BusinessWorkspace) -> Dict[str, bool]:
             active_col_tokens.append(f"{tname}.{cp.sql_name}".lower())
             if is_cust_tbl:
                 customer_table_cols.append(f"{tname}.{cp.sql_name}".lower())
-            if re.search(r"(?:^|_)(?:ten_?kh(?:ach(?:_?hang)?)?|tenkh|khach_?hang|ma_?kh(?:ach(?:_?hang)?)?|ma_kh_mua|customer_?id|ben_?mua|doi_?tac|so_?kh)(?:$|_)", cp.sql_name, re.I):
+            if re.search(r"(?:^|_)(?:ten_?kh(?:ach(?:_?hang)?)?|tenkh|khach_?hang|ma_?kh(?:ach(?:_?hang)?)?|ma_kh_mua|customer_?id|customer_?name|customer|client_?name|ben_?mua|doi_?tac|so_?kh)(?:$|_)", cp.sql_name, re.I):
                 non_anon = [
                     str(v) for v, _ in cp.top_values
                     if v is not None and norm_vn(v) not in {"", "khach le", "vang lai", "khach vang lai", "null", "none"}
@@ -158,7 +172,7 @@ def _detect_capabilities(ws: BusinessWorkspace) -> Dict[str, bool]:
                 has_cust_group = True
                 break
 
-    has_gender = _has_col(r"(?:^|[.\s_])(?:gioi_?tinh|gender|nam_?nu|namnu|phai)(?:$|[.\s_])")
+    has_gender = _has_col(r"(?:^|[.\s])(?:gioi_?tinh|gender|sex|nam_?nu|namnu|phai)(?:$|\s)|(?:^|[.\s_])(?:gioi_?tinh|gender|sex|nam_?nu)(?:$|[.\s_])")
     has_address = _has_col(
         r"(?:^|[.\s_])(?:dia_?chi|addr|address|duong|phuong_?xa|quan_?huyen|tinh_?thanh)(?:$|[.\s_])",
         cust_combined,
@@ -176,7 +190,13 @@ def _detect_capabilities(ws: BusinessWorkspace) -> Dict[str, bool]:
         r"(?:^|[.\s_])(?:phuong_?thuc(?:_?tt|_?thanh_?toan)?|hinh_?thuc(?:_?tt|_?thanh_?toan)?|pttt|cach_?tt)(?:$|[.\s_])"
     )
     has_return_reason = _has_col(r"(?:^|[.\s_])(?:nguyen_?nhan|ly_?do)(?:$|[.\s_])")
-    has_staff = _has_col(r"(?:^|[.\s_])(?:nhan_?vien|ma_?nv|ma_?nv_?ban|nguoi_?ban|chuc_?vu)(?:$|[.\s_])")
+    has_staff = _has_col(
+        r"(?:^|[.\s_])(?:nhan_?vien|nhan_?su|ma_?nv|ma_?nv_?ban|ten_?nv|ho_?ten_?nv|nguoi_?ban|chuc_?vu|chuc_?danh|"
+        r"thu_?ngan|employee(?:s|_?id|_?name)?|emp_?no|staff|salesperson|sales_?rep|spid|job_?title|cashier|worker)(?:$|[.\s_])"
+    ) or any(
+        tp.row_count > 0 and re.search(r"^(?:nhan_?vien|nhan_?su|employees?|staff|people|salaries|titles|dept_?emp)$", t, re.I)
+        for t, tp in ws.tables.items()
+    )
     has_pharmacy_rx = _has_col(
         r"(?:^|[.\s_])(?:ke_?don|ban_?theo_?don|thuoc_?ke_?don|hoat_?chat|thanh_?phan_?chinh|danhsachthuoc|banhang_?thuoc|thong_?tin_?thuoc)(?:$|[.\s_])"
     )
@@ -273,13 +293,19 @@ def _index_entities_and_categories(
                         f'SELECT "{cp.sql_name}", COUNT(*) FROM "{tname}" '
                         f'WHERE "{cp.sql_name}" IS NOT NULL GROUP BY "{cp.sql_name}" ORDER BY COUNT(*) DESC'
                     ).fetchall()
-                    categorical[f"{tname}.{cp.sql_name}"] = [
-                        (normalize_nfc(str(v)), int(cnt)) for v, cnt in cat_rows if v is not None
+                    safe_cats = [
+                        (pv, int(cnt))
+                        for v, cnt in cat_rows
+                        if v is not None and (pv := _safe_preview_val(v, max_len=80)) is not None
                     ]
                 else:
-                    categorical[f"{tname}.{cp.sql_name}"] = [
-                        (normalize_nfc(str(v)), int(cnt)) for v, cnt in cp.top_values if v is not None
+                    safe_cats = [
+                        (pv, int(cnt))
+                        for v, cnt in cp.top_values
+                        if v is not None and (pv := _safe_preview_val(v, max_len=80)) is not None
                     ]
+                if safe_cats:
+                    categorical[f"{tname}.{cp.sql_name}"] = safe_cats
 
             # Entity lookup values for product / customer / category / active ingredient / unit grounding
             if (
@@ -292,7 +318,9 @@ def _index_entities_and_categories(
                     f'WHERE "{cp.sql_name}" IS NOT NULL'
                 ).fetchall()
                 for (raw_val,) in rows:
-                    s_raw = normalize_nfc(str(raw_val))
+                    s_raw = _safe_preview_val(raw_val, max_len=120) or ""
+                    if not s_raw:
+                        continue
                     s_norm = norm_vn(s_raw)
                     if not s_norm or len(s_norm) < 2 or s_norm in _IGNORE_VALUE_TOKENS:
                         continue
@@ -460,7 +488,10 @@ def build_workspace_knowledge(ws: BusinessWorkspace) -> WorkspaceKnowledge:
                 vals_preview = ", ".join(repr(v) for v, _ in cat[:preview_lim])
                 col_parts.append(f"{cp.sql_name} ({tag}; values: {vals_preview})")
             else:
-                samp = ", ".join(repr(v) for v in cp.sample_values[:2]) if cp.sample_values else ""
+                safe_samps = [
+                    pv for v in (cp.sample_values or [])[:4] if (pv := _safe_preview_val(v, max_len=64)) is not None
+                ][:2]
+                samp = ", ".join(repr(v) for v in safe_samps)
                 col_parts.append(f"{cp.sql_name} ({tag}" + (f"; e.g. {samp}" if samp else "") + ")")
         note_str = f" [notes: {', '.join(tp.notes)}]" if tp.notes else ""
         lines.append(f"- Bảng `{tname}` ({tp.row_count} dòng){note_str}:")

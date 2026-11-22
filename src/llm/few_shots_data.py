@@ -3906,6 +3906,273 @@ FROM MonthlyAmountDue m
 CROSS JOIN Extremes e
 WHERE m.TotalAmountDue = e.MaxAmountDue OR m.TotalAmountDue = e.MinAmountDue
 ORDER BY m.TotalAmountDue DESC;"""
+    },
+    {
+        "id": "choco_crm_ticket_latency_by_dimension",
+        "domain": "awesome_chocolates",
+        "category": "crm_support",
+        "tags": [
+            "ticket", "crm_tickets", "phiếu hỗ trợ", "kênh hỗ trợ", "channel",
+            "status", "trạng thái", "firstreplyminutes", "phản hồi đầu tiên"
+        ],
+        "question": "Thống kê số lượng ticket theo Kênh hỗ trợ (Channel) và Trạng thái (Status), kèm thời gian phản hồi đầu tiên trung bình (FirstReplyMinutes)",
+        "question_en": "Summarize ticket counts by Channel and Status with average FirstReplyMinutes",
+        "intent_explanation": "Truy vấn trực tiếp bảng crm_tickets. Cột FirstReplyMinutes đã là số phút (FLOAT), dùng AVG(t.FirstReplyMinutes), tuyệt đối không dùng TIMESTAMPDIFF.",
+        "sql_mysql": """SELECT
+    t.Channel,
+    t.Status,
+    COUNT(*) AS TicketCount,
+    ROUND(AVG(t.FirstReplyMinutes), 2) AS AvgFirstReplyMinutes
+FROM crm_tickets t
+GROUP BY t.Channel, t.Status
+ORDER BY t.Channel ASC, TicketCount DESC;""",
+        "sql_sqlite": """SELECT
+    t.Channel,
+    t.Status,
+    COUNT(*) AS TicketCount,
+    ROUND(AVG(t.FirstReplyMinutes), 2) AS AvgFirstReplyMinutes
+FROM crm_tickets t
+GROUP BY t.Channel, t.Status
+ORDER BY t.Channel ASC, TicketCount DESC;"""
+    },
+    {
+        "id": "choco_crm_ticket_solved_rate_by_customer_type",
+        "domain": "awesome_chocolates",
+        "category": "crm_support",
+        "tags": [
+            "ticket", "crm_tickets", "customertype", "loại khách hàng", "new", "returned",
+            "solved", "giải quyết xong", "fullresolvehours", "thời gian xử lý"
+        ],
+        "question": "So sánh tỷ lệ giải quyết xong (Status = 'Solved') và thời gian xử lý trung bình (FullResolveHours) giữa nhóm khách hàng mới (New) và khách hàng quay lại (Returned)",
+        "question_en": "Compare Solved ticket rate and average FullResolveHours between New and Returned CustomerType",
+        "intent_explanation": "Truy vấn trực tiếp bảng crm_tickets, nhóm theo CustomerType. Tính SolvedRatePct bằng SUM(CASE WHEN Status='Solved' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) và AVG(FullResolveHours).",
+        "sql_mysql": """SELECT
+    t.CustomerType,
+    COUNT(*) AS TotalTickets,
+    SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) AS SolvedTickets,
+    ROUND(SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) AS SolvedRatePct,
+    ROUND(AVG(t.FullResolveHours), 2) AS AvgFullResolveHours
+FROM crm_tickets t
+GROUP BY t.CustomerType
+ORDER BY SolvedRatePct DESC;""",
+        "sql_sqlite": """SELECT
+    t.CustomerType,
+    COUNT(*) AS TotalTickets,
+    SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) AS SolvedTickets,
+    ROUND(SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) AS SolvedRatePct,
+    ROUND(AVG(t.FullResolveHours), 2) AS AvgFullResolveHours
+FROM crm_tickets t
+GROUP BY t.CustomerType
+ORDER BY SolvedRatePct DESC;"""
+    },
+    {
+        "id": "choco_product_size_rev_per_box",
+        "domain": "awesome_chocolates",
+        "category": "unit_economics",
+        "tags": [
+            "size", "kích thước", "doanh thu", "mỗi hộp", "trên mỗi hộp", "avg revenue per box", "hộp"
+        ],
+        "question": "Phân tích doanh thu theo kích thước sản phẩm (Size) và tính doanh thu trung bình trên mỗi hộp theo từng Size",
+        "question_en": "Analyze total revenue and average revenue per box by product Size",
+        "intent_explanation": "JOIN sales s với products pr qua PID, nhóm theo pr.Size. Doanh thu trung bình trên mỗi hộp bắt buộc là SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), không dùng AVG(s.Amount).",
+        "sql_mysql": """SELECT
+    pr.Size,
+    SUM(s.Amount) AS TotalRevenue,
+    SUM(s.Boxes) AS TotalBoxes,
+    ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+GROUP BY pr.Size
+ORDER BY TotalRevenue DESC;""",
+        "sql_sqlite": """SELECT
+    pr.Size,
+    SUM(s.Amount) AS TotalRevenue,
+    SUM(s.Boxes) AS TotalBoxes,
+    ROUND(SUM(s.Amount) * 1.0 / NULLIF(SUM(s.Boxes), 0), 2) AS AvgRevenuePerBox
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+GROUP BY pr.Size
+ORDER BY TotalRevenue DESC;"""
+    },
+    {
+        "id": "choco_category_region_revenue",
+        "domain": "awesome_chocolates",
+        "category": "multi_dim",
+        "tags": [
+            "category", "khu vực", "region", "apac", "europe", "americas", "phân bổ", "doanh thu"
+        ],
+        "question": "Phân bổ doanh thu theo từng Category sản phẩm và theo từng Khu vực (Region IN ('APAC', 'Europe'))",
+        "question_en": "Revenue breakdown by product Category and Region",
+        "intent_explanation": "JOIN 3 bảng sales s, products pr và geo g (không phải bảng regions). Nhóm theo pr.Category và g.Region.",
+        "sql_mysql": """SELECT
+    pr.Category,
+    g.Region,
+    SUM(s.Amount) AS TotalRevenue,
+    SUM(s.Boxes) AS TotalBoxes
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+JOIN geo g ON s.GeoID = g.GeoID
+WHERE g.Region IN ('APAC', 'Europe')
+GROUP BY pr.Category, g.Region
+ORDER BY TotalRevenue DESC;""",
+        "sql_sqlite": """SELECT
+    pr.Category,
+    g.Region,
+    SUM(s.Amount) AS TotalRevenue,
+    SUM(s.Boxes) AS TotalBoxes
+FROM sales s
+JOIN products pr ON s.PID = pr.PID
+JOIN geo g ON s.GeoID = g.GeoID
+WHERE g.Region IN ('APAC', 'Europe')
+GROUP BY pr.Category, g.Region
+ORDER BY TotalRevenue DESC;"""
+    },
+    {
+        "id": "choco_team_headcount_sales_boxes",
+        "domain": "awesome_chocolates",
+        "category": "team_summary",
+        "tags": [
+            "team", "đội ngũ", "bao nhiêu nhân viên", "nhân viên", "đóng góp", "doanh thu", "số hộp", "boxes"
+        ],
+        "question": "Mỗi đội ngũ (Team) có bao nhiêu nhân viên, đóng góp tổng doanh thu và số hộp là bao nhiêu?",
+        "question_en": "Employee count, total revenue, and total boxes sold per sales Team",
+        "intent_explanation": "JOIN people pe với sales s theo SPID, lọc pe.Team khác rỗng, tính COUNT(DISTINCT pe.SPID), SUM(s.Amount), SUM(s.Boxes) theo pe.Team.",
+        "sql_mysql": """SELECT
+    pe.Team,
+    COUNT(DISTINCT pe.SPID) AS EmployeeCount,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxes
+FROM people pe
+JOIN sales s ON pe.SPID = s.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;""",
+        "sql_sqlite": """SELECT
+    pe.Team,
+    COUNT(DISTINCT pe.SPID) AS EmployeeCount,
+    SUM(s.Amount) AS TotalSales,
+    SUM(s.Boxes) AS TotalBoxes
+FROM people pe
+JOIN sales s ON pe.SPID = s.SPID
+WHERE pe.Team != '' AND pe.Team IS NOT NULL
+GROUP BY pe.Team
+ORDER BY TotalSales DESC;"""
+    },
+    {
+        "id": "choco_country_revenue_and_bug_tickets_2023",
+        "domain": "awesome_chocolates",
+        "category": "crm_sales_cross",
+        "tags": [
+            "ticket", "bug", "crm_tickets", "quốc gia", "geo", "country",
+            "doanh thu", "revenue", "cao nhất", "2023"
+        ],
+        "question": "Trong năm 2023, quốc gia (Geo) nào có doanh thu cao nhất nhưng đồng thời ghi nhận bao nhiêu ticket loại Bug?",
+        "question_en": "In 2023, which country (Geo) had the highest revenue and how many Bug tickets did it record?",
+        "intent_explanation": "Bài toán liên bảng sales + geo + crm_tickets qua khóa ngoại GeoID. BẮT BUỘC tổng hợp sales và crm_tickets trong 2 CTE riêng (SalesAgg, TicketAgg) lọc cùng năm 2023 và t.Type = 'Bug' để tránh nhân bản dòng Descartes trước khi JOIN geo.",
+        "sql_mysql": """WITH SalesAgg AS (
+    SELECT s.GeoID, SUM(s.Amount) AS TotalSales
+    FROM sales s
+    WHERE YEAR(s.SaleDate) = 2023
+    GROUP BY s.GeoID
+),
+TicketAgg AS (
+    SELECT t.GeoID, COUNT(DISTINCT t.TicketID) AS BugTickets
+    FROM crm_tickets t
+    WHERE t.Type = 'Bug' AND YEAR(t.CreatedAt) = 2023
+    GROUP BY t.GeoID
+)
+SELECT
+    g.Geo AS Country,
+    COALESCE(sa.TotalSales, 0) AS TotalSales,
+    COALESCE(ta.BugTickets, 0) AS BugTickets
+FROM geo g
+JOIN SalesAgg sa ON g.GeoID = sa.GeoID
+LEFT JOIN TicketAgg ta ON g.GeoID = ta.GeoID
+ORDER BY TotalSales DESC
+LIMIT 1;""",
+        "sql_sqlite": """WITH SalesAgg AS (
+    SELECT s.GeoID, SUM(s.Amount) AS TotalSales
+    FROM sales s
+    WHERE strftime('%Y', s.SaleDate) = '2023'
+    GROUP BY s.GeoID
+),
+TicketAgg AS (
+    SELECT t.GeoID, COUNT(DISTINCT t.TicketID) AS BugTickets
+    FROM crm_tickets t
+    WHERE t.Type = 'Bug' AND strftime('%Y', t.CreatedAt) = '2023'
+    GROUP BY t.GeoID
+)
+SELECT
+    g.Geo AS Country,
+    COALESCE(sa.TotalSales, 0) AS TotalSales,
+    COALESCE(ta.BugTickets, 0) AS BugTickets
+FROM geo g
+JOIN SalesAgg sa ON g.GeoID = sa.GeoID
+LEFT JOIN TicketAgg ta ON g.GeoID = ta.GeoID
+ORDER BY TotalSales DESC
+LIMIT 1;"""
+    },
+    {
+        "id": "choco_salesperson_revenue_and_crm_tickets",
+        "domain": "awesome_chocolates",
+        "category": "crm_sales_cross",
+        "tags": [
+            "ticket", "crm_tickets", "nhân viên", "salesperson", "team",
+            "doanh thu", "revenue", "solved"
+        ],
+        "question": "Thống kê doanh thu và số lượng ticket hỗ trợ theo từng nhân viên bán hàng (Salesperson)",
+        "question_en": "Analyze sales revenue and CRM support ticket count by Salesperson",
+        "intent_explanation": "Tổng hợp sales theo SPID trong SalesAgg và crm_tickets theo SPID trong TicketAgg rồi JOIN people pe theo pe.SPID.",
+        "sql_mysql": """WITH SalesAgg AS (
+    SELECT s.SPID, SUM(s.Amount) AS TotalSales, SUM(s.Boxes) AS TotalBoxes
+    FROM sales s
+    GROUP BY s.SPID
+),
+TicketAgg AS (
+    SELECT
+        t.SPID,
+        COUNT(DISTINCT t.TicketID) AS TotalTickets,
+        SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) AS SolvedTickets
+    FROM crm_tickets t
+    GROUP BY t.SPID
+)
+SELECT
+    pe.Salesperson,
+    pe.Team,
+    COALESCE(sa.TotalSales, 0) AS TotalSales,
+    COALESCE(sa.TotalBoxes, 0) AS TotalBoxes,
+    COALESCE(ta.TotalTickets, 0) AS TotalTickets,
+    COALESCE(ta.SolvedTickets, 0) AS SolvedTickets
+FROM people pe
+JOIN SalesAgg sa ON pe.SPID = sa.SPID
+LEFT JOIN TicketAgg ta ON pe.SPID = ta.SPID
+ORDER BY TotalSales DESC
+LIMIT 10;""",
+        "sql_sqlite": """WITH SalesAgg AS (
+    SELECT s.SPID, SUM(s.Amount) AS TotalSales, SUM(s.Boxes) AS TotalBoxes
+    FROM sales s
+    GROUP BY s.SPID
+),
+TicketAgg AS (
+    SELECT
+        t.SPID,
+        COUNT(DISTINCT t.TicketID) AS TotalTickets,
+        SUM(CASE WHEN t.Status = 'Solved' THEN 1 ELSE 0 END) AS SolvedTickets
+    FROM crm_tickets t
+    GROUP BY t.SPID
+)
+SELECT
+    pe.Salesperson,
+    pe.Team,
+    COALESCE(sa.TotalSales, 0) AS TotalSales,
+    COALESCE(sa.TotalBoxes, 0) AS TotalBoxes,
+    COALESCE(ta.TotalTickets, 0) AS TotalTickets,
+    COALESCE(ta.SolvedTickets, 0) AS SolvedTickets
+FROM people pe
+JOIN SalesAgg sa ON pe.SPID = sa.SPID
+LEFT JOIN TicketAgg ta ON pe.SPID = ta.SPID
+ORDER BY TotalSales DESC
+LIMIT 10;"""
     }
 ]
 
