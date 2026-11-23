@@ -508,14 +508,26 @@ def scan_dashboard_anomalies_and_strategies(
     Hỗ trợ song ngữ Tiếng Việt & English.
     """
     is_en = (lang == "en")
-    if is_en:
+    if start_year is None or end_year is None:
+        time_label = "Full Dataset" if is_en else "Toàn bộ dữ liệu"
+    elif is_en:
         time_label = f"Year {start_year}" if start_year == end_year else f"Period {start_year} — {end_year}"
     else:
         time_label = f"Năm {start_year}" if start_year == end_year else f"Giai đoạn {start_year} — {end_year}"
-    is_multi_year = (start_year != end_year)
+    is_multi_year = (start_year is not None and end_year is not None and start_year != end_year)
     
     anomalies: List[Dict[str, Any]] = []
     lid_low = str(layer_id or "").lower()
+    is_generic_layer = lid_low.startswith("generic") or lid_low.startswith("table_")
+    unit_style = str(data.get("unit_style") or "").lower()
+
+    def _fmt_dash_val(val: float, force_money: bool = False) -> str:
+        if unit_style == "vnd":
+            return f"{val:,.0f} đ"
+        if unit_style == "usd" or force_money:
+            return f"${val:,.0f}"
+        return f"{val:,.0f}"
+
     is_sales_layer = (
         any(k in lid_low for k in ["sales", "northwind", "product", "geo", "people", "trend", "top_performer", "order", "customer", "supplier"])
         or isinstance(data.get("geo_df"), pd.DataFrame)
@@ -533,7 +545,15 @@ def scan_dashboard_anomalies_and_strategies(
             trend_df = data["df"]
     if trend_df is not None and not trend_df.empty:
         t_col = "TimePeriod" if "TimePeriod" in trend_df.columns else ("YearMonth" if "YearMonth" in trend_df.columns else ("Month" if "Month" in trend_df.columns else trend_df.columns[0]))
-        v1_col = "Metric1" if "Metric1" in trend_df.columns else ("Revenue" if "Revenue" in trend_df.columns else ("Headcount" if "Headcount" in trend_df.columns else trend_df.columns[1]))
+        v1_col = (
+            "Metric1" if "Metric1" in trend_df.columns else (
+                "Revenue" if "Revenue" in trend_df.columns else (
+                    "MetricSum" if "MetricSum" in trend_df.columns else (
+                        "Headcount" if "Headcount" in trend_df.columns else trend_df.columns[1]
+                    )
+                )
+            )
+        )
         is_rev_col = is_sales_layer or any(k in str(v1_col).lower() for k in ["rev", "amount", "sales", "doanh"])
         
         t_res = detect_time_series_inflections(trend_df, t_col, v1_col)
@@ -544,14 +564,17 @@ def scan_dashboard_anomalies_and_strategies(
             trough_p_fmt = format_anomaly_label(t_res['trough_period'], t_col)
             
             if is_rev_col:
+                pk_str = _fmt_dash_val(t_res['peak_val'], force_money=True)
+                tr_str = _fmt_dash_val(t_res['trough_val'], force_money=True)
+                sp_str = _fmt_dash_val(t_res['peak_val'] - t_res['trough_val'], force_money=True)
                 if is_en:
                     anomalies.append({
                         "severity": severity,
                         "category": "Time Series & Commercial Cycle",
                         "title": f"Revenue Cycle Volatility: -{drop_pct:.1f}% pullback from peak to trough",
-                        "metrics_summary": f"Revenue peaked at <b>${t_res['peak_val']:,.0f}</b> ({peak_p_fmt}) before pulling back to a trough of <b>${t_res['trough_val']:,.0f}</b> ({trough_p_fmt}), a <b>-{drop_pct:.1f}%</b> amplitude swing.",
+                        "metrics_summary": f"Revenue peaked at <b>{pk_str}</b> ({peak_p_fmt}) before pulling back to a trough of <b>{tr_str}</b> ({trough_p_fmt}), a <b>-{drop_pct:.1f}%</b> amplitude swing.",
                         "root_cause": "Post-peak seasonal demand cooldown combined with front-loaded distributor order batching during promotional campaigns.",
-                        "quantified_impact": f"High monthly cashflow variance (${t_res['peak_val'] - t_res['trough_val']:,.0f} spread) creates inventory buffer pressure and underutilized logistics capacity during off-peak periods.",
+                        "quantified_impact": f"High monthly cashflow variance ({sp_str} spread) creates inventory buffer pressure and underutilized logistics capacity during off-peak periods.",
                         "raw": t_res,
                         "is_sales": True
                     })
@@ -560,9 +583,35 @@ def scan_dashboard_anomalies_and_strategies(
                         "severity": severity,
                         "category": "Chuỗi Thời Gian & Chu Kỳ Doanh Số",
                         "title": f"Biến động chu kỳ doanh thu: Chênh lệch -{drop_pct:.1f}% từ đỉnh xuống đáy kỳ",
-                        "metrics_summary": f"Doanh thu đạt đỉnh <b>${t_res['peak_val']:,.0f}</b> ({peak_p_fmt}) sau đó điều chỉnh về mức đáy <b>${t_res['trough_val']:,.0f}</b> ({trough_p_fmt}), tương ứng biên độ giảm <b>-{drop_pct:.1f}%</b>.",
+                        "metrics_summary": f"Doanh thu đạt đỉnh <b>{pk_str}</b> ({peak_p_fmt}) sau đó điều chỉnh về mức đáy <b>{tr_str}</b> ({trough_p_fmt}), tương ứng biên độ giảm <b>-{drop_pct:.1f}%</b>.",
                         "root_cause": "Hiệu ứng dồn đơn hàng đại lý (Front-loading) vào các chiến dịch cao điểm đầu năm, kéo theo nhịp chững lại tự nhiên của sức mua ở các tháng kế tiếp.",
-                        "quantified_impact": f"Biên độ dao động dòng tiền tháng lên tới <b>${t_res['peak_val'] - t_res['trough_val']:,.0f}</b>, gây áp lực lên kế hoạch dự trữ tồn kho và công suất chuỗi cung ứng.",
+                        "quantified_impact": f"Biên độ dao động dòng tiền tháng lên tới <b>{sp_str}</b>, gây áp lực lên kế hoạch dự trữ tồn kho và công suất chuỗi cung ứng.",
+                        "raw": t_res,
+                        "is_sales": True
+                    })
+            elif is_generic_layer:
+                pk_str = _fmt_dash_val(t_res['peak_val'], force_money=(unit_style in ("vnd", "usd")))
+                tr_str = _fmt_dash_val(t_res['trough_val'], force_money=(unit_style in ("vnd", "usd")))
+                sp_str = _fmt_dash_val(t_res['peak_val'] - t_res['trough_val'], force_money=(unit_style in ("vnd", "usd")))
+                if is_en:
+                    anomalies.append({
+                        "severity": severity,
+                        "category": "Time Series & Activity Variance",
+                        "title": f"Time-series swing: -{drop_pct:.1f}% from peak ({peak_p_fmt}) to trough ({trough_p_fmt})",
+                        "metrics_summary": f"Peak activity reached <b>{pk_str}</b> ({peak_p_fmt}) before dropping to a low of <b>{tr_str}</b> ({trough_p_fmt}), a <b>-{drop_pct:.1f}%</b> swing.",
+                        "root_cause": "Uneven demand or transaction volume distribution across days/periods in the active dataset.",
+                        "quantified_impact": f"Peak-to-trough spread of <b>{sp_str}</b> indicates clear high/low periods worth examining by product or channel.",
+                        "raw": t_res,
+                        "is_sales": True
+                    })
+                else:
+                    anomalies.append({
+                        "severity": severity,
+                        "category": "Chuỗi Thời Gian & Biến Động Giao Dịch",
+                        "title": f"Biến động theo thời gian: giảm {drop_pct:.1f}% từ đỉnh ({peak_p_fmt}) xuống đáy ({trough_p_fmt})",
+                        "metrics_summary": f"Mức cao nhất đạt <b>{pk_str}</b> ({peak_p_fmt}) và xuống thấp nhất ở <b>{tr_str}</b> ({trough_p_fmt}), chênh lệch <b>{sp_str}</b> (<b>-{drop_pct:.1f}%</b>).",
+                        "root_cause": "Sức mua hoặc khối lượng giao dịch phân bổ chưa đều giữa các ngày/kỳ trong tập dữ liệu.",
+                        "quantified_impact": f"Khoảng chênh đỉnh - đáy đạt <b>{sp_str}</b>, nên kiểm tra nhóm hàng và kênh đóng góp vào các ngày cao điểm/thấp điểm.",
                         "raw": t_res,
                         "is_sales": True
                     })
@@ -787,9 +836,12 @@ def scan_dashboard_anomalies_and_strategies(
         )
         cand_keys = ["top_products_df", "cat_dist_df", "cat_df", "geo_df", "title_sal_df", "top10_df", "df", "sample_df"]
         seen_signatures = set()
+        grouped_cat_scanned = False
         for ck in cand_keys:
             if len(anomalies) >= 3:
                 break
+            if ck in ("df", "sample_df") and grouped_cat_scanned:
+                continue
             raw_cand = data.get(ck)
             if not isinstance(raw_cand, pd.DataFrame) or raw_cand.empty:
                 continue
@@ -797,6 +849,11 @@ def scan_dashboard_anomalies_and_strategies(
             if norm_df is None or norm_df.empty or len(norm_df) < 2:
                 continue
             p_col, l_col = select_primary_insight_columns(norm_df, user_query=layer_id)
+            if ck in ("cat_dist_df", "cat_df"):
+                if "MetricSum" in norm_df.columns and pd.to_numeric(norm_df["MetricSum"], errors="coerce").abs().sum() > 0:
+                    p_col = "MetricSum"
+                if "Category" in norm_df.columns:
+                    l_col = "Category"
             if not p_col:
                 num_c = [c for c in norm_df.select_dtypes(include="number").columns if not is_id_like(c)]
                 p_col = num_c[0] if num_c else None
@@ -831,24 +888,34 @@ def scan_dashboard_anomalies_and_strategies(
             top_sh = (top_v / tot_v) * 100.0
             top3_sh = (float(w_df.head(min(3, len(w_df)))[p_col].sum()) / tot_v) * 100.0
 
-            is_money_col = any(k in str(p_col).lower() for k in ["sales", "amount", "revenue", "doanh", "salary", "lương", "payroll", "cost", "price", "freight", "tiền"])
-            pfx = "$" if is_money_col else ""
-            fmt_v = lambda x: f"{pfx}{x:,.0f}" if abs(x) >= 100 or abs(x - round(x)) < 1e-4 else f"{pfx}{x:,.2f}"
+            is_money_col = any(k in str(p_col).lower() for k in ["sales", "amount", "revenue", "doanh", "salary", "lương", "payroll", "cost", "price", "freight", "tiền", "metricsum"])
+            if unit_style == "vnd" and (is_money_col or str(p_col).lower() == "metricsum"):
+                pfx, sfx = "", " đ"
+            elif is_money_col or (unit_style == "usd" and str(p_col).lower() == "metricsum"):
+                pfx, sfx = "$", ""
+            else:
+                pfx, sfx = "", ""
+            fmt_v = lambda x: f"{pfx}{x:,.0f}{sfx}" if abs(x) >= 100 or abs(x - round(x)) < 1e-4 else f"{pfx}{x:,.2f}{sfx}"
 
             lang_c = "en" if is_en else "vi"
             top_lbl = format_entity_label(top_r[l_col], col_name=l_col, lang=lang_c)
             bot_lbl = format_entity_label(bot_r[l_col], col_name=l_col, lang=lang_c)
-            dim_vi = humanize_name_vi(l_col)
-            dim_en = humanize_name_en(l_col)
-            met_vi = humanize_name_vi(p_col)
-            met_en = humanize_name_en(p_col)
+            dim_raw_name = data.get("main_cat_col") if (l_col == "Category" and data.get("main_cat_col")) else l_col
+            met_raw_name = (data.get("main_num_col") or data.get("num_col")) if (p_col == "MetricSum" and (data.get("main_num_col") or data.get("num_col"))) else p_col
+            dim_vi = humanize_name_vi(dim_raw_name)
+            dim_en = humanize_name_en(dim_raw_name)
+            met_vi = humanize_name_vi(met_raw_name)
+            met_en = humanize_name_en(met_raw_name)
+            if unit_style == "vnd":
+                met_vi = re.sub(r"\s*\(\$\)\s*$", "", met_vi).strip()
+                met_en = re.sub(r"\s*\(\$\)\s*$", "", met_en).strip()
 
             sev_u = "CRITICAL 🚨" if (top_sh >= 35.0 or gap_ratio >= 4.0) else "WARNING ⚠️"
             if is_en:
                 anomalies.append({
                     "severity": sev_u,
                     "category": f"{dim_en} Concentration & Dispersion",
-                    "title": f"{dim_en} Skew: #1 '{top_lbl}' accounts for {top_sh:.1f}% ({gap_ratio:.1f}x vs '{bot_lbl}')",
+                    "title": f"{met_en} Skew by {dim_en}: #1 '{top_lbl}' accounts for {top_sh:.1f}% ({gap_ratio:.1f}x vs '{bot_lbl}')",
                     "metrics_summary": f"Across <b>{len(w_df)}</b> units in <b>{dim_en}</b>, leader <b>{top_lbl}</b> reached <b>{fmt_v(top_v)}</b> (<b>{top_sh:.1f}%</b> share; Top 3 = <b>{top3_sh:.1f}%</b>), while <b>{bot_lbl}</b> recorded <b>{fmt_v(bot_v)}</b> (benchmark mean: <b>{fmt_v(mean_v)}</b>).",
                     "root_cause": f"Structural Pareto concentration in {met_en} where top-tier {dim_en} entities capture the majority of volume/value.",
                     "quantified_impact": f"Lifting below-average {dim_en} units to the {fmt_v(mean_v)} benchmark unlocks significant incremental capacity and reduces concentration risk.",
@@ -871,7 +938,7 @@ def scan_dashboard_anomalies_and_strategies(
                 anomalies.append({
                     "severity": sev_u,
                     "category": f"Phân Hóa & Tập Trung Theo {dim_vi}",
-                    "title": f"Độ lệch {dim_vi}: Top #1 '{top_lbl}' chiếm {top_sh:.1f}% (gấp {gap_ratio:.1f}x so với '{bot_lbl}')",
+                    "title": f"Độ lệch {met_vi} theo {dim_vi}: Top #1 '{top_lbl}' chiếm {top_sh:.1f}% (gấp {gap_ratio:.1f}x so với '{bot_lbl}')",
                     "metrics_summary": f"Trên tổng số <b>{len(w_df)}</b> đơn vị theo <b>{dim_vi}</b>, vị trí dẫn đầu <b>{top_lbl}</b> đạt <b>{fmt_v(top_v)}</b> (chiếm <b>{top_sh:.1f}%</b> tỷ trọng; Top 3 chiếm <b>{top3_sh:.1f}%</b>), trong khi <b>{bot_lbl}</b> đạt <b>{fmt_v(bot_v)}</b> (chuẩn bình quân: <b>{fmt_v(mean_v)}</b>).",
                     "root_cause": f"Sự tập trung Pareto trong chỉ số {met_vi} khi nhóm dẫn đầu theo {dim_vi} chiếm phần lớn quy mô vận hành, tạo khoảng hụt <b>{fmt_v(gap_v)}</b> với nhóm cuối bảng.",
                     "quantified_impact": f"Nếu nâng các đơn vị dưới chuẩn lên tiệm cận mức bình quân (<b>{fmt_v(mean_v)}</b>), hệ thống sẽ giảm rủi ro phụ thuộc cục bộ và mở khóa dư địa tăng trưởng rõ rệt.",
@@ -890,6 +957,8 @@ def scan_dashboard_anomalies_and_strategies(
                         "met_en": met_en,
                     },
                 })
+            if ck in ("cat_dist_df", "cat_df"):
+                grouped_cat_scanned = True
 
     # -------------------------------------------------------------
     # TỔNG HỢP CHIẾN LƯỢC 3 TẦNG CHUẨN SENIOR DATA ANALYST

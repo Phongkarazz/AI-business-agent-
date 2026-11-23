@@ -6,7 +6,9 @@ Features clean Silent Fix interface, Priority Tagging display, Bilingual English
 """
 
 import hashlib
+import html as html_lib
 import re
+from typing import Optional
 import streamlit as st
 import pandas as pd
 from src.analytics.heuristics import (
@@ -5474,9 +5476,18 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                     with col4:
                         st.metric(f"📉 " + ("Thấp nhất" if not is_en else "Lowest"), min_label, delta=f"{fmt_min}", delta_color="off")
                 else:
-                    _dim_col = label_cols[0] if label_cols else (dim_cols[0] if dim_cols else "")
+                    _dim_col = label_cols[0] if label_cols else (dim_cols[0] if dim_cols else next((c for c in df.columns if c != m_col), ""))
                     _dim_low = str(_dim_col).lower()
-                    if any(k in _dim_low for k in ["dept", "phòng", "department"]):
+                    if any(k in _dim_low for k in ["ngay", "ngày", "date", "day"]):
+                        _card1_title = "📅 " + ("Số ngày" if not is_en else "Days")
+                        _card1_val = f"{total_rows} Ngày" if not is_en else f"{total_rows} Days"
+                    elif any(k in _dim_low for k in ["thang", "tháng", "month"]):
+                        _card1_title = "📅 " + ("Số tháng" if not is_en else "Months")
+                        _card1_val = f"{total_rows} Tháng" if not is_en else f"{total_rows} Months"
+                    elif any(k in _dim_low for k in ["quy", "quý", "quarter"]):
+                        _card1_title = "📅 " + ("Số quý" if not is_en else "Quarters")
+                        _card1_val = f"{total_rows} Quý" if not is_en else f"{total_rows} Quarters"
+                    elif any(k in _dim_low for k in ["dept", "phòng", "department"]):
                         _card1_title = "🏢 " + ("Số phòng ban" if not is_en else "Departments")
                         _card1_val = f"{total_rows} Phòng"
                     elif any(k in _dim_low for k in ["title", "chức danh", "job"]):
@@ -5516,8 +5527,8 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             else:
                 # CỘT SỐ LƯỢNG/TỔNG QUỸ/TIỀN TỆ TUYỆT ĐỐI: Hiển thị Tổng cộng
                 _unassigned_keywords = ["(chưa phân nhóm)", "(chưa xác định)", "(unassigned)", "chưa phân nhóm", "chưa xác định", "unassigned", "(trống)", "none", "n/a", ""]
-                _dim_col = label_cols[0] if label_cols else "Department"
-                if _dim_col in df.columns:
+                _dim_col = label_cols[0] if label_cols else (dim_cols[0] if dim_cols else next((c for c in df.columns if c != m_col), ""))
+                if _dim_col and _dim_col in df.columns:
                     is_unassigned_mask = df[_dim_col].astype(str).str.strip().str.lower().isin(_unassigned_keywords)
                 else:
                     is_unassigned_mask = pd.Series([False] * len(df), index=df.index)
@@ -5657,7 +5668,16 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                                 st.metric("🏆 " + ("Xếp hạng" if not is_en else "Ranking"), f"Top {display_rows_count}{_entity_top}", delta=_card1_top_delta, help=f"CSDL có tổng cộng {display_rows_count}{_entity_top.lower()}, đã hiển thị đầy đủ 100% dữ liệu." if _is_db_capped else None)
                         else:
                             _dim_low = str(_dim_col).lower()
-                            if any(k in _dim_low for k in ["dept", "phòng", "department"]):
+                            if any(k in _dim_low for k in ["ngay", "ngày", "date", "day"]):
+                                _card1_title = "📅 " + ("Số ngày" if not is_en else "Days")
+                                _card1_val = f"{display_rows_count} Ngày" if not is_en else f"{display_rows_count} Days"
+                            elif any(k in _dim_low for k in ["thang", "tháng", "month"]):
+                                _card1_title = "📅 " + ("Số tháng" if not is_en else "Months")
+                                _card1_val = f"{display_rows_count} Tháng" if not is_en else f"{display_rows_count} Months"
+                            elif any(k in _dim_low for k in ["quy", "quý", "quarter"]):
+                                _card1_title = "📅 " + ("Số quý" if not is_en else "Quarters")
+                                _card1_val = f"{display_rows_count} Quý" if not is_en else f"{display_rows_count} Quarters"
+                            elif any(k in _dim_low for k in ["dept", "phòng", "department"]):
                                 _card1_title = "🏢 " + ("Số phòng ban" if not is_en else "Departments")
                                 _card1_val = f"{display_rows_count} Phòng"
                             elif any(k in _dim_low for k in ["team", "đội ngũ", "đội"]):
@@ -5922,6 +5942,8 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
     vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
     def _clean_md_inline(s_raw):
         s_val = str(s_raw or "")
+        s_val = s_val.replace(r"\$", "$").replace(r"\_", "_").replace(r"\*", "*")
+        s_val = re.sub(r"\\([#$%&~^])", r"\1", s_val)
         s_val = re.sub(r"\*\*\[([^\]]+)\]\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>", s_val)
         s_val = re.sub(r"\*\*([^*]+)\*\*", r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>", s_val)
         s_val = re.sub(r"`([^`]+)`", r"<code style='background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); padding: 1px 6px; border-radius: 5px; color: #67E8F9; font-size: 0.75rem; font-weight: 700; font-family: inherit;'>\1</code>", s_val)
@@ -6020,7 +6042,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
                         <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
-                            {f"ĐỐI CHIẾU {u_lbl_vi.upper()}:" if not is_en else f"{u_lbl_en.upper()} SCORECARD:"} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
+                            {f"ĐỐI CHIẾU {u_lbl_vi.upper()}:" if not is_en else f"{u_lbl_en.upper()} SCORECARD:"} <span style="color: #60A5FA;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
                         </span>
                         <span style="font-size: 0.71rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
                             {unit_diag.get('status_badge')}
@@ -6049,7 +6071,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                         <b style="color: #F8FAFC;">{unit_diag.get('pct_of_top'):.1f}%</b>
                     </div>
                     <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
-                        <div style="width: {pct_top_bar}%; height: 100%; background: linear-gradient(90deg, {u_stat_col}, #00F0FF); border-radius: 3px;"></div>
+                        <div style="width: {pct_top_bar}%; height: 100%; background: linear-gradient(90deg, {u_stat_col}, #60A5FA); border-radius: 3px;"></div>
                     </div>
                     {sec_row_html}
                 </div>
@@ -6130,55 +6152,48 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 col_p1, col_p2 = st.columns(2)
                 lead_dual_unit = selected_unit_val if (selected_unit_val and selected_unit_val != "ALL") else units_info.get("default_unit")
                 with col_p1:
-                    _render_persona_box("ceo", "#00F0FF", "#38BDF8", force_unit="ALL")
+                    _render_persona_box("ceo", "#60A5FA", "#38BDF8", force_unit="ALL")
                 with col_p2:
                     _render_persona_box("lead", "#10B981", "#34D399", force_unit=lead_dual_unit)
             elif selected_unit_val and selected_unit_val != "ALL":
                 _render_persona_box("lead", "#10B981", "#34D399", force_unit=selected_unit_val)
             elif sel_persona == persona_options[0]:
-                _render_persona_box("ceo", "#00F0FF", "#38BDF8", force_unit="ALL")
+                _render_persona_box("ceo", "#60A5FA", "#38BDF8", force_unit="ALL")
             else:
                 _render_persona_box("lead", "#10B981", "#34D399", force_unit="ALL")
         elif p23:
             st.markdown(format_card_markdown(p23))
 
     # TẦNG 2: PHÂN TÍCH CHUYÊN SÂU (Mặc định thu gọn, mở 1 click khi cần)
-    if branches or p22:
+    display_branches = [b for b in (branches or []) if b.get("status") != "REJECTED"]
+    if display_branches or p22:
         exp1_title = (
-            "Deep Dive: Root-Cause Verification (3 Competing Hypotheses)"
+            "Deep Dive: Key Drivers & Quantitative Analysis"
             if is_en else
-            "Phân tích chuyên sâu: Kiểm chứng nguyên nhân (3 giả thuyết đối chứng)"
+            "Phân tích chuyên sâu: Nguyên nhân & Cơ sở dữ liệu"
         )
         with st.expander(exp1_title, expanded=False):
-            if branches:
-                confirmed_b = [b for b in branches if b.get("status") == "CONFIRMED"]
-                partial_b = [b for b in branches if b.get("status") == "PARTIAL"]
-                rejected_b = [b for b in branches if b.get("status") == "REJECTED"]
-                top_b = confirmed_b[0] if confirmed_b else branches[0]
+            if display_branches:
+                confirmed_b = [b for b in display_branches if b.get("status") == "CONFIRMED"]
+                partial_b = [b for b in display_branches if b.get("status") == "PARTIAL"]
+                top_b = confirmed_b[0] if confirmed_b else display_branches[0]
                 sec_b = partial_b[0] if partial_b else (confirmed_b[1] if len(confirmed_b) > 1 else None)
-                rej_b = rejected_b[0] if rejected_b else None
                 top_t_clean = _clean_md_inline(re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(top_b.get("title", "H1")), flags=re.IGNORECASE))
-                top_c_pct = int(top_b.get("confidence", 88))
                 sec_badge_html = ""
                 if sec_b:
                     sec_id = sec_b.get("id", "H2")
-                    sec_c_pct = int(sec_b.get("confidence", 74))
-                    sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.38); color: #FBBF24; padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;'>{sec_id} ({sec_c_pct}%)</span>"
-                rej_badge_html = ""
-                if rej_b:
-                    rej_id = rej_b.get("id", "H3")
-                    rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.35); color: #94A3B8; padding: 2px 8px; border-radius: 5px; font-size: 0.71rem; font-weight: 500;'>{'Loại trừ' if not is_en else 'Ruled out'} {rej_id}</span>"
+                    sec_lbl = "Yếu tố bổ trợ" if not is_en else "Secondary driver"
+                    sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.38); color: #FBBF24; padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;'>{sec_id}: {sec_lbl}</span>"
                 gate_html = f"""
                 <div style="font-family: {vn_font_stack}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: rgba(6, 78, 59, 0.22); border: 1px solid rgba(16, 185, 129, 0.38); border-left: 3px solid #10B981; border-radius: 8px; padding: 6px 12px; margin-bottom: 10px;">
                     <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                         <span style="font-size: 0.72rem; font-weight: 800; color: #34D399; text-transform: uppercase;">
-                            {'Căn cứ kiểm định:' if not is_en else 'Verified Root Cause:'}
+                            {'Trọng tâm phân tích:' if not is_en else 'Key Drivers:'}
                         </span>
                         <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">
-                            {top_b.get('id', 'H1')}: {top_t_clean} ({top_c_pct}%)
+                            {top_b.get('id', 'H1')}: {top_t_clean}
                         </span>
                         {sec_badge_html}
-                        {rej_badge_html}
                     </div>
                 </div>
                 """
@@ -6187,8 +6202,8 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 prob_stmt = _clean_md_inline(tree_data.get("problem_statement", ""))
                 st.markdown(f"""
                 <div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 9px; padding: 9px 14px; margin-bottom: 10px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; margin-right: 6px;">
-                        {'BÀI TOÁN KIỂM ĐỊNH:' if not is_en else 'ROOT PROBLEM:'}
+                    <span style="font-size: 0.72rem; font-weight: 800; color: #60A5FA; text-transform: uppercase; margin-right: 6px;">
+                        {'TRỌNG TÂM ĐỐI CHIẾU:' if not is_en else 'ANALYSIS SCOPE:'}
                     </span>
                     <span style="font-size: 0.86rem; font-weight: 700; color: #F8FAFC;">
                         {prob_stmt}
@@ -6197,7 +6212,7 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                 """, unsafe_allow_html=True)
 
                 b_cards_html = []
-                for b in branches:
+                for b in display_branches:
                     status = b.get("status", "PARTIAL")
                     if status == "CONFIRMED":
                         border_c, bg_c, badge_bg, badge_c = "#10B981", "rgba(16, 185, 129, 0.08)", "rgba(16, 185, 129, 0.2)", "#34D399"
@@ -6206,35 +6221,23 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
                     else:
                         border_c, bg_c, badge_bg, badge_c = "#64748B", "rgba(100, 116, 139, 0.06)", "rgba(100, 116, 139, 0.2)", "#94A3B8"
 
-                    conf_pct = b.get("confidence", 50)
-                    imp_pct = b.get("impact", 50)
-                    prio_score = b.get("priority_score", 50)
-                    conf_lbl = "Độ chính xác" if not is_en else "Confidence"
-                    imp_lbl = "Tác động" if not is_en else "Impact"
-                    prio_lbl = "Ưu tiên" if not is_en else "Priority"
+                    b_id = b.get("id", "H1")
                     b_title_clean = _clean_md_inline(b.get("title", ""))
                     b_evid_clean = _clean_md_inline(b.get("evidence", ""))
-                    ev_summary_lbl = "Xem bằng chứng số liệu kiểm định" if not is_en else "View quantitative test evidence"
+                    ev_summary_lbl = "Xem số liệu thực tế liên quan" if not is_en else "View supporting data figures"
 
                     b_cards_html.append(f"""
                     <div style="background: {bg_c}; border: 1px solid {border_c}55; border-top: 3px solid {border_c}; border-radius: 10px; padding: 10px 11px; display: flex; flex-direction: column; justify-content: space-between;">
                         <div>
                             <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
                                 <span style="font-size: 0.69rem; font-weight: 800; color: {badge_c}; background: {badge_bg}; border: 1px solid {border_c}88; padding: 2px 7px; border-radius: 5px;">{b.get('status_label')}</span>
-                                <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.28); padding: 1px 7px; border-radius: 5px; font-size: 0.69rem; font-weight: 700;">{prio_lbl}: {prio_score}/100</span>
+                                <span style="background: rgba(148, 163, 184, 0.12); color: #CBD5E1; border: 1px solid rgba(148, 163, 184, 0.28); padding: 1px 7px; border-radius: 5px; font-size: 0.69rem; font-weight: 700;">{b_id}</span>
                             </div>
-                            <div style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC; line-height: 1.42; margin-bottom: 8px;">
+                            <div style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC; line-height: 1.42; margin-bottom: 10px;">
                                 {b_title_clean}
                             </div>
                         </div>
                         <div>
-                            <div style="display: flex; justify-content: space-between; font-size: 0.73rem; color: #94A3B8; margin-bottom: 3px;">
-                                <span>{conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
-                                <span>{imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
-                            </div>
-                            <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
-                                <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
-                            </div>
                             <details style="font-size: 0.74rem; color: #94A3B8;">
                                 <summary style="cursor: pointer; color: #7DD3FC; font-weight: 600; outline: none; user-select: none;">{ev_summary_lbl}</summary>
                                 <div style="margin-top: 5px; padding: 6px 8px; background: rgba(15, 23, 42, 0.85); border-radius: 5px; color: #CBD5E1; line-height: 1.48; font-size: 0.76rem;">
@@ -6284,50 +6287,27 @@ def render_insight_cards(insights_raw: str, df: pd.DataFrame = None, is_en: bool
 
 
 def render_agent_workflow_badges(result: dict, turn_id: str):
-    """Hiển thị huy hiệu bảo chứng tính toàn vẹn và tin cậy của dữ liệu (Trust & Integrity Seal)."""
-    lang = result.get("lang", "vi")
+    """Chỉ hiển thị cảnh báo ngắn gọn khi điểm kiểm định dữ liệu chưa đạt 100/100."""
+    lang = result.get("lang", "vi") if isinstance(result, dict) else "vi"
     is_en = (lang == "en")
-    evaluator = result.get("evaluator") or {}
+    evaluator = result.get("evaluator") if isinstance(result, dict) else {}
+    evaluator = evaluator or {}
     eval_score = evaluator.get("score", 100) if isinstance(evaluator, dict) else 100
-    eval_verdict = str(evaluator.get("verdict", "PASS") if isinstance(evaluator, dict) else "PASS")
+    eval_verdict = str(evaluator.get("verdict", "PASS") if isinstance(evaluator, dict) else "PASS").strip().upper()
     is_fully_verified = (eval_score >= 100 and eval_verdict == "PASS")
 
     if is_fully_verified:
-        seal_title = "✓ Dữ liệu đã được kiểm chứng tính toàn vẹn (Độ tin cậy 100%)" if not is_en else "✓ Verified Data Integrity (100% Trust Score)"
-        seal_color = "#00DF8F"
-        seal_bg = "rgba(0, 223, 143, 0.15)"
-        seal_border = "rgba(0, 223, 143, 0.3)"
-        seal_icon = "✓"
-    else:
-        seal_title = (
-            f"⚠️ Kết quả đạt kiểm định {eval_score}/100 ({eval_verdict}) — Vui lòng kiểm tra SQL & đối chiếu"
-            if not is_en
-            else f"⚠️ Audit Score {eval_score}/100 ({eval_verdict}) — Please inspect SQL & verify"
-        )
-        seal_color = "#F59E0B"
-        seal_bg = "rgba(245, 158, 11, 0.15)"
-        seal_border = "rgba(245, 158, 11, 0.35)"
-        seal_icon = "!"
-    source_label = "Nguồn: CSDL Doanh Nghiệp" if not is_en else "Source: Enterprise Database"
-    hint_label = "Xem chi tiết SQL & Tiến trình tại tab 🧭" if not is_en else "View full SQL & trace in 🧭 tab"
+        return
 
+    seal_title = (
+        f"Data verification notice ({eval_score}/100) — Click ⋯ below to inspect calculation & SQL"
+        if is_en
+        else f"Lưu ý kiểm định dữ liệu ({eval_score}/100) — Bấm ⋯ bên dưới để đối chiếu cách tính & SQL"
+    )
     st.markdown(f"""
-    <div style="background: #151A30; border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 12px; padding: 10px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
-        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="font-weight: 700; font-size: 0.86rem; color: {seal_color}; display: inline-flex; align-items: center; gap: 6px;">
-                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: {seal_bg}; color: {seal_color}; font-size: 0.75rem; font-weight: 800; border: 1px solid {seal_border};">{seal_icon}</span>
-                {seal_title}
-            </span>
-            <span style="color: rgba(255, 255, 255, 0.2);">•</span>
-            <span style="font-size: 0.82rem; color: #CBD5E1; font-weight: 500;">{source_label}</span>
-            <span style="color: rgba(255, 255, 255, 0.2);">•</span>
-            <span style="font-size: 0.78rem; font-weight: 600; background: #1E253E; color: #00F0FF; padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(0, 240, 255, 0.35);">
-                ⚡ Tối ưu Index
-            </span>
-        </div>
-        <div style="font-size: 0.8rem; color: #94A3B8;">
-            <i>{hint_label}</i>
-        </div>
+    <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #FBBF24;">
+        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #F59E0B;"></span>
+        <span>{html_lib.escape(seal_title)}</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -6395,10 +6375,10 @@ def render_result(result: dict, turn_id: str):
     if result.get("is_strategic_report"):
         memo_content = result.get("insights") or result.get("explanation", "")
         st.markdown("""
-        <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid rgba(0, 240, 255, 0.35); border-radius: 14px; padding: 18px 22px; margin-bottom: 14px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);">
-            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; margin-bottom: 14px;">
-                <span style="font-size: 1.1rem; font-weight: 800; color: #FFFFFF; letter-spacing: 0.3px;">
-                    🏛️ VĂN BẢN THAM MƯU CHIẾN LƯỢC BAN ĐIỀU HÀNH
+        <div style="background: #11141C; border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 12px; padding: 16px 20px; margin-bottom: 14px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px; margin-bottom: 12px;">
+                <span style="font-size: 1.02rem; font-weight: 700; color: #F8FAFC; letter-spacing: -0.01em;">
+                    Văn bản Tham mưu Chiến lược Ban Điều hành
                 </span>
                 <span class="crm-badge-neon">Executive Memo</span>
             </div>
@@ -6443,13 +6423,18 @@ def render_result(result: dict, turn_id: str):
                     is_en=is_en,
                 )
 
-            # Hiển thị chi tiết kỹ thuật & nhật ký kiểm toán nếu có
             if result.get("sql") or result.get("logs"):
-                with st.expander("🛠️ Technical SQL & Audit Context" if is_en else "🛠️ Chi tiết Kỹ thuật & Nhật ký AI", expanded=False):
-                    if result.get("sql"):
-                        st.code(result["sql"], language="sql")
-                    if result.get("logs"):
-                        st.code("\n".join(str(line) for line in result["logs"]), language="text")
+                _, c_more = st.columns([10.5, 1])
+                with c_more:
+                    _render_sql_popover(
+                        sql_query=result.get("sql", ""),
+                        result=result,
+                        df=None,
+                        turn_id=f"{turn_id}_exp",
+                        is_en=is_en,
+                        allow_edit=False,
+                        logs=result.get("logs", []),
+                    )
             return
 
     # 2. Hiển thị lỗi nếu có kèm Khung Sao chép Lỗi 1-Click (Copy to Clipboard)
@@ -6512,8 +6497,16 @@ def render_result(result: dict, turn_id: str):
                 is_en=is_en,
             )
         if sql_query:
-            with st.expander("🛠️ SQL Query Details" if is_en else "🛠️ Chi tiết Câu lệnh SQL", expanded=False):
-                st.code(sql_query, language="sql")
+            _, c_more = st.columns([10.5, 1])
+            with c_more:
+                _render_sql_popover(
+                    sql_query=sql_query,
+                    result=result,
+                    df=df,
+                    turn_id=f"{turn_id}_empty",
+                    is_en=is_en,
+                    allow_edit=False,
+                )
         return
 
     # Tự động thay thế các ô chuỗi rỗng / khoảng trắng / NaN trong cột text bằng nhãn rõ ràng
@@ -6562,8 +6555,6 @@ def render_result(result: dict, turn_id: str):
                 lambda val: unassigned_label if pd.isna(val) or (isinstance(val, str) and not val.strip()) else val
             )
     df = cleaned_df
-    # 2.5 Multi-Agent Collaborative Pipeline Ribbon (Hiển thị đồng thời 5 Agents phối hợp thời gian thực)
-    render_multi_agent_pipeline_ribbon(result, is_en=is_en)
 
     # 3. Thẻ Tóm tắt Chỉ số Điều hành (Executive KPI Summary Cards)
     render_executive_kpi_cards(df, is_en=is_en, user_query=user_query, sql_query=sql_query)
@@ -6650,9 +6641,8 @@ def render_result(result: dict, turn_id: str):
     tab_data_label = "Bảng số liệu & Báo cáo" if not is_en else "Data Table & Reports"
     tab_insight_label = "Insight & Hành động (Có cảnh báo)" if (has_anomaly and not is_en) else ("Insight & Phân tích" if not is_en else ("Insights & Action Plan (Alert)" if has_anomaly else "Insights & Analysis"))
     tab_forecast_label = "Dự báo xu hướng" if not is_en else "Forecast"
-    tab_sql_label = "Hội đồng 5 Agent & SQL" if not is_en else "5-Agent Matrix & SQL"
 
-    tab_data, tab_insight, tab_forecast, tab_sql = st.tabs([tab_data_label, tab_insight_label, tab_forecast_label, tab_sql_label])
+    tab_data, tab_insight, tab_forecast = st.tabs([tab_data_label, tab_insight_label, tab_forecast_label])
 
     # -----------------------------------------------------
     # TAB 1: BẢNG SỐ LIỆU & XUẤT BÁO CÁO (EXCEL, PDF, TELEGRAM, EMAIL)
@@ -7167,217 +7157,24 @@ def render_result(result: dict, turn_id: str):
                     explanation="Biểu đồ dự báo chuỗi thời gian dựa trên mô hình thích ứng Holt-Winters / San bằng số mũ (ETS) kèm Dải khoảng tin cậy 95% (Risk Corridor)."
                 )
 
-    # -----------------------------------------------------
-    # TAB 4: TIẾN TRÌNH AGENT & CÂU LỆNH SQL
-    # -----------------------------------------------------
-    with tab_sql:
-        # BANNER EXECUTIVE: HỘI ĐỒNG 5 AGENT CHUYÊN GIA VERAXUS
-        st.markdown(f"""
-        <div style="padding: 14px 18px; background: linear-gradient(135deg, #151A30 0%, #0B0E17 100%); border: 1.5px solid rgba(0, 240, 255, 0.4); border-radius: 12px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);">
-            <div style="font-weight: 800; font-size: 0.96rem; color: #00F0FF; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                <span style="letter-spacing: 0.03em;">🏛️ HỘI ĐỒNG 5 AGENT CHUYÊN GIA VERAXUS (MULTI-AGENT MATRIX)</span>
-                <span style="background: rgba(16, 185, 129, 0.2); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.6); font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 6px; letter-spacing: 0.05em;">100% COLLABORATIVE TRACE</span>
-            </div>
-            <div style="font-size: 0.82rem; color: #94A3B8; margin-top: 5px; line-height: 1.45;">
-                Minh bạch hóa toàn bộ chuỗi tư duy phối hợp đa tác tử: Phân rã nhiệm vụ (Plan-and-Solve), Thiết kế truy vấn (ICL), Kiểm toán độc lập 4 trụ cột (Maker-Checker 100/100), Phân tích dị biệt & Cố vấn chiến lược C-Level.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # AGENT 1: 🧭 MASTER SUPERVISOR & TASK PLANNER
-        plan = result.get("plan")
-        with st.expander("🧭 **Agent 1: Master Supervisor & Task Planner** (Phân tích Ý định & Phân rã Nhiệm vụ)", expanded=True):
-            if plan and plan.get("sub_tasks"):
-                comp_key = plan.get("complexity", "STANDARD")
-                complexity_map = {
-                    "BENCHMARK_EXTREMES": "⚡ Phân tích 2 Cực trị (Max / Min Benchmark)" if not is_en else "⚡ Dual Extremes Benchmark (Max / Min)",
-                    "MULTI_STEP_ANALYTIC": "🔬 Phân tích Đa bước (Multi-Step Analytics)" if not is_en else "🔬 Multi-Step Analytics",
-                    "TIME_SERIES_COHORT": "📈 Phân tích Chuỗi thời gian (Time-Series Cohort)" if not is_en else "📈 Time-Series Cohort Analysis",
-                    "DIRECT_SQL": "⚡ Truy vấn Trực tiếp (Direct Analysis)" if not is_en else "⚡ Direct Query Analysis",
-                }
-                disp_complexity = complexity_map.get(comp_key, comp_key.replace("_", " ").title())
-
-                # Làm sạch chuỗi ý định nghiệp vụ (bỏ tiền tố enum code thô)
-                raw_intent = plan.get("intent", user_query or "Truy vấn dữ liệu")
-                clean_intent = re.sub(r"^(Phân tích|Analyze)\s+[a-z0-9_]+:\s*", "", str(raw_intent), flags=re.IGNORECASE).strip()
-                if not clean_intent:
-                    clean_intent = user_query
-
-                # Làm sạch khung thời gian
-                raw_time = plan.get("time_horizon", "Thời điểm hiện tại" if not is_en else "Current active state")
-                disp_time = str(raw_time).replace("(to_date = '9999-01-01')", "(Nhân sự đang công tác)").replace("to_date = '9999-01-01'", "Nhân sự đang công tác")
-
-                disp_strategy = plan.get("execution_strategy", "Phân rã nhiệm vụ & Tổng hợp song song" if not is_en else "Plan-and-Solve / Decomposed Execution")
-
-                st.markdown(f"""
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
-                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
-                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Độ phức tạp bài toán' if not is_en else 'Query Complexity'}</div>
-                        <div style="font-size: 0.85rem; color: #00F0FF; font-weight: 700; margin-top: 2px;">{disp_complexity}</div>
-                    </div>
-                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
-                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Chiến lược điều phối' if not is_en else 'Execution Strategy'}</div>
-                        <div style="font-size: 0.85rem; color: #38BDF8; font-weight: 600; margin-top: 2px;">{disp_strategy}</div>
-                    </div>
-                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
-                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Ý định nghiệp vụ' if not is_en else 'Business Intent'}</div>
-                        <div style="font-size: 0.85rem; color: #E2E8F0; font-weight: 600; margin-top: 2px;">{clean_intent}</div>
-                    </div>
-                    <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 8px 12px;">
-                        <div style="font-size: 0.72rem; color: #94A3B8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em;">{'Khung thời gian' if not is_en else 'Time Horizon'}</div>
-                        <div style="font-size: 0.85rem; color: #10B981; font-weight: 600; margin-top: 2px;">{disp_time}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                sub_tasks_list = plan.get("sub_tasks", [])
-                st.markdown(f"<div style='margin-top: 10px; margin-bottom: 8px; font-weight: 700; font-size: 0.88rem; color: #00F0FF;'>📋 {'Kế hoạch thực thi phân rã' if not is_en else 'Decomposed Execution Plan'} ({len(sub_tasks_list)} {'bước' if not is_en else 'steps'}):</div>", unsafe_allow_html=True)
-                for st_item in sub_tasks_list:
-                    st.markdown(f"""
-                    <div style="background: #151A30; border-left: 3px solid #00F0FF; border-radius: 0 8px 8px 0; padding: 10px 14px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.08); border-left: 3px solid #00F0FF; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
-                        <div style="font-weight: 700; font-size: 0.88rem; color: #FFFFFF;">
-                            <span style="background: #1E253E; color: #00F0FF; border: 1px solid rgba(0,240,255,0.3); padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; margin-right: 6px; font-weight: 700;">Bước {st_item['step']}</span>
-                            {st_item['name']}
-                        </div>
-                        <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 3px; line-height: 1.4;">
-                            {st_item['desc']}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.caption("Supervisor đã tiếp nhận và hoàn tất định tuyến trực tiếp cho câu hỏi này." if not is_en else "Supervisor has routed and executed directly for this query.")
-
-        # AGENT 2: ⚡ DATA ENGINEER & SQL ARCHITECT
-        with st.expander("⚡ **Agent 2: Data Engineer & SQL Architect** (In-Context Learning & Thiết kế Truy vấn)", expanded=True):
-            few_shots = result.get("agent_trace", {}).get("few_shots", [])
-            if few_shots:
-                st.markdown(f"**Mẫu In-Context Learning (ICL) Tương đồng Đã Kích hoạt ({len(few_shots)} mẫu):**")
-                for s in few_shots:
-                    st.markdown(f"• **Mẫu {s.get('id')}** (Độ tương đồng: <span style='color: #00DF8F; font-weight: 700;'>{s.get('relevance')} pts</span>): *{s.get('goal')}*", unsafe_allow_html=True)
-
-            if sql_query:
-                st.markdown("#### Câu Lệnh SQL Tối Ưu Đã Thực Thi:")
-                st.code(sql_query, language="sql")
-
-                st.markdown("#### ⚡ Chỉnh sửa & Chạy lại SQL Trực tiếp (Live Playground):")
-                st.caption("Bạn có thể sửa câu lệnh SQL (đổi điều kiện WHERE, GROUP BY, ORDER BY, LIMIT...) và bấm nút bên dưới để cập nhật kết quả tức thì mà không cần gọi lại AI.")
-                edited_sql = st.text_area(
-                    "SQL Editor",
-                    value=sql_query,
-                    height=120,
-                    key=f"sql_edit_area_{turn_id}",
-                    label_visibility="collapsed"
-                )
-
-                btn_rerun_label = "⚡ Chạy lại câu lệnh SQL này" if not is_en else "⚡ Re-run Edited SQL"
-                if st.button(btn_rerun_label, key=f"btn_rerun_{turn_id}", type="primary"):
-                    engine = st.session_state.get("engine")
-                    if not engine:
-                        st.error("Chưa kết nối database để chạy câu lệnh SQL." if not is_en else "Database engine is not connected.")
-                    else:
-                        from src.database.query_runner import read_sql_capped
-                        from src.config import MAX_ROWS_CAP
-                        try:
-                            new_df, truncated = read_sql_capped(edited_sql, engine, cap=MAX_ROWS_CAP)
-                            if new_df is not None:
-                                result["sql"] = edited_sql
-                                result["df"] = new_df
-                                result["logs"].append(f"[SQL Playground] Updated with user-edited SQL.")
-                                st.toast("⚡ Đã cập nhật kết quả với câu lệnh SQL mới!", icon="⚡")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Lỗi thực thi SQL: {e}")
-
-        # AGENT 3: 🛡️ DATA AUDITOR & QUALITY EVALUATOR
-        evaluator = result.get("evaluator")
-        with st.expander("🛡️ **Agent 3: Data Auditor & Quality Evaluator** (Kiểm toán Độc lập 4 Trụ cột / Maker-Checker)", expanded=True):
-            if evaluator and evaluator.get("criteria"):
-                score = evaluator.get("score", 100)
-                verdict = evaluator.get("verdict", "PASS")
-                critique = evaluator.get("critique", "")
-
-                v_color = "#10B981" if verdict == "PASS" else "#F59E0B"
-                st.markdown(f"**Kết luận Thẩm định**: <span style='color: {v_color}; font-weight: 800; font-size: 1.05rem;'>{verdict} ({score}/100)</span> — *{critique}*", unsafe_allow_html=True)
-
-                c_c1, c_c2 = st.columns(2)
-                crits = evaluator.get("criteria", {})
-                with c_c1:
-                    sem = crits.get("semantic_alignment", {})
-                    icon_sem = "✅" if sem.get("passed") else "❌"
-                    st.markdown(f"**{icon_sem} Khớp Ngữ Nghĩa & Thực Thể (Semantic Alignment)**")
-                    st.caption(sem.get("detail", ""))
-
-                    temp = crits.get("temporal_validity", {})
-                    icon_temp = "✅" if temp.get("passed") else "❌"
-                    st.markdown(f"**{icon_temp} Toàn Vẹn Mốc Thời Gian (Temporal Validity)**")
-                    st.caption(temp.get("detail", ""))
-
-                with c_c2:
-                    comp = crits.get("comparative_sufficiency", {})
-                    icon_comp = "✅" if comp.get("passed") else "❌"
-                    st.markdown(f"**{icon_comp} Đầy Đủ Vế Đối Chiếu (Comparative Sufficiency)**")
-                    st.caption(comp.get("detail", ""))
-
-                    hlth = crits.get("data_health", {})
-                    icon_hlth = "✅" if hlth.get("passed") else "❌"
-                    st.markdown(f"**{icon_hlth} Tính Lành Mạnh Dữ Liệu (Data Health)**")
-                    st.caption(hlth.get("detail", ""))
-
-            attempts = result.get("attempts", 1)
-            eval_score = evaluator.get("score", 100) if evaluator else 100
-            eval_verdict = evaluator.get("verdict", "PASS") if evaluator else "PASS"
-            if attempts > 1:
-                if eval_score >= 100 or eval_verdict == "PASS":
-                    st.info(f"🔄 **Maker-Checker Self-Correction Loop**: Tác tử Auditor đã phát hiện điểm cần tối ưu và kích hoạt Data Engineer tự sửa lỗi hoàn tất sau **{attempts} vòng lặp âm thầm (Silent Self-Healing)**.")
-                else:
-                    st.warning(f"⚠️ **Maker-Checker Self-Correction Notice**: Tác tử Auditor đã thực hiện **{attempts} vòng lặp kiểm định** ({eval_score}/100 — {eval_verdict}).")
-            else:
-                if eval_score >= 100 or eval_verdict == "PASS":
-                    st.success("✅ **Maker-Checker Single Pass**: Dữ liệu và truy vấn đã vượt qua toàn bộ 4 tiêu chuẩn kiểm toán ngay trong lượt đầu tiên (Điểm tuyệt đối 100/100).")
-                else:
-                    st.warning(f"⚠️ **Maker-Checker Audit Notice**: Kết quả kiểm định đạt {eval_score}/100 ({eval_verdict}).")
-
-        # AGENT 4: 🔍 ANOMALY DETECTIVE & BI FORENSICS
-        with st.expander("🔍 **Agent 4: Anomaly Detective & BI Forensics** (Thám tử Dị biệt & Phân tích Biến động)", expanded=False):
-            stats = anomalies_info.get("summary_stats", {})
-            if stats:
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Tổng số bản ghi", f"{stats.get('count', 0):,}")
-                c2.metric("Giá trị TB (Mean)", f"{stats.get('mean', 0):,.2f}")
-                c3.metric("Đỉnh cao nhất (Max)", f"{stats.get('max', 0):,.2f}")
-                c4.metric("Sàn thấp nhất (Min)", f"{stats.get('min', 0):,.2f}")
-
-            if has_anomaly:
-                st.markdown("#### Phát hiện Dị biệt & Biến động Đáng chú ý:")
-                for f in anomalies_info.get("findings", []):
-                    st.warning(f"• {f.get('message')}")
-            else:
-                st.success("Thuật toán không phát hiện điểm dị biệt hoặc biến động cực đoan bất thường trong tập dữ liệu này.")
-
-        # AGENT 5: EXECUTIVE STRATEGY ADVISOR
-        with st.expander("**Agent 5: Executive Strategy Advisor** (Cố vấn Chiến lược & Nghị quyết Điều hành)" if not is_en else "**Agent 5: Executive Strategy Advisor**", expanded=False):
-            insights = result.get("insights", "")
-            if insights or (df is not None and not df.empty):
-                st.markdown("#### Khuyến nghị Trọng tâm & Kế hoạch Hành động:")
-                render_insight_cards(insights, df=df, is_en=is_en, user_query=result.get("query", ""), turn_id=f"tab4_{turn_id}")
-            else:
-                st.info("Chuyển sang tab 'Insight & Phân tích' để xem phân tích chi tiết từ Strategy Advisor.")
-
-        # NHẬT KÝ CHI TIẾT (ACTIVITY LOGS)
-        logs = result.get("logs", [])
-        if logs:
-            st.markdown("---")
-            with st.expander("📜 **Nhật Ký Tác Vụ Đầy Đủ (Execution Activity Logs)**", expanded=False):
-                for log in logs:
-                    st.text(f"• {log}")
-
     # 6. Gợi ý Câu hỏi Phân tích Tiếp nối (Follow-up Question Suggestions)
     followups = result.get("followups", [])
     if not followups and df is not None and not df.empty:
         try:
             from src.llm.agent import generate_grounded_fallback_followups
             schema_ctx = st.session_state.get("schema_context", "")
-            followups = generate_grounded_fallback_followups(df, schema_context=schema_ctx, current_query=user_query, lang=lang)
+            _hist_qs = [
+                str(h.get("query") or "")
+                for h in st.session_state.get("history", [])
+                if isinstance(h, dict) and h.get("query")
+            ]
+            followups = generate_grounded_fallback_followups(
+                df,
+                schema_context=schema_ctx,
+                current_query=user_query,
+                lang=lang,
+                asked_queries=_hist_qs,
+            )
             result["followups"] = followups
         except Exception:
             pass
@@ -7395,7 +7192,7 @@ def render_result(result: dict, turn_id: str):
             is_en=is_en,
         )
 
-    # 7. VÒNG LẶP TIẾN HÓA TRI THỨC (Tầng 2: Continuous Learning & Dynamic Memory)
+    # 7. Đánh giá kết quả & Popover kiểm chứng SQL gọn nhẹ (⋯)
     _user_q = result.get("query", "")
     _sql_q = result.get("sql", "")
     if _user_q and _sql_q:
@@ -7405,396 +7202,403 @@ def render_result(result: dict, turn_id: str):
             evaluator_score=result.get("evaluator", {}).get("score", 100) if isinstance(result.get("evaluator"), dict) else 100,
             dialect=st.session_state.get("db_dialect", "MySQL"),
             turn_id=turn_id,
-            is_en=is_en
+            is_en=is_en,
+            result=result,
+            df=df,
         )
+    elif _sql_q:
+        _, c_more_only = st.columns([10.5, 1])
+        with c_more_only:
+            _render_sql_popover(
+                sql_query=_sql_q,
+                result=result,
+                df=df,
+                turn_id=turn_id,
+                is_en=is_en,
+                allow_edit=False,
+            )
 
 
-def render_feedback_learning_bar(user_query: str, sql_query: str, evaluator_score: int = 100, dialect: str = "MySQL", turn_id: str = "main", is_en: bool = False):
-    """Render thanh Đánh giá Tương tác & Vòng lặp Tiến hóa Tri thức Động (Tầng 2)."""
+def _build_query_scope_summary(
+    result: Optional[dict],
+    df: Optional[pd.DataFrame],
+    sql_query: str,
+    is_en: bool = False,
+) -> dict:
+    """Trích xuất phạm vi bảng, bộ lọc, số bản ghi và thời gian thực thi từ truy vấn SQL thực tế."""
+    res = result if isinstance(result, dict) else {}
+    sql_str = str(sql_query or "").strip()
+
+    trace = res.get("agent_trace") or {}
+    schema_link = trace.get("schema_linking") or {} if isinstance(trace, dict) else {}
+    raw_selected = schema_link.get("selected_tables") or [] if isinstance(schema_link, dict) else []
+
+    tables: list[str] = []
+    for t in raw_selected:
+        t_clean = str(t or "").strip()
+        if t_clean and t_clean not in tables:
+            tables.append(t_clean)
+
+    if not tables and sql_str:
+        cte_names: set[str] = set()
+        for cte_match in re.finditer(
+            r"(?:\bWITH(?:\s+RECURSIVE)?|\)\s*,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s*\(",
+            sql_str,
+            flags=re.IGNORECASE,
+        ):
+            cte_names.add(cte_match.group(1).lower())
+
+        for tbl_match in re.finditer(
+            r"\b(?:FROM|JOIN)\s+[`\"\[]?([a-zA-Z_][a-zA-Z0-9_.]*)[`\"\]]?",
+            sql_str,
+            flags=re.IGNORECASE,
+        ):
+            raw_tbl = tbl_match.group(1).strip()
+            bare_tbl = raw_tbl.lower().split(".")[-1]
+            if bare_tbl in cte_names or bare_tbl in {"select", "dual"}:
+                continue
+            if raw_tbl not in tables:
+                tables.append(raw_tbl)
+
+    filters: list[str] = []
+    if sql_str:
+        sql_low = sql_str.lower()
+        has_cancel_excl = bool(
+            re.search(
+                r"(?:!=|<>|\bnot\s+in\b|\bnot\s+like\b)[^;\n]{0,80}(?:hủy|huy|cancel|trả|refund|void)",
+                sql_low,
+            )
+        )
+        if has_cancel_excl:
+            filters.append("Cancelled/returned excluded" if is_en else "Đã loại đơn hủy/trả")
+
+        if "9999-01-01" in sql_low:
+            filters.append("Active records only" if is_en else "Chỉ tính nhân sự đang làm việc")
+
+        sql_no_active = sql_low.replace("9999-01-01", "")
+        where_clauses = re.findall(
+            r"\bwhere\b([\s\S]*?)(?:\bgroup\s+by\b|\border\s+by\b|\blimit\b|\bhaving\b|\bunion\b|$)",
+            sql_no_active,
+        )
+        where_region = "\n".join(where_clauses)
+        has_date_filter = bool(
+            where_region
+            and re.search(
+                r"(?:['\"](?:19|20)\d{2}-\d{2}(?:-\d{2})?['\"]"
+                r"|\b(?:year|month|strftime|date_trunc|date_format|datediff)\s*\("
+                r"|\b(?:ngay|date|thang|nam|quarter|year|month|hire_date|from_date|to_date)[a-z0-9_]*\s*(?:=|>=|<=|>|<|\bbetween\b|\blike\b))",
+                where_region,
+            )
+        )
+        if has_date_filter:
+            filters.append("Date filter applied" if is_en else "Có lọc khoảng thời gian")
+
+    row_count = int(len(df)) if df is not None else 0
+
+    time_str = ""
+    exec_time_ms_raw = res.get("execution_time_ms")
+    if exec_time_ms_raw is not None:
+        try:
+            exec_time_ms = float(exec_time_ms_raw)
+            if exec_time_ms >= 1000.0:
+                time_str = f"{exec_time_ms / 1000.0:.1f}s"
+            elif exec_time_ms > 0:
+                time_str = f"{exec_time_ms:.0f} ms"
+        except (TypeError, ValueError):
+            time_str = ""
+
+    evaluator = res.get("evaluator") or {}
+    eval_score = evaluator.get("score", 100) if isinstance(evaluator, dict) else 100
+    eval_verdict = str(evaluator.get("verdict", "PASS") if isinstance(evaluator, dict) else "PASS").strip().upper()
+    audit_warning = ""
+    if eval_score < 100 or eval_verdict != "PASS":
+        critique = str(evaluator.get("critique", "") if isinstance(evaluator, dict) else "").strip()
+        if critique:
+            audit_warning = (
+                f"Verification notice ({eval_score}/100): {critique}"
+                if is_en
+                else f"Lưu ý đối chiếu ({eval_score}/100): {critique}"
+            )
+        else:
+            audit_warning = (
+                f"Verification notice ({eval_score}/100)"
+                if is_en
+                else f"Lưu ý đối chiếu ({eval_score}/100)"
+            )
+
+    summary_parts: list[str] = []
+    if tables:
+        summary_parts.append(("Tables: " if is_en else "Bảng: ") + ", ".join(tables))
+    if filters:
+        summary_parts.append(("Filters: " if is_en else "Bộ lọc: ") + ", ".join(filters))
+    summary_parts.append(f"{row_count:,} {'rows' if is_en else 'bản ghi'}")
+    if time_str:
+        summary_parts.append(time_str)
+
+    return {
+        "tables": tables,
+        "filters": filters,
+        "row_count": row_count,
+        "time_str": time_str,
+        "audit_warning": audit_warning,
+        "summary_line": " · ".join(summary_parts),
+    }
+
+
+def _render_sql_popover(
+    sql_query: str = "",
+    result: Optional[dict] = None,
+    df: Optional[pd.DataFrame] = None,
+    turn_id: str = "main",
+    is_en: bool = False,
+    allow_edit: bool = False,
+    user_query: str = "",
+    dialect: str = "MySQL",
+    evaluator_score: int = 100,
+    logs: Optional[list] = None,
+):
+    """Hiển thị gọn phạm vi dữ liệu, câu lệnh SQL và tùy chọn chỉnh sửa bên trong nút tĩnh `⋯`."""
+    help_label = "Inspect calculation & SQL" if is_en else "Xem cách tính & câu lệnh SQL"
+    with st.popover("⋯", help=help_label, use_container_width=True):
+        scope = _build_query_scope_summary(result, df, sql_query, is_en=is_en)
+        tables_txt = ", ".join(scope["tables"]) if scope["tables"] else ("None" if is_en else "Không xác định")
+        filters_txt = ", ".join(scope["filters"]) if scope["filters"] else ("None" if is_en else "Không có")
+        rec_txt = f"{scope['row_count']:,} {'rows' if is_en else 'bản ghi'}"
+        if scope["time_str"]:
+            rec_txt += f" · {scope['time_str']}"
+
+        hdr_lbl = "Scope & Filters" if is_en else "Phạm vi dữ liệu & bộ lọc"
+        lbl_tbl = "Tables" if is_en else "Bảng dữ liệu"
+        lbl_flt = "Filters" if is_en else "Bộ lọc"
+        lbl_rec = "Result" if is_en else "Kết quả"
+
+        scope_html = (
+            f'<div style="background: #11141C; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 0.8rem; line-height: 1.5; color: #CBD5E1;">'
+            f'<div style="font-weight: 600; color: #F8FAFC; margin-bottom: 4px;">{html_lib.escape(hdr_lbl)}</div>'
+            f'<div><span style="color: #64748B;">{html_lib.escape(lbl_tbl)}:</span> {html_lib.escape(tables_txt)}</div>'
+            f'<div><span style="color: #64748B;">{html_lib.escape(lbl_flt)}:</span> {html_lib.escape(filters_txt)}</div>'
+            f'<div><span style="color: #64748B;">{html_lib.escape(lbl_rec)}:</span> {html_lib.escape(rec_txt)}</div>'
+            f'</div>'
+        )
+        st.markdown(scope_html, unsafe_allow_html=True)
+
+        if scope["audit_warning"]:
+            st.warning(scope["audit_warning"])
+
+        if sql_query:
+            st.markdown("**SQL Query**" if is_en else "**Câu lệnh SQL**")
+            st.code(sql_query, language="sql")
+
+        if logs and not allow_edit:
+            with st.expander("Execution logs" if is_en else "Nhật ký xử lý", expanded=False):
+                st.code("\n".join(str(line) for line in logs), language="text")
+
+        if allow_edit and sql_query:
+            exp_title = "Edit SQL & Re-run" if is_en else "Chỉnh sửa SQL & chạy lại"
+            with st.expander(exp_title, expanded=False):
+                edited_sql = st.text_area(
+                    "SQL",
+                    value=sql_query,
+                    height=110,
+                    key=f"sql_edit_area_{turn_id}",
+                    label_visibility="collapsed",
+                )
+                custom_note = st.text_input(
+                    "Business note (optional)" if is_en else "Ghi chú nghiệp vụ (tùy chọn)",
+                    placeholder=(
+                        "e.g., Calculate monthly SUM(revenue)..."
+                        if is_en
+                        else "Ví dụ: Tính SUM(doanh_thu) theo từng tháng..."
+                    ),
+                    key=f"txt_custom_note_{turn_id}",
+                )
+                c_run, c_save = st.columns(2, gap="small")
+                with c_run:
+                    if st.button(
+                        "Re-run SQL" if is_en else "Chạy lại SQL",
+                        key=f"btn_rerun_{turn_id}",
+                        use_container_width=True,
+                    ):
+                        engine = st.session_state.get("engine")
+                        if not engine:
+                            st.error("Database engine is not connected." if is_en else "Chưa kết nối database để chạy câu lệnh SQL.")
+                        else:
+                            from src.database.query_runner import read_sql_capped
+                            from src.config import MAX_ROWS_CAP
+                            try:
+                                new_df, _truncated = read_sql_capped(edited_sql, engine, cap=MAX_ROWS_CAP)
+                                if new_df is not None and isinstance(result, dict):
+                                    result["sql"] = edited_sql
+                                    result["df"] = new_df
+                                    result.setdefault("logs", []).append("[SQL Editor] Updated with user-edited SQL.")
+                                    st.toast("Updated results with edited SQL." if is_en else "Đã cập nhật kết quả theo SQL mới.")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"SQL execution error: {e}" if is_en else f"Lỗi thực thi SQL: {e}")
+
+                with c_save:
+                    if st.button(
+                        "Save as template" if is_en else "Lưu làm mẫu",
+                        key=f"btn_save_finetune_{turn_id}",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        sql_to_save = (edited_sql or "").strip() or sql_query.strip()
+                        if sql_to_save:
+                            try:
+                                from src.llm.dynamic_memory import save_learned_case
+                                save_learned_case(
+                                    user_query=user_query,
+                                    sql_query=sql_to_save,
+                                    intent_explanation=custom_note.strip() or ("Manually refined query template" if is_en else "Mẫu truy vấn hiệu chỉnh thủ công"),
+                                    dialect=dialect,
+                                    evaluator_score=100,
+                                    rating=1,
+                                    source="manual_edit",
+                                )
+                                st.success("Saved as reusable query template." if is_en else "Đã lưu mẫu truy vấn chuẩn.")
+                            except ImportError:
+                                pass
+
+
+def render_feedback_learning_bar(
+    user_query: str,
+    sql_query: str,
+    evaluator_score: int = 100,
+    dialect: str = "MySQL",
+    turn_id: str = "main",
+    is_en: bool = False,
+    result: Optional[dict] = None,
+    df: Optional[pd.DataFrame] = None,
+):
+    """Render thanh Đánh giá kết quả tối giản kèm nút tĩnh `⋯` kiểm chứng cách tính & SQL."""
     if not user_query or not sql_query:
         return
 
-    st.markdown("<hr style='margin: 16px 0 10px 0; border: none; border-top: 1px dashed rgba(0, 240, 255, 0.22);' />", unsafe_allow_html=True)
+    st.markdown("<hr style='margin: 16px 0 10px 0; border: none; border-top: 1px solid rgba(255, 255, 255, 0.07);' />", unsafe_allow_html=True)
 
-    c_hdr, c_btn1, c_btn2 = st.columns([3.6, 1.2, 1.2], gap="small", vertical_alignment="center")
+    c_hdr, c_btn1, c_btn2, c_more = st.columns([3.4, 1.15, 1.15, 0.55], gap="small", vertical_alignment="center")
     with c_hdr:
         st.markdown(
-            "🧠 <span style='font-size: 0.85rem; font-weight: 700; color: #CBD5E1;'>Vòng Lặp Cải Tiến & Đánh Giá Tri Thức</span> "
-            "<span style='font-size: 0.72rem; color: #00F0FF; background: rgba(0,240,255,0.12); padding: 2px 7px; border-radius: 12px; border: 1px solid rgba(0,240,255,0.3);'>Tier 2 Online Learning</span>"
+            "<span style='font-size: 0.84rem; font-weight: 500; color: #94A3B8;'>Đánh giá kết quả phân tích</span>"
             if not is_en else
-            "🧠 <span style='font-size: 0.85rem; font-weight: 700; color: #CBD5E1;'>Continuous Learning & Knowledge Feedback</span>"
-        , unsafe_allow_html=True)
+            "<span style='font-size: 0.84rem; font-weight: 500; color: #94A3B8;'>Rate this analysis</span>",
+            unsafe_allow_html=True,
+        )
 
     try:
         from src.llm.dynamic_memory import save_learned_case, record_evolution_event
     except ImportError:
-        return
+        save_learned_case = None
+        record_evolution_event = None
 
     with c_btn1:
-        if st.button("👍 Hài lòng", key=f"btn_thumb_up_{turn_id}", use_container_width=True, help="Xác thực kết quả chuẩn mực và lưu vào Ngân hàng Tri thức Động"):
-            save_learned_case(
-                user_query=user_query,
-                sql_query=sql_query,
-                intent_explanation="Người dùng xác thực hài lòng",
-                dialect=dialect,
-                evaluator_score=evaluator_score,
-                rating=1,
-                source="user_feedback"
-            )
-            st.toast("🎉 Đã lưu vào Ngân hàng Tri thức Động (Dynamic Memory Bank) của Agent!", icon="🧠")
+        btn_up_lbl = "👍 Helpful" if is_en else "👍 Hài lòng"
+        btn_up_help = "Save this query as a verified template" if is_en else "Lưu kết quả này làm mẫu truy vấn chuẩn"
+        if st.button(btn_up_lbl, key=f"btn_thumb_up_{turn_id}", use_container_width=True, help=btn_up_help):
+            if save_learned_case:
+                save_learned_case(
+                    user_query=user_query,
+                    sql_query=sql_query,
+                    intent_explanation="Người dùng xác thực hài lòng",
+                    dialect=dialect,
+                    evaluator_score=evaluator_score,
+                    rating=1,
+                    source="user_feedback",
+                )
+            st.toast("Saved positive feedback." if is_en else "Đã lưu đánh giá hài lòng.")
 
     with c_btn2:
-        if st.button("👎 Cần sửa", key=f"btn_thumb_down_{turn_id}", use_container_width=True, help="Ghi nhận phản hồi để Agent tự suy ngẫm"):
-            record_evolution_event("USER_THUMBS_DOWN", user_query, "Người dùng đánh giá kết quả chưa đạt", score=evaluator_score)
-            st.toast("📝 Đã ghi nhận phản hồi để Agent tự phản tỉnh và cải thiện!", icon="ℹ️")
+        btn_dn_lbl = "👎 Needs fix" if is_en else "👎 Cần sửa"
+        btn_dn_help = "Record feedback to improve future queries" if is_en else "Ghi nhận phản hồi để cải thiện truy vấn"
+        if st.button(btn_dn_lbl, key=f"btn_thumb_down_{turn_id}", use_container_width=True, help=btn_dn_help):
+            if record_evolution_event:
+                record_evolution_event("USER_THUMBS_DOWN", user_query, "Người dùng đánh giá kết quả chưa đạt", score=evaluator_score)
+            st.toast("Feedback recorded." if is_en else "Đã ghi nhận phản hồi cần chỉnh sửa.")
 
-    with st.expander("✏️ **Hiệu chỉnh SQL & Huấn luyện Tức thì (Fine-Tune Memory)**", expanded=False):
-        st.caption("Chuyên gia có thể sửa đổi trực tiếp câu lệnh SQL hoặc ghi chú nghiệp vụ để nạp làm mẫu chuẩn mực cho các truy vấn sau:")
-        custom_sql = st.text_area("Câu lệnh SQL tối ưu:", value=sql_query, height=100, key=f"txt_custom_sql_{turn_id}")
-        custom_note = st.text_input("Ghi chú phân rã nghiệp vụ:", placeholder="Ví dụ: Cần tính SUM(s.salary) thay vì AVG...", key=f"txt_custom_note_{turn_id}")
-
-        if st.button("⚡️ Lưu làm Mẫu Chuẩn Mực (Gold Standard)", key=f"btn_save_finetune_{turn_id}", type="primary"):
-            if custom_sql.strip():
-                new_id = save_learned_case(
-                    user_query=user_query,
-                    sql_query=custom_sql.strip(),
-                    intent_explanation=custom_note.strip() or "Chuyên gia hiệu chỉnh thủ công",
-                    dialect=dialect,
-                    evaluator_score=100,
-                    rating=1,
-                    source="manual_edit"
-                )
-                st.success(f"🚀 Đã nạp thành công Mẫu Chuẩn Mực #{new_id} vào Dynamic Few-Shot Bank!")
+    with c_more:
+        _render_sql_popover(
+            sql_query=sql_query,
+            result=result,
+            df=df,
+            turn_id=turn_id,
+            is_en=is_en,
+            allow_edit=True,
+            user_query=user_query,
+            dialect=dialect,
+            evaluator_score=evaluator_score,
+        )
 
 
 def render_multi_agent_pipeline_ribbon(result: dict, is_en: bool = False):
-    """
-    Hiển thị dải băng 5-Agent Collaborative Pipeline trực quan ngay đầu kết quả:
-    - 5 Thẻ Agent hiển thị đồng thời theo chiều ngang (Horizontal Stepper).
-    - Thể hiện rõ nét luồng phối hợp: Supervisor -> Data Engineer -> Data Auditor -> Anomaly Detective -> Strategy Advisor.
-    - Cung cấp các chỉ số vi mô thực tế (Complexity, ICL samples, Audit Score, Anomaly findings, Action plan).
-    """
+    """Chỉ hiển thị cảnh báo gọn khi kết quả kiểm định chưa đạt 100/100; ẩn hoàn toàn khi đạt chuẩn."""
     if not result:
         return
 
-    # 1. Trích xuất metadata thực tế của từng Agent
-    trace = result.get("agent_trace", {})
-    plan = trace.get("plan", {})
-    few_shots = trace.get("few_shots", [])
-    evaluator = result.get("evaluator", {})
-    anomalies_info = result.get("anomalies_info", {})
-    anomalies_findings = anomalies_info.get("findings", []) if anomalies_info else []
-    attempts = result.get("attempts", 1)
-    exec_time_ms = result.get("execution_time_ms", 185.0)
+    evaluator = result.get("evaluator") or {}
+    score = evaluator.get("score", 100) if isinstance(evaluator, dict) else 100
+    verdict = str(evaluator.get("verdict", "PASS") if isinstance(evaluator, dict) else "PASS").strip().upper()
+    if score >= 100 and verdict == "PASS":
+        return
 
-    # Agent 1: Supervisor & Schema Linking
-    complexity = plan.get("complexity", "DIRECT_SQL")
-    subtasks = plan.get("subtasks", [])
-    subtasks_cnt = len(subtasks) if subtasks else 2
-    comp_badge = complexity.replace("_", " ")
-    schema_link = trace.get("schema_linking", {})
-    sel_tbls = schema_link.get("selected_tables", [])
-    if sel_tbls:
-        tbl_info = f"{len(sel_tbls)} Tables" if is_en else f"{len(sel_tbls)} Bảng"
-    else:
-        tbl_info = f"{subtasks_cnt} {'Subtasks' if is_en else 'Nhiệm vụ'}"
-
-    # Agent 2: Data Engineer
-    num_few_shots = len(few_shots) if few_shots else (2 if "icl" in str(result.get("logs", "")).lower() else 1)
-    sql_status = f"{num_few_shots} ICL Samples" if is_en else f"{num_few_shots} Mẫu ICL"
-
-    # Agent 3: Data Auditor
-    score = evaluator.get("score", 100) if evaluator else 100
-    verdict = evaluator.get("verdict", "PASS") if evaluator else "PASS"
-    crits = evaluator.get("criteria", {}) if evaluator else {}
-    passed_pillars = sum(1 for c in crits.values() if c.get("passed")) if crits else (4 if score >= 100 else 3)
-    total_pillars = len(crits) if crits else 4
-    pillar_icon = "✅" if (passed_pillars == total_pillars and score >= 100) else "⚠️"
-    pillar_text = f"{pillar_icon} {passed_pillars}/{total_pillars} {'Pillars Check' if is_en else 'Trụ cột đạt'}"
-
-    if attempts > 1:
-        if score >= 100:
-            audit_tag = f"Self-Healed ({attempts}x)" if is_en else f"Tự Sửa Lỗi ({attempts} Lần)"
-            audit_color = "#10B981"
-        else:
-            audit_tag = f"Audited ({attempts}x)" if is_en else f"Tự Sửa Lỗi ({attempts} Lần)"
-            audit_color = "#F59E0B"
-    else:
-        audit_tag = "Single-Pass 100%" if is_en else "Vượt Chuẩn 100%"
-        audit_color = "#10B981" if score >= 100 else "#F59E0B"
-
-    # Agent 4: Anomaly Detective
-    num_anom = len(anomalies_findings)
-    if num_anom > 0:
-        anom_tag = f"{num_anom} Anomalies" if is_en else f"{num_anom} Điểm Dị Biệt"
-        anom_color = "#A855F7"
-    else:
-        anom_tag = "Normal Distribution" if is_en else "Phân Phối Chuẩn"
-        anom_color = "#38BDF8"
-
-    # Agent 5: Strategy Advisor
-    strat_tag = "Action Matrix" if is_en else "Nghị Quyết HĐQT"
-
-    # Tiêu đề & Nhãn song ngữ
-    hdr_title = "⚡ 5-AGENT COLLABORATIVE PIPELINE • REAL-TIME WORKFLOW" if is_en else "⚡ HỆ THỐNG 5 AGENT PHỐI HỢP THỜI GIAN THỰC (MULTI-AGENT MATRIX)"
-    hdr_badge = "✓ 100% COLLABORATIVE TRACE" if is_en else "✓ 100% MINH BẠCH TƯ DUY"
-
+    warn_label = (
+        f"Verification notice ({score}/100) — Click ⋯ below to inspect calculation & SQL"
+        if is_en
+        else f"Lưu ý kiểm định ({score}/100) — Bấm ⋯ bên dưới để đối chiếu cách tính & SQL"
+    )
     try:
-        raw_ribbon_html = f"""<div style="background: linear-gradient(135deg, rgba(21, 26, 48, 0.95) 0%, rgba(11, 14, 23, 0.98) 100%); border: 1.5px solid rgba(0, 240, 255, 0.25); border-radius: 14px; padding: 12px 16px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(0, 240, 255, 0.08); backdrop-filter: blur(12px);">
-<div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 8px; margin-bottom: 10px;">
-<div style="display: flex; align-items: center; gap: 8px;">
-<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00DF8F; box-shadow: 0 0 10px #00DF8F; animation: vxPulseDot 1.2s ease-in-out infinite;"></span>
-<span style="font-size: 0.78rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{hdr_title}</span>
-</div>
-<span style="font-size: 0.68rem; font-weight: 700; color: #00DF8F; background: rgba(0, 223, 143, 0.12); border: 1px solid rgba(0, 223, 143, 0.35); padding: 2px 8px; border-radius: 6px; letter-spacing: 0.04em;">{hdr_badge}</span>
-</div>
-<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px;">
-<div style="background: rgba(0, 240, 255, 0.04); border: 1px solid rgba(0, 240, 255, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-<span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; display: flex; align-items: center; gap: 4px;">🧭 1. Supervisor</span>
-<span style="font-size: 0.6rem; font-weight: 700; color: #00F0FF; background: rgba(0, 240, 255, 0.15); padding: 1px 4px; border-radius: 4px;">PLAN</span>
-</div>
-<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{comp_badge}</div>
-<div style="font-size: 0.66rem; color: #94A3B8;">📋 {tbl_info} • {subtasks_cnt} {'Steps' if is_en else 'Bước'}</div>
-</div>
-<div style="background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-<span style="font-size: 0.72rem; font-weight: 800; color: #38BDF8; display: flex; align-items: center; gap: 4px;">⚡ 2. Data Eng</span>
-<span style="font-size: 0.6rem; font-weight: 700; color: #38BDF8; background: rgba(56, 189, 248, 0.15); padding: 1px 4px; border-radius: 4px;">SQL</span>
-</div>
-<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{sql_status}</div>
-<div style="font-size: 0.66rem; color: #94A3B8;">⏱️ {exec_time_ms:.0f} ms • CTE/Agg</div>
-</div>
-<div style="background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-<span style="font-size: 0.72rem; font-weight: 800; color: #10B981; display: flex; align-items: center; gap: 4px;">🛡️ 3. Auditor</span>
-<span style="font-size: 0.6rem; font-weight: 700; color: {audit_color}; background: rgba(16, 185, 129, 0.15); padding: 1px 4px; border-radius: 4px;">{score}/100</span>
-</div>
-<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{audit_tag}</div>
-<div style="font-size: 0.66rem; color: #94A3B8;">{pillar_text}</div>
-</div>
-<div style="background: rgba(168, 85, 247, 0.04); border: 1px solid rgba(168, 85, 247, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-<span style="font-size: 0.72rem; font-weight: 800; color: #A855F7; display: flex; align-items: center; gap: 4px;">🔍 4. Detective</span>
-<span style="font-size: 0.6rem; font-weight: 700; color: #A855F7; background: rgba(168, 85, 247, 0.15); padding: 1px 4px; border-radius: 4px;">SCAN</span>
-</div>
-<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{anom_tag}</div>
-<div style="font-size: 0.66rem; color: #94A3B8;">📊 Z-Score & IQR</div>
-</div>
-<div style="background: rgba(245, 158, 11, 0.04); border: 1px solid rgba(245, 158, 11, 0.22); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-<span style="font-size: 0.72rem; font-weight: 800; color: #F59E0B; display: flex; align-items: center; gap: 4px;">💡 5. Strategy</span>
-<span style="font-size: 0.6rem; font-weight: 700; color: #F59E0B; background: rgba(245, 158, 11, 0.15); padding: 1px 4px; border-radius: 4px;">ADVISE</span>
-</div>
-<div style="font-size: 0.75rem; font-weight: 700; color: #F8FAFC; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{strat_tag}</div>
-<div style="font-size: 0.66rem; color: #94A3B8;">🏛️ ESG & Meritocracy</div>
-</div>
-</div>
-</div>"""
-        clean_ribbon_html = re.sub(r'\n\s*', ' ', raw_ribbon_html).strip()
-        st.markdown(clean_ribbon_html, unsafe_allow_html=True)
+        raw_ribbon_html = (
+            f'<div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); '
+            f'border-radius: 8px; padding: 8px 14px; margin: 2px 0 12px 0; display: flex; align-items: center; '
+            f'gap: 8px; font-size: 0.82rem; color: #FBBF24;">'
+            f'<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #F59E0B;"></span>'
+            f'<span>{html_lib.escape(warn_label)}</span>'
+            f'</div>'
+        )
+        st.markdown(raw_ribbon_html, unsafe_allow_html=True)
     except Exception:
         pass
 
 
-
-
-def render_veraxus_loading_html(text: str) -> str:
-    """
-    Hiển thị widget loading với biểu tượng độc quyền VERAXUS & Multi-Agent Live Telemetry HUD:
-    - Vòng xoay quỹ đạo kép đa lớp (Dual Kinetic Neon Rings) màu Cyan (#00F0FF) và Emerald (#00DF8F).
-    - Lõi pha lê 3D đa giác lập thể (3D Faceted Geometric Crystal Core) thương hiệu Veraxus với hiệu ứng phát quang lơ lửng.
-    - Hệ thống Live Telemetry hiển thị đồng thời cả 5 Agents phối hợp song song ngay từ lúc người dùng gửi câu hỏi.
-    """
+def render_veraxus_loading_html(text: str, is_en: Optional[bool] = None) -> str:
+    """Hiển thị chỉ báo đang xử lý tối giản (3 chấm xoay vòng + 1 dòng nghiệp vụ tự nhiên)."""
     clean_text = str(text or "").strip()
     low_t = clean_text.lower()
 
-    if "agent 1" in low_t or "supervisor" in low_t or "router" in low_t or "phân tích câu hỏi" in low_t:
-        active_step = 1
-        agent_tag = "🧭 AGENT 1/5 • MASTER SUPERVISOR & PLANNER"
-        tag_color = "#00F0FF"
-        tag_bg = "rgba(0, 240, 255, 0.16)"
-        tag_border = "rgba(0, 240, 255, 0.45)"
-    elif "agent 2" in low_t or "data engineer" in low_t or "sql engine" in low_t or "in-context" in low_t or "database engine" in low_t or "thực thi" in low_t:
-        active_step = 2
-        agent_tag = "⚡ AGENT 2/5 • DATA ENGINEER & SQL ARCHITECT"
-        tag_color = "#38BDF8"
-        tag_bg = "rgba(56, 189, 248, 0.16)"
-        tag_border = "rgba(56, 189, 248, 0.45)"
-    elif "agent 3" in low_t or "data auditor" in low_t or "evaluator" in low_t or "kiểm định" in low_t or "audit" in low_t:
-        active_step = 3
-        agent_tag = "🛡️ AGENT 3/5 • DATA AUDITOR & QUALITY EVALUATOR"
-        tag_color = "#10B981"
-        tag_bg = "rgba(16, 185, 129, 0.16)"
-        tag_border = "rgba(16, 185, 129, 0.45)"
-    elif "agent 4" in low_t or "anomaly detective" in low_t or "dị biệt" in low_t or "outlier" in low_t or "forensics" in low_t:
-        active_step = 4
-        agent_tag = "🔍 AGENT 4/5 • ANOMALY DETECTIVE & FORENSICS"
-        tag_color = "#A855F7"
-        tag_bg = "rgba(168, 85, 247, 0.16)"
-        tag_border = "rgba(168, 85, 247, 0.45)"
-    elif "agent 5" in low_t or "strategy advisor" in low_t or "insight" in low_t or "khuyến nghị" in low_t or "trực quan" in low_t:
-        active_step = 5
-        agent_tag = "💡 AGENT 5/5 • EXECUTIVE STRATEGY ADVISOR"
-        tag_color = "#F59E0B"
-        tag_bg = "rgba(245, 158, 11, 0.16)"
-        tag_border = "rgba(245, 158, 11, 0.45)"
+    if is_en is None:
+        has_vi = bool(re.search(r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]", clean_text, re.IGNORECASE))
+        has_en_kw = any(
+            w in low_t
+            for w in (
+                "analyzing", "reading", "calculating", "executing", "verifying",
+                "checking", "summarizing", "generating", "query", "schema",
+                "database", "data", "metrics", "audit", "insights", "pattern",
+                "supervisor", "engineer", "advisor", "router", "plan",
+            )
+        )
+        use_en = bool(has_en_kw and not has_vi)
     else:
-        active_step = 1
-        agent_tag = "🧭 VERAXUS MULTI-AGENT ENGINE • LIVE CO-PILOT"
-        tag_color = "#00DF8F"
-        tag_bg = "rgba(0, 223, 143, 0.16)"
-        tag_border = "rgba(0, 223, 143, 0.45)"
+        use_en = bool(is_en)
 
-    agent_configs = [
-        {
-            "num": 1,
-            "name": "🧭 1. Supervisor",
-            "color": "#00F0FF",
-            "active_badge": "PLANNING",
-            "active_title": "Phân tích & Phân rã",
-            "active_sub": "🔥 Đang định tuyến...",
-            "standby_badge": "SUPERVISING",
-            "standby_title": "Giám sát tiến trình",
-            "standby_sub": "✓ Task Plan Active",
-        },
-        {
-            "num": 2,
-            "name": "⚡ 2. Data Eng",
-            "color": "#38BDF8",
-            "active_badge": "COMPILING",
-            "active_title": "Sinh SQL & Nạp ICL",
-            "active_sub": "🔥 Đang tối ưu hóa...",
-            "standby_badge": "SQL READY" if active_step > 2 else "PRE-FETCH",
-            "standby_title": "Cấu trúc SQL CTE" if active_step > 2 else "Nạp Dynamic Few-shots",
-            "standby_sub": "✓ SQL Compiled" if active_step > 2 else "⚡ Sẵn sàng biên dịch",
-        },
-        {
-            "num": 3,
-            "name": "🛡️ 3. Auditor",
-            "color": "#10B981",
-            "active_badge": "AUDITING",
-            "active_title": "Kiểm toán 4 Trụ Cột",
-            "active_sub": "🔥 Maker-Checker Loop...",
-            "standby_badge": "VERIFIED" if active_step > 3 else "STANDBY AUDIT",
-            "standby_title": "Đạt 4/4 Trụ Cột" if active_step > 3 else "Nạp luật kiểm toán",
-            "standby_sub": "✓ 100/100 Quality Pass" if active_step > 3 else "🛡️ Đón luồng SQL...",
-        },
-        {
-            "num": 4,
-            "name": "🔍 4. Detective",
-            "color": "#A855F7",
-            "active_badge": "SCANNING",
-            "active_title": "Quét Z-Score & IQR",
-            "active_sub": "🔥 Tìm điểm dị biệt...",
-            "standby_badge": "SCANNED" if active_step > 4 else "PRE-SCAN",
-            "standby_title": "Thống kê dị biệt" if active_step > 4 else "Khởi tạo mô hình Z-score",
-            "standby_sub": "✓ Dị biệt xác thực" if active_step > 4 else "🔍 Sẵn sàng phân tích...",
-        },
-        {
-            "num": 5,
-            "name": "💡 5. Strategy",
-            "color": "#F59E0B",
-            "active_badge": "ADVISING",
-            "active_title": "Khuyến nghị C-Level",
-            "active_sub": "🔥 Đúc kết giải pháp...",
-            "standby_badge": "PRESCRIBED" if active_step >= 5 else "FRAMEWORK",
-            "standby_title": "Nghị quyết HĐQT" if active_step >= 5 else "Nạp khung ESG/Quản trị",
-            "standby_sub": "✓ Action Matrix Ready" if active_step >= 5 else "💡 Sẵn sàng đúc kết...",
-        },
-    ]
+    if any(k in low_t for k in ("agent 4", "anomaly", "detective", "dị biệt", "outlier", "forensics", "checking key patterns", "điểm bất thường")):
+        display_msg = "Checking key patterns..." if use_en else "Đang kiểm tra điểm bất thường..."
+    elif any(k in low_t for k in ("agent 5", "strategy", "advisor", "insight", "khuyến nghị", "tổng hợp", "trực quan", "summarizing")):
+        display_msg = "Summarizing insights..." if use_en else "Đang tổng hợp nhận định..."
+    elif any(k in low_t for k in ("agent 2", "data engineer", "database engine", "datamate sql", "in-context", "sql", "thực thi", "sinh truy vấn", "calculating", "executing")):
+        display_msg = "Calculating metrics..." if use_en else "Đang tính toán số liệu..."
+    elif any(k in low_t for k in ("agent 3", "auditor", "evaluator", "kiểm định", "kiểm toán", "audit", "verifying", "đối chiếu")):
+        display_msg = "Verifying accuracy..." if use_en else "Đang đối chiếu độ chính xác..."
+    elif any(k in low_t for k in ("agent 1", "guard", "schema", "supervisor", "router", "plan", "kế hoạch", "đọc dữ liệu", "phân tích câu hỏi", "reading")):
+        display_msg = "Reading your data..." if use_en else "Đang đọc dữ liệu..."
+    else:
+        display_msg = "Analyzing data..." if use_en else "Đang phân tích dữ liệu..."
 
-    live_cards_html = []
-    for cfg in agent_configs:
-        c_num = cfg["num"]
-        c_name = cfg["name"]
-        c_color = cfg["color"]
-        is_lead = (c_num == active_step)
-
-        if is_lead:
-            live_cards_html.append(f"""
-            <div style="background: {c_color}18; border: 1.5px solid {c_color}; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 0 16px {c_color}55;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: {c_color}; display: flex; align-items: center; gap: 4px;">
-                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: {c_color}; animation: vxPulseDot 0.8s ease-in-out infinite;"></span>
-                        {c_name}
-                    </span>
-                    <span style="font-size: 0.58rem; font-weight: 800; color: #FFFFFF; background: {c_color}; padding: 1px 5px; border-radius: 4px;">{cfg['active_badge']}</span>
-                </div>
-                <div style="font-size: 0.74rem; font-weight: 700; color: #FFFFFF; margin-bottom: 2px;">{cfg['active_title']}</div>
-                <div style="font-size: 0.64rem; color: {c_color}; font-weight: 700;">{cfg['active_sub']}</div>
-            </div>
-            """)
-        else:
-            is_done = (c_num < active_step)
-            card_bg = f"{c_color}0C" if is_done else f"rgba(255, 255, 255, 0.03)"
-            card_border = f"{c_color}55" if is_done else f"{c_color}25"
-            dot_anim = "animation: vxPulseDot 1.6s ease-in-out infinite;" if not is_done else ""
-
-            live_cards_html.append(f"""
-            <div style="background: {card_bg}; border: 1px solid {card_border}; border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: space-between;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                    <span style="font-size: 0.72rem; font-weight: 700; color: {c_color}; display: flex; align-items: center; gap: 4px;">
-                        <span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: {c_color}; {dot_anim}"></span>
-                        {c_name}
-                    </span>
-                    <span style="font-size: 0.58rem; font-weight: 700; color: {c_color}; background: {c_color}18; padding: 1px 4px; border-radius: 4px; border: 1px solid {c_color}44;">{cfg['standby_badge']}</span>
-                </div>
-                <div style="font-size: 0.72rem; font-weight: 600; color: #E2E8F0; margin-bottom: 2px;">{cfg['standby_title']}</div>
-                <div style="font-size: 0.64rem; color: #94A3B8;">{cfg['standby_sub']}</div>
-            </div>
-            """)
-
-    cards_joined = "".join(live_cards_html)
-
-
-    raw_html = f"""<style>
-@keyframes vxSpinCW {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-@keyframes vxSpinCCW {{ 0% {{ transform: rotate(360deg); }} 100% {{ transform: rotate(0deg); }} }}
-@keyframes vxCrystalPulse {{ 0%, 100% {{ transform: scale(0.95); opacity: 0.9; }} 50% {{ transform: scale(1.1); opacity: 1; }} }}
-@keyframes vxPulseDot {{ 0%, 100% {{ transform: scale(0.85); opacity: 0.6; box-shadow: 0 0 6px {tag_color}; }} 50% {{ transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px {tag_color}, 0 0 22px {tag_color}; }} }}
-</style>
-<div class="veraxus-loading-card" style="display: flex; flex-direction: column; gap: 12px; padding: 14px 18px; background: linear-gradient(135deg, rgba(21, 26, 48, 0.96) 0%, rgba(11, 14, 23, 0.98) 100%); border: 1.5px solid rgba(0, 240, 255, 0.35); border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.15); backdrop-filter: blur(14px); margin: 12px 0;">
-<div style="display: flex; align-items: center; gap: 14px;">
-<div class="veraxus-spinner-wrapper" style="position: relative; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-<div style="position: absolute; width: 32px; height: 32px; background: radial-gradient(circle, rgba(0, 240, 255, 0.45) 0%, rgba(0, 104, 255, 0.2) 60%, transparent 80%); border-radius: 50%; filter: blur(4px);"></div>
-<div style="position: absolute; inset: 0; width: 42px; height: 42px; border-radius: 50%; border: 3px solid transparent; border-top: 3px solid #00F0FF; border-right: 3px solid #00DF8F; box-shadow: 0 0 12px rgba(0, 240, 255, 0.7); animation: vxSpinCW 0.8s linear infinite;"></div>
-<div style="position: absolute; inset: 4px; width: 34px; height: 34px; border-radius: 50%; border: 1.5px dashed rgba(0, 240, 255, 0.4); border-left: 2px solid #38BDF8; border-bottom: 2px solid #0068FF; animation: vxSpinCCW 1.4s linear infinite;"></div>
-<div style="position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; animation: vxCrystalPulse 1.5s ease-in-out infinite;">
-<svg width="20" height="20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.9));">
-<defs>
-<linearGradient id="vxSpinFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%"><stop offset="0%" stop-color="#38BDF8"/><stop offset="60%" stop-color="#0068FF"/><stop offset="100%" stop-color="#0047BA"/></linearGradient>
-<linearGradient id="vxSpinFacetLeftTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#BAE6FD"/><stop offset="100%" stop-color="#38BDF8"/></linearGradient>
-<linearGradient id="vxSpinFacetRightFront" x1="80%" y1="10%" x2="50%" y2="90%"><stop offset="0%" stop-color="#00A3FF"/><stop offset="50%" stop-color="#0052CC"/><stop offset="100%" stop-color="#02388A"/></linearGradient>
-<linearGradient id="vxSpinFacetRightTop" x1="100%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#E0F2FE"/><stop offset="100%" stop-color="#7DD3FC"/></linearGradient>
-<linearGradient id="vxSpinFacetCenterGlow" x1="50%" y1="40%" x2="50%" y2="92%"><stop offset="0%" stop-color="#00F0FF"/><stop offset="50%" stop-color="#00DF8F"/><stop offset="100%" stop-color="#0068FF"/></linearGradient>
-</defs>
-<polygon points="18,22 36,12 50,88 34,74" fill="url(#vxSpinFacetLeftFront)"/>
-<polygon points="18,22 36,12 48,22 30,32" fill="url(#vxSpinFacetLeftTop)"/>
-<polygon points="82,22 64,12 50,88 66,74" fill="url(#vxSpinFacetRightFront)"/>
-<polygon points="82,22 64,12 52,22 70,32" fill="url(#vxSpinFacetRightTop)"/>
-<polygon points="30,32 48,22 50,54 38,58" fill="#0052CC"/>
-<polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
-<polygon points="38,58 50,54 62,58 50,88" fill="url(#vxSpinFacetCenterGlow)"/>
-</svg>
-</div>
-</div>
-<div class="veraxus-spinner-text-wrap" style="display: flex; flex-direction: column; gap: 3px; z-index: 2; flex: 1;">
-<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-<div style="display: flex; align-items: center; gap: 6px;">
-<span style="font-size: 0.74rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1;">VERAXUS LIVE MATRIX</span>
-<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #00DF8F; animation: vxPulseDot 1.2s ease-in-out infinite;"></span>
-</div>
-<span style="font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; color: {tag_color}; background: {tag_bg}; border: 1px solid {tag_border}; padding: 1px 7px; border-radius: 5px;">{agent_tag}</span>
-</div>
-<span class="veraxus-spinner-status" style="color: #FFFFFF !important; font-weight: 600; font-size: 0.88rem; letter-spacing: -0.01em; line-height: 1.35; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);">{clean_text}</span>
-</div>
-</div>
-<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px; margin-top: 2px;">
-{cards_joined}
-</div>
-</div>"""
-    return re.sub(r'\n\s*', ' ', raw_html).strip()
+    return (
+        f'<div class="vx-loading-bar">'
+        f'<span class="vx-orbit-dots" aria-hidden="true"><span></span><span></span><span></span></span>'
+        f'<span class="vx-loading-text">{display_msg}</span>'
+        f'</div>'
+    )
 
 
 

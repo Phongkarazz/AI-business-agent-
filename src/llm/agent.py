@@ -22,6 +22,7 @@ from src.analytics.heuristics import (
     sanitize_followup_question,
     ensure_full_twelve_months,
     ensure_full_four_quarters,
+    ensure_continuous_daily_series,
     ensure_ratio_column_if_requested,
     ensure_efficiency_columns_if_requested,
 )
@@ -9268,12 +9269,14 @@ def is_hallucinated_followup(q: str) -> bool:
     return any(t in q_low for t in forbidden_terms)
 
 
-def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str = "", current_query: str = "", lang: str = "vi") -> list[str]:
-    """Sinh các câu hỏi đào sâu bám sát 100% vào cấu trúc CSDL theo 3 Chiều Chiến Lược Cấp Điều Hành (Multi-Tiered Strategic Drilldown):
-    - Chiều 1 (📈): Chuỗi thời gian, Xu hướng & Kích hoạt Tab Dự Báo (Line Chart / Forecasting)
-    - Chiều 2 (⚖️): Phân tích đối chuẩn & So sánh đa nhóm (Grouped Bar / Benchmarking)
-    - Chiều 3 (🍩): Phân tích cơ cấu, Tỷ lệ phần trăm & Quản trị (Donut Chart / Distribution)
-    """
+def generate_grounded_fallback_followups(
+    df: pd.DataFrame,
+    schema_context: str = "",
+    current_query: str = "",
+    lang: str = "vi",
+    asked_queries: list[str] | None = None,
+) -> list[str]:
+    """Sinh các câu hỏi đào sâu bám sát 100% vào cấu trúc CSDL theo nhiều góc độ phân tích, tự động loại bỏ câu đã hỏi trước đó."""
     if df is None or df.empty:
         return []
 
@@ -9283,6 +9286,22 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
     schema_low = (schema_context or "").lower()
     q_low = (current_query or "").lower()
 
+    def _norm_hist_q(text: str) -> str:
+        return re.sub(r"[^\w\s]", "", (text or "").lower()).strip()
+
+    prior_norms = {_norm_hist_q(q) for q in ([current_query] + list(asked_queries or [])) if _norm_hist_q(q)}
+    prior_list = [str(q).strip() for q in ([current_query] + list(asked_queries or [])) if q and str(q).strip()]
+
+    def _not_asked_before(cand_text: str) -> bool:
+        cn = _norm_hist_q(cand_text)
+        if not cn or cn in prior_norms:
+            return False
+        for p in prior_list:
+            pn = _norm_hist_q(p)
+            if pn and (cn == pn or (len(cn) > 12 and (cn in pn or pn in cn))):
+                return False
+        return True
+
     # Nhận diện CSDL
     is_employees_db = "departments" in schema_low or "dept_emp" in schema_low or "salaries" in schema_low or any(c in cols_low for c in ["salary", "avgsalary", "dept_name", "department", "emp_no"])
     is_chocolates_db = "people" in schema_low and "products" in schema_low
@@ -9290,11 +9309,8 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
     if is_employees_db:
         # Nhận diện thực thể trong kết quả hiện tại
         dept_col = next((c for c in cols if any(k in c.lower() for k in ["dept_name", "department", "phòng"])), None)
-        title_col = next((c for c in cols if any(k in c.lower() for k in ["title", "chức danh"])), None)
         dept_sample = str(df[dept_col].dropna().iloc[0]).strip() if dept_col and not df[dept_col].dropna().empty else None
-        title_sample = str(df[title_col].dropna().iloc[0]).strip() if title_col and not df[title_col].dropna().empty else None
 
-        # Tier 1: Xu Hướng & Dự Báo (Time-Series & Forecasting)
         tier1_candidates = [
             ("Thống kê số lượng nhân viên được tuyển dụng theo từng năm từ trước đến nay", "Total number of employees hired per year"),
             ("Mức lương trung bình của toàn công ty thay đổi như thế nào qua các năm?", "Average company-wide salary trend across years"),
@@ -9304,7 +9320,6 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
             ("Biến động tổng quỹ lương toàn công ty qua các năm", "Total company salary expenditure trend over the years")
         ]
 
-        # Tier 2: Đối Chuẩn & So Sánh (Comparative / Benchmark)
         tier2_candidates = [
             ("So sánh mức lương trung bình giữa nhân viên nam và nữ theo từng chức danh", "Compare average salary between male and female employees across job titles"),
             ("Top 10 nhân viên có mức lương cao nhất hiện tại trong toàn công ty", "Top 10 highest paid current employees in the company"),
@@ -9316,7 +9331,6 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
             ("Top 10 nhân viên có thâm niên làm việc lâu nhất công ty còn đang công tác", "Top 10 longest tenured active employees")
         ]
 
-        # Tier 3: Cơ Cấu Tỷ Lệ & Đào Sâu Quản Trị (Distribution & Executive Share)
         tier3_candidates = [
             ("Tỷ lệ nam và nữ trong ban quản lý (dept_manager) của từng phòng ban", "Gender distribution in management (dept_manager) across departments"),
             ("Danh sách các Manager hiện tại của từng phòng ban kèm mức lương mới nhất", "Current department managers and their latest salary"),
@@ -9328,24 +9342,23 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
             ("Những nhân viên có từ 5 lần tăng lương trở lên trong lịch sử công ty", "Employees who received 5 or more salary raises")
         ]
 
-        # Nếu đang xem 1 phòng ban cụ thể -> Ưu tiên các câu đào sâu theo phòng ban đó
         if dept_sample and dept_sample.lower() not in ["none", "nan", ""]:
             tier2_candidates.insert(0, (f"So sánh mức lương trung bình của phòng ban {dept_sample} so với các phòng ban khác", f"Compare average salary of {dept_sample} department with other departments"))
 
-        # Lọc thông minh: Loại bỏ câu trùng câu hỏi hiện tại và xoay vòng ngẫu nhiên đa dạng
-        avail_tier1 = [it for it in tier1_candidates if it[0].lower() not in q_low] or tier1_candidates
-        avail_tier2 = [it for it in tier2_candidates if it[0].lower() not in q_low] or tier2_candidates
-        avail_tier3 = [it for it in tier3_candidates if it[0].lower() not in q_low] or tier3_candidates
+        idx_pick = 1 if lang == "en" else 0
+        avail_t1 = [it for it in tier1_candidates if _not_asked_before(it[idx_pick])] or tier1_candidates
+        avail_t2 = [it for it in tier2_candidates if _not_asked_before(it[idx_pick])] or tier2_candidates
+        avail_t3 = [it for it in tier3_candidates if _not_asked_before(it[idx_pick])] or tier3_candidates
 
-        p1 = random.choice(avail_tier1)
-        p2 = random.choice(avail_tier2)
-        p3 = random.choice(avail_tier3)
-
-        selected = [p1, p2, p3]
-        return [item[1] if lang == "en" else item[0] for item in selected]
+        rot = len(prior_list)
+        selected = [
+            avail_t1[rot % len(avail_t1)],
+            avail_t2[rot % len(avail_t2)],
+            avail_t3[rot % len(avail_t3)],
+        ]
+        return [item[idx_pick] for item in selected]
 
     if is_chocolates_db:
-        # Tier 1: Xu Hướng & Dự Báo (Time-Series & Forecasting)
         tier1_candidates = [
             ("Doanh thu theo từng quốc gia (Country) thay đổi như thế nào qua các tháng năm 2021?", "Monthly revenue trend across countries in 2021"),
             ("Doanh số toàn công ty theo từng tháng năm 2021", "Monthly company-wide revenue trend in 2021"),
@@ -9355,7 +9368,6 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
             ("Doanh thu thị trường Ấn Độ (India) theo từng quý năm 2021", "Quarterly revenue trend in India in 2021")
         ]
 
-        # Tier 2: Đối Chuẩn & So Sánh (Comparative / Benchmark)
         tier2_candidates = [
             ("So sánh tổng doanh số và số lượng hộp bán ra giữa các Team kinh doanh", "Compare total revenue and boxes sold across sales teams"),
             ("Top 10 nhân viên bán hàng có doanh số cao nhất năm 2021", "Top 10 sales representatives by revenue in 2021"),
@@ -9367,7 +9379,6 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
             ("So sánh doanh thu giữa các nhóm sản phẩm (Category: Bars, Bites...) trong năm 2021", "Compare revenue across product categories in 2021")
         ]
 
-        # Tier 3: Cơ Cấu Tỷ Lệ & Đào Sâu Quản Trị (Distribution & Share)
         tier3_candidates = [
             ("Tỷ lệ đóng góp doanh thu của từng nhóm sản phẩm (Category) vào tổng doanh thu", "Revenue contribution percentage by product category"),
             ("Tỷ lệ phần trăm đóng góp doanh thu của từng quốc gia (Country)", "Revenue contribution share by country"),
@@ -9377,19 +9388,20 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
             ("Những sản phẩm có số lượng hộp bán ra trên 10,000 hộp năm 2021", "Products with over 10,000 boxes sold in 2021")
         ]
 
-        avail_tier1 = [it for it in tier1_candidates if it[0].lower() not in q_low] or tier1_candidates
-        avail_tier2 = [it for it in tier2_candidates if it[0].lower() not in q_low] or tier2_candidates
-        avail_tier3 = [it for it in tier3_candidates if it[0].lower() not in q_low] or tier3_candidates
+        idx_pick = 1 if lang == "en" else 0
+        avail_t1 = [it for it in tier1_candidates if _not_asked_before(it[idx_pick])] or tier1_candidates
+        avail_t2 = [it for it in tier2_candidates if _not_asked_before(it[idx_pick])] or tier2_candidates
+        avail_t3 = [it for it in tier3_candidates if _not_asked_before(it[idx_pick])] or tier3_candidates
 
-        p1 = random.choice(avail_tier1)
-        p2 = random.choice(avail_tier2)
-        p3 = random.choice(avail_tier3)
-
-        selected = [p1, p2, p3]
-        return [item[1] if lang == "en" else item[0] for item in selected]
+        rot = len(prior_list)
+        selected = [
+            avail_t1[rot % len(avail_t1)],
+            avail_t2[rot % len(avail_t2)],
+            avail_t3[rot % len(avail_t3)],
+        ]
+        return [item[idx_pick] for item in selected]
 
     # CSDL Tổng quát & Northwind
-    from src.analytics.heuristics import get_axis_columns
     from src.analytics.heuristics import get_axis_columns, sanitize_followup_question
     from src.visualization.charts import format_col_title
     measure_cols, label_cols, _ = get_axis_columns(df)
@@ -9397,34 +9409,52 @@ def generate_grounded_fallback_followups(df: pd.DataFrame, schema_context: str =
         measure_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
         label_cols = [c for c in cols if c not in measure_cols]
 
-    # Ưu tiên cột đo lường chính: Doanh thu / Tiền / Lương, tránh chọn nhầm cột đếm giao dịch phụ
     curr_cands = [c for c in measure_cols if any(k in str(c).lower() for k in ["amount", "revenue", "sales", "tiền", "salary", "lương", "doanh", "totalamount", "spent"])]
-    if curr_cands:
-        m_col = curr_cands[0]
-    else:
-        m_col = measure_cols[0] if measure_cols else cols[0]
+    m_col = curr_cands[0] if curr_cands else (measure_cols[0] if measure_cols else cols[0])
     l_col = label_cols[0] if label_cols else cols[0]
 
     m_clean = format_col_title(m_col)
     l_clean = format_col_title(l_col)
-
     m_prep = m_clean if not m_clean.lower().startswith("tổng") else m_clean[4:].strip()
-    
-    # Nếu người dùng vừa hỏi về Tỷ lệ đóng góp, gợi ý các câu hỏi mở rộng tiếp theo thay vì lặp lại câu hỏi vừa hỏi
-    if any(k in q_low for k in ["tỷ lệ", "tỉ lệ", "đóng góp", "tỷ trọng", "tỉ trọng", "phần trăm", "percentage", "contribution"]):
-        f1 = f"Xu hướng {m_clean} theo thời gian" if lang != "en" else f"Time-series trend of {m_col}"
-        f2 = f"So sánh {m_clean} giữa các {l_clean} hàng đầu" if lang != "en" else f"Compare {m_col} across top {l_col}"
-        f3 = f"Giá trị giao dịch trung bình của từng {l_clean}" if lang != "en" else f"Average transaction value per {l_col}"
-    else:
-        f1 = f"Xu hướng {m_clean} theo thời gian" if lang != "en" else f"Time-series trend of {m_col}"
-        f2 = f"So sánh {m_clean} giữa các {l_clean} hàng đầu" if lang != "en" else f"Compare {m_col} across top {l_col}"
-        f3 = f"Tỷ lệ phần trăm đóng góp của từng {l_clean} vào tổng {m_prep}" if lang != "en" else f"Percentage contribution of each {l_col} to total {m_col}"
 
-    followups.extend([sanitize_followup_question(f1), sanitize_followup_question(f2), sanitize_followup_question(f3)])
-    return followups[:3]
+    generic_pool_vi = [
+        f"Xu hướng {m_clean} theo thời gian",
+        f"So sánh {m_clean} giữa các {l_clean} hàng đầu",
+        f"Tỷ lệ phần trăm đóng góp của từng {l_clean} vào tổng {m_prep}",
+        f"Giá trị giao dịch trung bình của từng {l_clean}",
+        f"{l_clean} nào có {m_clean} cao nhất và thấp nhất?",
+        f"Những {l_clean} nào có {m_clean} vượt trên mức trung bình?",
+    ]
+    generic_pool_en = [
+        f"Time-series trend of {m_col}",
+        f"Compare {m_col} across top {l_col}",
+        f"Percentage contribution of each {l_col} to total {m_col}",
+        f"Average transaction value per {l_col}",
+        f"Which {l_col} has the highest and lowest {m_col}?",
+        f"Which {l_col} exceed average {m_col}?",
+    ]
+    pool_raw = generic_pool_en if lang == "en" else generic_pool_vi
+    pool_clean = [sanitize_followup_question(x) for x in pool_raw]
+    filtered = [x for x in pool_clean if _not_asked_before(x)]
+    if len(filtered) < 3:
+        for x in pool_clean:
+            if x not in filtered:
+                filtered.append(x)
+            if len(filtered) >= 3:
+                break
+    return filtered[:3]
 
 
-def generate_followup_questions(client, provider: str, model_name: str, user_query: str, schema_context: str, df: pd.DataFrame, lang: str = "vi") -> list[str]:
+def generate_followup_questions(
+    client,
+    provider: str,
+    model_name: str,
+    user_query: str,
+    schema_context: str,
+    df: pd.DataFrame,
+    lang: str = "vi",
+    asked_queries: list[str] | None = None,
+) -> list[str]:
     """Tự động sinh 2-3 câu hỏi gợi ý phân tích tiếp nối (Follow-up suggestions) bám sát 100% vào thực thể có thật."""
     if df is None or df.empty:
         return []
@@ -9435,6 +9465,7 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
         schema_context=schema_context,
         current_query=user_query,
         lang=lang,
+        asked_queries=asked_queries,
     )
 
     try:
@@ -9479,15 +9510,19 @@ def generate_followup_questions(client, provider: str, model_name: str, user_que
     except Exception:
         pass
 
-    # 3. ƯU TIÊN 100% CÁC CÂU HỎI BÁM SÁT CSDL ĐỂ ĐẢM BẢO CHẠY THÀNH CÔNG (VÀ LOẠI BỎ CÂU HỎI TRÙNG VỚI CÂU HIỆN TẠI)
-    uq_clean = re.sub(r"[^\w\s]", "", (user_query or "").lower()).strip()
+    # 3. ƯU TIÊN 100% CÁC CÂU HỎI BÁM SÁT CSDL ĐỂ ĐẢM BẢO CHẠY THÀNH CÔNG (VÀ LOẠI BỎ CÂU HỎI TRÙNG LẶP)
+    prior_clean = {
+        re.sub(r"[^\w\s]", "", (pq or "").lower()).strip()
+        for pq in ([user_query] + list(asked_queries or []))
+        if pq and str(pq).strip()
+    }
     combined = []
     for q in grounded_questions + ai_questions:
         if schema_context and detect_legacy_schema_gap is not None:
             if detect_legacy_schema_gap(q, schema_context=schema_context, lang=lang) is not None:
                 continue
         q_clean = re.sub(r"[^\w\s]", "", q.lower()).strip()
-        if q_clean != uq_clean and q not in combined:
+        if q_clean not in prior_clean and q not in combined:
             combined.append(q)
 
     if not combined:
@@ -10321,6 +10356,7 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
             lang=lang,
             as_of_date=kwargs.get("as_of_date"),
             insights_fn=generate_auto_insights,
+            asked_queries=kwargs.get("asked_queries"),
         )
 
     # 0.09b Bộ lọc câu nói ngoài phạm vi cho chế độ Legacy (không có DataMate knowledge)
@@ -10978,6 +11014,7 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
 
             df = ensure_full_twelve_months(df, user_query)
             df = ensure_full_four_quarters(df, user_query)
+            df = ensure_continuous_daily_series(df, user_query)
             df = ensure_ratio_column_if_requested(df, user_query)
             df = ensure_efficiency_columns_if_requested(df, user_query)
             result["df"] = df
@@ -11078,7 +11115,13 @@ Yêu cầu: Viết sắc sảo, ngôn từ chuẩn mực tư vấn chiến lư�
                 result["anomalies_info"] = anomalies_info
 
                 # 1. Sinh câu hỏi gợi ý tiếp nối ngay lập tức trong 0.0001s theo 3 chiều chiến lược
-                result["followups"] = generate_grounded_fallback_followups(df, schema_context=schema_context, current_query=user_query, lang=lang)
+                result["followups"] = generate_grounded_fallback_followups(
+                    df,
+                    schema_context=schema_context,
+                    current_query=user_query,
+                    lang=lang,
+                    asked_queries=kwargs.get("asked_queries"),
+                )
 
                 # 2. Sinh Insight Phân Tích & Kế hoạch Hành động (Agent 5: Strategy Advisor)
                 if enable_auto_insights:

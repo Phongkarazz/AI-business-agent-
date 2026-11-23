@@ -448,6 +448,19 @@ def _build_order_semantics(
                 f"  Lưu ý: chỉ dùng các cột nợ/thu {debt_cols} khi câu hỏi hỏi công nợ/trả nợ/đã trả; TUYỆT ĐỐI KHÔNG tự lọc `= 0` khi tính doanh thu hoặc số đơn."
             )
 
+    target_tables = {t["table"] for t in targets}
+    for tname, tp in ws.tables.items():
+        if tp.row_count <= 0 or tname in target_tables:
+            continue
+        active = _active_columns(tp)
+        has_date_col = any(f"{tname}.{cp.sql_name}" in date_ranges for cp in active)
+        if has_date_col:
+            continue
+        cols_csv = ", ".join(cp.sql_name for cp in active)
+        hint_lines.append(
+            f"- Bảng danh mục/tra cứu `{tname}` ({cols_csv}): dùng trực tiếp khi hỏi danh sách/thuộc tính/đơn giá mà không hỏi doanh thu hay giao dịch."
+        )
+
     return targets, grains, "\n".join(hint_lines)
 
 

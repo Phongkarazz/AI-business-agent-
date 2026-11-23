@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import pandas as pd
 from sqlalchemy import inspect as sa_inspect
@@ -17,22 +17,32 @@ from datamate.agent import (
     AgentConfig,
     DataMateAgent,
     QuestionAnalysis,
+    build_benchmark_average_entity_sql_spec,
+    build_catalog_listing_sql_spec,
+    build_entity_and_metric_listing_sql_spec,
     build_extreme_comparison_sql_spec,
     check_out_of_scope_or_irrelevant,
     check_preflight_unanswerable,
     classify_expected_type,
+    extract_benchmark_average_entity_intent,
     extract_ordinal_rank,
     extract_temporal_context,
+    format_effective_temporal_summary,
     format_sql_result,
     normalize_vn_question,
     rewrite_ranked_entity_sql,
+    strip_spurious_single_day_filter,
     verify_sql_semantics,
 )
 from datamate.llm_backend import LLMBackend, extract_json_object
 from datamate.schema_context import WorkspaceKnowledge, ground_query_entities
 from datamate.sql_executor import SQLExecutionResult, execute_sql_safe, norm_vn
 from src.analytics.anomaly import analyze_data_anomalies
-from src.analytics.heuristics import is_vnd_context_dataframe, split_insight_sections
+from src.analytics.heuristics import (
+    ensure_continuous_daily_series,
+    is_vnd_context_dataframe,
+    split_insight_sections,
+)
 from src.llm.client import normalize_model_for_openrouter
 
 
@@ -263,18 +273,67 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
             cat_noun_vi, cat_noun_en = c_vi, c_en
             break
 
+    def _collect_role_values(col_regex: str, limit: int = 10) -> List[str]:
+        rx = re.compile(col_regex, re.I)
+        vals_out: List[str] = []
+        seen_low: Set[str] = set()
+        for k, pairs in (knowledge.categorical_values or {}).items():
+            col_part = k.split(".")[-1].lower()
+            if rx.search(col_part):
+                for raw_v, _cnt in pairs:
+                    if raw_v is None:
+                        continue
+                    sv = str(raw_v).strip()
+                    if not sv or len(sv) < 2 or len(sv) > 45:
+                        continue
+                    sl = sv.lower()
+                    if sl in {"(chưa xác định)", "(unassigned)", "n/a", "none", "null", "nan", "unknown"}:
+                        continue
+                    if sl not in seen_low:
+                        seen_low.add(sl)
+                        vals_out.append(sv)
+                        if len(vals_out) >= limit:
+                            return vals_out
+        for ent in getattr(knowledge, "entity_entries", None) or ():
+            if rx.search(str(getattr(ent, "column", "")).lower()):
+                sv = str(getattr(ent, "raw_value", "") or "").strip()
+                if not sv or len(sv) < 2 or len(sv) > 45:
+                    continue
+                sl = sv.lower()
+                if sl in {"(chưa xác định)", "(unassigned)", "n/a", "none", "null", "nan", "unknown"}:
+                    continue
+                if sl not in seen_low:
+                    seen_low.add(sl)
+                    vals_out.append(sv)
+                    if len(vals_out) >= limit:
+                        return vals_out
+        return vals_out
+
     # Channel values & column
     channel_col = next(
         (c for _, c in active_cols if re.search(r"(?:^|_)(?:kenh_?ban|kenh|channel|ban_?qua|nguon_?don|noi_?ban)(?:$|_)", c, re.I)),
         None,
     )
-    channel_values: List[str] = []
-    for k, vals in (knowledge.categorical_values or {}).items():
-        col_part = k.split(".")[-1].lower()
-        if re.search(r"(?:^|_)(?:kenh_?ban|kenh|channel|ban_?qua|nguon_?don|noi_?ban)(?:$|_)", col_part):
-            channel_values = [str(v) for v, _ in vals if v is not None and str(v).strip()][:3]
-            if channel_values:
-                break
+    channel_values: List[str] = _collect_role_values(
+        r"(?:^|_)(?:kenh_?ban|kenh|channel|ban_?qua|nguon_?don|noi_?ban)(?:$|_)",
+        limit=6,
+    )
+    category_values: List[str] = _collect_role_values(
+        r"(?:^|_)(?:nhom_?mon|nhom_?thuoc|nhom_?hang|danh_?muc|loai_?hang|category(?:_?name)?)(?:$|_)",
+        limit=8,
+    )
+    supplier_values: List[str] = _collect_role_values(
+        r"(?:^|_)(?:nha_?cung_?cap|ncc|supplier(?:_?name)?)(?:$|_)",
+        limit=8,
+    )
+    item_values: List[str] = _collect_role_values(
+        r"(?:^|_)(?:ten_?thuoc|ten_?mon|vat_?lieu|ten_?vat_?lieu|ten_?san_?pham|ten_?hang|product(?:_?name)?)(?:$|_)",
+        limit=12,
+    )
+    customer_values: List[str] = _collect_role_values(
+        r"(?:^|_)(?:ten_?khach(?:_?hang)?|khach_?hang|customer(?:_?name)?|ben_?mua|doi_?tac)(?:$|_)",
+        limit=8,
+    )
 
     # Supplier / customer / numeric measure availability
     supplier_col = next(
@@ -346,6 +405,10 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         "has_channel": bool(caps.get("has_channel") or channel_col),
         "channel_col": channel_col,
         "channel_values": channel_values,
+        "category_values": category_values,
+        "supplier_values": supplier_values,
+        "item_values": item_values,
+        "customer_values": customer_values,
         "has_import": bool(caps.get("has_import")),
         "has_import_price": bool(caps.get("has_import_price")),
         "has_supplier": bool(supplier_col),
@@ -370,10 +433,10 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
     }
 
 
-def _extract_df_focus_entities(df: Optional[pd.DataFrame], profile: Dict[str, Any]) -> Dict[str, Optional[str]]:
-    """Extract the top/bottom entity returned in the current result table and classify its dimension."""
+def _extract_df_focus_entities(df: Optional[pd.DataFrame], profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract top/bottom/all entities returned in the current result table and classify dimension."""
     if df is None or df.empty:
-        return {"top_entity": None, "bottom_entity": None, "entity_kind": None}
+        return {"top_entity": None, "bottom_entity": None, "entity_kind": None, "df_entities": []}
 
     def _clean_ent(val: Any) -> Optional[str]:
         if val is None or pd.isna(val):
@@ -444,15 +507,21 @@ def _extract_df_focus_entities(df: Optional[pd.DataFrame], profile: Dict[str, An
             best_kind = kind
 
     if not best_col:
-        return {"top_entity": None, "bottom_entity": None, "entity_kind": None}
+        return {"top_entity": None, "bottom_entity": None, "entity_kind": None, "df_entities": []}
 
     top_ent = None
     bot_ent = None
+    df_entities: List[str] = []
+    seen_ent: Set[str] = set()
     for val in ranked_df[best_col].tolist():
         c = _clean_ent(val)
         if c:
-            top_ent = c
-            break
+            if top_ent is None:
+                top_ent = c
+            cl = c.lower()
+            if cl not in seen_ent:
+                seen_ent.add(cl)
+                df_entities.append(c)
     if len(ranked_df) >= 2:
         for val in reversed(ranked_df[best_col].tolist()):
             c = _clean_ent(val)
@@ -460,26 +529,55 @@ def _extract_df_focus_entities(df: Optional[pd.DataFrame], profile: Dict[str, An
                 bot_ent = c
                 break
 
-    return {"top_entity": top_ent, "bottom_entity": bot_ent, "entity_kind": best_kind}
+    return {"top_entity": top_ent, "bottom_entity": bot_ent, "entity_kind": best_kind, "df_entities": df_entities}
 
 
 def _is_near_duplicate_query(cand: str, ref: str) -> bool:
-    """Detect whether a suggested follow-up is identical or practically redundant with user_query."""
+    """Detect whether a suggested follow-up is identical or practically redundant with a prior query,
+    while allowing distinct entities (e.g., Sanofi VN vs Traphaco), numbers (Top 3 vs Top 5), or polarities (cao vs thap).
+    """
     if not cand or not ref:
         return False
     c_n = norm_vn(cand)
     r_n = norm_vn(ref)
     if not c_n or not r_n:
         return False
-    if c_n == r_n or c_n in r_n or r_n in c_n:
+    if c_n == r_n:
         return True
-    stop = {"la", "bao", "nhieu", "trong", "cua", "va", "theo", "tung", "co", "nhung", "nao", "the", "what", "is", "are", "by", "in", "of", "for"}
+
+    # Different numeric thresholds/counts/dates are genuinely distinct questions
+    c_nums = re.findall(r"\d+", c_n)
+    r_nums = re.findall(r"\d+", r_n)
+    if c_nums and r_nums and c_nums != r_nums:
+        return False
+
+    stop = {
+        "la", "bao", "nhieu", "trong", "cua", "va", "theo", "tung", "co", "nhung", "cac",
+        "nao", "gi", "hay", "cho", "toi", "biet", "xem", "nhu", "the", "nhe", "a",
+        "what", "is", "are", "by", "in", "of", "for", "the", "how", "many", "much", "which",
+    }
+    wrapper_tokens = {
+        "so", "sanh", "thong", "ke", "liet", "danh", "sach", "ty", "le", "ti", "trong",
+        "dong", "gop", "phan", "tram", "xu", "huong", "chi", "tiet", "tong", "hop", "cac",
+        "loai", "ban", "ra", "compare", "trend", "share", "list", "total", "average",
+    }
     c_toks = {t for t in c_n.split() if len(t) >= 2 and t not in stop}
     r_toks = {t for t in r_n.split() if len(t) >= 2 and t not in stop}
     if not c_toks or not r_toks:
         return False
+
+    c_only_sig = {t for t in (c_toks - r_toks) if t not in wrapper_tokens}
+    r_only_sig = {t for t in (r_toks - c_toks) if t not in wrapper_tokens}
+    # If BOTH sides carry distinct non-wrapper terms (e.g. Sanofi vs Traphaco, cao vs thap), they ask different things
+    if c_only_sig and r_only_sig:
+        return False
+
+    if (len(c_n) >= 10 and (c_n in r_n or r_n in c_n)) and not (c_only_sig and r_only_sig):
+        return True
+
     overlap = len(c_toks & r_toks) / max(1, len(c_toks | r_toks))
-    return overlap > 0.72
+    containment = len(c_toks & r_toks) / max(1, min(len(c_toks), len(r_toks)))
+    return overlap > 0.72 or containment >= 0.88
 
 
 def build_datamate_suggested_questions(
@@ -488,18 +586,22 @@ def build_datamate_suggested_questions(
     user_query: str = "",
     df: Optional[pd.DataFrame] = None,
     sql: str = "",
+    asked_queries: Optional[Sequence[str]] = None,
+    max_suggestions: int = 3,
 ) -> List[str]:
-    """Generate contextual, flow-preserving follow-up suggestions 100% grounded in the active DB schema."""
+    """Generate diverse, anti-repeating follow-up suggestions 100% grounded in the active DB schema and values."""
     prof = _profile_datamate_followup_schema(knowledge)
     focus = _extract_df_focus_entities(df, prof)
     is_en = lang == "en"
 
     top_ent = focus.get("top_entity")
     ent_kind = focus.get("entity_kind")
+    df_entities: List[str] = list(focus.get("df_entities") or [])
     q_norm = norm_vn(user_query or "")
 
     item_col = prof["item_col"]
     i_vi, i_en = prof["item_noun_vi"], prof["item_noun_en"]
+    i_cap = i_vi[:1].upper() + i_vi[1:] if i_vi else "Mặt hàng"
     s_vi, s_en = prof["sales_noun_vi"], prof["sales_noun_en"]
     d_vi, d_en = prof["doc_noun_vi"], prof["doc_noun_en"]
     imp_vi, imp_en = prof["import_noun_vi"], prof["import_noun_en"]
@@ -508,7 +610,16 @@ def build_datamate_suggested_questions(
     ym_vi = f" {prof['ym_phrase_vi']}" if prof["ym_phrase_vi"] else ""
     ym_en = f" {prof['ym_phrase_en']}" if prof["ym_phrase_en"] else ""
     ch_vals = prof["channel_values"]
-    ch_hint = f" ({', '.join(ch_vals)})" if ch_vals else ""
+    ch_hint = f" ({', '.join(ch_vals[:3])})" if ch_vals else ""
+    cat_vals = prof.get("category_values") or []
+    supp_vals = prof.get("supplier_values") or []
+    all_item_vals = prof.get("item_values") or []
+    cust_vals = prof.get("customer_values") or []
+
+    prior_queries: List[str] = [
+        str(q).strip() for q in ([user_query] + list(asked_queries or [])) if q and str(q).strip()
+    ]
+    rot_offset = len(prior_queries)
 
     asked_channel = bool(re.search(r"\b(?:kenh|tai quay|zalo|channel)\b", q_norm)) or ent_kind == "channel"
     asked_category = bool(re.search(r"\b(?:nhom mon|nhom thuoc|nhom hang|danh muc|category)\b", q_norm)) or ent_kind == "category"
@@ -523,253 +634,380 @@ def build_datamate_suggested_questions(
         or ent_kind == "item"
     )
 
-    candidates: List[str] = []
+    if asked_time:
+        cur_dim = "time_trend"
+    elif asked_import or asked_debt_cust:
+        cur_dim = "supply_debt"
+    elif asked_channel or asked_category:
+        cur_dim = "category_channel"
+    elif asked_item_rank:
+        cur_dim = "ranking"
+    else:
+        cur_dim = ""
 
-    def _add(q_vi: str, q_en: str) -> None:
-        candidates.append(q_en if is_en else q_vi)
+    # Candidates grouped as (dimension_tag, text)
+    candidates: List[Tuple[str, str]] = []
 
-    # 1. Contextual flow based on what the user just asked & what rows returned
-    if asked_item_rank:
-        if top_ent and prof["has_channel"]:
+    def _add(dim_tag: str, q_vi: str, q_en: str) -> None:
+        candidates.append((dim_tag, q_en if is_en else q_vi))
+
+    def _rotate_list(seq: Sequence[str], step: int) -> List[str]:
+        if not seq:
+            return []
+        s_idx = step % len(seq)
+        return list(seq[s_idx:]) + list(seq[:s_idx])
+
+    # Build deduplicated entity pool combining result-table entities (prioritized when small history) + all catalog/DB entities
+    rotated_entities: List[str] = []
+    seen_ent_low: Set[str] = set()
+    raw_ent_pool = (df_entities if rot_offset <= 2 else _rotate_list(all_item_vals, rot_offset)) + df_entities + all_item_vals
+    for ent_s in raw_ent_pool:
+        el = str(ent_s).strip().lower()
+        if el and el not in seen_ent_low:
+            seen_ent_low.add(el)
+            rotated_entities.append(str(ent_s).strip())
+
+    # --- 1. Immediate contextual flow anchored to current question & result ---
+    if asked_item_rank and top_ent:
+        if prof["has_channel"]:
             if prof["has_qty"]:
                 _add(
+                    "entity_deep_dive",
                     f"Doanh thu và số lượng bán của {top_ent} theo từng kênh bán là bao nhiêu?",
                     f"What are the revenue and quantity sold of {top_ent} by sales channel?",
                 )
             else:
                 _add(
+                    "entity_deep_dive",
                     f"Doanh thu của {top_ent} theo từng kênh bán là bao nhiêu?",
                     f"What is the revenue of {top_ent} by sales channel?",
                 )
-        if prof["has_channel"] and not asked_channel:
+        if prof["has_import"] and prof["has_import_price"] and prof["has_item_in_import"]:
             _add(
-                f"So sánh doanh thu {s_vi} theo từng kênh bán{ch_hint}?",
-                f"Compare {s_en} across channels{ch_hint}?",
-            )
-        if prof["has_import"] and prof["has_import_price"] and prof["has_supplier"]:
-            _add(
-                f"Tổng tiền nhập {imp_vi} và số lượng nhập theo từng nhà cung cấp là bao nhiêu?",
-                f"What is total import cost and quantity by supplier?",
-            )
-        if top_ent and prof["has_import"] and prof["has_import_price"] and prof["has_item_in_import"]:
-            _add(
+                "entity_deep_dive",
                 f"Giá nhập và tổng số lượng nhập của {top_ent} là bao nhiêu?",
                 f"What are the import price and total quantity imported for {top_ent}?",
             )
-        if cat_col and not asked_category:
-            _add(
-                f"Tỷ lệ đóng góp doanh thu theo từng {c_vi} là bao nhiêu?",
-                f"What is the revenue contribution share by {c_en}?",
-            )
-        if top_ent and prof["has_multi_day_sales"] and prof["has_revenue"]:
-            _add(
-                f"Xu hướng doanh thu của {top_ent} theo từng ngày{ym_vi}?",
-                f"Daily revenue trend of {top_ent}{ym_en}?",
-            )
-        if prof["has_debt"] and prof["has_customers"]:
-            _add(
-                "Khách hàng nào còn công nợ chưa thanh toán nhiều nhất?",
-                "Which customers have the highest outstanding debt?",
-            )
-        if prof["has_qty"] and item_col and "so luong" not in q_norm:
-            _add(
-                f"So sánh số lượng bán ra của từng {i_vi}{ym_vi}?",
-                f"Compare units sold across each {i_en}{ym_en}?",
-            )
-        if prof["has_cancelled"]:
-            ret_hint = " hoặc trả lại" if prof["returned_values"] else ""
-            _add(
-                f"Có bao nhiêu {d_vi} bị hủy{ret_hint} và tổng giá trị là bao nhiêu?",
-                f"How many {d_en} were canceled and what is their total value?",
-            )
-
-    elif asked_channel:
-        if top_ent and item_col:
-            _add(
-                f"Top {i_vi} có doanh thu cao nhất trên kênh {top_ent}?",
-                f"Top {i_en}s by revenue on {top_ent} channel?",
-            )
-        if prof["has_multi_day_sales"] and prof["has_revenue"]:
-            _add(
-                f"Xu hướng doanh thu {s_vi} theo từng ngày{ym_vi}?",
-                f"Daily {s_en} trend{ym_en}?",
-            )
-        if prof["has_import"] and prof["has_import_price"] and prof["has_supplier"]:
-            _add(
-                f"Tổng tiền nhập {imp_vi} và số lượng nhập theo từng nhà cung cấp là bao nhiêu?",
-                f"Total import value and quantity by supplier?",
-            )
-        if prof["has_cancelled"]:
-            _add(
-                f"Số lượng {d_vi} bị hủy theo từng kênh bán là bao nhiêu?",
-                f"How many canceled {d_en} per sales channel?",
-            )
-
-    elif asked_category:
-        if top_ent and item_col:
-            _add(
-                f"Các {i_vi} thuộc {c_vi} {top_ent} có doanh thu như thế nào?",
-                f"Revenue breakdown of {i_en}s in {top_ent} {c_en}?",
-            )
-        if item_col and prof["has_revenue"]:
-            _add(
-                f"Top 5 {i_vi} có doanh thu cao nhất{ym_vi}?",
-                f"Top 5 {i_en}s by revenue{ym_en}?",
-            )
-        if prof["has_multi_day_sales"] and prof["has_revenue"]:
-            _add(
-                f"Xu hướng doanh thu {s_vi} theo từng ngày{ym_vi}?",
-                f"Daily {s_en} trend{ym_en}?",
-            )
-
-    elif asked_import:
-        if top_ent and ent_kind == "supplier" and item_col:
-            _add(
-                f"Nhà cung cấp {top_ent} đã nhập những {i_vi} nào và tổng tiền nhập là bao nhiêu?",
-                f"Which {i_en}s were supplied by {top_ent} and at what import value?",
-            )
-        if item_col and prof["has_revenue"]:
-            _add(
-                f"Top 5 {i_vi} có doanh thu bán ra cao nhất{ym_vi}?",
-                f"Top 5 {i_en}s by sales revenue{ym_en}?",
-            )
-        if prof["has_channel"]:
-            _add(
-                f"So sánh doanh thu {s_vi} theo từng kênh bán{ch_hint}?",
-                f"Compare {s_en} across channels{ch_hint}?",
-            )
-        if prof["has_multi_day_sales"] and prof["has_revenue"]:
-            _add(
-                f"Xu hướng doanh thu {s_vi} theo từng ngày{ym_vi}?",
-                f"Daily {s_en} trend{ym_en}?",
-            )
-
-    elif asked_debt_cust:
-        if top_ent and ent_kind == "customer" and item_col:
-            _add(
-                f"Chi tiết các {i_vi} mà khách hàng {top_ent} đã mua là gì?",
-                f"Which {i_en}s did customer {top_ent} purchase?",
-            )
-        if item_col and prof["has_revenue"]:
-            _add(
-                f"Xếp hạng doanh thu theo từng {i_vi}{ym_vi}?",
-                f"Revenue ranking by {i_en}{ym_en}?",
-            )
-        if prof["has_debt"]:
-            _add(
-                "Tổng doanh thu và tổng số tiền đã thanh toán theo từng khách hàng là bao nhiêu?",
-                "Total revenue and paid amount per customer?",
-            )
-        if prof["has_multi_day_sales"] and prof["has_revenue"]:
-            _add(
-                f"Xu hướng doanh thu {s_vi} theo từng ngày{ym_vi}?",
-                f"Daily {s_en} trend{ym_en}?",
-            )
-
-    elif asked_time:
-        if item_col and prof["has_revenue"]:
-            _add(
-                f"Top 5 {i_vi} đóng góp doanh thu cao nhất{ym_vi}?",
-                f"Top 5 {i_en}s contributing to revenue{ym_en}?",
-            )
-        if prof["has_channel"]:
-            _add(
-                f"So sánh doanh thu {s_vi} theo từng kênh bán{ch_hint}?",
-                f"Compare {s_en} across channels{ch_hint}?",
-            )
-        if cat_col:
-            _add(
-                f"Tỷ lệ đóng góp doanh thu theo từng {c_vi} là bao nhiêu?",
-                f"Revenue share by {c_en}?",
-            )
-        if prof["has_import"] and prof["has_import_price"] and prof["has_supplier"]:
-            _add(
-                f"Tổng tiền nhập {imp_vi} theo từng nhà cung cấp là bao nhiêu?",
-                f"Total import value by supplier?",
-            )
-        if prof["has_debt"] and prof["has_customers"]:
-            _add(
-                "Khách hàng nào còn công nợ chưa thanh toán nhiều nhất?",
-                "Which customers have the highest outstanding debt?",
-            )
-
-    # 2. Always append schema-specific high-value analytical options as secondary/starter pool
-    if prof["has_debt"] and prof["has_customers"]:
+    elif asked_channel and top_ent and item_col:
         _add(
-            "Khách hàng nào còn công nợ chưa thanh toán nhiều nhất?",
-            "Which customers have the highest outstanding debt?",
+            "entity_deep_dive",
+            f"Top 3 {i_vi} có doanh thu cao nhất trên kênh {top_ent}?",
+            f"Top 3 {i_en}s by revenue on {top_ent} channel?",
         )
+    elif asked_category and top_ent and item_col:
+        _add(
+            "category_channel",
+            f"Các {i_vi} thuộc {c_vi} {top_ent} có doanh thu như thế nào?",
+            f"Revenue breakdown of {i_en}s in {top_ent} {c_en}?",
+        )
+    elif asked_import and top_ent and ent_kind == "supplier" and item_col:
+        _add(
+            "supply_debt",
+            f"Nhà cung cấp {top_ent} đã nhập những {i_vi} nào và tổng tiền nhập là bao nhiêu?",
+            f"Which {i_en}s were supplied by {top_ent} and at what import value?",
+        )
+    elif asked_debt_cust and top_ent and ent_kind == "customer" and item_col:
+        _add(
+            "supply_debt",
+            f"Chi tiết các {i_vi} mà khách hàng {top_ent} đã mua là gì?",
+            f"Which {i_en}s did customer {top_ent} purchase?",
+        )
+
+    # --- 2. Multi-dimensional analytical pools (6 distinct business angles) ---
+
+    # Dimension A: category_channel
     if prof["has_channel"]:
         _add(
+            "category_channel",
             f"So sánh doanh thu {s_vi} theo từng kênh bán{ch_hint}?",
             f"Compare {s_en} across channels{ch_hint}?",
         )
-    if prof["has_import"] and prof["has_import_price"] and prof["has_supplier"]:
+        if prof["has_qty"]:
+            _add(
+                "category_channel",
+                f"So sánh số lượng bán ra theo từng kênh bán{ch_hint}?",
+                f"Compare units sold across sales channels{ch_hint}?",
+            )
+    if cat_col:
         _add(
-            f"Tổng tiền nhập {imp_vi} và số lượng nhập theo từng nhà cung cấp là bao nhiêu?",
-            f"Total import value and quantity by supplier?",
+            "category_channel",
+            f"Tỷ lệ đóng góp doanh thu theo từng {c_vi} là bao nhiêu?",
+            f"What is the revenue contribution share by {c_en}?",
         )
+        for cat_v in _rotate_list(cat_vals, rot_offset):
+            if item_col:
+                _add(
+                    "category_channel",
+                    f"Danh sách các {i_vi} thuộc {c_vi} {cat_v} là gì?",
+                    f"List of {i_en}s in {cat_v} {c_en}?",
+                )
+                if prof["has_revenue"]:
+                    _add(
+                        "category_channel",
+                        f"Top 3 {i_vi} có doanh thu cao nhất trong {c_vi} {cat_v}?",
+                        f"Top 3 {i_en}s by revenue in {cat_v}?",
+                    )
+
+    # Dimension B: ranking & extremes
     if item_col and prof["has_revenue"]:
         _add(
+            "ranking",
             f"Top 5 {i_vi} có doanh thu cao nhất{ym_vi}?",
             f"Top 5 {i_en}s by revenue{ym_en}?",
         )
-    if cat_col:
         _add(
-            f"Tỷ lệ đóng góp doanh thu theo từng {c_vi} là bao nhiêu?",
-            f"Revenue share by {c_en}?",
+            "ranking",
+            f"{i_cap} nào có doanh thu cao nhất và thấp nhất{ym_vi}, chênh lệch bao nhiêu?",
+            f"Which {i_en} has the highest and lowest revenue{ym_en}, and what is the spread?",
         )
-    if prof["has_customers"] and not prof["has_debt"]:
         _add(
-            "Top 5 khách hàng có tổng giá trị đơn hàng cao nhất là ai?",
-            "Top 5 customers by valid order spending?",
+            "ranking",
+            f"Những {i_vi} nào có doanh thu vượt trên mức trung bình{ym_vi}?",
+            f"Which {i_en}s exceed average revenue{ym_en}?",
         )
+        _add(
+            "ranking",
+            f"Những {i_vi} nào có doanh thu dưới mức trung bình{ym_vi}?",
+            f"Which {i_en}s are below average revenue{ym_en}?",
+        )
+        _add(
+            "ranking",
+            f"{i_cap} nào có doanh thu đứng thứ 2{ym_vi}?",
+            f"Which {i_en} ranks 2nd in revenue{ym_en}?",
+        )
+    if prof["has_qty"] and item_col:
+        _add(
+            "ranking",
+            f"Top 5 {i_vi} có số lượng bán cao nhất{ym_vi}?",
+            f"Top 5 {i_en}s by quantity sold{ym_en}?",
+        )
+        _add(
+            "ranking",
+            f"So sánh số lượng bán ra của từng {i_vi}{ym_vi}?",
+            f"Compare units sold across each {i_en}{ym_en}?",
+        )
+
+    # Dimension C: time_trend
     if prof["has_multi_day_sales"] and prof["has_revenue"]:
         _add(
+            "time_trend",
             f"Xu hướng doanh thu {s_vi} theo từng ngày{ym_vi}?",
             f"Daily {s_en} trend{ym_en}?",
         )
+        _add(
+            "time_trend",
+            f"Ngày nào có doanh thu {s_vi} cao nhất{ym_vi}?",
+            f"Which date recorded the highest {s_en}{ym_en}?",
+        )
+        _add(
+            "time_trend",
+            f"Ngày nào có doanh thu {s_vi} thấp nhất{ym_vi}?",
+            f"Which date recorded the lowest {s_en}{ym_en}?",
+        )
+        if prof["has_qty"]:
+            _add(
+                "time_trend",
+                f"Xu hướng số lượng bán ra theo từng ngày{ym_vi}?",
+                f"Daily sales volume trend{ym_en}?",
+            )
+        _add(
+            "time_trend",
+            f"Thống kê số lượng {d_vi} hợp lệ theo từng ngày{ym_vi}?",
+            f"Daily count of valid {d_en}{ym_en}?",
+        )
+
+    # Dimension D: supply_debt (Import/Suppliers & Customer Debt)
+    if prof["has_import"] and prof["has_import_price"] and prof["has_supplier"]:
+        _add(
+            "supply_debt",
+            f"Tổng tiền nhập {imp_vi} và số lượng nhập theo từng nhà cung cấp là bao nhiêu?",
+            f"What is total import cost and quantity by supplier?",
+        )
+        for sup in _rotate_list(supp_vals, rot_offset):
+            if item_col:
+                _add(
+                    "supply_debt",
+                    f"Nhà cung cấp {sup} đã nhập những {i_vi} nào và tổng tiền nhập là bao nhiêu?",
+                    f"Which {i_en}s did supplier {sup} deliver and what is total import cost?",
+                )
+        if prof["has_item_in_import"] and item_col:
+            _add(
+                "supply_debt",
+                f"Top 5 {i_vi} có tổng tiền nhập cao nhất là gì?",
+                f"Top 5 {i_en}s by total import cost?",
+            )
+    if prof["has_debt"] and prof["has_customers"]:
+        _add(
+            "supply_debt",
+            "Khách hàng nào còn công nợ chưa thanh toán nhiều nhất?",
+            "Which customers have the highest outstanding debt?",
+        )
+        _add(
+            "supply_debt",
+            "Danh sách các khách hàng còn công nợ và số tiền nợ là bao nhiêu?",
+            "List customers with outstanding debt and unpaid balances?",
+        )
+        _add(
+            "supply_debt",
+            "Tổng doanh thu và tổng số tiền đã thanh toán theo từng khách hàng là bao nhiêu?",
+            "Total revenue and paid amount per customer?",
+        )
+        for cust in _rotate_list(cust_vals, rot_offset):
+            if item_col:
+                _add(
+                    "supply_debt",
+                    f"Khách hàng {cust} đã mua những {i_vi} nào và tổng giá trị là bao nhiêu?",
+                    f"Which {i_en}s did customer {cust} purchase and what is the total amount?",
+                )
+    elif prof["has_customers"] and not prof["has_debt"]:
+        _add(
+            "supply_debt",
+            "Top 5 khách hàng có tổng giá trị đơn hàng cao nhất là ai?",
+            "Top 5 customers by valid order spending?",
+        )
     if prof["has_staff"] and prof["has_revenue"]:
         _add(
+            "supply_debt",
             "Top 5 nhân viên có doanh thu cao nhất là ai?",
             "Top 5 staff by revenue?",
         )
+
+    # Dimension E: quality_ops (Canceled/Returned Orders)
+    if prof["has_cancelled"]:
+        ret_hint = " hoặc trả lại" if prof["returned_values"] else ""
+        _add(
+            "quality_ops",
+            f"Có bao nhiêu {d_vi} bị hủy{ret_hint} và tổng giá trị là bao nhiêu?",
+            f"How many {d_en} were canceled and what is their total value?",
+        )
+        if prof["has_channel"]:
+            _add(
+                "quality_ops",
+                f"Số lượng {d_vi} bị hủy theo từng kênh bán là bao nhiêu?",
+                f"How many canceled {d_en} per sales channel?",
+            )
+        if item_col:
+            _add(
+                "quality_ops",
+                f"Những {i_vi} nào có {d_vi} bị hủy và tổng giá trị hủy là bao nhiêu?",
+                f"Which {i_en}s had canceled {d_en} and what is their total value?",
+            )
+
+    # Dimension F: entity_deep_dive (Dynamic Entity Rotation across items & channels)
+    for ent_s in rotated_entities[:8]:
+        if prof["has_channel"]:
+            if prof["has_qty"]:
+                _add(
+                    "entity_deep_dive",
+                    f"Doanh thu và số lượng bán của {ent_s} theo từng kênh bán là bao nhiêu?",
+                    f"Revenue and quantity sold of {ent_s} by sales channel?",
+                )
+            else:
+                _add(
+                    "entity_deep_dive",
+                    f"Doanh thu của {ent_s} theo từng kênh bán là bao nhiêu?",
+                    f"Revenue of {ent_s} by sales channel?",
+                )
+        if prof["has_multi_day_sales"] and prof["has_revenue"]:
+            _add(
+                "entity_deep_dive",
+                f"Xu hướng doanh thu của {ent_s} theo từng ngày{ym_vi}?",
+                f"Daily revenue trend of {ent_s}{ym_en}?",
+            )
+        if prof["has_import"] and prof["has_import_price"] and prof["has_item_in_import"]:
+            _add(
+                "entity_deep_dive",
+                f"Giá nhập và tổng số lượng nhập của {ent_s} là bao nhiêu?",
+                f"Import price and total imported quantity of {ent_s}?",
+            )
+        if prof["has_revenue"] and prof["has_qty"]:
+            _add(
+                "entity_deep_dive",
+                f"Tổng số lượng bán và tổng doanh thu của {ent_s} là bao nhiêu?",
+                f"Total quantity sold and revenue of {ent_s}?",
+            )
+
+    for ch in _rotate_list(ch_vals, rot_offset):
+        if item_col and prof["has_revenue"]:
+            _add(
+                "entity_deep_dive",
+                f"Top 3 {i_vi} có doanh thu cao nhất trên kênh {ch}?",
+                f"Top 3 {i_en}s by revenue on {ch} channel?",
+            )
 
     # Non-POS / generic database fallback (e.g. arbitrary Excel sheets without revenue/status)
     t_fb = prof["fallback_table"]
     if prof["fb_text_col"] and prof["fb_num_col"]:
         _add(
+            "generic",
             f"Top 5 {prof['fb_text_col']} theo tổng {prof['fb_num_col']} trong bảng {t_fb}?",
             f"Top 5 {prof['fb_text_col']} by total {prof['fb_num_col']} in `{t_fb}`?",
         )
+        _add(
+            "generic",
+            f"{prof['fb_text_col']} nào có {prof['fb_num_col']} cao nhất và thấp nhất trong bảng {t_fb}?",
+            f"Highest and lowest {prof['fb_text_col']} by {prof['fb_num_col']} in `{t_fb}`?",
+        )
     elif prof["fb_text_col"]:
         _add(
+            "generic",
             f"Thống kê số lượng bản ghi theo từng {prof['fb_text_col']} trong bảng {t_fb}?",
             f"Record count by {prof['fb_text_col']} in `{t_fb}`?",
         )
     _add(
+        "generic",
         f"Thống kê tổng quan các chỉ số chính của bảng {t_fb}",
         f"Show summary metrics of table `{t_fb}`",
     )
 
-    # 3. Strict DB-groundness & anti-repetition gate
+    # --- 3. Strict DB-groundedness, history anti-repetition & cross-dimension diversity ---
     as_of = resolve_interactive_as_of_date(knowledge)
-    validated: List[str] = []
+    buckets: Dict[str, List[str]] = {}
+    bucket_order: List[str] = []
     seen_norm: Set[str] = set()
-    for cand in candidates:
+    accepted_texts: List[str] = []
+
+    for dim_tag, cand in candidates:
         q_clean = re.sub(r"\s+", " ", str(cand or "")).strip()
         if not q_clean:
             continue
         q_n = norm_vn(q_clean)
-        if q_n in seen_norm or _is_near_duplicate_query(q_clean, user_query):
+        if q_n in seen_norm:
+            continue
+        if any(_is_near_duplicate_query(q_clean, pq) for pq in prior_queries):
+            continue
+        if any(_is_near_duplicate_query(q_clean, aq) for aq in accepted_texts):
             continue
         if check_out_of_scope_or_irrelevant(q_clean, knowledge) is not None:
             continue
         if check_preflight_unanswerable(q_clean, as_of, knowledge, classify_expected_type(q_clean)) is not None:
             continue
         seen_norm.add(q_n)
-        validated.append(q_clean)
-        if len(validated) >= 3:
+        accepted_texts.append(q_clean)
+        if dim_tag not in buckets:
+            buckets[dim_tag] = []
+            bucket_order.append(dim_tag)
+        buckets[dim_tag].append(q_clean)
+
+    # Rotate dimension order by turn index (keeping current-query dimension deprioritized unless needed),
+    # then pick round-robin across distinct dimensions so consecutive turns stay diverse and fresh.
+    non_generic = [d for d in bucket_order if d != "generic"]
+    other_dims = [d for d in non_generic if d != cur_dim]
+    if len(other_dims) > 1:
+        other_dims = _rotate_list(other_dims, rot_offset // 2)
+    ordered_dims = other_dims + ([cur_dim] if cur_dim in buckets else []) + (["generic"] if "generic" in buckets else [])
+
+    validated: List[str] = []
+    while len(validated) < max_suggestions:
+        progressed = False
+        for d in ordered_dims:
+            q_list = buckets.get(d)
+            if q_list:
+                validated.append(q_list.pop(0))
+                progressed = True
+                if len(validated) >= max_suggestions:
+                    break
+        if not progressed:
             break
 
     if not validated:
@@ -947,20 +1185,54 @@ def _format_answer_banner(
                     f"Thấp nhất: **{bot_ent}** (**{bot_fmt}**) • Chênh lệch: **{diff_fmt}**{ratio_str}"
                 )
 
+    def _find_banner_num_idx(sres: SQLExecutionResult) -> Optional[int]:
+        sample_rows = sres.rows[:10]
+        valid_idxs = [
+            idx
+            for idx in range(1, len(sres.columns))
+            if not re.search(r"^(?:ma_|id$|rn_|row_?num)|_id$", str(sres.columns[idx]), re.I)
+            and all(
+                r and r[0] is not None and len(r) > idx
+                and isinstance(r[idx], (int, float))
+                and not isinstance(r[idx], bool)
+                for r in sample_rows
+            )
+        ]
+        if not valid_idxs:
+            return None
+        if analysis.money_like and len(valid_idxs) > 1:
+            money_idx = next(
+                (
+                    idx
+                    for idx in valid_idxs
+                    if re.search(
+                        r"(?:doanh_?thu|thanh_?tien|tong_?tien|tien|no|luong|gia|revenue|amount|sales|profit)",
+                        str(sres.columns[idx]),
+                        re.I,
+                    )
+                ),
+                None,
+            )
+            if money_idx is not None:
+                return money_idx
+        return valid_idxs[0]
+
     if (
         sql_res is not None
         and sql_res.ok
         and len(sql_res.rows) == 1
         and len(sql_res.columns) >= 2
-        and ptype in ("string", "date", "table")
+        and ptype in ("string", "date", "table", "list")
+        and not analysis.is_list_unit_pair
     ):
         row0 = sql_res.rows[0]
         ent_val = row0[0]
-        metric_val = row0[1]
-        if ent_val is not None and isinstance(metric_val, (int, float)) and not isinstance(metric_val, bool):
+        num_idx_1 = _find_banner_num_idx(sql_res)
+        if ent_val is not None and num_idx_1 is not None:
             from src.visualization.charts import format_col_title
 
-            raw_col = str(sql_res.columns[1])
+            metric_val = row0[num_idx_1]
+            raw_col = str(sql_res.columns[num_idx_1])
             col_title = format_col_title(raw_col) if not is_en else raw_col
             col_title_clean = re.sub(r"\s*\(\$\)\s*", "", col_title).strip()
             col_low = raw_col.lower()
@@ -991,6 +1263,35 @@ def _format_answer_banner(
     if ptype == "string":
         return f"💡 **Kết quả kiểm định chuẩn:** **{ans}**" if not is_en else f"💡 **Verified Result:** **{ans}**"
     if ptype == "list" and isinstance(ans, list):
+        if (
+            sql_res is not None
+            and sql_res.ok
+            and len(sql_res.rows) >= 2
+            and len(sql_res.columns) >= 2
+            and not analysis.is_list_unit_pair
+        ):
+            num_idx = _find_banner_num_idx(sql_res)
+            if num_idx is not None:
+                raw_col = str(sql_res.columns[num_idx]).lower()
+                is_money_col = analysis.money_like or any(
+                    k in raw_col for k in ("doanh_thu", "thanh_tien", "tong_tien", "tien", "no", "luong", "gia", "revenue", "amount", "sales")
+                )
+                unit = " VNĐ" if (is_money_col and not is_en) else ""
+                paired_items: List[str] = []
+                for r in sql_res.rows[:10]:
+                    mv = float(r[num_idx])
+                    m_str = (
+                        f"{int(round(mv)):,}".replace(",", ".")
+                        if (is_money_col or mv.is_integer())
+                        else f"{mv:,.2f}"
+                    )
+                    paired_items.append(f"**{r[0]}** (**{m_str}{unit}**)")
+                items_joined = ", ".join(paired_items)
+                return (
+                    f"💡 **Danh sách kiểm định chuẩn:** {items_joined}"
+                    if not is_en
+                    else f"💡 **Verified List:** {items_joined}"
+                )
         items = ", ".join(str(x) for x in ans[:10])
         return f"💡 **Danh sách kiểm định chuẩn:** {items}" if not is_en else f"💡 **Verified List:** {items}"
     return None
@@ -1013,6 +1314,7 @@ def run_datamate_enhanced_turn(
     lang: str = "vi",
     as_of_date: Optional[str] = None,
     insights_fn: Optional[Callable[..., str]] = None,
+    asked_queries: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """
     Execute a question against a DataMate WorkspaceKnowledge using full Stage-1 guardrails:
@@ -1078,7 +1380,7 @@ def run_datamate_enhanced_turn(
             lang,
         )
         result["followups"] = build_datamate_suggested_questions(
-            knowledge, lang=lang, user_query=user_query
+            knowledge, lang=lang, user_query=user_query, asked_queries=asked_queries
         )
         result["evaluator"] = {
             "verdict": "UNANSWERABLE_BLOCKED",
@@ -1106,6 +1408,7 @@ def run_datamate_enhanced_turn(
         ),
     )
 
+    effective_temp_summary = format_effective_temporal_summary(temp_summary, as_of, analysis)
     sys_p, usr_p = dm_agent._build_sql_prompt(
         question=user_query,
         as_of_date=as_of,
@@ -1121,9 +1424,21 @@ def run_datamate_enhanced_turn(
     last_sem_msg = ""
 
     def _try_extreme_fallback(trigger_reason: str) -> Optional[Tuple[SQLExecutionResult, str, bool, str]]:
-        if getattr(analysis, "extreme_comparison", None) is None:
-            return None
-        spec = build_extreme_comparison_sql_spec(user_query, knowledge, analysis)
+        spec: Optional[Dict[str, Any]] = None
+        fb_tag = "Extreme Comparison Fallback"
+        if getattr(analysis, "extreme_comparison", None) is not None:
+            spec = build_extreme_comparison_sql_spec(user_query, knowledge, analysis)
+        elif extract_benchmark_average_entity_intent(user_query) is not None:
+            spec = build_benchmark_average_entity_sql_spec(user_query, knowledge, analysis)
+            fb_tag = "Benchmark Average Entity Fallback"
+        else:
+            spec = build_entity_and_metric_listing_sql_spec(user_query, knowledge, analysis, entities)
+            if spec is not None:
+                fb_tag = "Entity + Metric Fallback"
+            else:
+                spec = build_catalog_listing_sql_spec(user_query, knowledge, analysis, entities)
+                if spec is not None:
+                    fb_tag = "Catalog Listing Fallback"
         if not spec or not spec.get("suggested_sql"):
             return None
         fb_sql = spec["suggested_sql"]
@@ -1142,7 +1457,7 @@ def run_datamate_enhanced_turn(
         if not fb_ok:
             return None
         result["logs"].append(
-            f"🛡️ [Extreme Comparison Fallback] {trigger_reason} — tự động chuyển sang CTE cực trị chuẩn."
+            f"🛡️ [{fb_tag}] {trigger_reason} — tự động chuyển sang truy vấn chuẩn."
         )
         return fb_res, (fb_res.sql or fb_sql), fb_ok, fb_msg
 
@@ -1174,7 +1489,7 @@ def run_datamate_enhanced_turn(
                     last_sql_text,
                     last_res.error,
                     knowledge,
-                    temporal_summary=temp_summary,
+                    temporal_summary=effective_temp_summary,
                     include_full_schema=False,
                 )
                 continue
@@ -1198,13 +1513,17 @@ def run_datamate_enhanced_turn(
                 }
                 result["agent_trace"]["evaluator"] = result["evaluator"]
                 result["followups"] = build_datamate_suggested_questions(
-                    knowledge, lang=lang, user_query=user_query
+                    knowledge, lang=lang, user_query=user_query, asked_queries=asked_queries
                 )
                 return result
 
         if not resolved_fb:
             candidate_sql = str(obj["sql"]) if (obj and isinstance(obj.get("sql"), str)) else raw_reply
             candidate_sql = rewrite_ranked_entity_sql(candidate_sql, user_query, use_round_half_up=True)
+            _before_strip = candidate_sql
+            candidate_sql = strip_spurious_single_day_filter(candidate_sql, user_query, analysis)
+            if candidate_sql != _before_strip:
+                result["logs"].append("🧹 [Date Guard] Tự động loại bỏ điều kiện lọc 1 ngày không được yêu cầu.")
             res = execute_sql_safe(
                 knowledge.workspace.open_connection,
                 candidate_sql,
@@ -1225,8 +1544,8 @@ def run_datamate_enhanced_turn(
                         last_sql_text,
                         res.error,
                         knowledge,
-                        temporal_summary=temp_summary,
-                        include_full_schema=(len(knowledge.schema_prompt or "") <= 4500),
+                        temporal_summary=effective_temp_summary,
+                        include_full_schema=(len(knowledge.schema_prompt or "") <= 5000),
                     )
                     continue
                 fb_out = _try_extreme_fallback(f"SQL lỗi ({res.error})")
@@ -1241,7 +1560,7 @@ def run_datamate_enhanced_turn(
                         lang,
                     )
                     result["followups"] = build_datamate_suggested_questions(
-                        knowledge, lang=lang, user_query=user_query
+                        knowledge, lang=lang, user_query=user_query, asked_queries=asked_queries
                     )
                     return result
             else:
@@ -1257,8 +1576,8 @@ def run_datamate_enhanced_turn(
                             last_sql_text,
                             sem_msg,
                             knowledge,
-                            temporal_summary=temp_summary,
-                            include_full_schema=False,
+                            temporal_summary=effective_temp_summary,
+                            include_full_schema=(len(knowledge.schema_prompt or "") <= 5000),
                         )
                         continue
                     if sem_fatal:
@@ -1274,7 +1593,7 @@ def run_datamate_enhanced_turn(
                                 lang,
                             )
                             result["followups"] = build_datamate_suggested_questions(
-                                knowledge, lang=lang, user_query=user_query
+                                knowledge, lang=lang, user_query=user_query, asked_queries=asked_queries
                             )
                             result["evaluator"] = {"verdict": "BLOCKED", "score": 40, "critique": sem_msg}
                             result["agent_trace"]["evaluator"] = result["evaluator"]
@@ -1293,7 +1612,7 @@ def run_datamate_enhanced_turn(
                         last_sql_text,
                         msg,
                         knowledge,
-                        temporal_summary=temp_summary,
+                        temporal_summary=effective_temp_summary,
                         include_full_schema=True,
                     )
                     continue
@@ -1309,18 +1628,62 @@ def run_datamate_enhanced_turn(
                         lang,
                     )
                     result["followups"] = build_datamate_suggested_questions(
-                        knowledge, lang=lang, user_query=user_query
+                        knowledge, lang=lang, user_query=user_query, asked_queries=asked_queries
                     )
                     return result
 
         # Valid rows returned & passed semantic guard! Build rich DataFrame + UI metadata.
         df = pd.DataFrame(res.rows, columns=res.columns)
+
+        # Fill zero-transaction days across active recorded date range for continuous daily trends
+        _tbl_mins: List[str] = []
+        _tbl_maxs: List[str] = []
+        _sql_low_span = (last_sql_text or "").lower()
+        for _tbl_col, _span in (knowledge.table_date_ranges or {}).items():
+            _tname_part = _tbl_col.split(".", 1)[0].lower()
+            if re.search(rf"\b{re.escape(_tname_part)}\b", _sql_low_span) and _span and len(_span) == 2:
+                _tbl_mins.append(str(_span[0]))
+                _tbl_maxs.append(str(_span[1]))
+        _data_min = min(_tbl_mins) if _tbl_mins else knowledge.data_min_date
+        _data_max = max(_tbl_maxs) if _tbl_maxs else knowledge.data_max_date
+        _eff_min, _eff_max = _data_min, _data_max
+        if analysis.bounded_period is not None:
+            _bp_s, _bp_e = analysis.bounded_period
+            if _bp_s and _bp_s != "0001-01-01":
+                _eff_min = max(_data_min, _bp_s) if _data_min else _bp_s
+            if _bp_e:
+                _eff_max = min(_data_max, _bp_e) if _data_max else _bp_e
+
+        _orig_day_vals = set(df.iloc[:, 0].astype(str)) if (not df.empty and len(df.columns) >= 1) else set()
+        _orig_daily_cnt = len(df)
+        df = ensure_continuous_daily_series(df, user_query=user_query, min_date=_eff_min, max_date=_eff_max)
+        _daily_fill_note = ""
+        if len(df) > _orig_daily_cnt and len(df.columns) >= 1:
+            _filled_days = [str(v) for v in df.iloc[:, 0].astype(str).tolist() if str(v) not in _orig_day_vals]
+            if _filled_days:
+                _days_preview = ", ".join(_filled_days[:10])
+                if len(_filled_days) > 10:
+                    _days_preview += f" (+{len(_filled_days) - 10})"
+                result["logs"].append(
+                    f"📅 [Daily Continuity] Đã bổ sung {len(_filled_days)} ngày không phát sinh giao dịch ({_days_preview}) với giá trị 0."
+                )
+                _span_str = f"{_eff_min or df.iloc[0, 0]} → {_eff_max or df.iloc[-1, 0]}"
+                _daily_fill_note = (
+                    f"ℹ️ **Continuous Daily Series ({_span_str}):** Days **{_days_preview}** had no qualifying orders for this filter and are displayed as **0** so trends and daily averages remain accurate."
+                    if lang == "en" else
+                    f"ℹ️ **Chuỗi ngày liên tục ({_span_str}):** Các ngày **{_days_preview}** không phát sinh đơn hợp lệ cho mục này nên được hiển thị **0** để biểu đồ xu hướng và mức trung bình theo ngày phản ánh đúng thực tế."
+                )
+
         if getattr(analysis, "extreme_comparison", None) is not None and not df.empty:
             df = _enrich_extreme_comparison_df(df, analysis, user_query=user_query)
+            formatted = {"type": "table", "answer": {"columns": list(df.columns), "rows": df.values.tolist()}}
+        elif len(df) > _orig_daily_cnt:
             formatted = {"type": "table", "answer": {"columns": list(df.columns), "rows": df.values.tolist()}}
         else:
             formatted = format_sql_result(res, analysis, user_query)
         banner = _format_answer_banner(formatted, analysis, lang, sql_res=res, df=df)
+        if _daily_fill_note:
+            banner = f"{banner}\n\n{_daily_fill_note}" if banner else _daily_fill_note
 
         result["df"] = df
         result["sql"] = last_sql_text
@@ -1354,6 +1717,7 @@ def run_datamate_enhanced_turn(
             user_query=user_query,
             df=df,
             sql=last_sql_text,
+            asked_queries=asked_queries,
         )
 
         if not df.empty and len(df) >= 2:

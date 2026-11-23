@@ -2015,6 +2015,121 @@ def _rank_categorical_column(col_name: str, distinct_cnt: int, row_count: int, i
     return (score, is_status)
 
 
+_ORDER_STATUS_COL_RE = re.compile(
+    r"(?:^|_)(?:trang_?thai|tinh_?trang|order_?status|invoice_?status|status|state)(?:$|_)",
+    re.I,
+)
+
+
+def _classify_status_strings_fallback(values: list) -> tuple[list, list, list]:
+    """Classify order status values locally without requiring external imports."""
+    import unicodedata
+
+    def _norm(s: str) -> str:
+        s = str(s or "").replace("đ", "d").replace("Đ", "D")
+        s = unicodedata.normalize("NFKD", s)
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        return re.sub(r"\s+", " ", s.lower()).strip()
+
+    valid, cancelled, returned = [], [], []
+    for raw in values:
+        nv = _norm(raw)
+        if re.search(r"huy|cancel|khong giao duoc|that bai|void|reject", nv):
+            cancelled.append(raw)
+        elif re.search(r"tra\s*hang|tra\s*lai|doi\s*tra|hoan\s*tra|hoan\s*hang|hoan\s*don|hang\s*tra\s*ve|returned", nv):
+            returned.append(raw)
+        else:
+            valid.append(raw)
+    return valid, cancelled, returned
+
+
+def _detect_order_status_exclusions(
+    conn,
+    t_name: str,
+    raw_cat_cols: list,
+    cat_stats: dict,
+    is_sqlite: bool,
+) -> tuple[str | None, list[str]]:
+    """Detect the primary order-status column and non-revenue statuses (cancelled/returned)."""
+    cands = [
+        cn for cn in raw_cat_cols
+        if _ORDER_STATUS_COL_RE.search(str(cn or "")) and 1 <= cat_stats.get(cn, 2) <= 25
+    ]
+    if not cands:
+        return None, []
+
+    def _pref_rank(cn: str) -> tuple[int, int]:
+        cl = cn.lower()
+        if "trang_thai" in cl or "trangthai" in cl:
+            return (0, len(cl))
+        if "tinh_trang" in cl or "tinhtrang" in cl:
+            return (1, len(cl))
+        if "order_status" in cl or "invoice_status" in cl:
+            return (2, len(cl))
+        if cl == "status":
+            return (3, len(cl))
+        return (4, len(cl))
+
+    cands.sort(key=_pref_rank)
+    qt = _q_ident(t_name, is_sqlite)
+
+    try:
+        from datamate.schema_context import _classify_status_values as _dm_classify
+    except Exception:
+        _dm_classify = _classify_status_strings_fallback
+
+    for cn in cands:
+        qc = _q_ident(cn, is_sqlite)
+        try:
+            rows = conn.execute(text(f"SELECT DISTINCT {qc} FROM {qt} WHERE {qc} IS NOT NULL LIMIT 30")).fetchall()
+            vals = [str(r[0]) for r in rows if r[0] is not None and str(r[0]).strip()]
+            if not vals:
+                continue
+            valid, cancelled, returned = _dm_classify(vals)
+            excluded = list(dict.fromkeys(list(cancelled) + list(returned)))
+            if valid and excluded:
+                return cn, excluded
+        except Exception:
+            continue
+    return None, []
+
+
+def _build_valid_status_condition(status_col: str | None, excluded_vals: list[str], is_sqlite: bool) -> str:
+    """Build bare SQL predicate (without leading WHERE) excluding cancelled/returned statuses."""
+    if not status_col or not excluded_vals:
+        return ""
+    qcol = _q_ident(status_col, is_sqlite)
+    cast_t = "TEXT" if is_sqlite else "CHAR"
+    escaped = []
+    seen = set()
+    for val in excluded_vals:
+        v_s = str(val).strip()
+        if not v_s or v_s in seen:
+            continue
+        seen.add(v_s)
+        escaped.append("'" + v_s.replace("'", "''") + "'")
+    if not escaped:
+        return ""
+    vals_sql = ", ".join(escaped)
+    return f"({qcol} IS NULL OR TRIM(CAST({qcol} AS {cast_t})) NOT IN ({vals_sql}))"
+
+
+def _combine_where_clauses(*clauses: str) -> str:
+    """Combine bare or WHERE-prefixed SQL filter clauses safely into a single WHERE clause."""
+    parts = []
+    for cl in clauses:
+        s = str(cl or "").strip()
+        if not s:
+            continue
+        if s.upper().startswith("WHERE "):
+            s = s[6:].strip()
+        if s:
+            parts.append(s)
+    if not parts:
+        return ""
+    return "WHERE " + " AND ".join(parts)
+
+
 def discover_generic_database_schema(engine) -> dict:
     """Tự động phân tích toàn bộ cấu trúc Schema của CSDL mới bất kỳ:
     - Danh sách bảng & số dòng
@@ -2124,6 +2239,11 @@ def discover_generic_database_schema(engine) -> dict:
                             status_col = cand
                             break
 
+                ord_status_col, excluded_status_vals = (
+                    _detect_order_status_exclusions(conn, t_name, raw_cat_cols, cat_stats, is_sqlite)
+                    if row_count > 0 else (None, [])
+                )
+
                 meta[t_name] = {
                     "columns": col_names,
                     "primary_keys": list(pks),
@@ -2131,6 +2251,8 @@ def discover_generic_database_schema(engine) -> dict:
                     "numeric_columns": numeric_cols,
                     "categorical_columns": categorical_cols,
                     "status_col": status_col,
+                    "order_status_col": ord_status_col,
+                    "excluded_status_values": excluded_status_vals,
                     "cat_stats": cat_stats,
                     "row_count": row_count,
                 }
@@ -2394,11 +2516,17 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
         and end_year is not None
         and (start_year != meta_min_y or end_year != meta_max_y)
     )
-    where_clause = ""
+    year_where_clause = ""
     if is_narrowed_year and main_table:
         qd = _q_ident(active_date_col, is_sqlite)
         y_expr = f"CAST(substr(TRIM(CAST({qd} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({qd})"
-        where_clause = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
+        year_where_clause = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
+
+    ord_status_col = main_meta.get("order_status_col")
+    excluded_status_vals = main_meta.get("excluded_status_values") or []
+    valid_status_cond = _build_valid_status_condition(ord_status_col, excluded_status_vals, is_sqlite)
+    valid_where_clause = _combine_where_clauses(year_where_clause, valid_status_cond)
+    excluded_status_count = 0
 
     main_df = pd.DataFrame()
     cat_dist_df = pd.DataFrame()
@@ -2414,16 +2542,24 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
         qt_main = _q_ident(main_table, is_sqlite)
         try:
             with engine.connect() as conn:
-                sql_sample = f"SELECT * FROM {qt_main} {where_clause} LIMIT 100;"
+                sql_sample = f"SELECT * FROM {qt_main} {year_where_clause} LIMIT 100;"
                 sql_parts.append(sql_sample)
                 main_df = pd.read_sql(text(sql_sample), conn)
-                if main_df.empty and where_clause:
+                if main_df.empty and year_where_clause:
                     sql_sample_fb = f"SELECT * FROM {qt_main} LIMIT 100;"
                     main_df = pd.read_sql(text(sql_sample_fb), conn)
-                    where_clause = ""
+                    year_where_clause = ""
+                    valid_where_clause = _combine_where_clauses(year_where_clause, valid_status_cond)
 
-                metrics_info = _find_secondary_metrics(conn, main_table, main_meta, where_clause, is_sqlite)
+                metrics_info = _find_secondary_metrics(conn, main_table, main_meta, valid_where_clause, is_sqlite)
                 sum_val = float(metrics_info.get("main_sum", 0.0))
+
+                if valid_status_cond:
+                    try:
+                        raw_cnt = conn.execute(text(f"SELECT COUNT(*) FROM {qt_main} {year_where_clause}")).scalar()
+                        excluded_status_count = max(0, int(raw_cnt or 0) - int(metrics_info.get("filtered_records", 0)))
+                    except Exception:
+                        excluded_status_count = 0
 
                 if main_cat_col:
                     qc = _q_ident(main_cat_col, is_sqlite)
@@ -2431,10 +2567,10 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
                     order_expr = "MetricSum DESC, Count DESC" if main_num_col else "Count DESC"
                     sql_cat = (
                         f"SELECT COALESCE(CAST({qc} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {cat_val_expr} AS MetricSum "
-                        f"FROM {qt_main} {where_clause} GROUP BY {qc} ORDER BY {order_expr} LIMIT 10;"
+                        f"FROM {qt_main} {valid_where_clause} GROUP BY {qc} ORDER BY {order_expr} LIMIT 10;"
                     ) if is_sqlite else (
                         f"SELECT COALESCE(CAST({qc} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {cat_val_expr} AS MetricSum "
-                        f"FROM {qt_main} {where_clause} GROUP BY {qc} ORDER BY {order_expr} LIMIT 10;"
+                        f"FROM {qt_main} {valid_where_clause} GROUP BY {qc} ORDER BY {order_expr} LIMIT 10;"
                     )
                     sql_parts.append(sql_cat)
                     try:
@@ -2445,12 +2581,13 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
                 if status_col and status_col != main_cat_col:
                     qs_col = _q_ident(status_col, is_sqlite)
                     st_val_expr = f"COALESCE(SUM({_q_ident(main_num_col, is_sqlite)}), 0)" if main_num_col else "COUNT(*)"
+                    status_where = year_where_clause if (status_col == ord_status_col) else valid_where_clause
                     sql_status = (
                         f"SELECT COALESCE(CAST({qs_col} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
-                        f"FROM {qt_main} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                        f"FROM {qt_main} {status_where} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
                     ) if is_sqlite else (
                         f"SELECT COALESCE(CAST({qs_col} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
-                        f"FROM {qt_main} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                        f"FROM {qt_main} {status_where} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
                     )
                     try:
                         status_df = pd.read_sql(text(sql_status), conn)
@@ -2462,13 +2599,21 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
                 if trend_tbl and trend_col:
                     t_num = main_num_col if trend_tbl == main_table else (meta.get(trend_tbl, {}).get("numeric_columns") or [None])[0]
                     t_qty = metrics_info.get("qty_col") if trend_tbl == main_table else None
-                    t_where = ""
-                    if is_narrowed_year and trend_tbl == main_table:
-                        t_where = where_clause
-                    elif is_narrowed_year:
-                        q_td = _q_ident(trend_col, is_sqlite)
-                        ty_expr = f"CAST(substr(TRIM(CAST({q_td} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({q_td})"
-                        t_where = f"WHERE {ty_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
+                    if trend_tbl == main_table:
+                        t_where = valid_where_clause
+                    else:
+                        t_yr_where = ""
+                        if is_narrowed_year:
+                            q_td = _q_ident(trend_col, is_sqlite)
+                            ty_expr = f"CAST(substr(TRIM(CAST({q_td} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({q_td})"
+                            t_yr_where = f"WHERE {ty_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
+                        t_tr_meta = meta.get(trend_tbl, {})
+                        t_tr_status = _build_valid_status_condition(
+                            t_tr_meta.get("order_status_col"),
+                            t_tr_meta.get("excluded_status_values") or [],
+                            is_sqlite,
+                        )
+                        t_where = _combine_where_clauses(t_yr_where, t_tr_status)
                     trend_df, trend_granularity = _fetch_adaptive_trend(conn, trend_tbl, trend_col, t_num, t_qty, t_where, is_sqlite)
 
                 # All-tables summary matrix
@@ -2480,8 +2625,17 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
                     t_dates = t_m.get("date_columns", [])
                     t_sum = None
                     if t_num_c:
+                        t_valid_where = _combine_where_clauses(
+                            _build_valid_status_condition(
+                                t_m.get("order_status_col"),
+                                t_m.get("excluded_status_values") or [],
+                                is_sqlite,
+                            )
+                        )
                         try:
-                            s_val = conn.execute(text(f"SELECT COALESCE(SUM({_q_ident(t_num_c, is_sqlite)}), 0) FROM {_q_ident(tbl_n, is_sqlite)}")).scalar()
+                            s_val = conn.execute(
+                                text(f"SELECT COALESCE(SUM({_q_ident(t_num_c, is_sqlite)}), 0) FROM {_q_ident(tbl_n, is_sqlite)} {t_valid_where}")
+                            ).scalar()
                             t_sum = float(s_val or 0.0)
                         except Exception:
                             t_sum = None
@@ -2567,6 +2721,9 @@ def fetch_generic_overview_data(engine, schema_meta: dict, start_year: int = Non
         "total_billed_val": metrics_info.get("total_billed_val"),
         "main_cat_col": main_cat_col,
         "status_col": status_col,
+        "order_status_col": ord_status_col,
+        "excluded_status_values": excluded_status_vals,
+        "excluded_status_count": excluded_status_count,
         "active_date_col": active_date_col,
         "min_date": schema_meta.get("min_date"),
         "max_date": schema_meta.get("max_date"),
@@ -2610,11 +2767,17 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
         and end_year is not None
         and (start_year != meta_min_y or end_year != meta_max_y)
     )
-    where_clause = ""
+    year_where_clause = ""
     if is_narrowed:
         qd = _q_ident(date_col, is_sqlite)
         y_expr = f"CAST(substr(TRIM(CAST({qd} AS TEXT)), 1, 4) AS INTEGER)" if is_sqlite else f"YEAR({qd})"
-        where_clause = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
+        year_where_clause = f"WHERE {y_expr} BETWEEN {int(start_year)} AND {int(end_year)}"
+
+    ord_status_col = meta.get("order_status_col")
+    excluded_status_vals = meta.get("excluded_status_values") or []
+    valid_status_cond = _build_valid_status_condition(ord_status_col, excluded_status_vals, is_sqlite)
+    valid_where_clause = _combine_where_clauses(year_where_clause, valid_status_cond)
+    excluded_status_count = 0
 
     df = pd.DataFrame()
     cat_df = pd.DataFrame()
@@ -2622,17 +2785,25 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
     trend_df = pd.DataFrame()
     trend_granularity = "month"
     metrics_info = {}
-    sql = f"SELECT * FROM {qt} {where_clause} LIMIT 200;"
+    sql = f"SELECT * FROM {qt} {year_where_clause} LIMIT 200;"
 
     try:
         with engine.connect() as conn:
             df = pd.read_sql(text(sql), conn)
-            if df.empty and where_clause:
+            if df.empty and year_where_clause:
                 sql = f"SELECT * FROM {qt} LIMIT 200;"
                 df = pd.read_sql(text(sql), conn)
-                where_clause = ""
+                year_where_clause = ""
+                valid_where_clause = _combine_where_clauses(year_where_clause, valid_status_cond)
 
-            metrics_info = _find_secondary_metrics(conn, table_name, meta, where_clause, is_sqlite)
+            metrics_info = _find_secondary_metrics(conn, table_name, meta, valid_where_clause, is_sqlite)
+
+            if valid_status_cond:
+                try:
+                    raw_cnt = conn.execute(text(f"SELECT COUNT(*) FROM {qt} {year_where_clause}")).scalar()
+                    excluded_status_count = max(0, int(raw_cnt or 0) - int(metrics_info.get("filtered_records", 0)))
+                except Exception:
+                    excluded_status_count = 0
 
             if main_cat:
                 qc = _q_ident(main_cat, is_sqlite)
@@ -2640,10 +2811,10 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
                 ord_expr = "MetricSum DESC, Count DESC" if num_col else "Count DESC"
                 sql_cat = (
                     f"SELECT COALESCE(CAST({qc} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {val_expr} AS MetricSum "
-                    f"FROM {qt} {where_clause} GROUP BY {qc} ORDER BY {ord_expr} LIMIT 12;"
+                    f"FROM {qt} {valid_where_clause} GROUP BY {qc} ORDER BY {ord_expr} LIMIT 12;"
                 ) if is_sqlite else (
                     f"SELECT COALESCE(CAST({qc} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {val_expr} AS MetricSum "
-                    f"FROM {qt} {where_clause} GROUP BY {qc} ORDER BY {ord_expr} LIMIT 12;"
+                    f"FROM {qt} {valid_where_clause} GROUP BY {qc} ORDER BY {ord_expr} LIMIT 12;"
                 )
                 try:
                     cat_df = pd.read_sql(text(sql_cat), conn)
@@ -2653,12 +2824,13 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
             if status_col and status_col != main_cat:
                 qs_col = _q_ident(status_col, is_sqlite)
                 st_val_expr = f"COALESCE(SUM({_q_ident(num_col, is_sqlite)}), 0)" if num_col else "COUNT(*)"
+                status_where = year_where_clause if (status_col == ord_status_col) else valid_where_clause
                 sql_st = (
                     f"SELECT COALESCE(CAST({qs_col} AS TEXT), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
-                    f"FROM {qt} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                    f"FROM {qt} {status_where} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
                 ) if is_sqlite else (
                     f"SELECT COALESCE(CAST({qs_col} AS CHAR), 'Khác') AS Category, COUNT(*) AS Count, {st_val_expr} AS MetricSum "
-                    f"FROM {qt} {where_clause} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
+                    f"FROM {qt} {status_where} GROUP BY {qs_col} ORDER BY Count DESC LIMIT 8;"
                 )
                 try:
                     status_df = pd.read_sql(text(sql_st), conn)
@@ -2667,7 +2839,7 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
 
             if date_col:
                 trend_df, trend_granularity = _fetch_adaptive_trend(
-                    conn, table_name, date_col, num_col, metrics_info.get("qty_col"), where_clause, is_sqlite
+                    conn, table_name, date_col, num_col, metrics_info.get("qty_col"), valid_where_clause, is_sqlite
                 )
 
         sum_val = float(metrics_info.get("main_sum", 0.0))
@@ -2693,6 +2865,9 @@ def fetch_generic_table_data(engine, table_name: str, schema_meta: dict, start_y
             "trend_granularity": trend_granularity,
             "main_cat_col": main_cat,
             "status_col": status_col,
+            "order_status_col": ord_status_col,
+            "excluded_status_values": excluded_status_vals,
+            "excluded_status_count": excluded_status_count,
             "num_col": num_col,
             "unit_style": unit_style,
             "sum_val": sum_val,

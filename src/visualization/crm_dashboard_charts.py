@@ -24,8 +24,8 @@ def _build_empty_dark_figure(height: int = 250) -> go.Figure:
         font=dict(size=12, color="#64748B", family="Inter")
     )
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=15, r=15, t=15, b=15),
         height=height,
         showlegend=False,
@@ -56,7 +56,7 @@ def build_latency_wave_chart(
             y=y_rep,
             name=name_1,
             mode="lines",
-            line=dict(color="#00F0FF", width=3, shape="spline", smoothing=1.3),
+            line=dict(color="#3B82F6", width=3, shape="spline", smoothing=1.3),
             fill="tozeroy",
             fillcolor="rgba(0, 240, 255, 0.22)",
             hoverinfo="x+y"
@@ -87,7 +87,7 @@ def build_latency_wave_chart(
             x=[pk_x],
             y=[pk_y],
             mode="markers+text",
-            marker=dict(size=12, color="#00F0FF", line=dict(color="#FFFFFF", width=2)),
+            marker=dict(size=12, color="#3B82F6", line=dict(color="#FFFFFF", width=2)),
             showlegend=False,
             hoverinfo="skip"
         ))
@@ -100,19 +100,19 @@ def build_latency_wave_chart(
             text=display_peak,
             showarrow=True,
             arrowhead=2,
-            arrowcolor="#00F0FF",
+            arrowcolor="#3B82F6",
             arrowsize=0.8,
             ax=0,
             ay=-36,
             bgcolor="rgba(0, 240, 255, 0.85)",
             font=dict(color="#0A0E23", size=10, family="Inter", weight=700),
             borderpad=4,
-            bordercolor="#00F0FF"
+            bordercolor="#3B82F6"
         )
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=10, r=10, t=25, b=25),
         height=180,
         showlegend=False,
@@ -154,8 +154,8 @@ def build_created_vs_solved_chart(
             y=y_solved,
             name=name_solved,
             mode="lines+markers",
-            line=dict(color="#00F0FF", width=3.5, shape="spline", smoothing=1.2),
-            marker=dict(size=7, color="#00F0FF"),
+            line=dict(color="#3B82F6", width=3.5, shape="spline", smoothing=1.2),
+            marker=dict(size=7, color="#3B82F6"),
             fill="tozeroy",
             fillcolor="rgba(0, 240, 255, 0.12)",
             hovertemplate=f"<b>%{{x}}</b><br>{name_solved}: <b>%{{y:,.0f}}</b><extra></extra>"
@@ -169,8 +169,8 @@ def build_created_vs_solved_chart(
             y=y_created,
             name=name_created,
             mode="lines+markers",
-            line=dict(color="#E879F9", width=2.5, dash="dot", shape="spline", smoothing=1.2),
-            marker=dict(size=6, color="#E879F9"),
+            line=dict(color="#8B5CF6", width=2.5, dash="dot", shape="spline", smoothing=1.2),
+            marker=dict(size=6, color="#8B5CF6"),
             hovertemplate=f"<b>%{{x}}</b><br>{name_created}: <b>%{{y:,.0f}}</b><extra></extra>"
         ))
 
@@ -182,7 +182,7 @@ def build_created_vs_solved_chart(
             x=[m_x],
             y=[m_y],
             mode="markers",
-            marker=dict(size=14, color="#00F0FF", line=dict(color="#FFFFFF", width=2.5)),
+            marker=dict(size=14, color="#3B82F6", line=dict(color="#FFFFFF", width=2.5)),
             showlegend=False,
             hoverinfo="skip"
         ))
@@ -192,19 +192,19 @@ def build_created_vs_solved_chart(
             text=f"<b>Max = {m_y:,}</b>",
             showarrow=True,
             arrowhead=2,
-            arrowcolor="#E879F9",
+            arrowcolor="#8B5CF6",
             arrowsize=0.8,
             ax=-25,
             ay=-30,
-            bgcolor="#E879F9",
+            bgcolor="#8B5CF6",
             font=dict(color="#FFFFFF", size=11, family="Inter", weight=800),
             borderpad=5,
-            bordercolor="#E879F9"
+            bordercolor="#8B5CF6"
         )
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=35, r=20, t=30, b=30),
         height=240,
         legend=dict(
@@ -233,7 +233,7 @@ def build_created_vs_solved_chart(
             bgcolor="#0F1424",
             font_size=12,
             font_family="Inter",
-            bordercolor="#00F0FF"
+            bordercolor="#3B82F6"
         )
     )
     return fig
@@ -268,8 +268,8 @@ def build_hr_trend_chart(
             y=y1_vals,
             name=name_1,
             mode="lines+markers",
-            line=dict(color="#00F0FF", width=3.5, shape="spline", smoothing=1.3),
-            marker=dict(size=7, color="#00F0FF", line=dict(color="#FFFFFF", width=1.5)),
+            line=dict(color="#3B82F6", width=3.5, shape="spline", smoothing=1.3),
+            marker=dict(size=7, color="#3B82F6", line=dict(color="#FFFFFF", width=1.5)),
             fill="tozeroy",
             fillcolor="rgba(0, 240, 255, 0.16)",
             hovertemplate=f"<b>%{{x}}</b><br>{name_1}: <b>%{{y:,.0f}} {unit}</b><extra></extra>"
@@ -283,8 +283,8 @@ def build_hr_trend_chart(
             y=y2_vals,
             name=name_2,
             mode="lines+markers",
-            line=dict(color="#E879F9", width=2.8, dash="dot", shape="spline", smoothing=1.3),
-            marker=dict(size=6, color="#E879F9"),
+            line=dict(color="#8B5CF6", width=2.8, dash="dot", shape="spline", smoothing=1.3),
+            marker=dict(size=6, color="#8B5CF6"),
             fill="tonexty" if y1_col in df.columns else "tozeroy",
             fillcolor="rgba(232, 121, 249, 0.12)",
             hovertemplate=f"<b>%{{x}}</b><br>{name_2}: <b>%{{y:,.0f}} {unit}</b><extra></extra>"
@@ -298,7 +298,7 @@ def build_hr_trend_chart(
             x=[m_x],
             y=[m_y],
             mode="markers",
-            marker=dict(size=14, color="#00F0FF", line=dict(color="#FFFFFF", width=2.5)),
+            marker=dict(size=14, color="#3B82F6", line=dict(color="#FFFFFF", width=2.5)),
             showlegend=False,
             hoverinfo="skip"
         ))
@@ -308,14 +308,14 @@ def build_hr_trend_chart(
             text=f"<b>{peak_label}: {m_y:,.0f} {unit}</b>",
             showarrow=True,
             arrowhead=2,
-            arrowcolor="#00F0FF",
+            arrowcolor="#3B82F6",
             arrowsize=0.8,
             ax=-25,
             ay=-32,
-            bgcolor="#00F0FF",
+            bgcolor="#3B82F6",
             font=dict(color="#0A0E23", size=11, family="Inter", weight=900),
             borderpad=5,
-            bordercolor="#00F0FF"
+            bordercolor="#3B82F6"
         )
     elif y1_col in df.columns and len(df[y1_col]) > 0:
         max_idx = int(df[y1_col].tolist().index(max(df[y1_col])))
@@ -325,7 +325,7 @@ def build_hr_trend_chart(
             x=[m_x],
             y=[m_y],
             mode="markers",
-            marker=dict(size=14, color="#00F0FF", line=dict(color="#FFFFFF", width=2.5)),
+            marker=dict(size=14, color="#3B82F6", line=dict(color="#FFFFFF", width=2.5)),
             showlegend=False,
             hoverinfo="skip"
         ))
@@ -335,19 +335,19 @@ def build_hr_trend_chart(
             text=f"<b>{peak_label}: {m_y:,.0f} {unit}</b>",
             showarrow=True,
             arrowhead=2,
-            arrowcolor="#00F0FF",
+            arrowcolor="#3B82F6",
             arrowsize=0.8,
             ax=-25,
             ay=-32,
-            bgcolor="#00F0FF",
+            bgcolor="#3B82F6",
             font=dict(color="#0A0E23", size=11, family="Inter", weight=900),
             borderpad=5,
-            bordercolor="#00F0FF"
+            bordercolor="#3B82F6"
         )
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=35, r=20, t=30, b=30),
         height=height,
         legend=dict(
@@ -376,7 +376,7 @@ def build_hr_trend_chart(
             bgcolor="#0F1424",
             font_size=12,
             font_family="Inter",
-            bordercolor="#00F0FF"
+            bordercolor="#3B82F6"
         )
     )
     return fig
@@ -395,24 +395,24 @@ def build_tickets_by_type_donut(df: pd.DataFrame, label_col: str = "Department",
     values = df[val_c].tolist()
     
     colors_map = {
-        "Development": "#00F0FF",
-        "Production": "#7928CA",
-        "Sales": "#FF0080",
-        "Customer Service": "#00DF8F",
-        "Research": "#FFBE0B",
-        "Marketing": "#3A86FF",
-        "Quality Management": "#FB5607",
-        "Human Resources": "#F72585",
-        "Finance": "#4CC9F0",
-        "Senior Engineer": "#00F0FF",
-        "Staff": "#7928CA",
-        "Engineer": "#FF0080",
-        "Senior Staff": "#00DF8F",
-        "Technique Leader": "#FFBE0B",
-        "Assistant Engineer": "#3A86FF",
-        "Manager": "#FB5607"
+        "Development": "#3B82F6",
+        "Production": "#6366F1",
+        "Sales": "#14B8A6",
+        "Customer Service": "#10B981",
+        "Research": "#F59E0B",
+        "Marketing": "#8B5CF6",
+        "Quality Management": "#EC4899",
+        "Human Resources": "#0EA5E9",
+        "Finance": "#64748B",
+        "Senior Engineer": "#3B82F6",
+        "Staff": "#6366F1",
+        "Engineer": "#14B8A6",
+        "Senior Staff": "#10B981",
+        "Technique Leader": "#F59E0B",
+        "Assistant Engineer": "#8B5CF6",
+        "Manager": "#EC4899"
     }
-    palette = ["#00F0FF", "#7928CA", "#FF0080", "#00DF8F", "#FFBE0B", "#3A86FF", "#FB5607", "#F72585", "#4CC9F0"]
+    palette = ["#3B82F6", "#6366F1", "#14B8A6", "#F59E0B", "#EC4899", "#0EA5E9", "#8B5CF6", "#10B981", "#64748B"]
     custom_colors = [colors_map.get(lbl, palette[i % len(palette)]) for i, lbl in enumerate(labels)]
 
     qty_label = "Quantity: " if is_en else "Số lượng: "
@@ -423,7 +423,7 @@ def build_tickets_by_type_donut(df: pd.DataFrame, label_col: str = "Department",
         values=values,
         hole=0.66,
         sort=False,
-        marker=dict(colors=custom_colors, line=dict(color="#13172B", width=2.5)),
+        marker=dict(colors=custom_colors, line=dict(color="#11141C", width=2.5)),
         textinfo="percent",
         textposition="inside",
         textfont=dict(size=12, color="#FFFFFF", family="Inter", weight=900),
@@ -448,8 +448,8 @@ def build_tickets_by_type_donut(df: pd.DataFrame, label_col: str = "Department",
     )
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=15, r=15, t=15, b=15),
         height=height,
         showlegend=True,
@@ -486,12 +486,12 @@ def build_new_vs_returned_donut(
     values = df[val_col].tolist()
 
     colors_map = {
-        "Nam (Male)": "#00F0FF",
-        "Nữ (Female)": "#FF007A",
-        "Returned": "#FF007A",
-        "New": "#7C3AED"
+        "Nam (Male)": "#3B82F6",
+        "Nữ (Female)": "#8B5CF6",
+        "Returned": "#8B5CF6",
+        "New": "#3B82F6"
     }
-    custom_colors = [colors_map.get(lbl, "#EC4899") for lbl in labels]
+    custom_colors = [colors_map.get(lbl, "#14B8A6") for lbl in labels]
 
     qty_label = "Quantity: " if is_en else "Số lượng: "
     ratio_label = "Ratio: " if is_en else "Tỷ lệ: "
@@ -501,7 +501,7 @@ def build_new_vs_returned_donut(
         values=values,
         hole=0.72,
         sort=False,
-        marker=dict(colors=custom_colors, line=dict(color="#13172B", width=3)),
+        marker=dict(colors=custom_colors, line=dict(color="#11141C", width=3)),
         textinfo="percent",
         textposition="inside",
         textfont=dict(size=12, color="#FFFFFF", family="Inter", weight=900),
@@ -525,8 +525,8 @@ def build_new_vs_returned_donut(
     )
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=15, r=15, t=15, b=15),
         height=height,
         showlegend=True,
@@ -552,7 +552,7 @@ def build_weekday_bar_chart(df: pd.DataFrame, height: int = 240, **kwargs) -> go
     totals = df["Total"].tolist() if "Total" in df.columns else df.iloc[:, 1].tolist()
 
     bar_colors = [
-        "#00F0FF",
+        "#3B82F6",
         "#38BDF8",
         "#818CF8",
         "#A855F7",
@@ -579,8 +579,8 @@ def build_weekday_bar_chart(df: pd.DataFrame, height: int = 240, **kwargs) -> go
     )])
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=25, r=15, t=25, b=30),
         height=height,
         showlegend=False,
@@ -601,7 +601,7 @@ def build_weekday_bar_chart(df: pd.DataFrame, height: int = 240, **kwargs) -> go
             bgcolor="#0E1326",
             font_size=12,
             font_family="Inter",
-            bordercolor="#00F0FF"
+            bordercolor="#3B82F6"
         )
     )
     return fig
@@ -625,11 +625,11 @@ def build_horizontal_bar_chart(
     x_vals = df_sorted[x_col].tolist() if x_col in df_sorted.columns else df_sorted.iloc[:, 1].tolist()
 
     colors = [
-        "rgba(56, 189, 248, 0.85)",
-        "rgba(14, 165, 233, 0.9)",
-        "rgba(6, 182, 212, 0.95)",
-        "rgba(0, 240, 255, 0.98)",
-        "#00F0FF"
+        "#334155",
+        "#1E40AF",
+        "#1D4ED8",
+        "#2563EB",
+        "#3B82F6"
     ]
 
     metric_name = name or x_col
@@ -640,19 +640,19 @@ def build_horizontal_bar_chart(
         name=metric_name,
         orientation="h",
         marker=dict(
-            color=colors[-len(x_vals):] if len(x_vals) <= len(colors) else color_hex,
-            line=dict(color="#FFFFFF", width=1.2)
+            color=colors[-len(x_vals):] if len(x_vals) <= len(colors) else "#3B82F6",
+            line=dict(width=0)
         ),
         text=[f"<b>{v:,.0f}</b>" if isinstance(v, (int, float)) else f"<b>{v}</b>" for v in x_vals],
         textposition="inside",
-        textfont=dict(color="#090D1A", size=12, family="Inter", weight=900),
+        textfont=dict(color="#F8FAFC", size=11, family="Inter", weight=700),
         insidetextanchor="middle",
         hovertemplate=f"<b>%{{y}}</b><br>{metric_name}: <b>%{{x:,.0f}}</b><extra></extra>"
     )])
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=20, r=20, t=15, b=15),
         height=height,
         showlegend=False,
@@ -686,7 +686,7 @@ def build_multi_bar_chart(
         return _build_empty_dark_figure(height)
     fig = go.Figure()
 
-    default_colors = ["#38BDF8", "#00F0FF", "#E879F9", "#F59E0B"]
+    default_colors = ["#38BDF8", "#3B82F6", "#8B5CF6", "#F59E0B"]
     bar_colors = colors or default_colors
 
     x_vals = df[x_col].tolist()
@@ -705,8 +705,8 @@ def build_multi_bar_chart(
 
     fig.update_layout(
         barmode="group",
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=25, r=15, t=30, b=30),
         height=height,
         legend=dict(
@@ -745,7 +745,7 @@ def build_multi_line_chart(
         return _build_empty_dark_figure(height)
     fig = go.Figure()
 
-    palette = ["#00F0FF", "#E879F9", "#38BDF8", "#F59E0B", "#10B981", "#A855F7", "#EC4899", "#3B82F6", "#F97316"]
+    palette = ["#3B82F6", "#8B5CF6", "#38BDF8", "#F59E0B", "#10B981", "#A855F7", "#EC4899", "#3B82F6", "#F97316"]
     x_vals = [str(x) for x in df[x_col].tolist()]
 
     for i, (col_name, label) in enumerate(series_dict.items()):
@@ -761,8 +761,8 @@ def build_multi_line_chart(
             ))
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=30, r=15, t=30, b=30),
         height=height,
         legend=dict(
@@ -804,7 +804,7 @@ def build_donut_chart(
         return _build_empty_dark_figure(height)
     fig = go.Figure()
 
-    default_colors = ["#00F0FF", "#38BDF8", "#E879F9", "#F59E0B", "#10B981", "#A855F7", "#EC4899", "#F97316"]
+    default_colors = ["#3B82F6", "#38BDF8", "#8B5CF6", "#F59E0B", "#10B981", "#A855F7", "#EC4899", "#F97316"]
     slice_colors = colors or default_colors
     val_label = "Value: " if is_en else "Giá trị: "
 
@@ -812,15 +812,15 @@ def build_donut_chart(
         labels=df[label_col].tolist(),
         values=df[val_col].tolist(),
         hole=0.55,
-        marker=dict(colors=slice_colors, line=dict(color="#13172B", width=2)),
+        marker=dict(colors=slice_colors, line=dict(color="#11141C", width=2)),
         textinfo="percent+label",
         textfont=dict(color="#FFFFFF", size=11, family="Inter", weight=700),
         hovertemplate=f"<b>%{{label}}</b><br>{val_label}<b>%{{value:,.0f}}</b> (%{{percent}})<extra></extra>"
     ))
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=15, r=15, t=20, b=20),
         height=height,
         showlegend=True,
@@ -867,7 +867,7 @@ def build_sales_dual_axis_chart(
             y=df[rev_col].tolist(),
             name=rev_name,
             marker=dict(
-                color="#00F0FF",
+                color="#3B82F6",
                 opacity=0.85,
                 line=dict(color="#FFFFFF", width=1)
             ),
@@ -882,15 +882,15 @@ def build_sales_dual_axis_chart(
             y=df[box_col].tolist(),
             name=box_name,
             mode="lines+markers",
-            line=dict(color="#E879F9", width=3, shape="spline", smoothing=1.3),
-            marker=dict(size=7, color="#E879F9", line=dict(color="#FFFFFF", width=1.5)),
+            line=dict(color="#8B5CF6", width=3, shape="spline", smoothing=1.3),
+            marker=dict(size=7, color="#8B5CF6", line=dict(color="#FFFFFF", width=1.5)),
             yaxis="y2",
             hovertemplate=f"<b>%{{x}}</b><br>{box_name}: <b>%{{y:,.0f}}{box_unit_pad}</b><extra></extra>"
         ))
 
     fig.update_layout(
-        paper_bgcolor="#13172B",
-        plot_bgcolor="#13172B",
+        paper_bgcolor="#11141C",
+        plot_bgcolor="#11141C",
         margin=dict(l=25, r=25, t=30, b=30),
         height=height,
         legend=dict(
@@ -908,21 +908,21 @@ def build_sales_dual_axis_chart(
             tickfont=dict(color="#FFFFFF", size=10, family="Inter", weight=700)
         ),
         yaxis=dict(
-            title=dict(text=rev_name, font=dict(color="#00F0FF", size=11, family="Inter", weight=700)),
+            title=dict(text=rev_name, font=dict(color="#3B82F6", size=11, family="Inter", weight=700)),
             showgrid=True,
             gridcolor="rgba(255,255,255,0.08)",
             showline=False,
             zeroline=False,
-            tickfont=dict(color="#00F0FF", size=10, family="Inter")
+            tickfont=dict(color="#3B82F6", size=10, family="Inter")
         ),
         yaxis2=dict(
-            title=dict(text=box_name, font=dict(color="#E879F9", size=11, family="Inter", weight=700)),
+            title=dict(text=box_name, font=dict(color="#8B5CF6", size=11, family="Inter", weight=700)),
             overlaying="y",
             side="right",
             showgrid=False,
             showline=False,
             zeroline=False,
-            tickfont=dict(color="#E879F9", size=10, family="Inter")
+            tickfont=dict(color="#8B5CF6", size=10, family="Inter")
         )
     )
     return fig

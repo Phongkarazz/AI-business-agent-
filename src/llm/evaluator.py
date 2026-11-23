@@ -1469,6 +1469,32 @@ def evaluate_execution(
                 "MUST SELECT Month, [Entity], SUM(s.Amount) AS TotalSales, GROUP BY Month, [Entity] ORDER BY Month ASC for multi-line trend chart!"
             )
 
+        # Kiểm tra 2.16: Người dùng hỏi đối tượng gắn với chỉ số (doanh thu, số lượng, lương, công nợ...) nhưng kết quả chỉ trả về 1 cột tên đối tượng mà thiếu cột số liệu
+        if (
+            len(df.columns) == 1
+            and not pd.api.types.is_numeric_dtype(df.iloc[:, 0])
+            and any(
+                k in q_low
+                for k in [
+                    "doanh thu", "doanh số", "thành tiền", "tổng tiền", "số lượng", "hộp", "boxes",
+                    "lương", "salary", "revenue", "sales", "amount", "chi phí", "công nợ", "lợi nhuận",
+                ]
+            )
+        ):
+            criteria["semantic_alignment"]["passed"] = False
+            msg = (
+                "Câu hỏi gắn với chỉ số đo lường (doanh thu / số lượng / lương / công nợ), nhưng câu SQL chỉ trả về 1 cột tên đối tượng mà bỏ sót cột giá trị số liệu đi kèm."
+                if not is_en
+                else "Query involves a quantitative metric (revenue / quantity / salary / debt), but SQL returned only 1 entity name column without the metric column."
+            )
+            criteria["semantic_alignment"]["detail"] = msg
+            fails.append(msg)
+            actionable_feedbacks.append(
+                "BẮT BUỘC chọn CẢ cột tên đối tượng VÀ cột chỉ số tổng hợp (`SUM(...)` / `AVG(...)`) trong mệnh đề `SELECT`, đồng thời `GROUP BY` theo đối tượng và sắp xếp `ORDER BY` theo chỉ số!"
+                if not is_en
+                else "MUST include BOTH the entity name column AND the aggregated metric column (`SUM(...)` / `AVG(...)`) in `SELECT`, grouped by the entity!"
+            )
+
     # -------------------------------------------------------------
     # PILLAR 3: COMPARATIVE SUFFICIENCY (ĐỘ ĐẦY ĐỦ CÁC VẾ SO SÁNH & CỰC TRỊ)
     # -------------------------------------------------------------

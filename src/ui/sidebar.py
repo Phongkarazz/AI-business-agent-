@@ -170,68 +170,73 @@ def render_main_sidebar():
     model_name = st.session_state.get("model_name", "deepseek/deepseek-chat")
 
     with st.sidebar:
-        # --- DARK THEME SIDEBAR CSS (#12141C) & VIBRANT HIGH-CONTRAST ACCENTS ---
+        # --- DARK NEUTRAL SIDEBAR CSS (#0F1219) ---
         st.markdown("""
         <style>
             [data-testid="stSidebar"],
             [data-testid="stSidebar"] > div:first-child,
             [data-testid="stSidebarContent"],
             [data-testid="stSidebarUserContent"] {
-                background-color: #12141C !important;
+                background-color: #0F1219 !important;
             }
             [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
             [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] span {
-                color: #FFFFFF !important;
+                color: #F8FAFC !important;
             }
             .sidebar-section-hdr {
-                font-size: 0.8rem;
-                font-weight: 800;
-                letter-spacing: 0.05em;
+                font-size: 0.72rem;
+                font-weight: 600;
+                letter-spacing: 0.06em;
                 text-transform: uppercase;
-                color: #38BDF8 !important;
-                margin: 16px 0 8px 2px;
+                color: #64748B !important;
+                margin: 14px 0 8px 2px;
                 display: flex;
                 align-items: center;
                 gap: 6px;
             }
             [data-testid="stSidebar"] .stButton > button {
-                border-radius: 9px !important;
-                font-weight: 750 !important;
-                font-size: 0.86rem !important;
+                min-height: 36px !important;
+                padding: 6px 10px !important;
+                border-radius: 8px !important;
+                font-weight: 600 !important;
+                font-size: 0.84rem !important;
+                box-shadow: none !important;
             }
             [data-testid="stSidebar"] .stButton > button[kind="primary"] {
-                background: linear-gradient(135deg, #0052D4 0%, #0068FF 100%) !important;
+                background: #2563EB !important;
                 color: #FFFFFF !important;
-                border: 1px solid rgba(255, 255, 255, 0.25) !important;
-                box-shadow: 0 4px 14px rgba(0, 104, 255, 0.4) !important;
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                box-shadow: none !important;
             }
             [data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
-                background: linear-gradient(135deg, #0068FF 0%, #00F0FF 100%) !important;
-                color: #090D1A !important;
-                box-shadow: 0 6px 18px rgba(0, 240, 255, 0.5) !important;
-                transform: translateY(-1px) !important;
+                background: #3B82F6 !important;
+                color: #FFFFFF !important;
+                box-shadow: none !important;
+                transform: none !important;
             }
             [data-testid="stSidebar"] .stButton > button[kind="secondary"] {
-                background: #181D2F !important;
-                border: 1px solid rgba(255, 255, 255, 0.15) !important;
-                color: #FFFFFF !important;
+                background: #151923 !important;
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                color: #E2E8F0 !important;
+                box-shadow: none !important;
             }
             [data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
-                background: #232A42 !important;
-                border-color: #00F0FF !important;
-                color: #00F0FF !important;
-                transform: translateY(-1px) !important;
+                background: #1C2230 !important;
+                border-color: rgba(255, 255, 255, 0.16) !important;
+                color: #F8FAFC !important;
+                box-shadow: none !important;
+                transform: none !important;
             }
         </style>
         """, unsafe_allow_html=True)
 
-        # --- PHẦN 1: TOP BRANDING & LANGUAGE SWITCHER ---
+        # --- PHẦN 1: TOP BRANDING & PRIMARY NAVIGATION ---
         is_en = (get_current_language() == "en")
 
         st.markdown(textwrap.dedent(f"""
-        <div style="padding: 4px 4px 6px 4px;">
-            <div style="font-size: 1.35rem; font-weight: 900; color: #FFFFFF; display: flex; align-items: center; gap: 10px;">
-                <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 12px rgba(0, 104, 255, 0.45)); flex-shrink: 0;">
+        <div style="padding: 2px 4px 10px 4px;">
+            <div style="font-size: 1.2rem; font-weight: 800; color: #F8FAFC; display: flex; align-items: center; gap: 9px;">
+                <svg width="24" height="24" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0;">
                     <defs>
                         <linearGradient id="sbFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
                             <stop offset="0%" stop-color="#38BDF8"/>
@@ -264,14 +269,10 @@ def render_main_sidebar():
                     <polygon points="70,32 52,22 50,54 62,58" fill="#003D99"/>
                     <polygon points="38,58 50,54 62,58 50,88" fill="url(#sbFacetCenterGlow)"/>
                 </svg>
-                <span style="color: #FFFFFF !important; letter-spacing: -0.025em; font-weight: 900;">VERAXUS</span>
+                <span style="color: #F8FAFC !important; letter-spacing: -0.02em; font-weight: 800;">VERAXUS</span>
             </div>
         </div>
         """).strip(), unsafe_allow_html=True)
-
-        # Nút chuyển đổi ngôn ngữ gọn gàng trên thanh Sidebar
-        render_language_switcher_button(key_suffix="sidebar")
-        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
 
         # Action Buttons: New Chat & Settings
         c_top1, c_top2 = st.columns(2)
@@ -299,26 +300,20 @@ def render_main_sidebar():
         elif detected_dom == "sales_commerce":
             dash_btn_label = t("sidebar_btn_sales_dashboard")
         elif detected_dom == "sakila_rental":
-            dash_btn_label = "🎬 Dashboard Sakila" if not is_en else "🎬 Sakila Dashboard"
+            dash_btn_label = "Dashboard Sakila" if not is_en else "Sakila Dashboard"
         elif detected_dom == "crm_support":
             dash_btn_label = t("sidebar_btn_crm_dashboard")
         else:
-            dash_btn_label = "💎 Dashboard CSDL" if not is_en else "💎 Universal Dashboard"
+            dash_btn_label = "Dashboard CSDL" if not is_en else "Universal Dashboard"
 
         if current_vmode in ("dashboard", "evolution"):
             if st.button(t("back_to_chat"), use_container_width=True, type="secondary", key="sidebar_btn_toggle_chat"):
                 st.session_state["view_mode"] = "chat"
                 st.rerun()
         else:
-            c_dash1, c_dash2 = st.columns(2)
-            with c_dash1:
-                if st.button(dash_btn_label, use_container_width=True, type="secondary", key="sidebar_btn_toggle_dash", help="Open Executive Intelligence Dashboard" if is_en else "Mở Dashboard phân tích điều hành thông minh tự động theo cơ sở dữ liệu"):
-                    st.session_state["view_mode"] = "dashboard"
-                    st.rerun()
-            with c_dash2:
-                if st.button(t("sidebar_btn_evolution"), use_container_width=True, type="secondary", key="sidebar_btn_toggle_evo", help="Open Multi-Agent Self-Evolution Loop Dashboard" if is_en else "Mở Bảng Điều Khiển Tiến Hóa Đa Tác Tử & Ngân Hàng Tri Thức Động"):
-                    st.session_state["view_mode"] = "evolution"
-                    st.rerun()
+            if st.button(dash_btn_label, use_container_width=True, type="secondary", key="sidebar_btn_toggle_dash", help="Open Executive Intelligence Dashboard" if is_en else "Mở Dashboard phân tích điều hành thông minh tự động theo cơ sở dữ liệu"):
+                st.session_state["view_mode"] = "dashboard"
+                st.rerun()
 
         st.markdown("<hr style='margin: 14px 0 10px 0; border: none; border-top: 1px solid rgba(255,255,255,0.08);' />", unsafe_allow_html=True)
 
@@ -409,3 +404,9 @@ def render_main_sidebar():
                 st.rerun()
         else:
             st.markdown(f"<div style='font-size:0.8rem; color:#64748B; line-height:1.4;'>{t('sidebar_history_empty')}</div>", unsafe_allow_html=True)
+
+        # --- PHẦN 4: FOOTER CHUYỂN ĐỔI NGÔN NGỮ ---
+        st.markdown("<hr style='margin: 18px 0 10px 0; border: none; border-top: 1px solid rgba(255,255,255,0.07);' />", unsafe_allow_html=True)
+        lang_lbl = "Language" if is_en else "Ngôn ngữ"
+        st.markdown(f"<div style='font-size:0.72rem; color:#64748B; margin-bottom:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;'>{lang_lbl}</div>", unsafe_allow_html=True)
+        render_language_switcher_button(key_suffix="sidebar")

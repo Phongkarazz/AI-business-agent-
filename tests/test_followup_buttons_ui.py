@@ -265,9 +265,10 @@ class TestFollowupButtonsUI(unittest.TestCase):
         self.assertFalse(at_warn.exception)
         warn_html = " ".join(getattr(m, "value", "") for m in at_warn.markdown)
         self.assertNotIn("Độ tin cậy 100%", warn_html)
+        self.assertNotIn("Hội đồng 5 Agent", warn_html)
         self.assertIn("75/100", warn_html)
 
-        # 2. Passing 100/100 score shows full verified badge
+        # 2. Passing 100/100 score stays silent (no noisy "Độ tin cậy 100%" / "100% minh bạch" clutter)
         at_ok = AppTest.from_function(_render_badges_only)
         at_ok.session_state["badge_result"] = {
             "df": pd.DataFrame({"Country": ["Australia"], "TotalSales": [1854356]}),
@@ -279,7 +280,9 @@ class TestFollowupButtonsUI(unittest.TestCase):
         at_ok.run(timeout=15)
         self.assertFalse(at_ok.exception)
         ok_html = " ".join(getattr(m, "value", "") for m in at_ok.markdown)
-        self.assertIn("Độ tin cậy 100%", ok_html)
+        self.assertEqual(ok_html.strip(), "")
+        self.assertNotIn("Độ tin cậy 100%", ok_html)
+        self.assertNotIn("100% minh bạch", ok_html)
 
 
 if __name__ == "__main__":

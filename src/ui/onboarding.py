@@ -68,7 +68,7 @@ def render_onboarding():
     with col_head2:
         st.markdown(
             '<div style="text-align: right; padding-top: 6px;">'
-            '<span style="background: rgba(0, 223, 143, 0.15); color: #00DF8F; border: 1px solid #00DF8F; padding: 5px 12px; border-radius: 9999px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em;">'
+            '<span style="background: rgba(16, 185, 129, 0.1); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.25); padding: 4px 10px; border-radius: 9999px; font-size: 0.76rem; font-weight: 600; letter-spacing: 0.01em;">'
             '● Local & Secured Engine'
             '</span>'
             '</div>',
@@ -102,7 +102,7 @@ def render_onboarding():
             st.caption("Dành cho Ban Giám khảo & Người dùng muốn trải nghiệm ngay tức thì.")
 
             st.markdown("""
-            <div style="background: #151A30; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 14px 18px; margin: 12px 0 16px 0;">
+            <div style="background: #11141C; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 14px 18px; margin: 12px 0 16px 0;">
                 <div style="margin-bottom: 8px; font-size: 0.88rem; color: #FFFFFF;">
                     📊 <b>CSDL Mẫu:</b> Awesome Chocolates (Doanh thu, Đơn hàng, Nhân sự)
                 </div>
@@ -192,7 +192,7 @@ def render_onboarding():
                     db_port = "3306"
                     use_ssl = False
                     st.markdown("""
-                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
+                    <div style="background: #11141C; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
                         🕊️ <b>CSDL Yến Sào Khánh Hòa (SQLite Cục Bộ):</b> Gồm 4 bảng <code>san_pham</code>, <code>khach_hang</code>, <code>don_hang</code>, <code>chi_tiet_don_hang</code>. Phân tích doanh số, công nợ, lợi nhuận yến sào ngay lập tức mà không cần cài MySQL!
                     </div>
                     """, unsafe_allow_html=True)
@@ -204,7 +204,7 @@ def render_onboarding():
                     db_port = "3306"
                     use_ssl = False
                     st.markdown("""
-                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
+                    <div style="background: #11141C; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
                         📊 <b>Dữ liệu Mẫu (In-Memory SQLite):</b> Tích hợp sẵn CSDL Awesome Chocolates (bảng <code>sales</code>, <code>products</code>, <code>salespersons</code>, <code>geo</code>). Không cần cài đặt MySQL!
                     </div>
                     """, unsafe_allow_html=True)
@@ -215,7 +215,7 @@ def render_onboarding():
                     db_port = "3306"
                     use_ssl = False
                     st.markdown("""
-                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
+                    <div style="background: #11141C; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.88rem; color: #00DF8F;">
                         📂 <b>Nạp Dữ liệu Doanh nghiệp (DataMate AI Engine):</b> Kéo thả nhiều file <code>.csv</code>, <code>.xlsx</code>, <code>.sqlite</code>/<code>.db</code> hoặc <code>README.md</code> mô tả nghiệp vụ — hoặc trỏ tới thư mục dữ liệu cục bộ.
                     </div>
                     """, unsafe_allow_html=True)
@@ -258,7 +258,7 @@ def render_onboarding():
                     use_ssl = False
 
                     st.markdown("""
-                    <div style="background: #151A30; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.84rem; color: #00DF8F; display: flex; align-items: center; gap: 8px;">
+                    <div style="background: #11141C; border: 1px solid rgba(0, 223, 143, 0.3); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.84rem; color: #00DF8F; display: flex; align-items: center; gap: 8px;">
                         <span>🟢</span> <span><b>Chế độ Cục bộ (Localhost):</b> <code>127.0.0.1:3306</code> (Không cần cấu hình mạng).</span>
                     </div>
                     """, unsafe_allow_html=True)
@@ -449,7 +449,14 @@ def render_onboarding():
 
     # 3. Nút phụ trợ phía dưới
     st.markdown("###")
-    c_sub1, c_sub2, c_sub3 = st.columns([2, 1, 1])
+    c_sub1, c_sub2, c_sub3 = st.columns([2, 1.2, 1.2])
+    with c_sub2:
+        if is_already_connected:
+            from src.i18n import get_current_language
+            _tpl_btn_lbl = "📚 Saved Query Templates" if get_current_language() == "en" else "📚 Mẫu truy vấn đã lưu"
+            if st.button(_tpl_btn_lbl, use_container_width=True, key="btn_onboarding_open_templates"):
+                st.session_state["view_mode"] = "evolution"
+                st.rerun()
     with c_sub3:
         if st.button("🗑️ Xóa cấu hình đã lưu", use_container_width=True, key="btn_onboarding_clear_config"):
             clear_saved_config()

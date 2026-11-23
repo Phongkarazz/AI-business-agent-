@@ -62,11 +62,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "sidebar_demo_engine": "CSDL Demo • SQLite Engine",
         "sidebar_disconnected": "Chưa Kết Nối CSDL",
         "sidebar_btn_new_chat": "+ Chat Mới",
-        "sidebar_btn_settings": "Thiết lập ⚙",
-        "sidebar_btn_hr_dashboard": "❖ HR & Payroll Dashboard",
-        "sidebar_btn_sales_dashboard": "❖ Sales Executive Dashboard",
-        "sidebar_btn_crm_dashboard": "❖ CRM Executive Dashboard",
-        "sidebar_btn_evolution": "🧬 Vòng Lặp Tiến Hóa",
+        "sidebar_btn_settings": "Thiết lập",
+        "sidebar_btn_hr_dashboard": "HR & Payroll Dashboard",
+        "sidebar_btn_sales_dashboard": "Sales Executive Dashboard",
+        "sidebar_btn_crm_dashboard": "CRM Executive Dashboard",
+        "sidebar_btn_evolution": "Mẫu truy vấn đã lưu",
         "sidebar_schema_title": "Danh Mục Bảng CSDL",
         "sidebar_schema_table_info": "Bảng `{table}`: {count} trường dữ liệu",
         "sidebar_schema_open_table": "Mở bảng `{table}` →",
@@ -91,7 +91,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "chart_tab_kpi": "📌 Chỉ số KPI",
         "insights_title": "💡 Insight & Phân tích",
         "forecast_tab_title": "🔮 Dự báo xu hướng",
-        "agent_team_tab_title": "🏛 Hội đồng 5 Agent & SQL",
+        "agent_team_tab_title": "Chi tiết truy vấn",
         "insights_highlights": "Điểm sáng & Cơ hội tăng trưởng",
         "insights_risks": "Cảnh báo rủi ro & Điểm nghẽn",
         "insights_actions": "Đề xuất hành động chiến lược",
@@ -232,18 +232,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # --- Northwind ERP Dashboard ---
         "northwind_dash_title": "📦 Global Supply Chain & Sales Intelligence Dashboard",
         "northwind_dash_badge": "CSDL NORTHWIND TRADERS • LIVE SQL",
-        "sidebar_btn_northwind_dashboard": "📦 Dashboard Northwind",
+        "sidebar_btn_northwind_dashboard": "Dashboard Northwind",
 
-        # --- Evolution Dashboard ---
-        "evo_dash_title": "🧬 VÒNG LẶP TIẾN HÓA & TỰ HOÀN THIỆN TRI THỨC (SELF-EVOLUTION LOOP)",
-        "evo_dash_subtitle": "Hệ thống Tự học, Đánh giá Độc lập & Tích lũy Tri thức Tự động của Veraxus",
-        "evo_kpi_score": "Điểm Chất lượng Trung bình",
-        "evo_kpi_samples": "Tổng Mẫu Tri thức Vàng",
-        "evo_kpi_autofix": "Tỷ lệ Tự sửa lỗi Thành công",
-        "evo_kpi_latency": "Độ trễ Phản hồi Trung bình",
-        "evo_tab_overview": "📈 Tổng quan Tiến hóa",
-        "evo_tab_knowledge": "📚 Kho Tri thức Mẫu",
-        "evo_tab_eval_logs": "🔍 Nhật ký Đánh giá & Giám sát",
+        # --- Saved Query Templates ---
+        "evo_dash_title": "📚 Mẫu truy vấn đã lưu",
+        "evo_dash_subtitle": "Quản lý các mẫu câu hỏi chuẩn hóa và phản hồi người dùng để Veraxus trả lời sát nghiệp vụ hơn",
+        "evo_kpi_score": "Chất lượng trung bình",
+        "evo_kpi_samples": "Số mẫu truy vấn đã lưu",
+        "evo_kpi_autofix": "Tỷ lệ sửa lỗi thành công",
+        "evo_kpi_latency": "Thời gian phản hồi",
+        "evo_tab_overview": "📈 Tổng quan",
+        "evo_tab_knowledge": "📚 Mẫu truy vấn đã lưu",
+        "evo_tab_eval_logs": "📋 Lịch sử đánh giá",
     },
 
     "en": {
@@ -298,11 +298,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "sidebar_demo_engine": "Demo DB • SQLite Engine",
         "sidebar_disconnected": "Database Disconnected",
         "sidebar_btn_new_chat": "+ New Chat",
-        "sidebar_btn_settings": "Settings ⚙",
-        "sidebar_btn_hr_dashboard": "❖ HR & Payroll Dashboard",
-        "sidebar_btn_sales_dashboard": "❖ Sales Executive Dashboard",
-        "sidebar_btn_crm_dashboard": "❖ CRM Executive Dashboard",
-        "sidebar_btn_evolution": "🧬 Evolution Loop",
+        "sidebar_btn_settings": "Settings",
+        "sidebar_btn_hr_dashboard": "HR & Payroll Dashboard",
+        "sidebar_btn_sales_dashboard": "Sales Executive Dashboard",
+        "sidebar_btn_crm_dashboard": "CRM Executive Dashboard",
+        "sidebar_btn_evolution": "Saved Query Templates",
         "sidebar_schema_title": "Database Tables",
         "sidebar_schema_table_info": "Table `{table}`: {count} fields",
         "sidebar_schema_open_table": "Open table `{table}` →",
@@ -327,7 +327,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "chart_tab_kpi": "📌 KPI Metrics",
         "insights_title": "💡 Insights & Deep Dive",
         "forecast_tab_title": "🔮 Trend Forecast",
-        "agent_team_tab_title": "🏛 5-Agent Council & SQL",
+        "agent_team_tab_title": "Query Details",
         "insights_highlights": "Key Highlights & Growth Opportunities",
         "insights_risks": "Risk Warnings & Bottlenecks",
         "insights_actions": "Strategic Action Plan",
@@ -468,18 +468,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         # --- Northwind ERP Dashboard ---
         "northwind_dash_title": "📦 Global Supply Chain & Sales Intelligence Dashboard",
         "northwind_dash_badge": "NORTHWIND TRADERS DB • LIVE SQL",
-        "sidebar_btn_northwind_dashboard": "📦 Northwind Dashboard",
+        "sidebar_btn_northwind_dashboard": "Northwind Dashboard",
 
-        # --- Evolution Dashboard ---
-        "evo_dash_title": "🧬 SELF-EVOLUTION & KNOWLEDGE ENHANCEMENT LOOP",
-        "evo_dash_subtitle": "Veraxus Autonomous Learning, Independent Evaluation & Knowledge Curation Engine",
-        "evo_kpi_score": "Average Quality Score",
-        "evo_kpi_samples": "Golden Knowledge Samples",
-        "evo_kpi_autofix": "Auto-Fix Success Rate",
-        "evo_kpi_latency": "Average Query Latency",
-        "evo_tab_overview": "📈 Evolution Overview",
-        "evo_tab_knowledge": "📚 Knowledge Base",
-        "evo_tab_eval_logs": "🔍 Evaluation & Audit Logs",
+        # --- Saved Query Templates ---
+        "evo_dash_title": "📚 Saved Query Templates",
+        "evo_dash_subtitle": "Manage verified query templates and user feedback to align Veraxus with your business rules",
+        "evo_kpi_score": "Average Quality",
+        "evo_kpi_samples": "Saved Query Templates",
+        "evo_kpi_autofix": "Fix Success Rate",
+        "evo_kpi_latency": "Response Latency",
+        "evo_tab_overview": "📈 Overview",
+        "evo_tab_knowledge": "📚 Saved Templates",
+        "evo_tab_eval_logs": "📋 Feedback History",
     }
 }
 
@@ -517,7 +517,7 @@ def t(key: str, lang: str = None, **kwargs: Any) -> str:
 
 
 def render_language_switcher_button(key_suffix: str = "main") -> None:
-    """Hiển thị nút chuyển đổi song ngữ gọn gàng, hiện đại (VI 🇻🇳 / EN 🇬🇧)."""
+    """Hiển thị nút chuyển đổi song ngữ gọn gàng, tối giản (VI / EN)."""
     current_lang = get_current_language()
     
     col1, col2 = st.columns([1, 1], gap="small")
@@ -525,7 +525,7 @@ def render_language_switcher_button(key_suffix: str = "main") -> None:
     with col1:
         is_vi = (current_lang == "vi")
         btn_type = "primary" if is_vi else "secondary"
-        if st.button("🇻🇳 VI", key=f"lang_btn_vi_{key_suffix}", type=btn_type, use_container_width=True):
+        if st.button("VI", key=f"lang_btn_vi_{key_suffix}", type=btn_type, use_container_width=True):
             if current_lang != "vi":
                 set_current_language("vi")
                 st.rerun()
@@ -533,7 +533,7 @@ def render_language_switcher_button(key_suffix: str = "main") -> None:
     with col2:
         is_en = (current_lang == "en")
         btn_type = "primary" if is_en else "secondary"
-        if st.button("🇬🇧 EN", key=f"lang_btn_en_{key_suffix}", type=btn_type, use_container_width=True):
+        if st.button("EN", key=f"lang_btn_en_{key_suffix}", type=btn_type, use_container_width=True):
             if current_lang != "en":
                 set_current_language("en")
                 st.rerun()

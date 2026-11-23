@@ -16,6 +16,7 @@ from .heuristics import (
     detect_query_language,
     unify_year_month_columns,
     ensure_full_twelve_months,
+    ensure_continuous_daily_series,
     restore_vietnamese_diacritics,
     sanitize_followup_question,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "detect_query_language",
     "unify_year_month_columns",
     "ensure_full_twelve_months",
+    "ensure_continuous_daily_series",
     "restore_vietnamese_diacritics",
     "sanitize_followup_question",
     "forecast_series",

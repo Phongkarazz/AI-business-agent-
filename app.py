@@ -203,10 +203,26 @@ st.markdown("""
         -moz-osx-font-smoothing: grayscale;
     }
     
-    /* Global Dark Luxury Theme (#0B0E17) & Cyber Contrast */
+    /* Global Dark Neutral SaaS Theme (Linear / Vercel / Stripe Aesthetic) */
+    :root {
+        --vx-bg-page: #0B0D12;
+        --vx-bg-sidebar: #0F1219;
+        --vx-bg-surface: #11141C;
+        --vx-bg-elevated: #171B26;
+        --vx-border: rgba(255, 255, 255, 0.08);
+        --vx-border-hover: rgba(255, 255, 255, 0.16);
+        --vx-text-primary: #F8FAFC;
+        --vx-text-secondary: #94A3B8;
+        --vx-text-muted: #64748B;
+        --vx-accent: #2563EB;
+        --vx-accent-hover: #3B82F6;
+        --vx-positive: #10B981;
+        --vx-warning: #F59E0B;
+        --vx-negative: #EF4444;
+    }
     .stApp {
-        background-color: #0B0E17 !important;
-        color: #FFFFFF !important;
+        background-color: #0B0D12 !important;
+        color: #F8FAFC !important;
     }
 
     /* Ẩn thanh Chrome thừa mặc định của Streamlit nhưng BẢO VỆ nút mở/đóng Sidebar */
@@ -233,10 +249,10 @@ st.markdown("""
         top: 14px !important;
         left: 14px !important;
         z-index: 999999 !important;
-        background: #12141C !important;
-        border: 1.5px solid #00F0FF !important;
+        background: #11141C !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
         border-radius: 8px !important;
-        box-shadow: 0 2px 10px rgba(0, 240, 255, 0.3) !important;
+        box-shadow: none !important;
         cursor: pointer !important;
     }
     [data-testid="stSidebarCollapseButton"] {
@@ -245,18 +261,18 @@ st.markdown("""
         opacity: 1 !important;
     }
 
-    /* Tinh chỉnh Sidebar - Dark Theme (#12141C) sắc nét & không bị mờ */
+    /* Tinh chỉnh Sidebar - Dark Neutral (#0F1219) sắc nét & phân tách nhẹ nhàng */
     section[data-testid="stSidebar"] {
-        border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
-        background-color: #12141C !important;
-        min-width: 320px !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
+        background-color: #0F1219 !important;
+        min-width: 300px !important;
     }
     section[data-testid="stSidebar"] [data-testid="stSidebarContent"],
     section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
-        background-color: #12141C !important;
-        padding-left: 1.65rem !important;
-        padding-right: 1.25rem !important;
-        padding-top: 1.25rem !important;
+        background-color: #0F1219 !important;
+        padding-left: 1.4rem !important;
+        padding-right: 1.2rem !important;
+        padding-top: 1.1rem !important;
     }
     section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
     section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
@@ -277,27 +293,26 @@ st.markdown("""
         margin-right: auto !important;
     }
     
-    /* Thẻ Chỉ số Điều hành (Executive KPI Cards) - Tỷ lệ tiêu chuẩn & Thẩm mỹ hài hòa */
+    /* Thẻ Chỉ số Điều hành (Executive KPI Cards) - Flat Neutral Surface & Tabular Nums */
     div[data-testid="stMetric"] {
-        background-color: #13172B !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        background-color: #11141C !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
         padding: 12px 14px !important;
-        border-radius: 14px !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
-        transition: all 0.2s ease-in-out;
+        border-radius: 12px !important;
+        box-shadow: none !important;
+        transition: border-color 0.15s ease, background-color 0.15s ease;
         min-width: 0 !important;
         overflow: hidden !important;
     }
     div[data-testid="stMetric"]:hover {
-        border-color: #00F0FF !important;
-        box-shadow: 0 6px 20px rgba(0, 240, 255, 0.25) !important;
-        transform: translateY(-1px);
+        border-color: rgba(255, 255, 255, 0.16) !important;
+        background-color: #151924 !important;
+        box-shadow: none !important;
     }
     div[data-testid="stMetricLabel"] {
         font-size: clamp(0.7rem, 0.88vw, 0.74rem) !important;
-        font-weight: 700 !important;
-        color: #CBD5E1 !important;
-        text-transform: uppercase;
+        font-weight: 600 !important;
+        color: #94A3B8 !important;
         letter-spacing: 0.01em;
         margin-bottom: 4px;
         white-space: nowrap !important;
@@ -311,13 +326,14 @@ st.markdown("""
         overflow: hidden !important;
         text-overflow: ellipsis !important;
         line-height: 1.3 !important;
-        color: #CBD5E1 !important;
+        color: #94A3B8 !important;
     }
     div[data-testid="stMetricValue"] {
         font-size: clamp(1.15rem, 1.4vw, 1.35rem) !important;
-        font-weight: 800 !important;
-        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        color: #F8FAFC !important;
         letter-spacing: -0.01em;
+        font-variant-numeric: tabular-nums;
         white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
@@ -325,29 +341,34 @@ st.markdown("""
     }
     div[data-testid="stMetricValue"] > div {
         font-size: inherit !important;
+        font-variant-numeric: tabular-nums;
         white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
-        color: #FFFFFF !important;
+        color: #F8FAFC !important;
     }
     div[data-testid="stMetricDelta"] {
-        font-size: 0.8rem !important;
+        font-size: 0.78rem !important;
         font-weight: 600 !important;
+        font-variant-numeric: tabular-nums;
         white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
     }
+    [data-testid="stDataFrame"] {
+        font-variant-numeric: tabular-nums;
+    }
 
-    /* Hệ thống Nút bấm Chuẩn Zalo Blue (#0068FF) - Thao tác 1-Chạm Mượt mà */
+    /* Hệ thống Nút bấm Chuẩn SaaS Blue (#2563EB) - Tối giản, Không Phát Sáng */
     .stButton > button {
-        border-radius: 10px !important;
-        font-weight: 700 !important;
-        font-size: 0.88rem !important;
-        line-height: 1.45 !important;
-        padding: 9px 16px !important;
-        min-height: 48px !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        font-size: 0.86rem !important;
+        line-height: 1.4 !important;
+        padding: 8px 14px !important;
+        min-height: 40px !important;
         height: auto !important;
-        transition: all 0.15s ease-in-out !important;
+        transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
         white-space: normal !important;
         word-break: break-word !important;
         display: flex !important;
@@ -356,28 +377,29 @@ st.markdown("""
         text-align: center !important;
     }
     .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #0052D4 0%, #0068FF 100%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.25) !important;
+        background: #2563EB !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
         color: #FFFFFF !important;
-        box-shadow: 0 4px 14px rgba(0, 104, 255, 0.35) !important;
+        box-shadow: none !important;
     }
     .stButton > button[kind="primary"]:hover {
-        background: linear-gradient(135deg, #0068FF 0%, #00F0FF 100%) !important;
-        color: #090D1A !important;
-        box-shadow: 0 6px 20px rgba(0, 240, 255, 0.45) !important;
-        transform: translateY(-1px) !important;
+        background: #3B82F6 !important;
+        color: #FFFFFF !important;
+        box-shadow: none !important;
+        transform: none !important;
     }
     .stButton > button[kind="secondary"] {
-        background-color: #181D2F !important;
-        border: 1px solid rgba(255, 255, 255, 0.15) !important;
-        color: #FFFFFF !important;
+        background-color: #161A24 !important;
+        border: 1px solid rgba(255, 255, 255, 0.09) !important;
+        color: #E2E8F0 !important;
+        box-shadow: none !important;
     }
     .stButton > button[kind="secondary"]:hover {
-        border-color: #00F0FF !important;
-        background-color: #222942 !important;
-        color: #00F0FF !important;
-        box-shadow: 0 4px 14px rgba(0, 240, 255, 0.25) !important;
-        transform: translateY(-1px) !important;
+        border-color: rgba(255, 255, 255, 0.18) !important;
+        background-color: #1E2433 !important;
+        color: #F8FAFC !important;
+        box-shadow: none !important;
+        transform: none !important;
     }
 
     /* Hero Section - Tối giản, Tập trung, Tỷ lệ Cân đối */
@@ -391,68 +413,67 @@ st.markdown("""
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        background: rgba(0, 223, 143, 0.15);
-        color: #00DF8F;
-        border: 1px solid #00DF8F;
+        background: rgba(255, 255, 255, 0.04);
+        color: #94A3B8;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         padding: 4px 12px;
         border-radius: 9999px;
         font-size: 0.76rem;
-        font-weight: 700;
-        letter-spacing: 0.02em;
+        font-weight: 600;
+        letter-spacing: 0.01em;
         margin-bottom: 10px;
-        box-shadow: 0 0 10px rgba(0, 223, 143, 0.2);
+        box-shadow: none;
     }
     .hero-badge-dot {
-        width: 7px;
-        height: 7px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
-        background: #00DF8F;
-        box-shadow: 0 0 0 2px rgba(0, 223, 143, 0.35);
+        background: #10B981;
     }
     .hero-title {
         font-size: 2.35rem;
-        font-weight: 900;
-        color: #FFFFFF !important;
-        letter-spacing: -0.035em;
+        font-weight: 800;
+        color: #F8FAFC !important;
+        letter-spacing: -0.03em;
         line-height: 1.2;
         margin-bottom: 6px;
     }
     .hero-subtitle {
-        font-size: 1.05rem;
-        color: #CBD5E1 !important;
+        font-size: 1.02rem;
+        color: #94A3B8 !important;
         line-height: 1.5;
         max-width: 640px;
         margin: 0 auto 18px auto;
-        font-weight: 500;
+        font-weight: 400;
     }
 
-    /* 3 Thẻ Trạng thái Hệ thống Live Snapshot - Trực quan, Tin cậy, Riêng tư */
+    /* 3 Thẻ Trạng thái Hệ thống Live Snapshot */
     .micro-trust-ribbon {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 12px;
-        margin: 4px auto 26px auto;
-        font-size: 0.8rem;
-        color: #CBD5E1;
-        font-weight: 600;
+        gap: 10px;
+        margin: 4px auto 24px auto;
+        font-size: 0.78rem;
+        color: #94A3B8;
+        font-weight: 500;
     }
     .micro-trust-pill {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        background: #151A30;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        padding: 4px 12px;
+        background: #11141C;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 4px 11px;
         border-radius: 9999px;
-        font-size: 0.76rem;
-        color: #E2E8F0;
-        transition: all 0.2s ease;
+        font-size: 0.75rem;
+        color: #CBD5E1;
+        transition: border-color 0.15s ease;
     }
     .micro-trust-pill:hover {
-        background: #1D2440;
-        border-color: #00F0FF;
-        color: #00F0FF;
+        background: #161A24;
+        border-color: rgba(255, 255, 255, 0.16);
+        color: #F8FAFC;
     }
     .health-card-header {
         display: flex;
@@ -461,9 +482,9 @@ st.markdown("""
         margin-bottom: 6px;
     }
     .health-card-title {
-        font-size: 0.76rem;
-        font-weight: 700;
-        color: #CBD5E1;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #94A3B8;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         display: flex;
@@ -472,30 +493,30 @@ st.markdown("""
     }
     .health-badge {
         font-size: 0.72rem;
-        font-weight: 700;
-        padding: 2px 9px;
-        border-radius: 9999px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 6px;
         white-space: nowrap;
     }
     .health-badge-green {
-        background: rgba(0, 223, 143, 0.15);
-        color: #00DF8F;
-        border: 1px solid #00DF8F;
+        background: rgba(16, 185, 129, 0.1);
+        color: #34D399;
+        border: 1px solid rgba(16, 185, 129, 0.2);
     }
     .health-badge-blue {
-        background: rgba(0, 104, 255, 0.15);
-        color: #38BDF8;
-        border: 1px solid #38BDF8;
+        background: rgba(59, 130, 246, 0.1);
+        color: #60A5FA;
+        border: 1px solid rgba(59, 130, 246, 0.2);
     }
     .health-badge-purple {
-        background: rgba(121, 40, 202, 0.2);
-        color: #C084FC;
-        border: 1px solid #C084FC;
+        background: rgba(139, 92, 246, 0.1);
+        color: #A78BFA;
+        border: 1px solid rgba(139, 92, 246, 0.2);
     }
     .health-card-value {
         font-size: 1.15rem;
-        font-weight: 800;
-        color: #FFFFFF !important;
+        font-weight: 700;
+        color: #F8FAFC !important;
         line-height: 1.35;
         margin: 4px 0 2px 0;
         letter-spacing: -0.015em;
@@ -509,7 +530,7 @@ st.markdown("""
         line-height: 1.35;
     }
 
-    /* Trục Tìm kiếm Trung tâm Hero Search - Tỷ lệ Chuẩn Claude & Gemini (860px) */
+    /* Trục Tìm kiếm Trung tâm Hero Search - Tỷ lệ Chuẩn Claude & Linear (860px) */
     form[data-testid="stForm"] {
         border: none !important;
         padding: 0 !important;
@@ -523,51 +544,50 @@ st.markdown("""
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"],
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"] {
-        border-radius: 16px !important;
-        background-color: #151A30 !important;
-        border: 1.5px solid rgba(0, 240, 255, 0.32) !important;
-        box-shadow: 0 6px 24px -2px rgba(0, 0, 0, 0.55), 0 0 16px rgba(0, 240, 255, 0.08) !important;
-        transition: all 0.25s ease !important;
+        border-radius: 12px !important;
+        background-color: #11141C !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"]:hover,
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"]:hover {
-        border-color: #00F0FF !important;
-        box-shadow: 0 8px 28px -2px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.2) !important;
+        border-color: rgba(255, 255, 255, 0.22) !important;
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within,
     form[data-testid="stForm"] div[data-testid="stTextInput"] div[data-baseweb="base-input"]:focus-within {
-        border-color: #00F0FF !important;
-        box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.25), 0 10px 32px -4px rgba(0, 240, 255, 0.35) !important;
+        border-color: #3B82F6 !important;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
     }
     form[data-testid="stForm"] div[data-testid="stTextInput"] input {
-        height: 52px !important;
-        min-height: 52px !important;
-        border-radius: 16px !important;
+        height: 48px !important;
+        min-height: 48px !important;
+        border-radius: 12px !important;
         background-color: transparent !important;
         border: none !important;
-        font-size: 1.02rem !important;
-        padding: 0 20px !important;
-        color: #FFFFFF !important;
+        font-size: 0.98rem !important;
+        padding: 0 18px !important;
+        color: #F8FAFC !important;
         box-shadow: none !important;
     }
     form[data-testid="stForm"] .stButton > button {
-        height: 52px !important;
-        min-height: 52px !important;
-        border-radius: 16px !important;
-        font-size: 0.98rem !important;
-        font-weight: 700 !important;
-        background: linear-gradient(135deg, #0052D4 0%, #0068FF 60%, #00F0FF 100%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        height: 48px !important;
+        min-height: 48px !important;
+        border-radius: 12px !important;
+        font-size: 0.92rem !important;
+        font-weight: 600 !important;
+        background: #2563EB !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
         color: #FFFFFF !important;
         white-space: nowrap !important;
-        box-shadow: 0 4px 18px rgba(0, 104, 255, 0.4) !important;
-        transition: all 0.2s ease !important;
+        box-shadow: none !important;
+        transition: background-color 0.15s ease !important;
     }
     form[data-testid="stForm"] .stButton > button:hover {
-        background: linear-gradient(135deg, #0068FF 0%, #00F0FF 100%) !important;
-        color: #090D1A !important;
-        box-shadow: 0 6px 24px rgba(0, 240, 255, 0.6) !important;
-        transform: translateY(-2px) !important;
+        background: #3B82F6 !important;
+        color: #FFFFFF !important;
+        box-shadow: none !important;
+        transform: none !important;
     }
     /* Ẩn dòng chữ watermark submit instructions của Streamlit để thanh search đạt độ tinh gọn tuyệt đối */
     div[data-testid="InputInstructions"],
@@ -581,9 +601,9 @@ st.markdown("""
     .prompt-tab-intro {
         margin: 18px auto 10px auto;
         max-width: 860px;
-        font-size: 0.9rem;
-        font-weight: 700;
-        color: #FFFFFF !important;
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: #94A3B8 !important;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -595,192 +615,131 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         margin-bottom: 14px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 8px 16px;
+        padding: 8px 14px;
         border-radius: 8px 8px 0 0;
-        font-size: 0.88rem;
-        font-weight: 600;
-        color: #CBD5E1 !important;
+        font-size: 0.86rem;
+        font-weight: 500;
+        color: #94A3B8 !important;
     }
     .stTabs [aria-selected="true"] {
-        color: #00F0FF !important;
-        border-bottom: 2px solid #00F0FF !important;
+        color: #F8FAFC !important;
+        font-weight: 600 !important;
+        border-bottom: 2px solid #3B82F6 !important;
     }
 
-    /* Thẻ Gợi Ý Hành Động (Prompt Action Cards) - Hover lift & 1-Chạm mượt mà */
+    /* Thẻ Gợi Ý Hành Động (Prompt Action Cards) - Flat Surface & Clean Hover */
     div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-radius: 14px !important;
-        border: 1px solid rgba(0, 240, 255, 0.25) !important;
-        background: #151A30 !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        background: #11141C !important;
         padding: 14px 16px !important;
-        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+        transition: border-color 0.15s ease, background-color 0.15s ease !important;
+        box-shadow: none !important;
         min-height: 142px !important;
         display: flex !important;
         flex-direction: column !important;
         justify-content: space-between !important;
     }
     div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-        border-color: #00F0FF !important;
-        box-shadow: 0 6px 20px rgba(0, 240, 255, 0.2) !important;
-        transform: translateY(-2px);
+        border-color: rgba(255, 255, 255, 0.18) !important;
+        background: #151924 !important;
+        box-shadow: none !important;
+        transform: none;
     }
     div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
-        min-height: 38px !important;
-        height: 38px !important;
-        font-size: 0.84rem !important;
+        min-height: 36px !important;
+        height: 36px !important;
+        font-size: 0.82rem !important;
         font-weight: 600 !important;
-        border-radius: 9px !important;
-        background-color: #1E253E !important;
-        border: 1px solid rgba(0, 240, 255, 0.35) !important;
-        color: #00F0FF !important;
+        border-radius: 8px !important;
+        background-color: #171C28 !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        color: #E2E8F0 !important;
         white-space: nowrap !important;
+        box-shadow: none !important;
     }
     div[data-testid="stTabsContent"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button:hover {
-        background-color: #00F0FF !important;
-        color: #0B0E17 !important;
-        border-color: #00F0FF !important;
-        box-shadow: 0 2px 10px rgba(0, 240, 255, 0.35) !important;
+        background-color: #2563EB !important;
+        color: #FFFFFF !important;
+        border-color: #2563EB !important;
+        box-shadow: none !important;
     }
 
-    /* ========================================================
-       VERAXUS EXCLUSIVE SIGNATURE QUANTUM SPINNER & STATUS CARD
-       ======================================================== */
-    .veraxus-loading-card, .agent-loading-card {
+    /* Minimalist 3-dot Orbiting Loading Indicator & Clean Popover Styling */
+    .vx-loading-bar {
         display: inline-flex;
         align-items: center;
-        gap: 18px;
-        padding: 16px 26px;
-        background: linear-gradient(135deg, rgba(21, 26, 48, 0.96) 0%, rgba(11, 14, 23, 0.98) 100%) !important;
-        border: 1.5px solid rgba(0, 240, 255, 0.45) !important;
-        border-radius: 18px !important;
-        margin: 16px 0 !important;
-        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 28px rgba(0, 240, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
-        backdrop-filter: blur(16px) !important;
+        gap: 10px;
+        padding: 8px 2px;
+        margin: 4px 0;
+    }
+    .vx-orbit-dots {
         position: relative;
-        overflow: hidden;
-    }
-    .veraxus-loading-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 200%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent 0%, rgba(0, 240, 255, 0.1) 50%, transparent 100%);
-        animation: vx-shimmer-sweep 2.5s infinite linear;
-        pointer-events: none;
-    }
-    @keyframes vx-shimmer-sweep {
-        0% { transform: translateX(-50%); }
-        100% { transform: translateX(50%); }
-    }
-    .veraxus-spinner-wrapper {
-        position: relative;
-        width: 48px;
-        height: 48px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-    }
-    .vx-ambient-glow {
-        position: absolute;
-        width: 36px;
-        height: 36px;
-        background: radial-gradient(circle, rgba(0, 240, 255, 0.5) 0%, rgba(0, 104, 255, 0.25) 60%, transparent 80%);
-        border-radius: 50%;
-        filter: blur(6px);
-        animation: vx-pulse-ambient 1.8s ease-in-out infinite;
-    }
-    .vx-ring-outer {
-        position: absolute;
-        inset: 0;
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        border: 2.5px solid transparent;
-        border-top: 2.5px solid #00F0FF;
-        border-right: 2.5px solid #00DF8F;
-        box-shadow: 0 0 14px rgba(0, 240, 255, 0.65), inset 0 0 8px rgba(0, 240, 255, 0.35);
-        animation: vx-spin-cw 0.85s linear infinite;
-    }
-    .vx-ring-inner {
-        position: absolute;
-        inset: 6px;
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        border: 1.5px dashed rgba(0, 240, 255, 0.35);
-        border-left: 2px solid #38BDF8;
-        border-bottom: 2px solid #0068FF;
-        animation: vx-spin-ccw 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-    }
-    .vx-crystal-core {
-        position: relative;
-        z-index: 3;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        animation: vx-crystal-float 1.6s ease-in-out infinite;
-    }
-    .vx-crystal-svg {
-        filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.85));
-    }
-    .veraxus-spinner-text-wrap {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-        z-index: 2;
-    }
-    .veraxus-spinner-brand {
-        font-size: 0.72rem;
-        font-weight: 800;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        background: linear-gradient(135deg, #00F0FF 0%, #00DF8F 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        line-height: 1;
-    }
-    .vx-live-pulse-dot {
         display: inline-block;
-        width: 7px;
-        height: 7px;
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+        animation: vx-spin 1.05s linear infinite;
+    }
+    .vx-orbit-dots > span {
+        position: absolute;
+        width: 4px;
+        height: 4px;
         border-radius: 50%;
-        background: #00DF8F;
-        box-shadow: 0 0 10px #00DF8F, 0 0 4px #00DF8F;
-        animation: vx-live-dot-pulse 1.2s ease-in-out infinite;
+        background: #60A5FA;
     }
-    .veraxus-spinner-status, .agent-spinner-text {
-        color: #FFFFFF !important;
-        font-weight: 600;
-        font-size: 0.95rem;
-        letter-spacing: -0.01em;
+    .vx-orbit-dots > span:nth-child(1) {
+        top: 0.8px;
+        left: 6px;
+        opacity: 1;
+    }
+    .vx-orbit-dots > span:nth-child(2) {
+        top: 8.6px;
+        left: 10.5px;
+        opacity: 0.62;
+    }
+    .vx-orbit-dots > span:nth-child(3) {
+        top: 8.6px;
+        left: 1.5px;
+        opacity: 0.32;
+    }
+    .vx-loading-text {
+        color: #94A3B8;
+        font-size: 0.88rem;
+        font-weight: 450;
         line-height: 1.4;
-        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
     }
-    @keyframes vx-spin-cw {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+    @keyframes vx-spin {
+        to { transform: rotate(360deg); }
     }
-    @keyframes vx-spin-ccw {
-        0% { transform: rotate(360deg); }
-        100% { transform: rotate(0deg); }
+    @media (prefers-reduced-motion: reduce) {
+        .vx-orbit-dots {
+            animation: none;
+        }
     }
-    @keyframes vx-crystal-float {
-        0%, 100% { transform: scale(0.96) translateY(0); filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.7)); }
-        50% { transform: scale(1.1) translateY(-1px); filter: drop-shadow(0 0 12px rgba(0, 240, 255, 1)) drop-shadow(0 0 4px #00DF8F); }
+    [data-testid="stPopover"] > button {
+        background-color: #161A24 !important;
+        border: 1px solid rgba(255, 255, 255, 0.09) !important;
+        border-radius: 8px !important;
+        color: #94A3B8 !important;
+        min-height: 40px !important;
+        height: auto !important;
+        padding: 6px 10px !important;
+        box-shadow: none !important;
+        transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
     }
-    @keyframes vx-pulse-ambient {
-        0%, 100% { transform: scale(0.85); opacity: 0.4; }
-        50% { transform: scale(1.15); opacity: 0.8; }
+    [data-testid="stPopover"] > button:hover {
+        border-color: rgba(255, 255, 255, 0.18) !important;
+        background-color: #1E2433 !important;
+        color: #F8FAFC !important;
     }
-    @keyframes vx-live-dot-pulse {
-        0%, 100% { transform: scale(0.9); opacity: 0.7; box-shadow: 0 0 6px #00DF8F; }
-        50% { transform: scale(1.35); opacity: 1; box-shadow: 0 0 12px #00DF8F, 0 0 20px #00DF8F; }
+    [data-testid="stPopover"] > button svg {
+        width: 14px !important;
+        height: 14px !important;
+        opacity: 0.55 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1001,6 +960,23 @@ else:
                             f"### 2.2. Giả thuyết & Nguyên nhân Tiềm năng\n{_sec_dm['hypothesis']}\n\n"
                             f"### 2.3. Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec_dm['action_plan']}"
                         )
+                    if _dm_know is not None and _turn.get("df") is not None and not _turn["df"].empty:
+                        from src.analytics.heuristics import ensure_continuous_daily_series
+                        _df_before_fill = _turn["df"]
+                        _df_filled = ensure_continuous_daily_series(
+                            _df_before_fill,
+                            user_query=_q_dm,
+                            min_date=_dm_know.data_min_date,
+                            max_date=_dm_know.data_max_date,
+                        )
+                        if len(_df_filled) > len(_df_before_fill):
+                            _turn["df"] = _df_filled
+                            _sec_dm = split_insight_sections("", df=_df_filled, user_query=_q_dm, is_en=(_turn.get("lang") == "en"))
+                            _turn["insights"] = (
+                                f"### 2.1. Phát hiện Bất thường & Xu hướng Chính\n{_sec_dm['anomaly']}\n\n"
+                                f"### 2.2. Giả thuyết & Nguyên nhân Tiềm năng\n{_sec_dm['hypothesis']}\n\n"
+                                f"### 2.3. Kế hoạch Hành động & Đề xuất Ưu tiên\n{_sec_dm['action_plan']}"
+                            )
                     if _dm_know is not None:
                         from src.llm.datamate_bridge import build_datamate_suggested_questions
 
@@ -1017,6 +993,7 @@ else:
                                 user_query=_q_dm,
                                 df=_turn.get("df"),
                                 sql=str(_turn.get("sql") or ""),
+                                asked_queries=[str(h.get("query") or "") for h in history if isinstance(h, dict) and h.get("query")],
                             )
                     continue
                 _q = str(_turn.get("query") or "")
@@ -1174,11 +1151,11 @@ else:
             margin: 0 auto !important;
         }
         .hero-title {
-            font-size: clamp(2.5rem, 4vw, 3.4rem) !important;
-            font-weight: 900 !important;
-            color: #FFFFFF !important;
+            font-size: clamp(2.4rem, 3.8vw, 3.1rem) !important;
+            font-weight: 800 !important;
+            color: #F8FAFC !important;
             letter-spacing: -0.03em !important;
-            text-shadow: 0 4px 24px rgba(0, 104, 255, 0.45) !important;
+            text-shadow: none !important;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -1186,8 +1163,8 @@ else:
         # Hero Header - Chữ Veraxus & Logo Kim Cương Chính Giữa Khung Hình (Chuẩn Claude / Gemini)
         st.markdown(textwrap.dedent(f"""
         <div class="hero-container">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 16px; margin: 0 0 4px 0;">
-                <svg width="48" height="48" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 8px 22px rgba(0, 104, 255, 0.45)); flex-shrink: 0;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin: 0 0 4px 0;">
+                <svg width="42" height="42" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0;">
                     <defs>
                         <linearGradient id="heroFacetLeftFront" x1="20%" y1="10%" x2="50%" y2="90%">
                             <stop offset="0%" stop-color="#38BDF8"/>
@@ -1270,7 +1247,7 @@ else:
 
         st.markdown(f"""
         <div class="prompt-tab-intro">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
             <span><b>{t("starter_framework_title")}</b></span>
         </div>
         """, unsafe_allow_html=True)
@@ -1339,20 +1316,44 @@ else:
             ):
                 cached = None
 
+        _asked_queries = [
+            str(h.get("query") or "").strip()
+            for h in st.session_state.get("history", [])
+            if isinstance(h, dict) and h.get("query")
+        ]
+
         if st.session_state.get("enable_cache", True) and cached and not cached.get("error"):
-            result = cached
+            result = dict(cached)
+            _dm_know_hit = st.session_state.get("datamate_knowledge")
+            if _dm_know_hit is not None:
+                result["followups"] = src.llm.datamate_bridge.build_datamate_suggested_questions(
+                    _dm_know_hit,
+                    lang=result.get("lang") or get_current_language(),
+                    user_query=prompt_to_run,
+                    df=result.get("df"),
+                    sql=str(result.get("sql") or ""),
+                    asked_queries=_asked_queries,
+                )
+            elif result.get("df") is not None and not result["df"].empty:
+                result["followups"] = src.llm.agent.generate_grounded_fallback_followups(
+                    result["df"],
+                    schema_context=st.session_state.get("schema_context", ""),
+                    current_query=prompt_to_run,
+                    lang=result.get("lang") or get_current_language(),
+                    asked_queries=_asked_queries,
+                )
         else:
             st.chat_message("user").write(_format_user_chat_display(prompt_to_run))
             with st.chat_message("assistant"):
                 status_placeholder = st.empty()
+                active_lang = get_current_language()
                 def update_status(text: str):
                     status_placeholder.markdown(
-                        render_veraxus_loading_html(text),
+                        render_veraxus_loading_html(text, is_en=(active_lang == "en")),
                         unsafe_allow_html=True
                     )
 
-                active_lang = get_current_language()
-                loading_msg = "Analyzing business data & executing query..." if active_lang == "en" else "Đang phân tích câu hỏi & đối chiếu dữ liệu doanh nghiệp..."
+                loading_msg = "Reading your data..." if active_lang == "en" else "Đang đọc dữ liệu..."
                 update_status(loading_msg)
                 current_engine = st.session_state.get("engine")
                 current_schema = st.session_state.get("schema_context", "")
@@ -1374,6 +1375,7 @@ else:
                     status_callback=update_status,
                     lang=active_lang,
                     datamate_knowledge=st.session_state.get("datamate_knowledge"),
+                    asked_queries=_asked_queries,
                 )
                 status_placeholder.empty()
                 if not result.get("error"):

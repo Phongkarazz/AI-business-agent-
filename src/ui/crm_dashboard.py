@@ -62,494 +62,8 @@ from src.visualization.crm_dashboard_charts import (
 )
 from src.visualization.chart_modal import render_zoomable_chart_card, show_chart_zoom_dialog
 from src.analytics.anomaly import scan_dashboard_anomalies_and_strategies
-from src.analytics.export_reports import export_resolution_to_pdf
 from src.i18n import t, get_current_language
 from typing import Dict, Any
-
-
-@st.dialog("🏛️ EXECUTIVE STRATEGIC RESOLUTION / NGHỊ QUYẾT CHIẾN LƯỢC BAN ĐIỀU HÀNH", width="large")
-def show_executive_resolution_dialog(
-    layer_id: str,
-    res: Dict[str, Any],
-    time_label: str
-):
-    """Hiển thị văn bản Nghị Quyết Chiến Lược & Kế Hoạch Hành Động chính thức chuẩn C-Level (Bilingual)."""
-    import re
-    is_en = (get_current_language() == "en")
-    health_status = res["health_status"]
-    health_score = res["health_score"]
-    anomalies = res["anomalies"]
-    immediate_actions = res["immediate_actions"]
-    structural_optimizations = res["structural_optimizations"]
-    sustainable_strategies = res["sustainable_strategies"]
-    okrs = res["okrs"]
-    ai_prompt_payload = res["ai_prompt_payload"]
-
-    doc_title = t("resolution_dialog_title")
-    doc_code = t("resolution_doc_code", time=time_label.replace(' ', ''))
-    app_period_label = t("resolution_applied_period")
-    health_label = t("resolution_health_status")
-
-    # Header văn bản
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 12px; padding: 16px 20px; margin-bottom: 14px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
-            <span style="font-size: 1.1rem; font-weight: 800; color: #FFFFFF; letter-spacing: 0.5px;">
-                {doc_title}
-            </span>
-            <span style="background: rgba(0, 240, 255, 0.2); color: #00F0FF; font-size: 0.78rem; font-weight: 700; padding: 3px 10px; border-radius: 12px; border: 1px solid rgba(0, 240, 255, 0.3);">
-                {doc_code}
-            </span>
-        </div>
-        <div style="font-size: 0.86rem; color: #94A3B8; margin-bottom: 8px;">
-            {app_period_label} <b style="color: #F8FAFC;">{time_label}</b> • {health_label} <b style="color: #67E8F9;">{health_status} ({health_score}/100)</b>
-        </div>
-        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-            <span style="background: rgba(0, 240, 255, 0.12); color: #67E8F9; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(0, 240, 255, 0.25);">🤖 Supervisor Agent</span>
-            <span style="background: rgba(59, 130, 246, 0.12); color: #93C5FD; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.25);">⚙️ Data Engineer</span>
-            <span style="background: rgba(16, 185, 129, 0.12); color: #6EE7B7; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🛡️ Data Auditor (100% Passed)</span>
-            <span style="background: rgba(239, 68, 68, 0.12); color: #FCA5A5; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.25);">🔍 Anomaly Detective</span>
-            <span style="background: rgba(217, 70, 239, 0.12); color: #F0ABFC; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(217, 70, 239, 0.25);">🎯 Strategy Advisor</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # I. CĂN CỨ VẬN HÀNH & CHẨN ĐOÁN DỮ LIỆU
-    st.markdown(f"""
-    <div style="font-size: 0.95rem; font-weight: 800; color: #00F0FF; margin-top: 10px; margin-bottom: 8px;">
-        {t('resolution_sec1')}
-    </div>
-    """, unsafe_allow_html=True)
-
-    if anomalies:
-        for i, a in enumerate(anomalies, 1):
-            act_label = "Actual Metrics:" if is_en else "Thực tế:"
-            rc_label = "Root Cause:" if is_en else "Nguyên nhân gốc rễ:"
-            imp_label = "Quantified Impact:" if is_en else "Lượng hóa rủi ro:"
-            st.markdown(f"""
-            <div style="background: rgba(15, 23, 42, 0.6); border-left: 3px solid #EF4444; border-radius: 6px; padding: 10px 14px; margin-bottom: 8px; font-size: 0.84rem; line-height: 1.5;">
-                <div style="font-weight: 700; color: #F8FAFC; margin-bottom: 4px;">1.{i}. {a['title']} ({a['severity']})</div>
-                <div style="color: #CBD5E1; margin-bottom: 3px;">• <b>{act_label}</b> {a['metrics_summary']}</div>
-                <div style="color: #94A3B8; margin-bottom: 3px;">• <b>{rc_label}</b> {a['root_cause']}</div>
-                <div style="color: #FCA5A5;">• <b>{imp_label}</b> {a['quantified_impact']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info(f"✨ All operational indicators remain stable and balanced during {time_label}." if is_en else f"✨ Toàn bộ các chỉ số vận hành duy trì trạng thái ổn định và cân bằng trong {time_label}.")
-
-    # II. QUYẾT NGHỊ HÀNH ĐỘNG CHIẾN LƯỢC 3 TẦNG
-    st.markdown(f"""
-    <div style="font-size: 0.95rem; font-weight: 800; color: #E879F9; margin-top: 14px; margin-bottom: 8px;">
-        {t('resolution_sec2')}
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_t1, col_t2 = st.columns(2)
-    with col_t1:
-        st.markdown(f"""
-        <div style="background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 12px 14px; height: 100%;">
-            <div style="font-weight: 700; color: #00F0FF; font-size: 0.86rem; margin-bottom: 6px;">{t('plan_tier1_title')}</div>
-            <div style="font-size: 0.82rem; color: #E2E8F0; line-height: 1.5;">
-                {''.join(f'<div style="margin-bottom: 4px;">🔹 {act}</div>' for act in immediate_actions)}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_t2:
-        st.markdown(f"""
-        <div style="background: rgba(232, 121, 249, 0.06); border: 1px solid rgba(232, 121, 249, 0.2); border-radius: 8px; padding: 12px 14px; height: 100%;">
-            <div style="font-weight: 700; color: #E879F9; font-size: 0.86rem; margin-bottom: 6px;">{t('plan_tier2_title')}</div>
-            <div style="font-size: 0.82rem; color: #E2E8F0; line-height: 1.5;">
-                {''.join(f'<div style="margin-bottom: 4px;">🔹 {act}</div>' for act in structural_optimizations)}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div style="background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.2); border-radius: 8px; padding: 12px 14px; margin-top: 10px;">
-        <div style="font-weight: 700; color: #34D399; font-size: 0.86rem; margin-bottom: 6px;">{t('plan_tier3_title')}</div>
-        <div style="font-size: 0.82rem; color: #E2E8F0; line-height: 1.5;">
-            {''.join(f'<div style="margin-bottom: 4px;">🔹 {act}</div>' for act in sustainable_strategies)}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # III. HỆ THỐNG CHỈ SỐ OKRS & PHÂN CÔNG TRÁCH NHIỆM RACI
-    st.markdown(f"""
-    <div style="font-size: 0.95rem; font-weight: 800; color: #FBBF24; margin-top: 14px; margin-bottom: 8px;">
-        {t('resolution_sec3')}
-    </div>
-    """, unsafe_allow_html=True)
-
-    raci_text = "👥 <b>RACI Matrix:</b> Board of Directors (A - Approval) • Chief Human Resources Officer (R - Lead Tier 1, 2) • Operations & Engineering Heads (R - Execution) • Finance (C - Budget Oversight)." if is_en else "👥 <b>Phân công RACI:</b> Ban Tổng Giám Đốc (A - Phê duyệt) • Giám Đốc Nhân Sự (R - Chủ trì Tầng 1, 2) • Trưởng Khối Vận Hành & Kỹ Thuật (R - Thực thi) • Tài Chính (C - Giám sát ngân sách)."
-    okr_label = "Target Metric:" if is_en else "Chỉ số đo lường:"
-
-    st.markdown(f"""
-    <div style="background: rgba(251, 191, 36, 0.06); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
-        <div style="font-size: 0.84rem; color: #FEF08A; line-height: 1.5; margin-bottom: 8px;">
-            {''.join(f'<div style="margin-bottom: 4px;">🎯 <b>{okr_label}</b> {okr}</div>' for okr in okrs)}
-        </div>
-        <div style="font-size: 0.8rem; color: #CBD5E1; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 6px;">
-            {raci_text}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Thanh tác vụ 1 chạm: Tải xuống & Chat sâu với AI
-    c_btn1, c_btn2 = st.columns([1, 1])
-    
-    anomalies_md_list = []
-    for a in anomalies:
-        c_sum = re.sub(r'<[^>]+>', '', a['metrics_summary'])
-        c_rc = re.sub(r'<[^>]+>', '', a['root_cause'])
-        c_imp = re.sub(r'<[^>]+>', '', a['quantified_impact'])
-        anomalies_md_list.append(f"""
-#### {a['title']} ({a['severity']})
-- **Recorded Metrics / Thực tế:** {c_sum}
-- **Root Cause / Nguyên nhân:** {c_rc}
-- **Quantified Risk / Rủi ro lượng hóa:** {c_imp}
-""")
-    
-    clean_imm_md = [re.sub(r'<[^>]+>', '', act) for act in immediate_actions]
-    clean_str_md = [re.sub(r'<[^>]+>', '', act) for act in structural_optimizations]
-    clean_sus_md = [re.sub(r'<[^>]+>', '', act) for act in sustainable_strategies]
-    clean_okr_md = [re.sub(r'<[^>]+>', '', okr) for okr in okrs]
-
-    full_resolution_md = f"""# {doc_title}
-**{doc_code}**
-- **{app_period_label}** {time_label}
-- **{health_label}** {health_status} ({health_score}/100)
-
----
-
-## {t('resolution_sec1')}
-{''.join(anomalies_md_list)}
-
----
-
-## {t('resolution_sec2')}
-### {t('plan_tier1_title')}
-{chr(10).join(f"- {act}" for act in clean_imm_md)}
-
-### {t('plan_tier2_title')}
-{chr(10).join(f"- {act}" for act in clean_str_md)}
-
-### {t('plan_tier3_title')}
-{chr(10).join(f"- {act}" for act in clean_sus_md)}
-
----
-
-## {t('resolution_sec3')}
-{chr(10).join(f"- 🎯 {okr}" for okr in clean_okr_md)}
-
-{raci_text}
-
----
-*Generated by Veraxus Executive Intelligence Copilot*
-"""
-
-    with c_btn1:
-        try:
-            pdf_bytes = export_resolution_to_pdf(res, layer_id=layer_id, time_label=time_label, doc_code=f"NQ-BĐH/{time_label.replace(' ', '')}")
-        except Exception:
-            pdf_bytes = b""
-        if pdf_bytes:
-            st.download_button(
-                label=t("resolution_btn_export"),
-                data=pdf_bytes,
-                file_name=f"Executive_Resolution_{layer_id}_{time_label.replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                type="primary",
-                use_container_width=True
-            )
-        else:
-            st.download_button(
-                label="📥 Download Resolution (.md)" if is_en else "📥 Tải Nghị Quyết (.md)",
-                data=full_resolution_md.encode("utf-8"),
-                file_name=f"Executive_Resolution_{layer_id}_{time_label.replace(' ', '_')}.md",
-                mime="text/markdown",
-                type="primary",
-                use_container_width=True
-            )
-
-    with c_btn2:
-        ai_act_label = "🤖 Activate AI Planning Agent ➔" if is_en else "🤖 Kích Hoạt Tác Tử Lập Kế Hoạch Chi Tiết ➔"
-        ai_act_help = "Transfer full strategic resolution evidence to AI Agent for detailed breakdown" if is_en else "Chuyển toàn bộ dữ liệu & căn cứ nghị quyết này sang Agent để giải trình chi tiết"
-        if st.button(ai_act_label, type="secondary", use_container_width=True, help=ai_act_help):
-            st.session_state["pending_prompt"] = ai_prompt_payload
-            st.session_state["view_mode"] = "chat"
-            st.rerun()
-
-
-@st.dialog("💬 EXECUTIVE COPILOT / TRỢ LÝ ĐỒNG HÀNH", width="large")
-def show_dashboard_copilot_dialog(ctx: Dict[str, Any]):
-    """Hiển thị hộp thoại trao đổi hỏi-đáp trực tiếp với DashboardCopilotAgent theo ngữ cảnh sống (Bilingual)."""
-    from src.multi_agent.dashboard_copilot_agent import DashboardCopilotAgent, sanitize_executive_vietnamese_text
-    copilot = DashboardCopilotAgent()
-    is_en = (get_current_language() == "en")
-
-    layer_title = ctx.get("layer_title", "Executive Overview" if is_en else "Tổng quan Doanh nghiệp")
-    time_label = ctx.get("time_label", "1985 - 2002")
-
-    # Injected Modern Executive CSS for Dialog
-    st.markdown("""
-    <style>
-        .copilot-modal-hdr {
-            background: linear-gradient(135deg, #0D1322 0%, #151F32 100%);
-            border: 1px solid rgba(0, 240, 255, 0.35);
-            border-radius: 14px;
-            padding: 16px 20px;
-            margin-bottom: 16px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-        }
-        .copilot-chip-title {
-            font-size: 0.82rem;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #67E8F9;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .copilot-user-bubble {
-            background: linear-gradient(135deg, rgba(30, 58, 138, 0.35) 0%, rgba(15, 23, 42, 0.6) 100%);
-            border: 1px solid rgba(59, 130, 246, 0.4);
-            border-radius: 12px;
-            padding: 12px 16px;
-            margin-bottom: 12px;
-            color: #FFFFFF;
-        }
-        .copilot-ai-card {
-            background: linear-gradient(145deg, #0E1526 0%, #090D1A 100%);
-            border: 1px solid rgba(0, 240, 255, 0.35);
-            border-left: 4px solid #00F0FF;
-            border-radius: 14px;
-            padding: 18px 22px;
-            margin-bottom: 16px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
-            color: #E2E8F0;
-            line-height: 1.7;
-            font-size: 0.92rem;
-        }
-        .copilot-ai-card h3 {
-            color: #00F0FF !important;
-            font-size: 1.08rem !important;
-            font-weight: 850 !important;
-            margin-top: 18px !important;
-            margin-bottom: 10px !important;
-            letter-spacing: -0.01em;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            border-bottom: 1px solid rgba(0, 240, 255, 0.15);
-            padding-bottom: 6px;
-        }
-        .copilot-ai-card table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-            margin: 14px 0 !important;
-            border-radius: 10px !important;
-            overflow: hidden !important;
-            font-size: 0.88rem !important;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
-        }
-        .copilot-ai-card th {
-            background: rgba(0, 240, 255, 0.18) !important;
-            color: #67E8F9 !important;
-            font-weight: 800 !important;
-            padding: 10px 14px !important;
-            text-align: left !important;
-            border-bottom: 1.5px solid rgba(0, 240, 255, 0.35) !important;
-            letter-spacing: 0.02em;
-        }
-        .copilot-ai-card td {
-            padding: 10px 14px !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-            color: #F8FAFC !important;
-        }
-        .copilot-ai-card tr:nth-child(even) {
-            background: rgba(255, 255, 255, 0.03) !important;
-        }
-        .copilot-ai-card blockquote {
-            background: linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(15, 23, 42, 0.95) 100%) !important;
-            border: 1.5px solid #F59E0B !important;
-            border-left: 5px solid #FBBF24 !important;
-            padding: 14px 18px !important;
-            border-radius: 10px !important;
-            margin: 18px 0 10px 0 !important;
-            color: #FFFFFF !important;
-            font-size: 0.93rem !important;
-            font-weight: 550 !important;
-            line-height: 1.65 !important;
-            box-shadow: 0 6px 24px rgba(245, 158, 11, 0.25) !important;
-        }
-        .copilot-ai-card blockquote b, .copilot-ai-card blockquote strong {
-            color: #FDE68A !important;
-            font-weight: 850 !important;
-            font-size: 0.96rem !important;
-        }
-        .copilot-ai-card strong, .copilot-ai-card b {
-            color: #F8FAFC !important;
-            font-weight: 750 !important;
-        }
-        .copilot-ai-card ul {
-            padding-left: 20px !important;
-            margin-bottom: 12px !important;
-        }
-        .copilot-ai-card li {
-            margin-bottom: 6px !important;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # 1. Header Card
-    badge_ctx_lbl = "Live Context" if is_en else "Ngữ Cảnh Sống"
-    st.markdown(f"""
-    <div class="copilot-modal-hdr">
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="font-size: 1.3rem;">🧠</span>
-                <div>
-                    <div style="font-size: 1.02rem; font-weight: 800; color: #FFFFFF; letter-spacing: -0.01em;">
-                        {layer_title}
-                    </div>
-                    <div style="font-size: 0.8rem; color: #94A3B8;">
-                        {"Analysis period:" if is_en else "Giai đoạn khảo sát:"} <b style="color: #67E8F9;">{time_label}</b> • {"Mode:" if is_en else "Chế độ:"} <span style="color: #00DF8F; font-weight: 600;">Executive Live Copilot</span>
-                    </div>
-                </div>
-            </div>
-            <span style="background: rgba(0, 240, 255, 0.15); border: 1px solid #00F0FF; color: #00F0FF; font-size: 0.74rem; font-weight: 750; padding: 4px 12px; border-radius: 20px;">
-                ⚡ {badge_ctx_lbl}
-            </span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Khởi tạo lịch sử cuộc trò chuyện
-    if "dashboard_copilot_history" not in st.session_state:
-        st.session_state["dashboard_copilot_history"] = []
-
-    def _handle_copilot_chip_click(chip_text: str):
-        st.session_state["dashboard_copilot_history"].append({"role": "user", "content": chip_text})
-        with st.spinner("🤖 Copilot is analyzing live data..." if is_en else "🤖 Copilot đang phân tích số liệu thực tế..."):
-            prior_history = st.session_state["dashboard_copilot_history"][:-1]
-            ans = copilot.ask_copilot(
-                question=chip_text,
-                ctx=ctx,
-                chat_history=prior_history
-            )
-            st.session_state["dashboard_copilot_history"].append({"role": "assistant", "content": ans})
-            followup_chips = copilot.generate_followup_chips(
-                question=chip_text,
-                answer=ans,
-                ctx=ctx
-            )
-            st.session_state["copilot_dynamic_followups"] = followup_chips
-        st.rerun()
-
-    def _handle_clear_copilot():
-        st.session_state["dashboard_copilot_history"] = []
-        st.session_state["copilot_dynamic_followups"] = []
-        st.rerun()
-
-    # 3. Hiển thị gợi ý câu hỏi ban đầu nếu chưa có lịch sử chat
-    chips = copilot.generate_smart_chips(ctx)
-    if not st.session_state.get("dashboard_copilot_history") and chips:
-        chips_title = "💡 INSTANT DEEP DIVE QUESTIONS (CLICK TO ASK):" if is_en else "💡 GỢI Ý CÂU HỎI ĐÀO SÂU TỨC THÌ (NHẤP ĐỂ HỎI):"
-        st.markdown(f"<div class='copilot-chip-title'>{chips_title}</div>", unsafe_allow_html=True)
-        cols = st.columns(min(len(chips), 2))
-        for idx, chip_text in enumerate(chips):
-            with cols[idx % 2]:
-                st.button(
-                    chip_text,
-                    key=f"copilot_init_chip_{idx}",
-                    on_click=_handle_copilot_chip_click,
-                    args=(chip_text,),
-                    use_container_width=True
-                )
-
-    # 4. Hiển thị khung chat với giao diện Executive Card
-    st.markdown("<div style='margin-top: 12px;'></div>", unsafe_allow_html=True)
-    if not st.session_state["dashboard_copilot_history"]:
-        welcome_info = "👋 Hello! I am the **Dashboard Copilot Agent**. Click on any suggested question above or type any question to explore root causes and strategic actions!" if is_en else "👋 Chào bạn! Tôi là **Dashboard Copilot Agent**. Hãy nhấp vào một câu hỏi gợi ý ở trên hoặc gõ câu hỏi bất kỳ để tôi giải thích nguyên nhân và đề xuất hành động cho bạn nhé!"
-        st.info(welcome_info)
-    else:
-        for msg in st.session_state["dashboard_copilot_history"]:
-            if msg["role"] == "user":
-                user_role_label = "EXECUTIVE BOARD" if is_en else "BAN ĐIỀU HÀNH"
-                st.markdown(f"""
-                <div class="copilot-user-bubble">
-                    <div style="font-weight: 750; font-size: 0.78rem; color: #93C5FD; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-                        <span>👤</span> {user_role_label}
-                    </div>
-                    <div style="font-size: 0.92rem; font-weight: 500; color: #F8FAFC;">{msg['content']}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 14px; margin-bottom: 4px;">
-                    <div style="font-weight: 850; font-size: 0.85rem; color: #00F0FF; display: flex; align-items: center; gap: 6px;">
-                        <span>✨</span> VERAXUS EXECUTIVE COPILOT
-                    </div>
-                    <span style="background: rgba(0, 240, 255, 0.12); color: #67E8F9; font-size: 0.72rem; font-weight: 750; padding: 2px 8px; border-radius: 8px; border: 1px solid rgba(0, 240, 255, 0.25);">
-                        C-LEVEL ADVISOR
-                    </span>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                clean_content = sanitize_executive_vietnamese_text(msg['content'])
-                card_html = f'<div class="copilot-ai-card">\n\n{clean_content}\n\n</div>'
-                st.markdown(card_html, unsafe_allow_html=True)
-
-        dynamic_followups = st.session_state.get("copilot_dynamic_followups", [])
-        if dynamic_followups:
-            next_q_label = "✨ SUGGESTED NEXT FOLLOW-UP QUESTIONS (1-CLICK):" if is_en else "✨ GỢI Ý CÂU HỎI ĐÀO SÂU TIẾP THEO (1-CLICK):"
-            st.markdown(f"<div class='copilot-chip-title' style='margin-top: 16px; margin-bottom: 8px;'>{next_q_label}</div>", unsafe_allow_html=True)
-            turn_count = len(st.session_state["dashboard_copilot_history"])
-            f_cols = st.columns(min(len(dynamic_followups), 2))
-            for f_idx, f_text in enumerate(dynamic_followups):
-                with f_cols[f_idx % len(f_cols)]:
-                    st.button(
-                        f_text,
-                        key=f"copilot_followup_btm_{turn_count}_{f_idx}",
-                        on_click=_handle_copilot_chip_click,
-                        args=(f_text,),
-                        use_container_width=True
-                    )
-
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-        clear_label = "🗑️ Clear conversation history" if is_en else "🗑️ Xóa lịch sử cuộc trò chuyện này"
-        st.button(
-            clear_label,
-            key="btn_clear_copilot_hist",
-            type="secondary",
-            on_click=_handle_clear_copilot,
-            use_container_width=True
-        )
-
-    # 6. Chat Input
-    st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
-    input_ph = "Ask Copilot any question about charts, KPIs or anomalies..." if is_en else "Hỏi Copilot bất kỳ câu hỏi nào về biểu đồ, KPI hoặc điểm dị biệt..."
-    user_q = st.chat_input(input_ph, key="copilot_input_field")
-    if user_q:
-        st.session_state["dashboard_copilot_history"].append({"role": "user", "content": user_q})
-        spinner_msg = "🤖 Copilot is analyzing live data..." if is_en else "🤖 Copilot đang phân tích số liệu thực tế..."
-        with st.spinner(spinner_msg):
-            prior_history = st.session_state["dashboard_copilot_history"][:-1]
-            ans = copilot.ask_copilot(
-                question=user_q,
-                ctx=ctx,
-                chat_history=prior_history
-            )
-            st.session_state["dashboard_copilot_history"].append({"role": "assistant", "content": ans})
-            followup_chips = copilot.generate_followup_chips(
-                question=user_q,
-                answer=ans,
-                ctx=ctx
-            )
-            st.session_state["copilot_dynamic_followups"] = followup_chips
-        st.rerun()
 
 
 def _render_diagnostic_kpi_card(
@@ -588,29 +102,20 @@ def _render_diagnostic_kpi_card(
     if not resolved_val.strip().startswith("<span"):
         resolved_val = f"<span>{resolved_val}</span>"
 
-    resolved_pill = status_pill or status_text or "🟢 OPTIMAL"
+    clean_bench_lbl = re.sub(r"^[\s🎯]+", "", str(bench_label or "")).strip()
+
     fill_w = min(100.0, max(8.0, float(bench_pct)))
     if bench_pct >= 98.0 or status_level == "good":
-        bar_bg = fill_color or "linear-gradient(90deg, #34D399 0%, #10B981 100%)"
-        pill_bg = "rgba(16, 185, 129, 0.36)"
-        pill_border = "rgba(167, 243, 208, 0.75)"
+        bar_bg = fill_color or "#10B981"
     elif bench_pct >= 85.0 or status_level == "warn":
-        bar_bg = fill_color or "linear-gradient(90deg, #FBBF24 0%, #F59E0B 100%)"
-        pill_bg = "rgba(245, 158, 11, 0.36)"
-        pill_border = "rgba(253, 230, 138, 0.75)"
+        bar_bg = fill_color or "#F59E0B"
     else:
-        bar_bg = fill_color or "linear-gradient(90deg, #F87171 0%, #EF4444 100%)"
-        pill_bg = "rgba(239, 68, 68, 0.38)"
-        pill_border = "rgba(252, 165, 165, 0.78)"
+        bar_bg = fill_color or "#EF4444"
 
     delta_badge_html = f"<span class='kpi-delta-tag'>{extracted_delta}</span>" if extracted_delta else ""
 
     st.markdown(f"""
     <div class="{resolved_class}" style="{extra_style}">
-        <div class="kpi-top-row">
-            <span class="kpi-badge">{badge_text}</span>
-            <span class="kpi-status-pill" style="background:{pill_bg}; border:1px solid {pill_border};">{resolved_pill}</span>
-        </div>
         <div class="kpi-title" title="{title}">
             <span class="kpi-title-text">{title}</span>
         </div>
@@ -621,7 +126,7 @@ def _render_diagnostic_kpi_card(
         </div>
         <div class="kpi-bench-wrap">
             <div class="kpi-bench-header">
-                <span class="kpi-bench-lbl" title="{bench_label}">🎯 {bench_label}</span>
+                <span class="kpi-bench-lbl" title="{clean_bench_lbl}">{clean_bench_lbl}</span>
                 <span class="kpi-bench-pct"><b>{bench_pct:.1f}%</b></span>
             </div>
             <div class="kpi-bench-track">
@@ -632,6 +137,122 @@ def _render_diagnostic_kpi_card(
     """, unsafe_allow_html=True)
 
 
+_DASH_LABEL_MAP = {
+    "hoa_don_ban": ("Hóa đơn bán", "Sales Invoices"),
+    "phieu_nhap_thuoc": ("Phiếu nhập thuốc", "Stock-In Vouchers"),
+    "donhang": ("Đơn hàng", "Orders"),
+    "don_hang": ("Đơn hàng", "Orders"),
+    "danhmucmon": ("Danh mục món", "Menu Items"),
+    "danh_muc_mon": ("Danh mục món", "Menu Items"),
+    "congnobanhang": ("Công nợ bán hàng", "Sales Receivables"),
+    "cong_no_ban_hang": ("Công nợ bán hàng", "Sales Receivables"),
+    "san_pham": ("Sản phẩm", "Products"),
+    "khach_hang": ("Khách hàng", "Customers"),
+    "ten_khach_hang": ("Khách hàng", "Customer"),
+    "nhan_vien": ("Nhân viên", "Employees"),
+    "nha_cung_cap": ("Nhà cung cấp", "Suppliers"),
+    "kho_hang": ("Kho hàng", "Inventory"),
+    "ton_kho": ("Tồn kho", "Inventory"),
+    "chi_phi": ("Chi phí", "Expenses"),
+    "doanh_thu": ("Doanh thu", "Revenue"),
+    "thanh_tien": ("Thành tiền", "Total Amount"),
+    "tong_tien": ("Tổng tiền", "Total Amount"),
+    "da_thanh_toan": ("Đã thanh toán", "Paid Amount"),
+    "cong_no": ("Công nợ", "Receivables"),
+    "so_luong": ("Số lượng", "Quantity"),
+    "so_luong_nhap": ("Số lượng nhập", "Import Quantity"),
+    "don_gia": ("Đơn giá", "Unit Price"),
+    "gia_nhap": ("Giá nhập", "Import Price"),
+    "gia_ban": ("Giá bán", "Selling Price"),
+    "loi_nhuan": ("Lợi nhuận", "Profit"),
+    "ten_thuoc": ("Tên thuốc", "Medicine"),
+    "ten_mon": ("Tên món", "Menu Item"),
+    "nhom_mon": ("Nhóm món", "Category"),
+    "vat_lieu": ("Vật liệu", "Material"),
+    "kenh_ban": ("Kênh bán", "Sales Channel"),
+    "trang_thai": ("Trạng thái", "Status"),
+    "don_vi": ("Đơn vị", "Unit"),
+    "ngay_gd": ("Ngày giao dịch", "Transaction Date"),
+    "ngay_ban": ("Ngày bán", "Sale Date"),
+    "ngay_nhap": ("Ngày nhập", "Import Date"),
+    "ma_hd": ("Mã hóa đơn", "Invoice ID"),
+    "ma_don": ("Mã đơn", "Order ID"),
+    "ma_phieu": ("Mã phiếu", "Voucher ID"),
+}
+
+
+def _humanize_dashboard_label(raw_name: str, is_en: bool = False) -> str:
+    """Convert raw snake_case/camelCase column or table names into clean display labels."""
+    import re
+    if not raw_name:
+        return ""
+    s = str(raw_name).strip()
+    key = re.sub(r"[^a-zA-Z0-9_]", "", s).lower()
+    if key in _DASH_LABEL_MAP:
+        return _DASH_LABEL_MAP[key][1] if is_en else _DASH_LABEL_MAP[key][0]
+    norm_compact = key.replace("_", "")
+    for k, vals in _DASH_LABEL_MAP.items():
+        if k.replace("_", "") == norm_compact:
+            return vals[1] if is_en else vals[0]
+    if is_en:
+        cleaned = re.sub(r"([a-z])([A-Z])", r"\1 \2", s).replace("_", " ").strip()
+        return cleaned.title() if cleaned.islower() or "_" in s else cleaned
+    if any(c in s for c in "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựíìỉĩịđÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÍÌỈĨỊĐ"):
+        return s
+    try:
+        from src.visualization.charts import format_col_title
+        formatted = format_col_title(s)
+        formatted = re.sub(r"\s*\(\$\)\s*$", "", formatted).strip()
+        return formatted or s
+    except Exception:
+        return s.replace("_", " ").strip().title()
+
+
+def _build_dashboard_deep_dive_prompt(layer_id: str, data: Dict[str, Any], anomalies: list, is_en: bool) -> str:
+    """Build a schema-compatible follow-up prompt so clicking Analyze in Chat answers directly."""
+    lid = str(layer_id or "").lower()
+    if lid.startswith("generic") or lid.startswith("table_"):
+        met_raw = data.get("main_num_col") or data.get("num_col") or ""
+        cat_raw = data.get("main_cat_col") or data.get("status_col") or ""
+        tbl_raw = data.get("main_table") or (lid[6:] if lid.startswith("table_") else "")
+        met_lbl = _humanize_dashboard_label(met_raw, is_en=is_en) if met_raw else ""
+        cat_lbl = _humanize_dashboard_label(cat_raw, is_en=is_en) if cat_raw else ""
+        tbl_lbl = _humanize_dashboard_label(tbl_raw, is_en=is_en) if tbl_raw else ""
+        if met_lbl and cat_lbl:
+            return (
+                f"Compare the highest and lowest {cat_lbl} by {met_lbl} and show the gap"
+                if is_en else
+                f"Phân tích chênh lệch {met_lbl} theo {cat_lbl} giữa nhóm cao nhất và thấp nhất"
+            )
+        if met_lbl:
+            return (
+                f"Analyze {met_lbl} trends and distribution over time"
+                if is_en else
+                f"Phân tích xu hướng và biến động {met_lbl} theo thời gian"
+            )
+        target = tbl_lbl or ("current database" if is_en else "dữ liệu hiện tại")
+        return (
+            f"Summarize key drivers and variances in {target}"
+            if is_en else
+            f"Phân tích các điểm biến động chính trong {target}"
+        )
+
+    if any(k in lid for k in ("sales", "northwind", "geo", "product", "people", "trend", "top_performer", "order", "customer", "supplier")):
+        if "geo" in lid:
+            return "Compare highest and lowest regions by revenue and explain the gap" if is_en else "Phân tích chênh lệch doanh số giữa các khu vực cao nhất và thấp nhất"
+        if "people" in lid or "employee" in lid:
+            return "Compare top and bottom sales representatives by revenue" if is_en else "So sánh doanh số giữa nhân viên bán hàng cao nhất và thấp nhất"
+        if "customer" in lid:
+            return "Identify top revenue customers and concentration risk" if is_en else "Phân tích nhóm khách hàng mang lại doanh thu cao nhất và mức độ tập trung"
+        if "product" in lid:
+            return "Compare top-selling and lowest-selling products by revenue" if is_en else "Phân tích chênh lệch doanh thu giữa sản phẩm bán chạy nhất và thấp nhất"
+        return "Analyze revenue concentration and top vs bottom performers" if is_en else "Phân tích chênh lệch doanh thu giữa nhóm cao nhất và thấp nhất"
+
+    if "salary" in lid or "title" in lid:
+        return "Compare average salary across departments and job titles" if is_en else "So sánh mức lương bình quân giữa các phòng ban và chức danh"
+    return "Analyze headcount distribution and gaps across departments" if is_en else "Phân tích cơ cấu nhân sự và chênh lệch giữa các phòng ban"
+
+
 def render_smart_analyst_anomaly_panel(
     layer_id: str,
     data: Dict[str, Any],
@@ -639,676 +260,74 @@ def render_smart_analyst_anomaly_panel(
     end_year: int,
     key_prefix: str = "analyst"
 ):
-    """Component UI Bảng Chẩn Đoán Hiệu Suất Động 4 Tầng: Cây Giả Thuyết, Phân Tầng Vai Trò & Đơn Vị, Điểm Nghẽn & Lộ Trình (Bilingual)."""
-    import textwrap
+    """Render a compact 1-line anomaly signal strip with a direct bridge button to Main Chat."""
+    import html
     import re
-    from src.analytics.heuristics import (
-        generate_hypothesis_tree,
-        generate_persona_action_plan,
-        extract_selectable_units,
-    )
     lang = get_current_language()
     is_en = (lang == "en")
     res = scan_dashboard_anomalies_and_strategies(layer_id, data, start_year, end_year, lang=lang)
-    health_status = res["health_status"]
-    health_score = res["health_score"]
-    headline = res["headline"]
-    anomalies = res["anomalies"]
-    immediate_actions = res["immediate_actions"]
-    structural_optimizations = res["structural_optimizations"]
-    sustainable_strategies = res["sustainable_strategies"]
-    okrs = res["okrs"]
-    time_label = res["time_label"]
-    
-    if "CRITICAL" in health_status:
-        border_color = "rgba(239, 68, 68, 0.6)"
-        badge_bg = "background: rgba(239, 68, 68, 0.2); color: #FCA5A5; border: 1px solid #EF4444;"
-        glow = "box-shadow: 0 4px 20px rgba(239, 68, 68, 0.18);"
-    elif "WARNING" in health_status:
-        border_color = "rgba(245, 158, 11, 0.6)"
-        badge_bg = "background: rgba(245, 158, 11, 0.2); color: #FDE68A; border: 1px solid #F59E0B;"
-        glow = "box-shadow: 0 4px 20px rgba(245, 158, 11, 0.18);"
+    health_status = str(res.get("health_status") or "")
+    anomalies = res.get("anomalies") or []
+
+    def _clean_signal_txt(txt: Any) -> str:
+        s = re.sub(r"<[^>]+>", "", str(txt or ""))
+        s = re.sub(r"[🚨⚠️🔴🟡🟢📊🔥💡🧠🎯⚡🏆📈🍩📋🗂️]+", "", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    titles = [_clean_signal_txt(a.get("title", "")) for a in anomalies[:2] if _clean_signal_txt(a.get("title", ""))]
+    if titles:
+        summary_line = "  •  ".join(titles)
     else:
-        border_color = "rgba(16, 185, 129, 0.6)"
-        badge_bg = "background: rgba(16, 185, 129, 0.2); color: #A7F3D0; border: 1px solid #10B981;"
-        glow = "box-shadow: 0 4px 20px rgba(16, 185, 129, 0.18);"
-
-    panel_title = t("anomaly_panel_title")
-    health_lbl = t("anomaly_health_label")
-    vn_font_stack = "'Be Vietnam Pro', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
-
-    header_html = textwrap.dedent(f"""
-<div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid {border_color}; border-radius: 14px; padding: 14px 18px; margin-top: 14px; margin-bottom: 10px; {glow}">
-<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
-<div style="display: flex; align-items: center; gap: 8px;">
-<span style="font-size: 1.25rem;">🧠</span>
-<span style="font-size: 1.02rem; font-weight: 800; color: #FFFFFF; letter-spacing: 0.2px;">
-{panel_title}
-</span>
-</div>
-<div style="display: flex; align-items: center; gap: 8px;">
-<span style="{badge_bg} font-size: 0.76rem; font-weight: 700; padding: 3px 11px; border-radius: 20px;">
-{health_lbl}: {health_status} ({health_score}/100)
-</span>
-<span style="background: rgba(0, 240, 255, 0.14); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.3); font-size: 0.76rem; font-weight: 600; padding: 3px 11px; border-radius: 20px;">
-{time_label}
-</span>
-</div>
-</div>
-<div style="font-size: 0.84rem; color: #CBD5E1; line-height: 1.45;">
-{headline}
-</div>
-</div>
-""").strip()
-    st.markdown(header_html, unsafe_allow_html=True)
-
-    # Hàm chuẩn hóa Markdown inline (**bold**, `code`) sang HTML sạch để nhúng trong thẻ <div> không bị lỗi hiển thị dấu **
-    def _md_inline_to_html(raw_txt: Any) -> str:
-        if raw_txt is None:
-            return ""
-        s = str(raw_txt)
-        s = re.sub(
-            r"\*\*\[([^\]]+)\]\*\*",
-            r"<strong style='color: #F8FAFC; font-weight: 700;'>[\1]</strong>",
-            s
+        summary_line = (
+            "No unusual variance detected in this period."
+            if is_en else
+            "Các chỉ số trong kỳ đang ổn định, chưa ghi nhận biến động bất thường."
         )
-        s = re.sub(
-            r"\*\*([^*]+)\*\*",
-            r"<strong style='color: #F8FAFC; font-weight: 700;'>\1</strong>",
-            s
+
+    if "CRITICAL" in health_status:
+        dot_color = "#EF4444"
+    elif "WARNING" in health_status:
+        dot_color = "#F59E0B"
+    else:
+        dot_color = "#22C55E"
+
+    signal_label = "Key Signals" if is_en else "Điểm cần chú ý"
+    deep_dive_prompt = _build_dashboard_deep_dive_prompt(layer_id, data, anomalies, is_en=is_en)
+    btn_label = "Analyze in Chat →" if is_en else "Phân tích trong Chat →"
+
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    c_sig, c_btn = st.columns([4.6, 1.4], vertical_alignment="center")
+    with c_sig:
+        safe_summary = html.escape(summary_line)
+        strip_html = (
+            "<div style='background: #11141C; border: 1px solid rgba(255,255,255,0.08); "
+            "border-radius: 10px; padding: 11px 16px; display: flex; align-items: center; "
+            "gap: 10px; font-size: 0.86rem; line-height: 1.45;'>"
+            f"<span style='width: 8px; height: 8px; border-radius: 50%; background: {dot_color}; flex-shrink: 0;'></span>"
+            f"<span style='color: #E2E8F0;'><strong style='color: #FFFFFF; font-weight: 700;'>{signal_label}:</strong> "
+            f"{safe_summary}</span>"
+            "</div>"
         )
-        s = re.sub(
-            r"`([^`]+)`",
-            r"<code style='background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.3); padding: 1px 6px; border-radius: 5px; color: #67E8F9; font-size: 0.75rem; font-weight: 700; font-family: inherit;'>\1</code>",
-            s
-        )
-        return s
-
-    # Xác định các tập dữ liệu chẩn đoán hiện có trong Layer để dựng Cây Giả Thuyết & Phân Tầng Vai Trò / Đơn vị Phụ trách (100% Động trên mọi CSDL)
-    from src.analytics.heuristics import (
-        normalize_diagnostic_dataframe,
-        select_primary_insight_columns,
-        humanize_name_vi,
-        humanize_name_en,
-        is_id_like,
-        _is_status_or_eval_column,
-        find_time_column,
-    )
-    diag_sources = {}
-    if isinstance(data.get("geo_df"), pd.DataFrame) and not data["geo_df"].empty:
-        diag_sources["🌍 Thị trường Quốc gia (Market Share)" if not is_en else "🌍 Global Markets (Geo)"] = (data["geo_df"], "doanh số theo quốc gia thị trường")
-    if isinstance(data.get("region_df"), pd.DataFrame) and not data["region_df"].empty:
-        diag_sources["🌐 Khu vực Chiến lược (Regions)" if not is_en else "🌐 Strategic Regions"] = (data["region_df"], "doanh số theo khu vực vùng")
-    if isinstance(data.get("team_df"), pd.DataFrame) and not data["team_df"].empty:
-        diag_sources["👥 Đội ngũ Kinh doanh (Sales Teams)" if not is_en else "👥 Sales Teams"] = (data["team_df"], "doanh số theo đội ngũ team")
-    if isinstance(data.get("category_df"), pd.DataFrame) and not data["category_df"].empty:
-        diag_sources["🍫 Danh mục Sản phẩm (Product Category)" if not is_en else "🍫 Product Categories"] = (data["category_df"], "doanh số theo danh mục sản phẩm")
-    elif isinstance(data.get("cat_dist_df"), pd.DataFrame) and not data["cat_dist_df"].empty:
-        diag_sources["📦 Cơ cấu Ngành hàng (Categories)" if not is_en else "📦 Product Categories"] = (data["cat_dist_df"], "doanh số theo danh mục sản phẩm")
-    elif isinstance(data.get("cat_df"), pd.DataFrame) and not data["cat_df"].empty:
-        cat_col_0 = str(data["cat_df"].columns[0])
-        cat_lbl_vi = f"📊 Phân bổ theo {humanize_name_vi(cat_col_0)}"
-        cat_lbl_en = f"📊 Distribution by {humanize_name_en(cat_col_0)}"
-        diag_sources[cat_lbl_en if is_en else cat_lbl_vi] = (data["cat_df"], f"phân tích theo {cat_col_0}")
-    if isinstance(data.get("size_df"), pd.DataFrame) and not data["size_df"].empty:
-        diag_sources["📦 Kích cỡ Đóng gói (Package Size)" if not is_en else "📦 Package Sizes"] = (data["size_df"], "doanh số theo kích cỡ sản phẩm")
-    if isinstance(data.get("top_skus_df"), pd.DataFrame) and not data["top_skus_df"].empty:
-        diag_sources["🍫 Top 10 Sản phẩm (Top SKUs)" if not is_en else "🍫 Top 10 SKUs"] = (data["top_skus_df"], "doanh số theo sản phẩm")
-    if isinstance(data.get("top_products_df"), pd.DataFrame) and not data["top_products_df"].empty:
-        diag_sources["🏆 Top Sản phẩm Chủ lực (Top Products)" if not is_en else "🏆 Top Flagship Products"] = (data["top_products_df"], "doanh số theo sản phẩm")
-    if isinstance(data.get("dept_df"), pd.DataFrame) and not data["dept_df"].empty:
-        diag_sources["🏢 Khối Phòng Ban (Departments)" if not is_en else "🏢 Departments"] = (data["dept_df"], "nhân sự và lương theo phòng ban")
-    if isinstance(data.get("dept_sal_df"), pd.DataFrame) and not data["dept_sal_df"].empty:
-        diag_sources["💰 Lương theo Phòng Ban (Dept Salary)" if not is_en else "💰 Salary by Department"] = (data["dept_sal_df"], "lương trung bình theo phòng ban")
-    if isinstance(data.get("title_sal_df"), pd.DataFrame) and not data["title_sal_df"].empty:
-        diag_sources["🎖️ Lương theo Chức Danh (Title Salary)" if not is_en else "🎖️ Salary by Job Title"] = (data["title_sal_df"], "lương trung bình theo chức danh")
-    if isinstance(data.get("top10_df"), pd.DataFrame) and not data["top10_df"].empty:
-        diag_sources["🏅 Top Nhân Sự Lương Cao Nhất" if not is_en else "🏅 Top 10 Earners"] = (data["top10_df"], "top nhân sự lương cao nhất")
-
-    base_table_df = data.get("df") if isinstance(data.get("df"), pd.DataFrame) and not data["df"].empty else (
-        data.get("sample_df") if isinstance(data.get("sample_df"), pd.DataFrame) and not data["sample_df"].empty else None
-    )
-    if base_table_df is not None:
-        main_df_cols = [str(c).lower() for c in base_table_df.columns]
-        norm_main_df = normalize_diagnostic_dataframe(base_table_df, user_query=layer_id)
-        if "geo" in main_df_cols and not isinstance(data.get("geo_df"), pd.DataFrame):
-            df_lbl = "🌍 Thị trường Quốc gia (Market Share)" if not is_en else "🌍 Global Markets (Geo)"
-            df_q = "doanh số theo quốc gia thị trường"
-        elif any(k in main_df_cols for k in ["salesperson", "salesrep", "employeename"]):
-            df_lbl = "🧑‍💼 Chuyên viên Kinh doanh (Sales Reps)" if not is_en else "🧑‍💼 Sales Representatives"
-            df_q = "doanh số theo nhân viên bán hàng"
-        elif any(k in main_df_cols for k in ["product", "productname"]):
-            df_lbl = "🍫 Chi tiết Sản phẩm SKU (Product SKUs)" if not is_en else "🍫 Product SKUs"
-            df_q = "doanh số theo sản phẩm"
-        elif any(k in main_df_cols for k in ["companyname", "customername", "customer"]):
-            df_lbl = "🏢 Khách hàng / Đối tác (Accounts)" if not is_en else "🏢 Corporate Accounts"
-            df_q = "doanh số theo khách hàng"
-        elif any(k in main_df_cols for k in ["month", "yearmonth", "timeperiod"]) and not isinstance(data.get("trend_df"), pd.DataFrame):
-            df_lbl = "📈 Chuỗi thời gian Tháng (Monthly Trend)" if not is_en else "📈 Monthly Time Series"
-            df_q = "xu hướng doanh thu theo từng tháng"
-        else:
-            p_c0, l_c0 = select_primary_insight_columns(norm_main_df, user_query=layer_id)
-            if l_c0:
-                df_lbl = f"📊 Phân tích theo {humanize_name_vi(l_c0)} ({l_c0})" if not is_en else f"📊 Analysis by {humanize_name_en(l_c0)} ({l_c0})"
-                df_q = f"{layer_id} {l_c0}"
-            else:
-                df_lbl = "📊 Bảng dữ liệu chính (Primary Table)" if not is_en else "📊 Primary Layer Dataset"
-                df_q = layer_id
-        diag_sources[df_lbl] = (norm_main_df, df_q)
-
-        # Tự động bóc tách thêm các chiều phân tích ảo (Virtual Grouped Dimensions) từ mọi cột phân loại hợp lệ trong bảng
-        p_metric, primary_lbl_col = select_primary_insight_columns(base_table_df, user_query=layer_id)
-        if not p_metric:
-            num_cands = [c for c in base_table_df.select_dtypes(include="number").columns if not is_id_like(c)]
-            p_metric = num_cands[0] if num_cands else None
-        t_col_base = find_time_column(base_table_df)
-        for col in base_table_df.columns:
-            if col in (primary_lbl_col, p_metric, t_col_base) or is_id_like(col) or _is_status_or_eval_column(base_table_df, col):
-                continue
-            if pd.api.types.is_numeric_dtype(base_table_df[col]):
-                continue
-            s_clean = base_table_df[col].dropna().astype(str).str.strip()
-            s_clean = s_clean[~s_clean.str.lower().isin(["", "nan", "none", "null"])]
-            n_uniq = s_clean.nunique()
-            if 2 <= n_uniq <= min(35, max(2, len(base_table_df) - 1)):
-                if p_metric and p_metric in base_table_df.columns:
-                    w_grp = base_table_df[[col, p_metric]].copy()
-                    w_grp[p_metric] = pd.to_numeric(w_grp[p_metric], errors="coerce")
-                    w_grp = w_grp.dropna(subset=[col, p_metric])
-                    w_grp[col] = w_grp[col].astype(str).str.strip()
-                    w_grp = w_grp[~w_grp[col].str.lower().isin(["", "nan", "none", "null"])]
-                    if len(w_grp) >= 2:
-                        is_avg_m = any(k in str(p_metric).lower() for k in ["avg", "average", "mean", "pct", "rate", "margin", "price"])
-                        v_df = (
-                            w_grp.groupby(col, as_index=False)[p_metric].mean()
-                            if is_avg_m else
-                            w_grp.groupby(col, as_index=False)[p_metric].sum()
-                        ).sort_values(p_metric, ascending=False).reset_index(drop=True)
-                    else:
-                        v_df = pd.DataFrame()
-                else:
-                    v_df = (
-                        base_table_df.dropna(subset=[col])
-                        .assign(_g=lambda x: x[col].astype(str).str.strip())
-                        .query("_g != '' and _g.str.lower() not in ['nan', 'none', 'null']")
-                        .groupby("_g", as_index=False)
-                        .size()
-                        .rename(columns={"_g": col, "size": "RecordCount"})
-                        .sort_values("RecordCount", ascending=False)
-                        .reset_index(drop=True)
-                    )
-                if not v_df.empty and len(v_df) >= 2:
-                    v_lbl = f"🔎 Theo {humanize_name_vi(col)} ({col})" if not is_en else f"🔎 By {humanize_name_en(col)} ({col})"
-                    if v_lbl not in diag_sources:
-                        diag_sources[v_lbl] = (v_df, f"phân tích theo {col}")
-
-    if isinstance(data.get("trend_df"), pd.DataFrame) and not data["trend_df"].empty:
-        diag_sources["📈 Chuỗi thời gian (Time Trend)" if not is_en else "📈 Time Series Trend"] = (data["trend_df"], "xu hướng theo thời gian")
-
-    # Hạng mục 1: Tinh giản 4 Tab chồng chéo thành 3 Bước Trực quan ("Slide-to-Unlock" Flow)
-    persona_tab_label = "🎯 1. Role & Unit Action Plan" if is_en else "🎯 1. Hành Động Theo Vai Trò & Đơn Vị"
-    tree_tab_label = f"🔬 2. Root-Cause Verification ({len(anomalies)})" if is_en else f"🔬 2. Kiểm Định Nguyên Nhân ({len(anomalies)})"
-    strat_tab_label = "🗺️ 3. 30-90-365 Roadmap & OKRs" if is_en else "🗺️ 3. Lộ Trình 30-90-365 Ngày & OKRs"
-
-    tab_persona, tab_tree, tab_strat = st.tabs([persona_tab_label, tree_tab_label, strat_tab_label])
-
-    # Khởi tạo dữ liệu cây giả thuyết mặc định
-    active_diag_df = None
-    active_diag_q = layer_id
-    if diag_sources:
-        first_src_k = list(diag_sources.keys())[0]
-        active_diag_df, active_diag_q = diag_sources[first_src_k]
-
-    with tab_persona:
-        persona_opts = [
-            "🎯 Quản lý Vùng / Team / KAM (Thực thi Cục bộ)" if not is_en else "🎯 Regional / Team / KAM Lead (Local Execution)",
-            "🏛️ Ban Điều Hành CEO / CFO (Chiến lược Vĩ mô)" if not is_en else "🏛️ C-Level CEO / CFO (Macro Strategy)",
-            "⚖️ Đối chiếu song song 2 góc nhìn (CEO & Quản lý)" if not is_en else "⚖️ Side-by-Side Dual View (CEO & Lead)"
-        ]
-
-        # Hạng mục 2: Gom bộ lọc Chiều dữ liệu, Vai trò và Đơn vị phụ trách lên 1 Hàng Ngang Duy Nhất (1-Line Control Bar)
-        if len(diag_sources) > 1:
-            ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([1.15, 1.35, 1.25])
-            with ctrl_c1:
-                sel_p_src_lbl = st.selectbox(
-                    "📂 Chiều dữ liệu phân tích:" if not is_en else "📂 Diagnostic Dimension:",
-                    options=list(diag_sources.keys()),
-                    key=f"diag_persona_src_{key_prefix}_{layer_id}"
-                )
-            persona_df, persona_q = diag_sources[sel_p_src_lbl]
-        else:
-            ctrl_c2, ctrl_c3 = st.columns([1.35, 1.25])
-            persona_df, persona_q = active_diag_df, active_diag_q
-
-        dash_units_info = extract_selectable_units(persona_df, user_query=persona_q, is_en=is_en) if (persona_df is not None and not persona_df.empty) else {"has_units": False}
-        has_selectable_units = bool(dash_units_info.get("has_units"))
-
-        with ctrl_c2:
-            sel_p = st.selectbox(
-                "👤 Vai trò nhận khuyến nghị:" if not is_en else "👤 Target Persona:",
-                options=persona_opts,
-                index=0 if has_selectable_units else 1,
-                key=f"dash_persona_radio_{key_prefix}_{layer_id}"
-            )
-
-        dash_selected_unit = None
-        with ctrl_c3:
-            if sel_p in (persona_opts[0], persona_opts[2]) and has_selectable_units:
-                u_opts = dash_units_info.get("unit_options", [])
-                all_u_lbl = dash_units_info.get("all_option_label", "ALL")
-                lbl_to_val = {(u.get("label") or u.get("display") or str(u.get("value", ""))): u.get("value", "") for u in u_opts}
-                lbl_to_val[all_u_lbl] = "ALL"
-                sel_u_labels = [(u.get("label") or u.get("display") or str(u.get("value", ""))) for u in u_opts] + [all_u_lbl]
-                def_u_val = dash_units_info.get("default_unit")
-                def_u_idx = 0
-                for idx_u, u_it in enumerate(u_opts):
-                    if u_it["value"] == def_u_val:
-                        def_u_idx = idx_u
-                        break
-                chosen_u_lbl = st.selectbox(
-                    "📍 Đơn vị / Vùng phụ trách:" if not is_en else "📍 Assigned Unit / Region:",
-                    options=sel_u_labels,
-                    index=def_u_idx,
-                    key=f"dash_unit_scope_{key_prefix}_{layer_id}_{abs(hash(str(persona_q))) % 10000}"
-                )
-                dash_selected_unit = lbl_to_val.get(chosen_u_lbl, "ALL")
-            else:
-                st.selectbox(
-                    "📍 Phạm vi điều hành:" if not is_en else "📍 Governance Scope:",
-                    options=["🌐 Toàn hệ thống (Macro P&L)" if not is_en else "🌐 Enterprise-Wide (Macro P&L)"],
-                    disabled=True,
-                    key=f"dash_unit_macro_{key_prefix}_{layer_id}"
-                )
-
-        # Dải Status Pill 1 dòng siêu gọn cho Cổng Kiểm Chứng Giả Thuyết (thay cho hộp văn bản 4 dòng cũ)
-        if persona_df is not None and not persona_df.empty:
-            p_tree = generate_hypothesis_tree(persona_df, user_query=persona_q, is_en=is_en)
-            p_branches = p_tree.get("branches", [])
-            if p_branches:
-                conf_list = [b for b in p_branches if b.get("status") == "CONFIRMED"]
-                part_list = [b for b in p_branches if b.get("status") == "PARTIAL"]
-                rej_list = [b for b in p_branches if b.get("status") == "REJECTED"]
-                top_b = conf_list[0] if conf_list else p_branches[0]
-                sec_b = part_list[0] if part_list else (conf_list[1] if len(conf_list) > 1 else None)
-                rej_b = rej_list[0] if rej_list else None
-                top_t_clean = _md_inline_to_html(re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(top_b.get("title", "H1")), flags=re.IGNORECASE))
-                top_c_pct = int(top_b.get("confidence", 88))
-                sec_badge_html = ""
-                if sec_b:
-                    sec_id = sec_b.get("id", "H2")
-                    sec_c_pct = int(sec_b.get("confidence", 74))
-                    sec_badge_html = f"<span style='background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.38); color: #FBBF24; padding: 2px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;'>⚡ {sec_id} ({sec_c_pct}%)</span>"
-                rej_badge_html = ""
-                if rej_b:
-                    rej_id = rej_b.get("id", "H3")
-                    rej_badge_html = f"<span style='background: rgba(100, 116, 139, 0.16); border: 1px solid rgba(100, 116, 139, 0.35); color: #94A3B8; padding: 2px 8px; border-radius: 5px; font-size: 0.71rem; font-weight: 500;'>❌ {'Loại trừ' if not is_en else 'Ruled out'} {rej_id}</span>"
-                gate_pill_html = f"""
-                <div style="font-family: {vn_font_stack}; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: rgba(6, 78, 59, 0.22); border: 1px solid rgba(16, 185, 129, 0.38); border-left: 3px solid #10B981; border-radius: 8px; padding: 6px 12px; margin-top: 2px; margin-bottom: 10px;">
-                    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                        <span style="font-size: 0.72rem; font-weight: 800; color: #34D399; text-transform: uppercase;">
-                            🔒 {'Căn cứ kiểm định:' if not is_en else 'Verified Root Cause:'}
-                        </span>
-                        <span style="background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(16, 185, 129, 0.45); color: #6EE7B7; padding: 2px 8px; border-radius: 5px; font-size: 0.73rem; font-weight: 700;">
-                            ✅ {top_b.get('id', 'H1')}: {top_t_clean} ({top_c_pct}%)
-                        </span>
-                        {sec_badge_html}
-                        {rej_badge_html}
-                    </div>
-                    <span style="font-size: 0.7rem; color: #94A3B8;">
-                        {'Xem bằng chứng số liệu tại Tab 🔬 2' if not is_en else 'See full proof in Tab 🔬 2'}
-                    </span>
-                </div>
-                """
-                st.markdown(re.sub(r'\n\s*', ' ', gate_pill_html).strip(), unsafe_allow_html=True)
-
-        # Hạng mục 3: Render Thẻ Hành Động theo chuẩn "Micro-Action Card" (Tách Số liệu khỏi Câu văn + Progressive Disclosure)
-        def _render_dash_persona_card(p_code: str, border_col: str, badge_col: str):
-            if persona_df is None or persona_df.empty:
-                return
-            u_target = dash_selected_unit if p_code == "lead" else None
-            p_data = generate_persona_action_plan(persona_df, persona=p_code, user_query=persona_q, is_en=is_en, target_unit=u_target)
-            role_title_clean = _md_inline_to_html(p_data.get("role_title", ""))
-            role_focus_clean = _md_inline_to_html(p_data.get("role_focus", ""))
-            unit_diag = p_data.get("unit_diagnostic")
-
-            # Nếu đã có Unit Benchmark Scorecard 4 cột thì KHÔNG lặp lại 3 chip KPI trùng số liệu ở dưới
-            unit_strip_html = ""
-            kpis_row_html = ""
-            if unit_diag:
-                u_stat_col = unit_diag.get("status_color", "#10B981")
-                pct_top_bar = max(8.0, min(100.0, float(unit_diag.get("pct_of_top", 50.0))))
-                vs_m = float(unit_diag.get("vs_mean_pct", 0.0))
-                vs_m_col = "#34D399" if vs_m >= 0 else "#FBBF24"
-                sec_m_list = unit_diag.get("secondary_metrics", [])
-                sec_m_html = "".join(
-                    f"<span style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #CBD5E1; font-size: 0.71rem; padding: 2px 8px; border-radius: 5px;'>🔹 {sm}</span>"
-                    for sm in sec_m_list
-                )
-                sec_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;'>{sec_m_html}</div>" if sec_m_html else ""
-                u_lbl_vi = unit_diag.get("entity_label_vi", "Đơn vị")
-                u_lbl_en = unit_diag.get("entity_label_en", "Unit")
-                unit_strip_html = f"""
-                <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid {u_stat_col}55; border-left: 3px solid {u_stat_col}; border-radius: 9px; padding: 10px 12px; margin-bottom: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
-                        <span style="font-size: 0.78rem; font-weight: 800; color: #F8FAFC; text-transform: uppercase; letter-spacing: 0.03em;">
-                            🎯 {f"ĐỊNH CHUẨN {u_lbl_vi.upper()}:" if not is_en else f"{u_lbl_en.upper()} SCORECARD:"} <span style="color: #00F0FF;">{unit_diag.get('unit_name')}</span> ({unit_diag.get('rank_str')})
-                        </span>
-                        <span style="font-size: 0.71rem; font-weight: 700; color: {u_stat_col}; background: {u_stat_col}1F; border: 1px solid {u_stat_col}66; padding: 2px 8px; border-radius: 6px;">
-                            {unit_diag.get('status_badge')}
-                        </span>
-                    </div>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 8px; margin-bottom: 8px;">
-                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
-                            <div style="font-size: 0.68rem; color: #94A3B8;">{f"Thực tế {u_lbl_vi}" if not is_en else f"{u_lbl_en} Actual"}</div>
-                            <div style="font-size: 0.85rem; font-weight: 800; color: #F8FAFC;">{unit_diag.get('unit_val_fmt')} <span style="font-size: 0.69rem; color: #38BDF8; font-weight: 600;">({unit_diag.get('share_pct'):.1f}%)</span></div>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
-                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Chuẩn TB' if not is_en else 'vs. Company Mean'} ({unit_diag.get('mean_val_fmt')})</div>
-                            <div style="font-size: 0.85rem; font-weight: 800; color: {vs_m_col};">{vs_m:+.1f}% <span style="font-size: 0.69rem; color: #CBD5E1; font-weight: 500;">({unit_diag.get('pct_of_mean'):.1f}%)</span></div>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 8px;">
-                            <div style="font-size: 0.68rem; color: #94A3B8;">{'So với Top #1' if not is_en else 'vs. #1 Leader'} ({unit_diag.get('top_name')})</div>
-                            <div style="font-size: 0.85rem; font-weight: 800; color: #E2E8F0;">{unit_diag.get('pct_of_top'):.1f}% <span style="font-size: 0.69rem; color: #94A3B8; font-weight: 500;">(Δ {unit_diag.get('gap_to_top_fmt')})</span></div>
-                        </div>
-                        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 6px 8px;">
-                            <div style="font-size: 0.68rem; color: #6EE7B7;">{'Chỉ tiêu Kỳ tới (Target)' if not is_en else 'Next-Period Quota'}</div>
-                            <div style="font-size: 0.85rem; font-weight: 800; color: #34D399;">{unit_diag.get('next_target_fmt')}</div>
-                        </div>
-                    </div>
-                    <div style="font-size: 0.7rem; color: #94A3B8; display: flex; justify-content: space-between; margin-bottom: 3px;">
-                        <span>{'Tỷ lệ tiệm cận Top #1 (' if not is_en else 'Ratio vs. #1 ('}{unit_diag.get('top_name')}: {unit_diag.get('top_val_fmt')})</span>
-                        <b style="color: #F8FAFC;">{unit_diag.get('pct_of_top'):.1f}%</b>
-                    </div>
-                    <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
-                        <div style="width: {pct_top_bar}%; height: 100%; background: linear-gradient(90deg, {u_stat_col}, #00F0FF); border-radius: 3px;"></div>
-                    </div>
-                    {sec_row_html}
-                </div>
-                """
-            else:
-                kpis_chips = "".join(
-                    f"<span style='font-family: {vn_font_stack}; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); color: #F8FAFC; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; line-height: 1.35;'>📌 {_md_inline_to_html(k)}</span>"
-                    for k in p_data.get("kpis", [])
-                )
-                kpis_row_html = f"<div style='display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;'>{kpis_chips}</div>"
-
-            micro_list = p_data.get("micro_actions", [])
-            if micro_list:
-                cards_list_html = []
-                for ma in micro_list:
-                    p_col = ma.get("priority_color", "#38BDF8")
-                    p_lbl = ma.get("priority_label", "")
-                    p_icon = ma.get("priority_icon", "🔹")
-                    hl_html = _md_inline_to_html(ma.get("headline", ""))
-                    brief_html = _md_inline_to_html(ma.get("brief_action", ""))
-                    det_html = _md_inline_to_html(ma.get("detail_note", ""))
-                    t_pill = _md_inline_to_html(ma.get("target_pill", ""))
-                    l_pill = _md_inline_to_html(ma.get("lever_pill", ""))
-                    e_pill = _md_inline_to_html(ma.get("evidence_pill", ""))
-                    det_label = "▸ Xem số liệu đối chiếu & hướng dẫn chi tiết" if not is_en else "▸ View full comparative metrics & execution details"
-                    cards_list_html.append(f"""
-                    <div style="background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(255,255,255,0.08); border-left: 3.5px solid {p_col}; border-radius: 9px; padding: 10px 14px; margin-bottom: 8px;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
-                            <div style="font-size: 0.87rem; font-weight: 700; color: #F8FAFC; line-height: 1.4;">
-                                {p_icon} {hl_html}
-                            </div>
-                            <span style="font-size: 0.67rem; font-weight: 800; color: {p_col}; background: {p_col}1A; border: 1px solid {p_col}55; padding: 1px 7px; border-radius: 5px; letter-spacing: 0.03em;">
-                                {p_lbl}
-                            </span>
-                        </div>
-                        <div style="font-size: 0.81rem; color: #CBD5E1; line-height: 1.48; margin-bottom: 7px;">
-                            {brief_html}
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                            <span style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #6EE7B7; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 5px;">{t_pill}</span>
-                            <span style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.32); color: #7DD3FC; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{l_pill}</span>
-                            <span style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.28); color: #CBD5E1; font-size: 0.71rem; font-weight: 600; padding: 2px 8px; border-radius: 5px;">{e_pill}</span>
-                        </div>
-                        <details style="margin-top: 6px; font-size: 0.75rem; color: #94A3B8;">
-                            <summary style="cursor: pointer; color: #38BDF8; font-weight: 600; outline: none; user-select: none;">{det_label}</summary>
-                            <div style="margin-top: 5px; padding: 7px 10px; background: rgba(15, 23, 42, 0.85); border-left: 2px solid #38BDF8; border-radius: 5px; color: #E2E8F0; line-height: 1.52; font-size: 0.79rem;">
-                                {det_html}
-                            </div>
-                        </details>
-                    </div>
-                    """)
-                acts_html = "".join(cards_list_html)
-            else:
-                acts_html = "".join(
-                    f"<div style='font-family: {vn_font_stack}; font-size: 0.84rem; color: #E2E8F0; margin-bottom: 8px; line-height: 1.55;'>• {_md_inline_to_html(act)}</div>"
-                    for act in p_data.get("actions", [])
-                )
-
-            box_html = f"""
-            <div style="font-family: {vn_font_stack}; background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.9) 100%); border-left: 4px solid {border_col}; border-top: 1px solid {border_col}44; border-right: 1px solid {border_col}44; border-bottom: 1px solid {border_col}44; border-radius: 12px; padding: 14px 16px; margin-top: 4px; margin-bottom: 10px;">
-                <div style="font-family: {vn_font_stack}; font-size: 0.9rem; font-weight: 800; color: {badge_col}; margin-bottom: 3px; line-height: 1.4;">
-                    {role_title_clean}
-                </div>
-                <div style="font-family: {vn_font_stack}; font-size: 0.78rem; color: #94A3B8; margin-bottom: 10px; font-weight: 500; line-height: 1.45;">
-                    {role_focus_clean}
-                </div>
-                {unit_strip_html}
-                {kpis_row_html}
-                <div>
-                    {acts_html}
-                </div>
-            </div>
-            """
-            st.markdown(re.sub(r'\n\s*', ' ', box_html).strip(), unsafe_allow_html=True)
-
-        if persona_df is not None and not persona_df.empty:
-            if sel_p == persona_opts[0]:
-                _render_dash_persona_card("lead", "#10B981", "#34D399")
-            elif sel_p == persona_opts[1]:
-                _render_dash_persona_card("ceo", "#00F0FF", "#38BDF8")
-            else:
-                cp1, cp2 = st.columns(2)
-                with cp1:
-                    _render_dash_persona_card("ceo", "#00F0FF", "#38BDF8")
-                with cp2:
-                    _render_dash_persona_card("lead", "#10B981", "#34D399")
-        else:
-            st.info("No dataset available for persona action plan." if is_en else "Chưa có dữ liệu để phân tầng kế hoạch hành động.")
-
-    # Hạng mục 4 (Phần A): Tab 2 — Kiểm Định Nguyên Nhân (3-Column Issue Tree + Compact Anomaly Grid)
-    with tab_tree:
-        tree_df, tree_q = (diag_sources[sel_p_src_lbl] if (len(diag_sources) > 1 and 'sel_p_src_lbl' in locals()) else (active_diag_df, active_diag_q))
-
-        if tree_df is not None and not tree_df.empty:
-            tree_data = generate_hypothesis_tree(tree_df, user_query=tree_q, is_en=is_en)
-            branches = tree_data.get("branches", [])
-            prob_stmt = _md_inline_to_html(tree_data.get("problem_statement", ""))
-            if branches:
-                st.markdown(f"""
-                <div style="font-family: {vn_font_stack}; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 9px; padding: 10px 14px; margin-bottom: 10px;">
-                    <span style="font-size: 0.72rem; font-weight: 800; color: #00F0FF; text-transform: uppercase; margin-right: 6px;">
-                        {'🎯 BÀI TOÁN KIỂM ĐỊNH:' if not is_en else '🎯 ROOT PROBLEM:'}
-                    </span>
-                    <span style="font-size: 0.86rem; font-weight: 700; color: #F8FAFC;">
-                        {prob_stmt}
-                    </span>
-                </div>
-                """, unsafe_allow_html=True)
-
-                b_cards_html = []
-                for b in branches:
-                    status = b.get("status", "PARTIAL")
-                    if status == "CONFIRMED":
-                        border_c, bg_c, badge_bg_c, badge_c = "#10B981", "rgba(16, 185, 129, 0.08)", "rgba(16, 185, 129, 0.2)", "#34D399"
-                    elif status == "PARTIAL":
-                        border_c, bg_c, badge_bg_c, badge_c = "#F59E0B", "rgba(245, 158, 11, 0.07)", "rgba(245, 158, 11, 0.2)", "#FBBF24"
-                    else:
-                        border_c, bg_c, badge_bg_c, badge_c = "#64748B", "rgba(100, 116, 139, 0.06)", "rgba(100, 116, 139, 0.2)", "#94A3B8"
-
-                    conf_pct = b.get("confidence", 50)
-                    imp_pct = b.get("impact", 50)
-                    prio_score = b.get("priority_score", 50)
-                    conf_lbl = "Độ chính xác" if not is_en else "Confidence"
-                    imp_lbl = "Tác động" if not is_en else "Impact"
-                    prio_lbl = "Ưu tiên" if not is_en else "Priority"
-                    b_title_clean = _md_inline_to_html(b.get("title", ""))
-                    b_evid_clean = _md_inline_to_html(b.get("evidence", ""))
-                    ev_summary_lbl = "▸ Xem bằng chứng số liệu kiểm định" if not is_en else "▸ View quantitative test evidence"
-
-                    b_cards_html.append(f"""
-                    <div style="background: {bg_c}; border: 1px solid {border_c}55; border-top: 3px solid {border_c}; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between;">
-                        <div>
-                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
-                                <span style="font-size: 0.69rem; font-weight: 800; color: {badge_c}; background: {badge_bg_c}; border: 1px solid {border_c}88; padding: 2px 7px; border-radius: 5px;">{b.get('status_label')}</span>
-                                <span style="background: rgba(0, 240, 255, 0.1); color: #00F0FF; border: 1px solid rgba(0, 240, 255, 0.28); padding: 1px 7px; border-radius: 5px; font-size: 0.69rem; font-weight: 700;">🏆 {prio_lbl}: {prio_score}/100</span>
-                            </div>
-                            <div style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC; line-height: 1.42; margin-bottom: 8px;">
-                                {b_title_clean}
-                            </div>
-                        </div>
-                        <div>
-                            <div style="display: flex; justify-content: space-between; font-size: 0.73rem; color: #94A3B8; margin-bottom: 3px;">
-                                <span>🎯 {conf_lbl}: <b style="color: {badge_c};">{conf_pct}%</b></span>
-                                <span>⚡ {imp_lbl}: <b style="color: #E2E8F0;">{imp_pct}/100</b></span>
-                            </div>
-                            <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
-                                <div style="width: {conf_pct}%; height: 100%; background: {border_c}; border-radius: 3px;"></div>
-                            </div>
-                            <details style="font-size: 0.74rem; color: #94A3B8;">
-                                <summary style="cursor: pointer; color: #7DD3FC; font-weight: 600; outline: none; user-select: none;">{ev_summary_lbl}</summary>
-                                <div style="margin-top: 5px; padding: 6px 8px; background: rgba(15, 23, 42, 0.8); border-radius: 5px; color: #CBD5E1; line-height: 1.48; font-size: 0.76rem;">
-                                    {b_evid_clean}
-                                </div>
-                            </details>
-                        </div>
-                    </div>
-                    """)
-
-                grid_tree_html = f"""
-                <div style="font-family: {vn_font_stack}; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                    {''.join(b_cards_html)}
-                </div>
-                """
-                st.markdown(re.sub(r'\n\s*', ' ', grid_tree_html).strip(), unsafe_allow_html=True)
-
-                concl = _md_inline_to_html(tree_data.get("conclusion", ""))
-                if concl:
-                    st.markdown(f"""
-                    <div style="font-family: {vn_font_stack}; background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10B981; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.81rem; color: #ECFDF5; line-height: 1.45;">
-                        💡 <strong style="font-weight: 700;">{concl}</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-        # Hiển thị các Điểm Bất Thường Hệ Thống dạng Grid 2 cột tinh gọn ngay bên dưới Cây Giả Thuyết
-        if anomalies:
-            anom_cards_html = []
-            for idx, a in enumerate(anomalies, 1):
-                sev_color = "#EF4444" if "CRITICAL" in a["severity"] else "#F59E0B"
-                rc_lbl = "Nguyên nhân gốc:" if not is_en else "Root Cause:"
-                imp_lbl = "Tác động:" if not is_en else "Impact:"
-                more_lbl = "▸ Xem nguyên nhân gốc & tác động lượng hóa" if not is_en else "▸ View root cause & quantified impact"
-                anom_cards_html.append(f"""
-                <div style="background: rgba(15, 23, 42, 0.78); border: 1px solid rgba(255,255,255,0.07); border-left: 3.5px solid {sev_color}; border-radius: 9px; padding: 10px 13px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px;">
-                        <span style="font-size: 0.85rem; font-weight: 700; color: #F8FAFC;">#{idx}. {_md_inline_to_html(a['title'])}</span>
-                        <span style="font-size: 0.68rem; font-weight: 700; color: {sev_color}; background: rgba(0,0,0,0.35); padding: 2px 8px; border-radius: 10px; border: 1px solid {sev_color}44;">{a['severity']}</span>
-                    </div>
-                    <div style="font-size: 0.79rem; color: #E2E8F0; line-height: 1.45; margin-bottom: 5px;">
-                        📊 {_md_inline_to_html(a['metrics_summary'])}
-                    </div>
-                    <details style="font-size: 0.74rem; color: #94A3B8;">
-                        <summary style="cursor: pointer; color: #FDE047; font-weight: 600; outline: none; user-select: none;">{more_lbl}</summary>
-                        <div style="margin-top: 5px; padding: 6px 9px; background: rgba(15, 23, 42, 0.9); border-radius: 5px; line-height: 1.45;">
-                            <div style="color: #CBD5E1; margin-bottom: 4px;">🔬 <b style="color: #FDE047;">{rc_lbl}</b> {_md_inline_to_html(a['root_cause'])}</div>
-                            <div style="color: #FCA5A5;">💥 <b style="color: #F87171;">{imp_lbl}</b> {_md_inline_to_html(a['quantified_impact'])}</div>
-                        </div>
-                    </details>
-                </div>
-                """)
-            anom_grid_html = f"""
-            <div style="font-family: {vn_font_stack}; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 4px; margin-bottom: 8px;">
-                {''.join(anom_cards_html)}
-            </div>
-            """
-            st.markdown(re.sub(r'\n\s*', ' ', anom_grid_html).strip(), unsafe_allow_html=True)
-
-    # Hạng mục 4 (Phần B): Tab 3 — Lộ Trình 30-90-365 Ngày & OKRs (Ma trận 3 Cột Ngang + Thanh OKRs)
-    with tab_strat:
-        imm_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.48; font-size: 0.8rem;'>⚡ {_md_inline_to_html(act)}</div>" for act in immediate_actions)
-        str_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.48; font-size: 0.8rem;'>🚀 {_md_inline_to_html(act)}</div>" for act in structural_optimizations)
-        sus_items = "".join(f"<div style='margin-bottom: 6px; line-height: 1.48; font-size: 0.8rem;'>🏛️ {_md_inline_to_html(act)}</div>" for act in sustainable_strategies)
-        okr_items = "".join(f"<span style='background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); color: #FEF08A; font-size: 0.78rem; font-weight: 600; padding: 4px 10px; border-radius: 6px;'>🎯 {_md_inline_to_html(okr)}</span>" for okr in okrs)
-
-        strat_html = f"""
-        <div style="font-family: {vn_font_stack}; margin-bottom: 10px;">
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                <div style="background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.25); border-top: 3px solid #00F0FF; border-radius: 9px; padding: 11px 13px;">
-                    <div style="font-size: 0.78rem; font-weight: 800; color: #00F0FF; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.4px;">
-                        {t('plan_tier1_title')}
-                    </div>
-                    <div style="color: #E2E8F0;">{imm_items}</div>
-                </div>
-                <div style="background: rgba(232, 121, 249, 0.06); border: 1px solid rgba(232, 121, 249, 0.25); border-top: 3px solid #E879F9; border-radius: 9px; padding: 11px 13px;">
-                    <div style="font-size: 0.78rem; font-weight: 800; color: #E879F9; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.4px;">
-                        {t('plan_tier2_title')}
-                    </div>
-                    <div style="color: #E2E8F0;">{str_items}</div>
-                </div>
-                <div style="background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.25); border-top: 3px solid #34D399; border-radius: 9px; padding: 11px 13px;">
-                    <div style="font-size: 0.78rem; font-weight: 800; color: #34D399; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 0.4px;">
-                        {t('plan_tier3_title')}
-                    </div>
-                    <div style="color: #E2E8F0;">{sus_items}</div>
-                </div>
-            </div>
-            <div style="background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.3); border-left: 3.5px solid #FBBF24; border-radius: 8px; padding: 9px 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <span style="font-size: 0.76rem; font-weight: 800; color: #FBBF24; text-transform: uppercase;">{t('plan_okr_title')}:</span>
-                {okr_items}
-            </div>
-        </div>
-        """
-        st.markdown(re.sub(r'\n\s*', ' ', strat_html).strip(), unsafe_allow_html=True)
-
-    col_act1, col_act2 = st.columns([1.2, 1])
-    with col_act1:
-        res_btn_lbl = t("btn_resolution", period=time_label)
+        st.markdown(strip_html, unsafe_allow_html=True)
+    with c_btn:
         if st.button(
-            res_btn_lbl,
-            key=f"btn_ai_strategy_{key_prefix}_{layer_id}",
+            btn_label,
+            key=f"btn_dash_to_chat_{key_prefix}_{layer_id}",
             type="primary",
-            use_container_width=True
+            use_container_width=True,
         ):
-            show_executive_resolution_dialog(layer_id, res, time_label)
-    with col_act2:
-        layer_titles_map = {
-            "overview": "Executive Overview" if is_en else "Tổng quan Doanh nghiệp (Overview)",
-            "dept_mgmt": "Department Management" if is_en else "Quản lý Phòng ban (Departments)",
-            "employee_dir": "Employee Directory" if is_en else "Danh bạ Nhân sự (Directory)",
-            "salary_analysis": "Salary Analysis" if is_en else "Phân tích Tiền lương & Đãi ngộ (Salary)",
-            "org_structure": "Organizational Structure" if is_en else "Cơ cấu Tổ chức (Org Structure)",
-            "title_positions": "Title & Positions" if is_en else "Chức danh & Vị trí (Titles)",
-            "dept_managers": "Department Managers" if is_en else "Đội ngũ Quản lý (Managers)",
-        }
-        ctx_card = {
-            "layer_title": layer_titles_map.get(layer_id, layer_id.replace("_", " ").title()),
-            "time_label": time_label,
-            "anomalies": anomalies,
-            "kpis_summary": f"Health score: {health_status} ({health_score}/100)" if is_en else f"Sức khỏe vận hành: {health_status} ({health_score}/100)",
-            "data_summary": f"Diagnostics: {headline}" if is_en else f"Chẩn đoán: {headline}"
-        }
-        copilot_btn_label = "💬 Ask Copilot Assistant" if is_en else "💬 Hỏi Trợ Lý Copilot Về Điểm Này"
-        if st.button(
-            copilot_btn_label,
-            key=f"btn_copilot_ask_{key_prefix}_{layer_id}",
-            type="secondary",
-            use_container_width=True
-        ):
-            show_dashboard_copilot_dialog(ctx_card)
+            _trigger_ai_deep_dive(deep_dive_prompt)
 
 
 def _render_sql_modal(title: str, sql: str, exec_time_ms: float, key: str):
-    """Hiển thị câu lệnh SQL đằng sau widget trong expander nhỏ gọn, chuẩn mực (Bilingual)."""
+    """Hiển thị câu lệnh SQL đằng sau widget trong nút tĩnh `⋯` gọn gàng (Bilingual)."""
     is_en = (get_current_language() == "en")
-    exp_title = f"🔍 View SQL Query ({title}) • {exec_time_ms} ms" if is_en else f"🔍 Xem câu lệnh SQL ({title}) • {exec_time_ms} ms"
-    with st.expander(exp_title, expanded=False):
-        st.code(sql, language="sql")
-        caption_text = f"⚡ Execution Time: **{exec_time_ms} ms** • Engine: SQLAlchemy Live Engine" if is_en else f"⚡ Thời gian thực thi: **{exec_time_ms} ms** • Engine: SQLAlchemy Live Engine"
-        st.caption(caption_text)
+    help_txt = f"Inspect SQL ({title})" if is_en else f"Xem câu lệnh SQL ({title})"
+    _, c_pop = st.columns([10.5, 1])
+    with c_pop:
+        with st.popover("⋯", help=help_txt, use_container_width=True):
+            st.caption(f"{title} · {exec_time_ms} ms")
+            st.code(sql, language="sql")
 
 
 def _trigger_ai_deep_dive(prompt_text: str):
@@ -1435,68 +454,52 @@ def render_crm_dashboard():
             -webkit-font-smoothing: antialiased;
         }
         
-        /* High-Contrast Neon Gradient Metric KPI Cards (100% Uniform Diagnostic Dimensions & Zero Truncation) */
+        /* Calm Dark Neutral SaaS Metric KPI Cards (Linear / Stripe Dark Aesthetic) */
         .kpi-card-cyan, .kpi-card-purple, .kpi-card-emerald, .kpi-card-amber {
-            border-radius: 16px;
-            padding: 12px 14px !important;
-            color: #FFFFFF !important;
-            border: 1px solid rgba(255, 255, 255, 0.22);
+            background: #11141C !important;
+            border-radius: 12px !important;
+            padding: 14px 16px !important;
+            color: #F8FAFC !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
             height: auto !important;
-            min-height: 198px !important;
+            min-height: 138px !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
             display: flex !important;
             flex-direction: column !important;
             justify-content: space-between !important;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        .kpi-card-cyan {
-            background: linear-gradient(145deg, #0A2968 0%, #1142A6 50%, #1A5BD8 100%) !important;
-            border: 1px solid rgba(56, 189, 248, 0.45) !important;
-            box-shadow: 0 8px 24px rgba(10, 41, 104, 0.4) !important;
-        }
-        .kpi-card-purple {
-            background: linear-gradient(145deg, #4A0E4E 0%, #7E1546 50%, #A81B4B 100%) !important;
-            border: 1px solid rgba(244, 114, 182, 0.45) !important;
-            box-shadow: 0 8px 24px rgba(126, 21, 70, 0.4) !important;
-        }
-        .kpi-card-emerald {
-            background: linear-gradient(145deg, #023325 0%, #06553F 50%, #0A7456 100%) !important;
-            border: 1px solid rgba(52, 211, 153, 0.45) !important;
-            box-shadow: 0 8px 24px rgba(2, 51, 37, 0.4) !important;
-        }
-        .kpi-card-amber {
-            background: linear-gradient(145deg, #422006 0%, #713F12 50%, #8D4F13 100%) !important;
-            border: 1px solid rgba(251, 191, 36, 0.5) !important;
-            box-shadow: 0 8px 24px rgba(66, 32, 6, 0.4) !important;
+            box-shadow: none !important;
+            transition: border-color 0.15s ease, background-color 0.15s ease;
         }
         .kpi-card-cyan:hover, .kpi-card-purple:hover, .kpi-card-emerald:hover, .kpi-card-amber:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 14px 36px rgba(0, 240, 255, 0.35);
+            border-color: rgba(255, 255, 255, 0.16) !important;
+            background: #151924 !important;
+            transform: none !important;
+            box-shadow: none !important;
         }
 
         .kpi-top-row {
             display: flex !important;
             align-items: center !important;
             justify-content: space-between !important;
-            gap: 4px !important;
+            gap: 6px !important;
             width: 100% !important;
             flex-shrink: 0 !important;
             margin-bottom: 2px !important;
         }
         .kpi-title {
-            font-size: 0.74rem !important;
-            font-weight: 800 !important;
-            text-transform: uppercase;
-            letter-spacing: 0.02em;
-            color: rgba(255, 255, 255, 0.98) !important;
-            line-height: 1.24 !important;
+            font-size: 0.78rem !important;
+            font-weight: 600 !important;
+            text-transform: none;
+            letter-spacing: -0.005em;
+            color: #94A3B8 !important;
+            line-height: 1.28 !important;
             width: 100% !important;
             white-space: normal !important;
             overflow: visible !important;
             margin: 2px 0 1px 0 !important;
             flex-shrink: 0 !important;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            text-shadow: none !important;
         }
         .kpi-title-text {
             display: block !important;
@@ -1505,28 +508,30 @@ def render_crm_dashboard():
             overflow: visible !important;
         }
         .kpi-status-pill {
-            font-size: 0.63rem !important;
-            font-weight: 800 !important;
-            padding: 2px 7px !important;
-            border-radius: 999px !important;
-            color: #FFFFFF !important;
+            font-size: 0.66rem !important;
+            font-weight: 500 !important;
+            padding: 0 !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            color: #94A3B8 !important;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
             letter-spacing: 0.01em;
-            backdrop-filter: blur(6px);
             display: inline-flex !important;
             align-items: center !important;
             gap: 3px !important;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            text-shadow: none !important;
         }
         .kpi-val {
-            font-size: clamp(1.22rem, 1.45vw, 1.55rem) !important;
-            font-weight: 900 !important;
-            color: #FFFFFF !important;
+            font-size: clamp(1.24rem, 1.48vw, 1.55rem) !important;
+            font-weight: 700 !important;
+            color: #F8FAFC !important;
             letter-spacing: -0.02em;
-            line-height: 1.15 !important;
-            margin: 2px 0 !important;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+            font-variant-numeric: tabular-nums;
+            line-height: 1.18 !important;
+            margin: 3px 0 !important;
+            text-shadow: none !important;
             white-space: nowrap !important;
             overflow: visible !important;
             display: flex !important;
@@ -1536,19 +541,20 @@ def render_crm_dashboard():
         }
         .kpi-delta-tag {
             font-size: 0.68rem !important;
-            font-weight: 800 !important;
+            font-weight: 600 !important;
             padding: 1px 6px !important;
-            border-radius: 6px !important;
-            background: rgba(0, 0, 0, 0.4) !important;
-            color: #FFFFFF !important;
-            border: 1px solid rgba(255, 255, 255, 0.35) !important;
+            border-radius: 5px !important;
+            background: rgba(255, 255, 255, 0.06) !important;
+            color: #CBD5E1 !important;
+            border: none !important;
+            font-variant-numeric: tabular-nums;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            text-shadow: none !important;
         }
         .kpi-bench-wrap {
             width: 100% !important;
-            margin-top: 3px !important;
+            margin-top: 4px !important;
             flex-shrink: 0 !important;
         }
         .kpi-bench-header {
@@ -1556,10 +562,10 @@ def render_crm_dashboard():
             justify-content: space-between !important;
             align-items: center !important;
             gap: 6px !important;
-            font-size: 0.70rem !important;
-            font-weight: 700 !important;
-            color: rgba(255, 255, 255, 0.98) !important;
-            margin-bottom: 3px !important;
+            font-size: 0.69rem !important;
+            font-weight: 500 !important;
+            color: #64748B !important;
+            margin-bottom: 4px !important;
             width: 100% !important;
         }
         .kpi-bench-lbl {
@@ -1569,36 +575,37 @@ def render_crm_dashboard():
             min-width: 0 !important;
             flex: 1 1 0% !important;
             display: block !important;
-            color: rgba(255, 255, 255, 0.95) !important;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            color: #64748B !important;
+            text-shadow: none !important;
         }
         .kpi-bench-pct {
             white-space: nowrap !important;
             flex: 0 0 auto !important;
             text-align: right !important;
             padding-left: 4px !important;
-            font-size: 0.72rem !important;
-            font-weight: 800 !important;
-            color: #FFFFFF !important;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            font-size: 0.70rem !important;
+            font-weight: 600 !important;
+            font-variant-numeric: tabular-nums;
+            color: #94A3B8 !important;
+            text-shadow: none !important;
         }
         .kpi-bench-track {
             width: 100% !important;
-            height: 6px !important;
-            background: rgba(0, 0, 0, 0.35) !important;
+            height: 3px !important;
+            background: rgba(255, 255, 255, 0.08) !important;
             border-radius: 999px !important;
             overflow: hidden !important;
-            border: 1px solid rgba(255, 255, 255, 0.25) !important;
+            border: none !important;
         }
         .kpi-bench-fill {
             height: 100% !important;
             border-radius: 999px !important;
-            box-shadow: 0 0 8px rgba(255, 255, 255, 0.7) !important;
+            box-shadow: none !important;
         }
         .kpi-sub {
             font-size: 0.71rem !important;
-            font-weight: 600 !important;
-            color: rgba(255, 255, 255, 0.95) !important;
+            font-weight: 500 !important;
+            color: #94A3B8 !important;
             display: flex !important;
             align-items: center !important;
             gap: 5px !important;
@@ -1613,77 +620,79 @@ def render_crm_dashboard():
             text-overflow: ellipsis !important;
             min-width: 0 !important;
             flex: 1 1 auto !important;
-            color: rgba(255, 255, 255, 0.92) !important;
-            font-weight: 600 !important;
-            font-size: 0.70rem !important;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            color: #94A3B8 !important;
+            font-weight: 500 !important;
+            font-size: 0.71rem !important;
+            text-shadow: none !important;
         }
         .kpi-badge {
-            background: rgba(255, 255, 255, 0.18) !important;
-            border: 1px solid rgba(255, 255, 255, 0.3) !important;
-            padding: 2px 7px !important;
-            border-radius: 6px !important;
-            font-size: 0.65rem !important;
-            font-weight: 800 !important;
-            color: #FFFFFF !important;
-            letter-spacing: 0.02em;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            border-radius: 0 !important;
+            font-size: 0.66rem !important;
+            font-weight: 600 !important;
+            color: #64748B !important;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            text-shadow: none !important;
         }
 
-        /* Dark Glassmorphism Card Containers */
+        /* Flat Dark Neutral Card Containers */
         .crm-card {
-            background: linear-gradient(145deg, #13172B 0%, #0D1020 100%);
-            border-radius: 18px;
-            padding: 18px 20px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-            margin-bottom: 16px;
+            background: #11141C;
+            border-radius: 12px;
+            padding: 16px 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: none;
+            margin-bottom: 14px;
         }
         .crm-card-title {
-            font-size: 1.02rem;
-            font-weight: 800;
-            color: #FFFFFF;
-            letter-spacing: -0.015em;
-            margin-bottom: 12px;
+            font-size: 0.96rem;
+            font-weight: 600;
+            color: #F8FAFC;
+            letter-spacing: -0.01em;
+            margin-bottom: 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
         .crm-badge-neon {
-            background: rgba(0, 240, 255, 0.15);
-            color: #00F0FF;
-            border: 1px solid rgba(0, 240, 255, 0.4);
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 0.78rem;
-            font-weight: 750;
-            letter-spacing: 0.02em;
+            background: transparent;
+            color: #64748B;
+            border: none;
+            padding: 0;
+            border-radius: 0;
+            font-size: 0.76rem;
+            font-weight: 500;
+            letter-spacing: 0.01em;
         }
 
         /* Interactive Navigation Cards (Uniform Height & Aligned Buttons) */
         .nav-hub-box {
-            background: linear-gradient(145deg, #151A30 0%, #0F1324 100%);
-            border: 1.5px solid rgba(0, 240, 255, 0.2);
-            border-radius: 16px;
+            background: #11141C;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
             padding: 16px 18px;
-            transition: all 0.25s ease;
+            transition: border-color 0.15s ease, background-color 0.15s ease;
             min-height: 125px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+            box-shadow: none;
         }
         .nav-hub-box:hover {
-            border-color: #00F0FF;
-            box-shadow: 0 8px 28px rgba(0, 240, 255, 0.28);
-            transform: translateY(-3px);
+            border-color: rgba(255, 255, 255, 0.18);
+            background: #151924;
+            box-shadow: none;
+            transform: none;
         }
         .nav-hub-title {
-            font-weight: 800;
-            font-size: 1.0rem;
-            color: #FFFFFF;
+            font-weight: 600;
+            font-size: 0.96rem;
+            color: #F8FAFC;
             margin-bottom: 4px;
             display: flex;
             align-items: center;
@@ -1700,7 +709,7 @@ def render_crm_dashboard():
             height: 58px !important;
             min-height: 58px !important;
             max-height: 58px !important;
-            font-weight: 500;
+            font-weight: 400;
             display: -webkit-box !important;
             -webkit-line-clamp: 3 !important;
             -webkit-box-orient: vertical !important;
@@ -1708,27 +717,28 @@ def render_crm_dashboard():
             margin-bottom: 6px !important;
         }
 
-        /* Clean Unified Dashboard Hub Cards */
+        /* Clean Compact Dashboard Action Buttons */
         div[data-testid="stHorizontalBlock"] .stButton > button {
-            background: linear-gradient(145deg, #151A30 0%, #0F1324 100%) !important;
-            border: 1.5px solid rgba(0, 240, 255, 0.25) !important;
-            border-radius: 14px !important;
-            color: #FFFFFF !important;
-            padding: 14px 16px !important;
-            min-height: 85px !important;
-            text-align: left !important;
+            background: #161A24 !important;
+            border: 1px solid rgba(255, 255, 255, 0.09) !important;
+            border-radius: 8px !important;
+            color: #E2E8F0 !important;
+            padding: 8px 14px !important;
+            min-height: 38px !important;
+            text-align: center !important;
             display: flex !important;
-            flex-direction: column !important;
+            flex-direction: row !important;
             justify-content: center !important;
-            align-items: flex-start !important;
-            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4) !important;
-            transition: all 0.2s ease !important;
+            align-items: center !important;
+            box-shadow: none !important;
+            transition: background-color 0.15s ease, border-color 0.15s ease !important;
         }
         div[data-testid="stHorizontalBlock"] .stButton > button:hover {
-            border-color: #00F0FF !important;
-            background: linear-gradient(145deg, #1C2340 0%, #12182D 100%) !important;
-            box-shadow: 0 8px 26px rgba(0, 240, 255, 0.35) !important;
-            transform: translateY(-2px) !important;
+            border-color: rgba(255, 255, 255, 0.18) !important;
+            background: #1E2433 !important;
+            color: #F8FAFC !important;
+            box-shadow: none !important;
+            transform: none !important;
         }
 
         .layer-breadcrumb {
@@ -1762,12 +772,11 @@ def _render_hr_dashboard(engine):
     current_layer = st.session_state.get("hr_dashboard_layer", "overview")
 
     # Header điều hành
-    c_hdr1, c_hdr2, c_hdr3, c_hdr4 = st.columns([4.0, 2.6, 1.8, 1.6])
+    c_hdr1, c_hdr2, c_hdr3 = st.columns([4.6, 2.8, 1.8])
     with c_hdr1:
         st.markdown(f"""
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-            <div style="font-size: 1.55rem; font-weight: 900; color: #FFFFFF; letter-spacing: -0.02em;">{t('hr_dash_title')}</div>
-            <span class="crm-badge-neon">{t('hr_dash_badge')}</span>
+            <div style="font-size: 1.45rem; font-weight: 800; color: #F8FAFC; letter-spacing: -0.02em;">{t('hr_dash_title')}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1808,21 +817,6 @@ def _render_hr_dashboard(engine):
         current_layer = st.session_state.get("hr_dashboard_layer", "overview")
 
     with c_hdr3:
-        layer_title_curr = layer_names.get(current_layer, "Executive Overview" if is_en else "Tổng quan Doanh nghiệp")
-        start_y_curr = st.session_state.get(f"hr_{current_layer}_start_year", 1985)
-        end_y_curr = st.session_state.get(f"hr_{current_layer}_end_year", 2002)
-        t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
-        ctx_header = {
-            "layer_title": layer_title_curr,
-            "time_label": t_lbl_curr,
-            "anomalies": [],
-            "kpis_summary": f"Viewing {layer_title_curr} during {t_lbl_curr}." if is_en else f"Đang xem {layer_title_curr} giai đoạn {t_lbl_curr}.",
-            "data_summary": f"User opened Copilot from header on {layer_title_curr}." if is_en else f"Người dùng mở Copilot từ thanh Header trên tầng {layer_title_curr}."
-        }
-        if st.button(t("hr_btn_copilot"), type="primary", use_container_width=True, help=t("hr_copilot_help")):
-            show_dashboard_copilot_dialog(ctx_header)
-
-    with c_hdr4:
         if st.button(t("hr_btn_main_chat"), type="secondary", use_container_width=True, help=t("hr_main_chat_help")):
             st.session_state["view_mode"] = "chat"
             st.rerun()
@@ -1896,13 +890,13 @@ def _render_layer_overview(engine):
     period_badge = str(sy) if sy == ey else f"{sy} — {ey}"
 
     # 3. 4 THẺ CHỈ SỐ KPI TÓM TẮT TOÀN BỘ CÔNG TY (KPI 1 NỔI BẬT NHẤT)
-    period_badge_label = f"⚡ Period: {period_badge}" if is_en else f"⚡ Mốc: {period_badge}"
+    period_badge_label = f"Period: {period_badge}" if is_en else f"Mốc: {period_badge}"
     st.markdown(f"""
-    <div style="font-size: 1.05rem; font-weight: 800; color: #FFFFFF; margin: 12px 0; display: flex; align-items: center; justify-content: space-between;">
+    <div style="font-size: 1.02rem; font-weight: 700; color: #F8FAFC; margin: 12px 0; display: flex; align-items: center; justify-content: space-between;">
         <div style="display: flex; align-items: center; gap: 8px;">
-            <span>📊</span> <span><b>{t('kpi_overview_header')}</b></span>
+            <span><b>{t('kpi_overview_header')}</b></span>
         </div>
-        <span style="font-size: 0.85rem; color: #00F0FF; font-weight: 700;">{period_badge_label}</span>
+        <span style="font-size: 0.82rem; color: #94A3B8; font-weight: 500;">{period_badge_label}</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2087,7 +1081,7 @@ def _render_layer_department_management(engine):
     <div class="crm-card">
         <div class="crm-card-title">
             <span>{card_title}</span>
-            <span style="font-size: 0.78rem; color: #00F0FF; font-weight: 600;">{count_badge}</span>
+            <span style="font-size: 0.78rem; color: #94A3B8; font-weight: 500;">{count_badge}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -2451,7 +1445,7 @@ def _render_layer_salary_analysis(engine):
             x_col="Department",
             y_cols=["MinSalary", "AvgSalary", "MaxSalary"],
             names=m_names,
-            colors=["#38BDF8", "#00F0FF", "#E879F9"],
+            colors=["#64748B", "#3B82F6", "#8B5CF6"],
             height=270
         )
         mbar_title = "🏢 Min / Avg / Max Salary Comparison by Department" if is_en else "🏢 So Sánh Lương Min / Avg / Max Theo Phòng Ban"
@@ -2874,12 +1868,11 @@ def _render_sales_dashboard(engine):
     min_y, max_y = _get_sales_year_range(engine)
 
     # 1. Điều hướng Header
-    c_hdr1, c_hdr2, c_hdr3, c_hdr4 = st.columns([4.0, 2.6, 1.8, 1.6])
+    c_hdr1, c_hdr2, c_hdr3 = st.columns([4.6, 2.8, 1.8])
     with c_hdr1:
         st.markdown(f"""
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-            <div style="font-size: 1.55rem; font-weight: 900; color: #FFFFFF; letter-spacing: -0.02em;">{t('sales_dash_title')}</div>
-            <span class="crm-badge-neon">{t('sales_dash_badge')}</span>
+            <div style="font-size: 1.45rem; font-weight: 800; color: #F8FAFC; letter-spacing: -0.02em;">{t('sales_dash_title')}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2919,21 +1912,6 @@ def _render_sales_dashboard(engine):
         current_layer = st.session_state.get("sales_dashboard_layer", "overview")
 
     with c_hdr3:
-        layer_title_curr = layer_names.get(current_layer, "Sales Overview" if is_en else "Tổng quan Doanh số")
-        start_y_curr = st.session_state.get("sales_timeline_years", (min_y, max_y))[0]
-        end_y_curr = st.session_state.get("sales_timeline_years", (min_y, max_y))[1]
-        t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
-        ctx_header = {
-            "layer_title": layer_title_curr,
-            "time_label": t_lbl_curr,
-            "anomalies": [],
-            "kpis_summary": f"Viewing {layer_title_curr} during {t_lbl_curr}." if is_en else f"Đang xem {layer_title_curr} giai đoạn {t_lbl_curr}.",
-            "data_summary": f"User opened Copilot from header on {layer_title_curr}." if is_en else f"Người dùng mở Copilot từ thanh Header trên tầng {layer_title_curr}."
-        }
-        if st.button(t("hr_btn_copilot"), type="primary", use_container_width=True, key="btn_sales_header_copilot", help=t("hr_copilot_help")):
-            show_dashboard_copilot_dialog(ctx_header)
-
-    with c_hdr4:
         if st.button(t("hr_btn_main_chat"), type="secondary", use_container_width=True, key="btn_sales_header_chat", help=t("hr_main_chat_help")):
             st.session_state["view_mode"] = "chat"
             st.rerun()
@@ -3061,12 +2039,12 @@ def _render_sales_layer_overview(engine, min_y: int = 2021, max_y: int = 2022):
     diag_p3 = f"📊 <b>Monthly Volatility (CV):</b> <b style='color:#FBBF24;'>{cv_month_pct}%</b> • Peak in <b>{peak_m_label}</b>" if is_en else f"📊 <b>Độ biến thiên tháng (CV):</b> <b style='color:#FBBF24;'>{cv_month_pct}%</b> • Đỉnh điểm tại <b>{peak_m_label}</b>"
 
     st.markdown(f"""
-    <div style="background: linear-gradient(90deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%); border: 1px solid rgba(0, 240, 255, 0.28); border-radius: 12px; padding: 10px 16px; margin-top: 12px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; font-size: 0.8rem; color: #E2E8F0;">
-        <span style="color: #00F0FF; font-weight: 800; letter-spacing: 0.03em;">{diag_strip_title}</span>
+    <div style="background: #11141C; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 10px 16px; margin-top: 12px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; font-size: 0.8rem; color: #E2E8F0;">
+        <span style="color: #94A3B8; font-weight: 600; letter-spacing: 0.02em;">{diag_strip_title}</span>
         <span>{diag_p1}</span>
-        <span style="color: rgba(255,255,255,0.2);">|</span>
+        <span style="color: rgba(255,255,255,0.16);">|</span>
         <span>{diag_p2}</span>
-        <span style="color: rgba(255,255,255,0.2);">|</span>
+        <span style="color: rgba(255,255,255,0.16);">|</span>
         <span>{diag_p3}</span>
     </div>
     """, unsafe_allow_html=True)
@@ -3497,12 +2475,11 @@ def _render_northwind_dashboard(engine):
     min_year, max_year = _get_northwind_year_range(engine)
 
     # 1. Header điều hướng
-    c_hdr1, c_hdr2, c_hdr3, c_hdr4 = st.columns([4.0, 2.6, 1.8, 1.6])
+    c_hdr1, c_hdr2, c_hdr3 = st.columns([4.6, 2.8, 1.8])
     with c_hdr1:
         st.markdown(f"""
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-            <div style="font-size: 1.55rem; font-weight: 900; color: #FFFFFF; letter-spacing: -0.02em;">{t('northwind_dash_title')}</div>
-            <span class="crm-badge-neon">{t('northwind_dash_badge')}</span>
+            <div style="font-size: 1.45rem; font-weight: 800; color: #F8FAFC; letter-spacing: -0.02em;">{t('northwind_dash_title')}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -3542,21 +2519,6 @@ def _render_northwind_dashboard(engine):
         current_layer = st.session_state.get("northwind_dashboard_layer", "overview")
 
     with c_hdr3:
-        layer_title_curr = layer_names.get(current_layer, "Northwind Overview" if is_en else "Tổng quan Northwind")
-        start_y_curr = st.session_state.get("northwind_timeline_years", (min_year, max_year))[0]
-        end_y_curr = st.session_state.get("northwind_timeline_years", (min_year, max_year))[1]
-        t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
-        ctx_header = {
-            "layer_title": layer_title_curr,
-            "time_label": t_lbl_curr,
-            "anomalies": [],
-            "kpis_summary": f"Viewing {layer_title_curr} during {t_lbl_curr}." if is_en else f"Đang xem {layer_title_curr} giai đoạn {t_lbl_curr}.",
-            "data_summary": f"User opened Copilot from header on {layer_title_curr}." if is_en else f"Người dùng mở Copilot từ thanh Header trên tầng {layer_title_curr}."
-        }
-        if st.button(t("hr_btn_copilot"), type="primary", use_container_width=True, key="btn_northwind_header_copilot", help=t("hr_copilot_help")):
-            show_dashboard_copilot_dialog(ctx_header)
-
-    with c_hdr4:
         if st.button(t("hr_btn_main_chat"), type="secondary", use_container_width=True, key="btn_northwind_header_chat", help=t("hr_main_chat_help")):
             st.session_state["view_mode"] = "chat"
             st.rerun()
@@ -3984,23 +2946,22 @@ def _render_generic_dashboard(engine):
 
     current_layer = st.session_state.get("generic_dashboard_layer", "overview")
 
-    layer_names = {"overview": "🏠 Executive Overview" if is_en else "🏠 Trang chủ Tổng quan (Overview)"}
+    layer_names = {"overview": "Executive Overview" if is_en else "Tổng quan CSDL"}
     for t_n in tables:
         r_cnt = schema_meta.get("meta", {}).get(t_n, {}).get("row_count", 0)
         recs_suf = "records" if is_en else "bản ghi"
         tbl_pref = "Table" if is_en else "Bảng"
-        layer_names[f"tbl_{t_n}"] = f"📊 {tbl_pref}: {t_n} ({r_cnt:,} {recs_suf})"
+        t_lbl = _humanize_dashboard_label(t_n, is_en=is_en)
+        layer_names[f"tbl_{t_n}"] = f"{tbl_pref}: {t_lbl} ({r_cnt:,} {recs_suf})"
 
     layer_keys = list(layer_names.keys())
     current_idx = layer_keys.index(current_layer) if current_layer in layer_keys else 0
 
-    c_hdr1, c_hdr2, c_hdr3, c_hdr4 = st.columns([4.0, 2.6, 1.8, 1.6])
+    c_hdr1, c_hdr2, c_hdr3 = st.columns([4.6, 2.8, 1.8])
     with c_hdr1:
-        gen_badge = "ADAPTIVE SCHEMA • LIVE SQL" if is_en else "CSDL TỰ ĐỘNG THÍCH ỨNG • LIVE SQL"
         st.markdown(f"""
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-            <div style="font-size: 1.55rem; font-weight: 900; color: #FFFFFF; letter-spacing: -0.02em;">💎 Universal Enterprise Intelligence Dashboard</div>
-            <span class="crm-badge-neon">{gen_badge}</span>
+            <div style="font-size: 1.45rem; font-weight: 800; color: #F8FAFC; letter-spacing: -0.02em;">{"Database Overview Dashboard" if is_en else "Bảng Điều Hành Dữ Liệu"}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -4019,24 +2980,6 @@ def _render_generic_dashboard(engine):
         current_layer = st.session_state.get("generic_dashboard_layer", "overview")
 
     with c_hdr3:
-        layer_title_curr = layer_names.get(current_layer, "Database Overview" if is_en else "Tổng quan CSDL")
-        start_y_curr = st.session_state.get("generic_timeline_years", (min_year, max_year))[0]
-        end_y_curr = st.session_state.get("generic_timeline_years", (min_year, max_year))[1]
-        if has_timeline:
-            t_lbl_curr = f"{start_y_curr} — {end_y_curr}" if start_y_curr != end_y_curr else str(start_y_curr)
-        else:
-            t_lbl_curr = "Snapshot"
-        ctx_header = {
-            "layer_title": layer_title_curr,
-            "time_label": t_lbl_curr,
-            "anomalies": [],
-            "kpis_summary": f"Viewing {layer_title_curr} ({t_lbl_curr})." if is_en else f"Đang xem {layer_title_curr} ({t_lbl_curr}).",
-            "data_summary": f"User opened Copilot from header on {layer_title_curr}." if is_en else f"Người dùng mở Copilot từ thanh Header trên tầng {layer_title_curr}."
-        }
-        if st.button(t("hr_btn_copilot"), type="primary", use_container_width=True, key="btn_generic_header_copilot", help=t("hr_copilot_help")):
-            show_dashboard_copilot_dialog(ctx_header)
-
-    with c_hdr4:
         if st.button(t("hr_btn_main_chat"), type="secondary", use_container_width=True, key="btn_generic_header_chat", help=t("hr_main_chat_help")):
             st.session_state["view_mode"] = "chat"
             st.rerun()
@@ -4081,6 +3024,18 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
     filtered_recs = int(data.get("filtered_records") or 0)
     total_recs = max(1, int(data.get("total_records") or 0))
     main_tbl_disp = data.get("main_table") or "N/A"
+    main_num_lbl = _humanize_dashboard_label(main_num_col, is_en=is_en) if main_num_col else ""
+    sec_num_lbl = _humanize_dashboard_label(sec_num_col, is_en=is_en) if sec_num_col else ""
+    qty_lbl = _humanize_dashboard_label(qty_col, is_en=is_en) if qty_col else ""
+    main_cat_lbl = _humanize_dashboard_label(main_cat_col, is_en=is_en) if main_cat_col else ""
+    main_tbl_lbl = _humanize_dashboard_label(main_tbl_disp, is_en=is_en) if main_tbl_disp != "N/A" else "N/A"
+
+    excl_cnt = int(data.get("excluded_status_count") or 0)
+    recs_delta_txt = (
+        (f"{filtered_recs:,} valid (-{excl_cnt} excl.)" if is_en else f"{filtered_recs:,} hợp lệ (-{excl_cnt} hủy/trả)")
+        if excl_cnt > 0 else
+        (f"{filtered_recs:,} rows" if is_en else f"{filtered_recs:,} dòng")
+    )
 
     # 4 Business KPI Cards
     col_k1, col_k2, col_k3, col_k4 = st.columns(4)
@@ -4089,13 +3044,13 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
             avg_txt = _format_generic_metric_val(data.get("avg_val", 0.0), unit_style)
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-cyan",
-                title=f"TOTAL {main_num_col.upper()}" if is_en else f"TỔNG {main_num_col.upper()}",
+                title=f"TOTAL {main_num_lbl.upper()}" if is_en else f"TỔNG {main_num_lbl.upper()}",
                 val_html=_format_generic_metric_val(data.get("sum_val", 0.0), unit_style),
-                badge_text=main_tbl_disp,
+                badge_text=main_tbl_lbl,
                 sub_text=f"Avg/row: {avg_txt}" if is_en else f"TB/dòng: {avg_txt}",
                 bench_label="Data Coverage" if is_en else "Độ phủ bản ghi",
                 bench_pct=100.0,
-                delta_str=f"{filtered_recs:,} rows" if is_en else f"{filtered_recs:,} dòng",
+                delta_str=recs_delta_txt,
                 delta_dir="up",
                 status_text="🟢 LIVE SUM" if is_en else "🟢 TỔNG HỢP",
                 status_level="good",
@@ -4142,7 +3097,7 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
             avg_qty = data.get("total_qty", 0.0) / max(1, filtered_recs)
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-purple",
-                title=f"TOTAL {qty_col.upper()}" if is_en else f"TỔNG {qty_col.upper()}",
+                title=f"TOTAL {qty_lbl.upper()}" if is_en else f"TỔNG {qty_lbl.upper()}",
                 val_html=_format_generic_metric_val(data.get("total_qty", 0.0), "count"),
                 badge_text="Volume" if is_en else "Sản lượng",
                 sub_text=f"Avg: {avg_qty:,.1f}/row" if is_en else f"TB: {avg_qty:,.1f}/giao dịch",
@@ -4157,10 +3112,10 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
         elif sec_num_col:
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-purple",
-                title=f"TOTAL {sec_num_col.upper()}" if is_en else f"TỔNG {sec_num_col.upper()}",
+                title=f"TOTAL {sec_num_lbl.upper()}" if is_en else f"TỔNG {sec_num_lbl.upper()}",
                 val_html=_format_generic_metric_val(data.get("sec_sum_val", 0.0), sec_unit_style),
                 badge_text="Secondary KPI",
-                sub_text=f"Table: {main_tbl_disp}" if is_en else f"Bảng: {main_tbl_disp}",
+                sub_text=f"Table: {main_tbl_lbl}" if is_en else f"Bảng: {main_tbl_lbl}",
                 bench_label="Coverage" if is_en else "Độ phủ dữ liệu",
                 bench_pct=100.0,
                 delta_str=f"{filtered_recs:,} rows",
@@ -4193,7 +3148,7 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
             val_fmt = _format_generic_metric_val(top_item_val, unit_style if main_num_col else "count")
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-emerald",
-                title=f"TOP {main_cat_col.upper()}" if (is_en and main_cat_col) else (f"DẪN ĐẦU ({main_cat_col})" if main_cat_col else "NHÓM DẪN ĐẦU"),
+                title=f"TOP {main_cat_lbl.upper()}" if (is_en and main_cat_lbl) else (f"DẪN ĐẦU ({main_cat_lbl.upper()})" if main_cat_lbl else "NHÓM DẪN ĐẦU"),
                 val_html=short_name,
                 badge_text="Top Driver" if is_en else "Đứng đầu",
                 sub_text=f"{val_fmt} ({data.get('top_item_cnt', 0):,} dòng)",
@@ -4209,7 +3164,7 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-emerald",
                 title="PRIMARY TABLE" if is_en else "BẢNG DỮ LIỆU CHÍNH",
-                val_html=main_tbl_disp,
+                val_html=main_tbl_lbl,
                 badge_text="Focus" if is_en else "Trọng tâm",
                 sub_text="Largest dataset" if is_en else "Nhiều bản ghi nhất",
                 bench_label="Core Coverage" if is_en else "Tỷ trọng dữ liệu lõi",
@@ -4228,7 +3183,7 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
             card_class="kpi-card-amber",
             title="DATABASE SCOPE" if is_en else "QUY MÔ & MỐC DỮ LIỆU",
             val_html=scope_val,
-            badge_text=main_tbl_disp,
+            badge_text=main_tbl_lbl,
             sub_text=period_sub,
             bench_label="Core Table Share" if is_en else "Tỷ trọng bảng chính",
             bench_pct=round(filtered_recs / total_recs * 100.0, 1),
@@ -4251,24 +3206,64 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
     has_cat = not cat_dist_df.empty
     has_trend = not trend_df.empty
 
+    def _build_generic_zoom_df(
+        src_df: pd.DataFrame,
+        dim_col_src: str,
+        dim_label: str,
+        use_metric_col: bool,
+        metric_label: str,
+        u_style: str,
+        extra_qty_label: str = "",
+    ) -> pd.DataFrame:
+        if src_df is None or src_df.empty:
+            return pd.DataFrame()
+        out = pd.DataFrame()
+        if dim_col_src in src_df.columns:
+            out[dim_label] = src_df[dim_col_src]
+        m_hdr = (
+            f"{metric_label} (đ)" if (u_style == "vnd" and "đ" not in metric_label.lower())
+            else (f"{metric_label} ($)" if (u_style == "usd" and "$" not in metric_label) else metric_label)
+        )
+        cnt_hdr = "Transactions" if is_en else "Số giao dịch"
+        if use_metric_col and "MetricSum" in src_df.columns:
+            out[m_hdr] = src_df["MetricSum"]
+            if "QtySum" in src_df.columns and extra_qty_label and extra_qty_label != m_hdr:
+                out[extra_qty_label] = src_df["QtySum"]
+            if "Count" in src_df.columns and cnt_hdr not in out.columns:
+                out[cnt_hdr] = src_df["Count"]
+        else:
+            if "Count" in src_df.columns:
+                out[m_hdr if not use_metric_col and metric_label else cnt_hdr] = src_df["Count"]
+            if "MetricSum" in src_df.columns and m_hdr not in out.columns:
+                out[m_hdr] = src_df["MetricSum"]
+        return out if not out.empty else src_df
+
     def _render_cat_chart():
         use_metric = bool(main_num_col and "MetricSum" in cat_dist_df.columns and cat_dist_df["MetricSum"].abs().sum() > 0)
         x_field = "MetricSum" if use_metric else "Count"
-        metric_lbl = main_num_col if use_metric else ("Count" if is_en else "Số lượng")
+        metric_lbl = main_num_lbl if use_metric else ("Count" if is_en else "Số lượng")
         fig_cat = build_horizontal_bar_chart(cat_dist_df, y_col="Category", x_col=x_field, name=metric_lbl, height=275)
-        cat_col_name = main_cat_col or ("Category" if is_en else "Danh mục")
+        cat_col_lbl = main_cat_lbl or ("Category" if is_en else "Danh mục")
         title_txt = (
-            f"🏆 Top {cat_col_name} by {metric_lbl}" if is_en
-            else f"🏆 Xếp Hạng {cat_col_name} Theo {metric_lbl}"
+            f"Top {cat_col_lbl} by {metric_lbl}" if is_en
+            else f"Xếp hạng {cat_col_lbl} theo {metric_lbl}"
         )
         expl_txt = (
-            f"Aggregated {metric_lbl} across '{cat_col_name}'." if is_en
-            else f"Tổng hợp {metric_lbl} và tần suất giao dịch theo '{cat_col_name}'."
+            f"Aggregated {metric_lbl} across {cat_col_lbl}." if is_en
+            else f"Tổng hợp {metric_lbl} và tần suất giao dịch theo {cat_col_lbl}."
+        )
+        cat_zoom_df = _build_generic_zoom_df(
+            cat_dist_df,
+            dim_col_src="Category",
+            dim_label=cat_col_lbl,
+            use_metric_col=use_metric,
+            metric_label=metric_lbl,
+            u_style=unit_style if use_metric else "count",
         )
         render_zoomable_chart_card(
             title=title_txt,
             fig=fig_cat,
-            df=cat_dist_df,
+            df=cat_zoom_df,
             badge="Top Ranking",
             explanation=expl_txt,
             key="gen_cat_chart"
@@ -4276,10 +3271,11 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
 
     def _render_trend_chart():
         gran = data.get("trend_granularity", "month")
-        gran_lbl = ("Daily" if gran == "day" else "Monthly") if is_en else ("Theo Ngày" if gran == "day" else "Theo Tháng")
+        gran_lbl = ("Daily" if gran == "day" else "Monthly") if is_en else ("theo ngày" if gran == "day" else "theo tháng")
+        time_hdr = ("Date" if gran == "day" else "Month") if is_en else ("Ngày" if gran == "day" else "Tháng")
         if main_num_col and "MetricSum" in trend_df.columns:
             box_col = "QtySum" if (qty_col and "QtySum" in trend_df.columns) else "Count"
-            box_lbl = qty_col if qty_col else ("Records" if is_en else "Số giao dịch")
+            box_lbl = qty_lbl if qty_lbl else ("Records" if is_en else "Số giao dịch")
             rev_pref = "$" if unit_style == "usd" else ""
             rev_suf = " đ" if unit_style == "vnd" else ""
             fig_tr = build_sales_dual_axis_chart(
@@ -4288,22 +3284,39 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
                 rev_col="MetricSum",
                 box_col=box_col,
                 height=275,
-                rev_name=main_num_col,
+                rev_name=main_num_lbl,
                 box_name=box_lbl,
                 rev_prefix=rev_pref,
                 rev_suffix=rev_suf,
                 box_unit="",
             )
-            title_txt = f"📈 {gran_lbl} {main_num_col} & Volume" if is_en else f"📈 Xu Hướng {main_num_col} & Số Lượng {gran_lbl}"
-            expl_txt = f"Chronological progression ({gran}) of {main_num_col} and volume." if is_en else f"Diễn biến {main_num_col} và khối lượng giao dịch {gran_lbl.lower()}."
+            title_txt = f"{gran_lbl} {main_num_lbl} & {box_lbl}" if is_en else f"Xu hướng {main_num_lbl} & {box_lbl} {gran_lbl}"
+            expl_txt = f"Chronological progression ({gran}) of {main_num_lbl} and volume." if is_en else f"Diễn biến {main_num_lbl} và {box_lbl.lower()} {gran_lbl}."
+            tr_zoom_df = _build_generic_zoom_df(
+                trend_df,
+                dim_col_src="TimePeriod",
+                dim_label=time_hdr,
+                use_metric_col=True,
+                metric_label=main_num_lbl,
+                u_style=unit_style,
+                extra_qty_label=box_lbl,
+            )
         else:
             fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": trend_df["TimePeriod"], "Total": trend_df["Count"]}), height=275)
-            title_txt = f"📈 {gran_lbl} Record Volume" if is_en else f"📈 Xu Hướng Bản Ghi {gran_lbl}"
+            title_txt = f"{gran_lbl} Record Volume" if is_en else f"Xu hướng bản ghi {gran_lbl}"
             expl_txt = "Volume of data generated across chronological periods." if is_en else "Khối lượng dữ liệu phát sinh theo từng mốc thời gian."
+            tr_zoom_df = _build_generic_zoom_df(
+                trend_df,
+                dim_col_src="TimePeriod",
+                dim_label=time_hdr,
+                use_metric_col=False,
+                metric_label="Records" if is_en else "Số bản ghi",
+                u_style="count",
+            )
         render_zoomable_chart_card(
             title=title_txt,
             fig=fig_tr,
-            df=trend_df,
+            df=tr_zoom_df,
             badge="Daily Series" if gran == "day" else "Monthly Series",
             explanation=expl_txt,
             key="gen_trend_chart"
@@ -4326,63 +3339,80 @@ def _render_generic_layer_overview(engine, schema_meta: dict):
     if has_status and has_multi_tbl:
         col_s1, col_s2 = st.columns([1.0, 1.35])
         with col_s1:
-            st_col_name = data.get("status_col") or ("Status" if is_en else "Phân nhóm")
+            st_col_raw = data.get("status_col")
+            st_col_lbl = _humanize_dashboard_label(st_col_raw, is_en=is_en) if st_col_raw else ("Status" if is_en else "Phân nhóm")
             use_m = bool(main_num_col and "MetricSum" in status_df.columns and status_df["MetricSum"].abs().sum() > 0)
+            st_metric_lbl = main_num_lbl if use_m else ("Count" if is_en else "Số giao dịch")
             fig_st = build_tickets_by_type_donut(status_df, label_col="Category", val_col=("MetricSum" if use_m else "Count"), height=260)
+            st_zoom_df = _build_generic_zoom_df(
+                status_df,
+                dim_col_src="Category",
+                dim_label=st_col_lbl,
+                use_metric_col=use_m,
+                metric_label=st_metric_lbl,
+                u_style=unit_style if use_m else "count",
+            )
             render_zoomable_chart_card(
-                title=f"🍩 Breakdown by {st_col_name}" if is_en else f"🍩 Cơ Cấu Theo {st_col_name}",
+                title=f"Breakdown by {st_col_lbl}" if is_en else f"Cơ cấu theo {st_col_lbl}",
                 fig=fig_st,
-                df=status_df,
-                badge=st_col_name,
-                explanation=f"Share split across '{st_col_name}'." if is_en else f"Tỷ trọng đóng góp theo trường '{st_col_name}'.",
+                df=st_zoom_df,
+                badge=st_col_lbl,
+                explanation=f"Share split across {st_col_lbl}." if is_en else f"Tỷ trọng đóng góp theo {st_col_lbl}.",
                 key="gen_status_donut"
             )
         with col_s2:
             st.markdown(f"""
             <div class="crm-card">
                 <div class="crm-card-title">
-                    <span>{"🗂️ Database Tables Portfolio" if is_en else "🗂️ Ma Trận Tổng Hợp Tất Cả Bảng CSDL"}</span>
+                    <span>{"Database Tables Portfolio" if is_en else "Tổng hợp các bảng dữ liệu"}</span>
                     <span class="crm-badge-neon">{len(table_summary_df)} Tables</span>
                 </div>
             """, unsafe_allow_html=True)
             st.dataframe(table_summary_df, hide_index=True, use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
     elif has_status:
-        st_col_name = data.get("status_col") or ("Status" if is_en else "Phân nhóm")
+        st_col_raw = data.get("status_col")
+        st_col_lbl = _humanize_dashboard_label(st_col_raw, is_en=is_en) if st_col_raw else ("Status" if is_en else "Phân nhóm")
         use_m = bool(main_num_col and "MetricSum" in status_df.columns and status_df["MetricSum"].abs().sum() > 0)
+        st_metric_lbl = main_num_lbl if use_m else ("Count" if is_en else "Số giao dịch")
         fig_st = build_tickets_by_type_donut(status_df, label_col="Category", val_col=("MetricSum" if use_m else "Count"), height=260)
+        st_zoom_df = _build_generic_zoom_df(
+            status_df,
+            dim_col_src="Category",
+            dim_label=st_col_lbl,
+            use_metric_col=use_m,
+            metric_label=st_metric_lbl,
+            u_style=unit_style if use_m else "count",
+        )
         render_zoomable_chart_card(
-            title=f"🍩 Breakdown by {st_col_name}" if is_en else f"🍩 Cơ Cấu Theo {st_col_name}",
+            title=f"Breakdown by {st_col_lbl}" if is_en else f"Cơ cấu theo {st_col_lbl}",
             fig=fig_st,
-            df=status_df,
-            badge=st_col_name,
-            explanation=f"Share split across '{st_col_name}'." if is_en else f"Tỷ trọng đóng góp theo trường '{st_col_name}'.",
+            df=st_zoom_df,
+            badge=st_col_lbl,
+            explanation=f"Share split across {st_col_lbl}." if is_en else f"Tỷ trọng đóng góp theo {st_col_lbl}.",
             key="gen_status_donut"
         )
     elif has_multi_tbl:
         st.markdown(f"""
         <div class="crm-card">
             <div class="crm-card-title">
-                <span>{"🗂️ Database Tables Portfolio" if is_en else "🗂️ Ma Trận Tổng Hợp Tất Cả Bảng CSDL"}</span>
+                <span>{"Database Tables Portfolio" if is_en else "Tổng hợp các bảng dữ liệu"}</span>
                 <span class="crm-badge-neon">{len(table_summary_df)} Tables</span>
             </div>
         """, unsafe_allow_html=True)
         st.dataframe(table_summary_df, hide_index=True, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Hiển thị mẫu dữ liệu bảng chính
+    # Hiển thị mẫu dữ liệu bảng chính trong expander đóng sẵn cho gọn Dashboard
     if not data["df"].empty:
         rows_suf = "rows" if is_en else "dòng"
-        tbl_prev_hdr = f"📋 Sample Data: Table '{data['main_table']}' ({len(data['df'])} {rows_suf})" if is_en else f"📋 Dữ Liệu Mẫu: Bảng '{data['main_table']}' ({len(data['df'])} dòng)"
-        st.markdown(f"""
-        <div class="crm-card">
-            <div class="crm-card-title">
-                <span>{tbl_prev_hdr}</span>
-                <span class="crm-badge-neon">Live Data Preview</span>
-            </div>
-        """, unsafe_allow_html=True)
-        st.dataframe(data["df"], hide_index=True, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        tbl_prev_hdr = (
+            f"Sample Data: {main_tbl_lbl} ({len(data['df'])} {rows_suf})"
+            if is_en else
+            f"Xem dữ liệu mẫu: {main_tbl_lbl} ({len(data['df'])} dòng)"
+        )
+        with st.expander(tbl_prev_hdr, expanded=False):
+            st.dataframe(data["df"], hide_index=True, use_container_width=True)
 
     render_smart_analyst_anomaly_panel(
         layer_id="generic_overview",
@@ -4402,12 +3432,13 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
     has_tbl_date = bool(tbl_meta.get("date_columns")) and schema_meta.get("has_timeline", False)
 
     c_bc1, c_bc2 = st.columns([6, 1])
+    table_lbl = _humanize_dashboard_label(table_name, is_en=is_en)
     with c_bc1:
         bc_home = "Home" if is_en else "Trang Chủ"
         tbl_lbl = "Table" if is_en else "Bảng"
-        st.markdown(f"<div class='layer-breadcrumb'>🏠 <a href='#' style='color:#64748B;'>{bc_home}</a> ➔ <b>📊 {tbl_lbl}: {table_name}</b></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='layer-breadcrumb'><a href='#' style='color:#64748B;'>{bc_home}</a> / <b>{tbl_lbl}: {table_lbl}</b></div>", unsafe_allow_html=True)
     with c_bc2:
-        back_btn_lbl = "⬅️ Home" if is_en else "⬅️ Trang Chủ"
+        back_btn_lbl = "← Home" if is_en else "← Trang Chủ"
         if st.button(back_btn_lbl, key=f"btn_back_gen_{table_name}", use_container_width=True):
             _set_layer("overview", domain_key="generic")
 
@@ -4423,16 +3454,30 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
     trend_df = data.get("trend_df", pd.DataFrame())
     num_col = data.get("num_col")
     unit_style = data.get("unit_style", "number")
+    num_col_lbl = _humanize_dashboard_label(num_col, is_en=is_en) if num_col else ""
+    cat_col_raw = data.get("main_cat_col")
+    cat_col_lbl = _humanize_dashboard_label(cat_col_raw, is_en=is_en) if cat_col_raw else ""
+    st_col_raw = data.get("status_col")
+    st_col_lbl = _humanize_dashboard_label(st_col_raw, is_en=is_en) if st_col_raw else ("Group" if is_en else "Nhóm")
+    qty_col_raw = data.get("qty_col")
+    qty_col_lbl = _humanize_dashboard_label(qty_col_raw, is_en=is_en) if qty_col_raw else ""
 
     # 3 Table KPI Cards
+    excl_cnt_tbl = int(data.get("excluded_status_count") or 0)
+    tbl_row_cnt = int(data.get('row_count', len(df)))
+    tbl_sub_txt = (
+        (f"{len(df.columns)} cols • -{excl_cnt_tbl} excl." if is_en else f"{len(df.columns)} cột • loại {excl_cnt_tbl} hủy/trả")
+        if excl_cnt_tbl > 0 else
+        (f"{len(df.columns)} columns" if is_en else f"{len(df.columns)} trường dữ liệu")
+    )
     tk1, tk2, tk3 = st.columns(3)
     with tk1:
         _render_diagnostic_kpi_card(
             card_class="kpi-card-cyan",
             title="RECORDS" if is_en else "SỐ BẢN GHI",
-            val_html=f"{int(data.get('row_count', len(df))):,}",
-            badge_text=table_name,
-            sub_text=f"{len(df.columns)} columns" if is_en else f"{len(df.columns)} trường dữ liệu",
+            val_html=f"{tbl_row_cnt:,}",
+            badge_text=table_lbl,
+            sub_text=tbl_sub_txt,
             bench_label="Completeness" if is_en else "Sẵn sàng phân tích",
             bench_pct=100.0,
             delta_str=f"{data['exec_time_ms']:.0f} ms",
@@ -4445,13 +3490,13 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
         if num_col:
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-purple",
-                title=f"TOTAL {num_col.upper()}" if is_en else f"TỔNG {num_col.upper()}",
+                title=f"TOTAL {num_col_lbl.upper()}" if is_en else f"TỔNG {num_col_lbl.upper()}",
                 val_html=_format_generic_metric_val(data.get("sum_val", 0.0), unit_style),
                 badge_text="Metric Sum",
                 sub_text=f"Avg: {_format_generic_metric_val(data.get('avg_val', 0.0), unit_style)}",
                 bench_label="Coverage" if is_en else "Độ phủ số liệu",
                 bench_pct=100.0,
-                delta_str=num_col,
+                delta_str=num_col_lbl,
                 delta_dir="up",
                 status_text="🟢 SUMMED",
                 status_level="good",
@@ -4479,7 +3524,7 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
             top_c_val = float(cat_df["MetricSum"].iloc[0]) if ("MetricSum" in cat_df.columns and num_col) else float(cat_df["Count"].iloc[0])
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-emerald",
-                title=f"TOP ({data.get('main_cat_col') or 'GROUP'})",
+                title=f"TOP ({cat_col_lbl or 'GROUP'})" if is_en else f"DẪN ĐẦU ({(cat_col_lbl or 'NHÓM').upper()})",
                 val_html=top_c_short,
                 badge_text="Leader" if is_en else "Dẫn đầu",
                 sub_text=_format_generic_metric_val(top_c_val, unit_style if num_col else "count"),
@@ -4495,7 +3540,7 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
             _render_diagnostic_kpi_card(
                 card_class="kpi-card-emerald",
                 title="TABLE LAYER" if is_en else "TẦNG DỮ LIỆU",
-                val_html=table_name,
+                val_html=table_lbl,
                 badge_text="Active",
                 sub_text="Live SQL Inspection" if is_en else "Truy vấn trực tiếp",
                 bench_label="Health",
@@ -4509,38 +3554,97 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
+    def _build_tbl_zoom_df(
+        src_df: pd.DataFrame,
+        dim_col_src: str,
+        dim_label: str,
+        use_metric_col: bool,
+        metric_label: str,
+        u_style: str,
+        extra_qty_label: str = "",
+    ) -> pd.DataFrame:
+        if src_df is None or src_df.empty:
+            return pd.DataFrame()
+        out = pd.DataFrame()
+        if dim_col_src in src_df.columns:
+            out[dim_label] = src_df[dim_col_src]
+        m_hdr = (
+            f"{metric_label} (đ)" if (u_style == "vnd" and "đ" not in metric_label.lower())
+            else (f"{metric_label} ($)" if (u_style == "usd" and "$" not in metric_label) else metric_label)
+        )
+        cnt_hdr = "Transactions" if is_en else "Số giao dịch"
+        if use_metric_col and "MetricSum" in src_df.columns:
+            out[m_hdr] = src_df["MetricSum"]
+            if "QtySum" in src_df.columns and extra_qty_label and extra_qty_label != m_hdr:
+                out[extra_qty_label] = src_df["QtySum"]
+            if "Count" in src_df.columns and cnt_hdr not in out.columns:
+                out[cnt_hdr] = src_df["Count"]
+        else:
+            if "Count" in src_df.columns:
+                out[m_hdr if not use_metric_col and metric_label else cnt_hdr] = src_df["Count"]
+            if "MetricSum" in src_df.columns and m_hdr not in out.columns:
+                out[m_hdr] = src_df["MetricSum"]
+        return out if not out.empty else src_df
+
     # Charts for Table Layer
     if not cat_df.empty and not status_df.empty:
         tc1, tc2 = st.columns([1.2, 1.0])
         with tc1:
             use_m = bool(num_col and "MetricSum" in cat_df.columns and cat_df["MetricSum"].abs().sum() > 0)
-            fig_cat = build_horizontal_bar_chart(cat_df, y_col="Category", x_col=("MetricSum" if use_m else "Count"), name=(num_col if use_m else ("Count" if is_en else "Số lượng")), height=260)
+            metric_lbl_tbl = num_col_lbl if use_m else ("Count" if is_en else "Số lượng")
+            fig_cat = build_horizontal_bar_chart(cat_df, y_col="Category", x_col=("MetricSum" if use_m else "Count"), name=metric_lbl_tbl, height=260)
+            cat_tbl_zoom = _build_tbl_zoom_df(
+                cat_df,
+                dim_col_src="Category",
+                dim_label=cat_col_lbl or table_lbl,
+                use_metric_col=use_m,
+                metric_label=metric_lbl_tbl,
+                u_style=unit_style if use_m else "count",
+            )
             render_zoomable_chart_card(
-                title=f"📊 Top {data.get('main_cat_col') or table_name}" if is_en else f"📊 Phân Bổ Theo {data.get('main_cat_col') or table_name}",
+                title=f"Top {cat_col_lbl or table_lbl}" if is_en else f"Phân bổ theo {cat_col_lbl or table_lbl}",
                 fig=fig_cat,
-                df=cat_df,
+                df=cat_tbl_zoom,
                 badge="Distribution",
                 explanation="Value and record breakdown." if is_en else "Phân bổ giá trị và tần suất giao dịch.",
                 key=f"gen_tbl_cat_{table_name}"
             )
         with tc2:
             use_ms = bool(num_col and "MetricSum" in status_df.columns and status_df["MetricSum"].abs().sum() > 0)
+            st_metric_tbl = num_col_lbl if use_ms else ("Count" if is_en else "Số giao dịch")
             fig_st = build_tickets_by_type_donut(status_df, label_col="Category", val_col=("MetricSum" if use_ms else "Count"), height=260)
+            st_tbl_zoom = _build_tbl_zoom_df(
+                status_df,
+                dim_col_src="Category",
+                dim_label=st_col_lbl,
+                use_metric_col=use_ms,
+                metric_label=st_metric_tbl,
+                u_style=unit_style if use_ms else "count",
+            )
             render_zoomable_chart_card(
-                title=f"🍩 {data.get('status_col') or 'Group'} Share" if is_en else f"🍩 Tỷ Trọng Theo {data.get('status_col') or 'Nhóm'}",
+                title=f"{st_col_lbl} Share" if is_en else f"Tỷ trọng theo {st_col_lbl}",
                 fig=fig_st,
-                df=status_df,
-                badge="Share",
+                df=st_tbl_zoom,
+                badge=st_col_lbl,
                 explanation="Share breakdown." if is_en else "Tỷ trọng đóng góp theo phân nhóm.",
                 key=f"gen_tbl_st_{table_name}"
             )
     elif not cat_df.empty:
         use_m = bool(num_col and "MetricSum" in cat_df.columns and cat_df["MetricSum"].abs().sum() > 0)
-        fig_cat = build_horizontal_bar_chart(cat_df, y_col="Category", x_col=("MetricSum" if use_m else "Count"), name=(num_col if use_m else ("Count" if is_en else "Số lượng")), height=260)
+        metric_lbl_tbl = num_col_lbl if use_m else ("Count" if is_en else "Số lượng")
+        fig_cat = build_horizontal_bar_chart(cat_df, y_col="Category", x_col=("MetricSum" if use_m else "Count"), name=metric_lbl_tbl, height=260)
+        cat_tbl_zoom = _build_tbl_zoom_df(
+            cat_df,
+            dim_col_src="Category",
+            dim_label=cat_col_lbl or table_lbl,
+            use_metric_col=use_m,
+            metric_label=metric_lbl_tbl,
+            u_style=unit_style if use_m else "count",
+        )
         render_zoomable_chart_card(
-            title=f"📊 Category Distribution: Table {table_name}" if is_en else f"📊 Phân Bổ Theo {data.get('main_cat_col') or 'Danh Mục'}: Bảng {table_name}",
+            title=f"Category Distribution: {table_lbl}" if is_en else f"Phân bổ theo {cat_col_lbl or 'danh mục'}: {table_lbl}",
             fig=fig_cat,
-            df=cat_df,
+            df=cat_tbl_zoom,
             badge="Distribution",
             explanation="Distribution of records and metric value." if is_en else "Tần suất và giá trị phân bổ dữ liệu.",
             key=f"gen_tbl_cat_{table_name}"
@@ -4548,25 +3652,43 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
 
     if not trend_df.empty:
         gran = data.get("trend_granularity", "month")
+        time_hdr_tbl = ("Date" if gran == "day" else "Month") if is_en else ("Ngày" if gran == "day" else "Tháng")
         if num_col and "MetricSum" in trend_df.columns:
             fig_tr = build_sales_dual_axis_chart(
                 trend_df,
                 x_col="TimePeriod",
                 rev_col="MetricSum",
-                box_col="QtySum" if (data.get("qty_col") and "QtySum" in trend_df.columns) else "Count",
+                box_col="QtySum" if (qty_col_raw and "QtySum" in trend_df.columns) else "Count",
                 height=260,
-                rev_name=num_col,
-                box_name=data.get("qty_col") or ("Records" if is_en else "Số dòng"),
+                rev_name=num_col_lbl,
+                box_name=qty_col_lbl or ("Records" if is_en else "Số dòng"),
                 rev_prefix=("$" if unit_style == "usd" else ""),
                 rev_suffix=(" đ" if unit_style == "vnd" else ""),
                 box_unit="",
             )
+            tr_tbl_zoom = _build_tbl_zoom_df(
+                trend_df,
+                dim_col_src="TimePeriod",
+                dim_label=time_hdr_tbl,
+                use_metric_col=True,
+                metric_label=num_col_lbl,
+                u_style=unit_style,
+                extra_qty_label=qty_col_lbl or ("Records" if is_en else "Số dòng"),
+            )
         else:
             fig_tr = build_weekday_bar_chart(pd.DataFrame({"WeekDay": trend_df["TimePeriod"], "Total": trend_df["Count"]}), height=260)
+            tr_tbl_zoom = _build_tbl_zoom_df(
+                trend_df,
+                dim_col_src="TimePeriod",
+                dim_label=time_hdr_tbl,
+                use_metric_col=False,
+                metric_label="Records" if is_en else "Số bản ghi",
+                u_style="count",
+            )
         render_zoomable_chart_card(
-            title=f"📈 Time Trend ({'Daily' if gran == 'day' else 'Monthly'})" if is_en else f"📈 Xu Hướng Thời Gian ({'Theo Ngày' if gran == 'day' else 'Theo Tháng'})",
+            title=f"Time Trend ({'Daily' if gran == 'day' else 'Monthly'})" if is_en else f"Xu hướng thời gian ({'theo ngày' if gran == 'day' else 'theo tháng'})",
             fig=fig_tr,
-            df=trend_df,
+            df=tr_tbl_zoom,
             badge="Timeline",
             explanation="Chronological progression for this table." if is_en else "Diễn biến dữ liệu theo thời gian của bảng.",
             key=f"gen_tbl_tr_{table_name}"
@@ -4574,7 +3696,7 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
 
     rows_suf = "rows" if is_en else "dòng"
     cols_suf = "Columns" if is_en else "Cột Dữ Liệu"
-    tbl_rec_hdr = f"📊 Records Table: '{table_name}' ({len(df)} {rows_suf})" if is_en else f"📊 Danh Sách Bản Ghi: Bảng '{table_name}' ({len(df)} dòng)"
+    tbl_rec_hdr = f"Records: {table_lbl} ({len(df)} {rows_suf})" if is_en else f"Danh sách bản ghi: {table_lbl} ({len(df)} dòng)"
     st.markdown(f"""
     <div class="crm-card">
         <div class="crm-card-title">
@@ -4586,10 +3708,10 @@ def _render_generic_layer_table(engine, table_name: str, schema_meta: dict):
     if not df.empty:
         st.dataframe(df, hide_index=True, use_container_width=True)
     else:
-        st.info(f"Table '{table_name}' has no records." if is_en else f"Bảng '{table_name}' chưa có dữ liệu.")
+        st.info(f"Table '{table_lbl}' has no records." if is_en else f"Bảng '{table_lbl}' chưa có dữ liệu.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    _render_sql_modal(f"Table {table_name}" if is_en else f"Bảng {table_name}", data["sql"], data["exec_time_ms"], f"gen_tbl_sql_{table_name}")
+    _render_sql_modal(table_lbl, data["sql"], data["exec_time_ms"], f"gen_tbl_sql_{table_name}")
 
     render_smart_analyst_anomaly_panel(
         layer_id=f"table_{table_name}",

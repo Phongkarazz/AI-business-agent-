@@ -428,6 +428,132 @@ def ensure_full_four_quarters(df: pd.DataFrame, user_query: str = "") -> pd.Data
     return df
 
 
+def ensure_continuous_daily_series(
+    df: pd.DataFrame,
+    user_query: str = "",
+    min_date: str | None = None,
+    max_date: str | None = None,
+) -> pd.DataFrame:
+    """Bổ sung các ngày không phát sinh giao dịch (giá trị 0) cho chuỗi thời gian theo ngày,
+    giúp biểu đồ xu hướng và mức trung bình theo ngày phản ánh đúng toàn bộ khoảng ngày hoạt động.
+    """
+    if df is None or df.empty or pd is None:
+        return df
+
+    import unicodedata as _ud
+
+    def _ascii_low(text: str) -> str:
+        s = _ud.normalize("NFD", str(text or "")).lower().replace("đ", "d")
+        return re.sub(r"[\u0300-\u036f]", "", s)
+
+    q_norm = _ascii_low(user_query or "")
+    # Không điền ngày 0 cho câu hỏi tìm ngày đỉnh/đáy đơn lẻ hoặc Top N ngày
+    if q_norm and any(
+        re.search(p, q_norm)
+        for p in (
+            r"\b(?:ngay\s+nao|hom\s+nao|bua\s+nao)\b",
+            r"\b(?:cao\s+nhat\s+va\s+thap\s+nhat|highest\s+and\s+lowest)\b",
+            r"\btop\s*\d+\b",
+        )
+    ):
+        return df
+
+    if q_norm and not any(
+        k in q_norm
+        for k in (
+            "theo tung ngay", "tung ngay", "theo ngay", "hang ngay", "qua cac ngay",
+            "moi ngay", "xu huong", "bien dong", "daily", "per day", "by day", "trend",
+        )
+    ):
+        return df
+
+    def _parse_strict_date_series(series: pd.Series) -> pd.Series | None:
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return series.dt.normalize()
+        non_null = series.dropna().astype(str).str.strip()
+        if non_null.empty:
+            return None
+        iso_ok = non_null.str.match(r"^\d{4}[-/]\d{2}[-/]\d{2}$").all()
+        dmy_ok = non_null.str.match(r"^\d{1,2}/\d{1,2}/\d{4}$").all()
+        if not (iso_ok or dmy_ok):
+            return None
+        parsed = pd.to_datetime(
+            series.astype(str).str.strip(),
+            format="%Y-%m-%d" if iso_ok else "%d/%m/%Y",
+            errors="coerce",
+        )
+        if parsed.notna().all():
+            return parsed.dt.normalize()
+        parsed_mix = pd.to_datetime(series, dayfirst=bool(dmy_ok), errors="coerce")
+        return parsed_mix.dt.normalize() if parsed_mix.notna().all() else None
+
+    date_col = None
+    parsed_dates = None
+    for c in df.columns:
+        c_ascii = _ascii_low(c)
+        is_date_name = any(k in c_ascii for k in ("ngay", "date", "day")) and not any(
+            bad in c_ascii for bad in ("birth", "sinh", "year", "month", "quarter")
+        )
+        cand_parsed = _parse_strict_date_series(df[c])
+        if cand_parsed is not None and (is_date_name or len(df.columns) >= 2):
+            date_col = c
+            parsed_dates = cand_parsed
+            if is_date_name:
+                break
+
+    if date_col is None or parsed_dates is None:
+        return df
+
+    non_time_cols = [c for c in df.columns if c != date_col]
+    num_cols = df[non_time_cols].select_dtypes(include="number").columns.tolist()
+    # Chỉ điền 0 cho bảng tổng hợp 1 chiều theo ngày (tránh đụng bảng liệt kê hóa đơn thô)
+    if len(num_cols) != len(non_time_cols) or len(non_time_cols) == 0:
+        return df
+    if parsed_dates.nunique() != len(df):
+        return df
+
+    df_min = parsed_dates.min()
+    df_max = parsed_dates.max()
+
+    def _parse_bound(val: str | None) -> pd.Timestamp | None:
+        if not val or not str(val).strip():
+            return None
+        try:
+            ts = pd.to_datetime(str(val).strip()[:10], errors="coerce")
+            return ts.normalize() if pd.notna(ts) else None
+        except Exception:
+            return None
+
+    b_min = _parse_bound(min_date)
+    b_max = _parse_bound(max_date)
+    start_dt = min(df_min, b_min) if b_min is not None else df_min
+    end_dt = max(df_max, b_max) if b_max is not None else df_max
+
+    if start_dt >= end_dt or (end_dt - start_dt).days > 366:
+        return df
+
+    expected_days = (end_dt - start_dt).days + 1
+    if len(df) >= expected_days:
+        return df
+
+    all_dates_iso = [d.strftime("%Y-%m-%d") for d in pd.date_range(start_dt, end_dt, freq="D")]
+    work = df.copy()
+    work["_iso_date_key"] = parsed_dates.dt.strftime("%Y-%m-%d")
+    int_cols = [c for c in num_cols if pd.api.types.is_integer_dtype(work[c])]
+
+    spine = pd.DataFrame({"_iso_date_key": all_dates_iso})
+    merged = pd.merge(spine, work, on="_iso_date_key", how="left")
+    merged[date_col] = merged["_iso_date_key"]
+    merged = merged.drop(columns=["_iso_date_key"])
+
+    for c in num_cols:
+        merged[c] = merged[c].fillna(0)
+        if c in int_cols:
+            merged[c] = merged[c].astype(int)
+
+    return merged[df.columns]
+
+
 def ensure_ratio_column_if_requested(df: pd.DataFrame, user_query: str = "") -> pd.DataFrame:
     """Đảm bảo kết quả DataFrame luôn có cột tỷ lệ / phần trăm khi người dùng yêu cầu bài toán tỷ lệ, tỷ trọng, cơ cấu.
     Nếu SQL chỉ trả về các số đo tuyệt đối (TotalSales, Headcount...), hàm này tự động bổ sung cột Tỷ lệ (%) chuẩn xác."""
@@ -919,14 +1045,30 @@ def select_primary_insight_columns(df: pd.DataFrame, user_query: str = "") -> tu
             if spread_candidate:
                 val_col = spread_candidate
             else:
-                # Ưu tiên cột tiền tệ / số lượng trước cột phần trăm
-                money_or_vol = [
+                # Ưu tiên cột giá trị tiền tệ (MetricSum, doanh thu, lương...) trước cột đếm số lượng (Count, số lượng)
+                non_ratio = [
                     c for c in non_cum_measures
-                    if any(k in str(c).lower() for k in ["sales", "revenue", "amount", "doanh thu", "doanh_thu", "doanhthu", "doanh số", "thanh_tien", "thanhtien", "tong_tien", "tien_nhap", "cong_no", "boxes", "hộp", "payroll", "quỹ lương", "salary", "lương", "cost", "profit", "lợi nhuận", "headcount", "nhân viên", "nhân sự", "count", "số lượng", "so_luong", "yearsofservice", "tenure"])
-                    and not any(k in str(c).lower() for k in ["pct", "percent", "%", "margin", "rate", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng"])
+                    if not any(k in str(c).lower() for k in ["pct", "percent", "%", "margin", "rate", "share", "tỷ lệ", "tỉ lệ", "tỷ trọng", "tỉ trọng"])
                 ]
-                if money_or_vol:
-                    val_col = money_or_vol[0]
+                money_cols = [
+                    c for c in non_ratio
+                    if any(k in str(c).lower() for k in [
+                        "sales", "revenue", "amount", "metricsum", "doanh thu", "doanh_thu", "doanhthu",
+                        "doanh số", "thanh_tien", "thanhtien", "tong_tien", "tien_nhap", "cong_no",
+                        "payroll", "quỹ lương", "salary", "lương", "cost", "profit", "lợi nhuận"
+                    ])
+                ]
+                vol_cols = [
+                    c for c in non_ratio
+                    if any(k in str(c).lower() for k in [
+                        "boxes", "hộp", "headcount", "nhân viên", "nhân sự", "count",
+                        "số lượng", "so_luong", "yearsofservice", "tenure"
+                    ])
+                ]
+                if money_cols:
+                    val_col = money_cols[0]
+                elif vol_cols:
+                    val_col = vol_cols[0]
                 else:
                     val_col = non_cum_measures[0]
     elif measure_cols:
@@ -993,8 +1135,9 @@ def _summarize_scalar_kpi_row(df: pd.DataFrame, val_col: str = None, is_en: bool
     primary_label = (humanize_name_en(val_col) if is_en else humanize_name_vi(val_col)) or str(val_col)
     vals = pd.to_numeric(df[val_col], errors="coerce").dropna()
     primary_val = float(vals.iloc[0]) if len(vals) == 1 else (float(vals.sum()) if not vals.empty else 0.0)
-    primary_fmt = format_metric_value(primary_val, val_col)
-    next_target_15_fmt = format_metric_value(primary_val * 1.15, val_col)
+    is_vnd_df = is_vnd_context_dataframe(df, val_col)
+    primary_fmt = _format_insight_currency_impl(primary_val, val_col, df=df, force_vnd=is_vnd_df)
+    next_target_15_fmt = _format_insight_currency_impl(primary_val * 1.15, val_col, df=df, force_vnd=is_vnd_df)
 
     secondary_kpis = []
     for c in df.columns:
@@ -1004,7 +1147,7 @@ def _summarize_scalar_kpi_row(df: pd.DataFrame, val_col: str = None, is_en: bool
         if not s_vals.empty:
             sv = float(s_vals.iloc[0]) if len(s_vals) == 1 else float(s_vals.sum())
             s_lbl = (humanize_name_en(c) if is_en else humanize_name_vi(c)) or str(c)
-            s_fmt = format_metric_value(sv, c)
+            s_fmt = _format_insight_currency_impl(sv, c, df=df, force_vnd=is_vnd_context_dataframe(df, c))
             secondary_kpis.append({"col": c, "label": s_lbl, "val": sv, "fmt": s_fmt})
 
     secondary_summary_str = ", ".join(f"{item['label']}: {item['fmt']}" for item in secondary_kpis[:3])
@@ -1012,7 +1155,7 @@ def _summarize_scalar_kpi_row(df: pd.DataFrame, val_col: str = None, is_en: bool
     derived_aov_fmt = ""
     derived_aov_label = ""
     v_low = str(val_col).lower()
-    is_rev_or_amt = any(k in v_low for k in ["doanh_thu", "doanhthu", "doanh_so", "doanhso", "revenue", "sales", "amount", "thanh_tien", "thanhtien", "tong_tien", "tongtien"])
+    is_rev_or_amt = any(k in v_low for k in ["doanh_thu", "doanhthu", "doanh_so", "doanhso", "revenue", "sales", "amount", "thanh_tien", "thanhtien", "tong_tien", "tongtien", "tien_nhap", "tiennhap"])
     if is_rev_or_amt and primary_val > 0 and secondary_kpis:
         for sec in secondary_kpis:
             sc_low = str(sec["col"]).lower()
@@ -1020,7 +1163,8 @@ def _summarize_scalar_kpi_row(df: pd.DataFrame, val_col: str = None, is_en: bool
                 aov_val = primary_val / sec["val"]
                 is_order_cnt = any(k in sc_low for k in ["don", "order", "invoice", "hoa_don", "giao_dich", "giaodich"])
                 unit_word = ("order" if is_en else "đơn") if is_order_cnt else ("unit" if is_en else "đơn vị")
-                derived_aov_fmt = f"{format_metric_value(aov_val, val_col)}/{unit_word}"
+                aov_num_fmt = _format_insight_currency_impl(aov_val, val_col, df=df, force_vnd=is_vnd_df)
+                derived_aov_fmt = f"{aov_num_fmt}/{unit_word}"
                 derived_aov_label = (
                     ("Average Order Value (AOV)" if is_order_cnt else "Average Unit Value")
                     if is_en else
@@ -1252,6 +1396,18 @@ VI_DIACRITICS_MAP = [
     (r"(?i)\bten\s+sp\b", "Tên Sản Phẩm"),
     (r"(?i)\bgia\s+sp\b", "Giá Sản Phẩm"),
     (r"(?i)\bngay\s+dat\b", "Ngày Đặt"),
+    (r"(?i)\btien\s+nhap\b", "Tiền Nhập"),
+    (r"(?i)\bgia\s+nhap\b", "Giá Nhập"),
+    (r"(?i)\bso\s+luong\s+nhap\b", "Số Lượng Nhập"),
+    (r"(?i)\bphieu\s+nhap\b", "Phiếu Nhập"),
+    (r"(?i)\bngay\s+nhap\b", "Ngày Nhập"),
+    (r"(?i)\bnha\s+cung\s+cap\b", "Nhà Cung Cấp"),
+    (r"(?i)\bten\s+thuoc\b", "Tên Thuốc"),
+    (r"(?i)\bloai\s+thuoc\b", "Loại Thuốc"),
+    (r"(?i)\bten\s+vl\b", "Tên Vật Liệu"),
+    (r"(?i)\bvat\s+lieu\b", "Vật Liệu"),
+    (r"(?i)\bcong\s+no\b", "Công Nợ"),
+    (r"(?i)\bcon\s+no\b", "Còn Nợ"),
 
     # Từ đơn cơ sở
     (r"(?i)\bnhom\b", "Nhóm"),
@@ -1262,6 +1418,10 @@ VI_DIACRITICS_MAP = [
     (r"(?i)\bnam\b", "Năm"),
     (r"(?i)\btong\b", "Tổng"),
     (r"(?i)\bdon\b", "Đơn"),
+    (r"(?i)\bnhap\b", "Nhập"),
+    (r"(?i)\bxuat\b", "Xuất"),
+    (r"(?i)\bthuoc\b", "Thuốc"),
+    (r"(?i)\btien\b", "Tiền"),
 ]
 
 
@@ -2539,6 +2699,11 @@ def format_metric_value(val, col_name: str = "") -> str:
     if is_count:
         return f"{round(f_val):,.0f}"
 
+    if _is_vnd_money_col(c_low):
+        if abs(f_val) >= 100 or f_val.is_integer():
+            return f"{round(f_val):,.0f} đ"
+        return f"{f_val:,.2f} đ"
+
     is_curr = any(
         k in c_low
         for k in [
@@ -2559,13 +2724,14 @@ def format_metric_value(val, col_name: str = "") -> str:
 
 
 def escape_markdown_currency_symbols(text: str) -> str:
-    r"""Thoát ký tự đô-la ($) sang (\$ ) trong chuỗi Markdown để tránh bị KaTeX trên Streamlit
-    hiểu nhầm hai số tiền là công thức toán học inline làm dính chữ, rụng khoảng trắng và nuốt mất ký hiệu $.
+    r"""Loại bỏ các ký tự gạch chéo ngược thừa (\$, \_, \*) trước ký hiệu tiền tệ và dấu câu
+    để không bao giờ hiển thị ký tự '\' thừa trên giao diện UI (kể cả trong thẻ HTML <details>/<div> lẫn Markdown).
     """
     if not text:
         return ""
-    # Thoát mọi ký tự $ chưa có dấu gạch chéo ngược đứng trước
-    return re.sub(r'(?<!\\)\$', r'\$', str(text))
+    s = str(text)
+    s = s.replace(r"\$", "$").replace(r"\_", "_").replace(r"\*", "*")
+    return s
 
 
 def detect_tradeoff_insight(df: pd.DataFrame, name_col: str = None, val_col: str = None, is_en: bool = False) -> str | None:
@@ -5750,6 +5916,118 @@ def normalize_diagnostic_dataframe(df: pd.DataFrame, user_query: str = "") -> pd
     return df
 
 
+def _format_diagnostic_metric_value(
+    v: float,
+    primary_col: str,
+    is_money: bool,
+    is_vnd_primary: bool,
+    is_count_metric: bool,
+    is_en: bool = False,
+) -> str:
+    """Format diagnostic metric value with proper currency/unit suffix and preserve 1 decimal place on non-integer count averages."""
+    col_l = str(primary_col or "").lower()
+    if is_money and is_vnd_primary:
+        return _format_insight_currency_impl(v, primary_col, is_count_metric=False, force_vnd=True)
+    if is_count_metric:
+        if col_l == "recordcount":
+            unit_sfx = " records" if is_en else " bản ghi"
+        elif any(k in col_l for k in ("so_don", "sodon", "don_hang", "hoa_don", "orders", "order_count", "ticket")):
+            unit_sfx = " orders" if is_en else " đơn"
+        elif any(k in col_l for k in ("boxes", "so_hop", "sohop")):
+            unit_sfx = " boxes" if is_en else " hộp"
+        else:
+            unit_sfx = ""
+        if abs(v - round(v)) >= 0.05 and abs(v) < 100:
+            return f"{v:,.1f}{unit_sfx}"
+        return f"{int(round(v)):,}{unit_sfx}"
+    prefix = "$" if is_money else ""
+    if abs(v) >= 100:
+        return f"{prefix}{v:,.0f}"
+    if abs(v - round(v)) < 1e-4:
+        return f"{prefix}{int(round(v)):,}"
+    return f"{prefix}{v:,.2f}"
+
+
+def _get_diagnostic_entity_nouns(
+    entity_type: str,
+    label_col: str = "",
+    user_query: str = "",
+) -> dict:
+    """Return natural Vietnamese & English nouns for the analyzed entity (eliminating robotic 'Thực thể dẫn đầu')."""
+    lbl_low = f"{label_col or ''} {user_query or ''}".lower()
+    if any(k in lbl_low for k in ("kenh", "kênh", "channel")):
+        return {
+            "leader_vi": "Kênh bán đứng đầu",
+            "leader_short_vi": "kênh bán đứng đầu",
+            "bot_vi": "kênh bán thấp hơn",
+            "plural_vi": "các kênh bán",
+            "leader_en": "Leading channel",
+        }
+    if any(k in lbl_low for k in ("khach", "khách", "customer")):
+        return {
+            "leader_vi": "Khách hàng đứng đầu",
+            "leader_short_vi": "khách hàng đứng đầu",
+            "bot_vi": "khách hàng xếp cuối bảng",
+            "plural_vi": "các khách hàng",
+            "leader_en": "Top customer",
+        }
+    if any(k in lbl_low for k in ("nha_cung_cap", "nhà cung cấp", "ncc", "supplier")):
+        return {
+            "leader_vi": "Nhà cung cấp đứng đầu",
+            "leader_short_vi": "nhà cung cấp đứng đầu",
+            "bot_vi": "nhà cung cấp xếp cuối bảng",
+            "plural_vi": "các nhà cung cấp",
+            "leader_en": "Leading supplier",
+        }
+    if entity_type == "product" or any(k in lbl_low for k in ("thuoc", "thuốc", "mon", "món", "vat_lieu", "vật liệu", "san_pham", "sản phẩm", "mat_hang", "mặt hàng", "product")):
+        return {
+            "leader_vi": "Mặt hàng đứng đầu",
+            "leader_short_vi": "mặt hàng chủ lực",
+            "bot_vi": "mặt hàng xếp cuối bảng",
+            "plural_vi": "các mặt hàng",
+            "leader_en": "Leading product",
+        }
+    if entity_type == "geo":
+        return {
+            "leader_vi": "Khu vực đứng đầu",
+            "leader_short_vi": "khu vực dẫn đầu",
+            "bot_vi": "khu vực xếp cuối bảng",
+            "plural_vi": "các khu vực",
+            "leader_en": "Leading market",
+        }
+    if entity_type == "employee":
+        return {
+            "leader_vi": "Nhân sự đứng đầu",
+            "leader_short_vi": "nhân sự dẫn đầu",
+            "bot_vi": "nhân sự xếp cuối bảng",
+            "plural_vi": "các nhân sự",
+            "leader_en": "Top performer",
+        }
+    if entity_type == "department":
+        return {
+            "leader_vi": "Phòng ban đứng đầu",
+            "leader_short_vi": "phòng ban dẫn đầu",
+            "bot_vi": "phòng ban quy mô gọn nhất",
+            "plural_vi": "các phòng ban",
+            "leader_en": "Leading department",
+        }
+    if entity_type == "team":
+        return {
+            "leader_vi": "Nhóm đứng đầu",
+            "leader_short_vi": "nhóm dẫn đầu",
+            "bot_vi": "nhóm xếp cuối bảng",
+            "plural_vi": "các nhóm",
+            "leader_en": "Leading team",
+        }
+    return {
+        "leader_vi": "Vị trí đứng đầu",
+        "leader_short_vi": "mục đứng đầu",
+        "bot_vi": "mục xếp cuối bảng",
+        "plural_vi": "các mục khảo sát",
+        "leader_en": "Leading item",
+    }
+
+
 def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool = False) -> dict:
     """Xây dựng Sơ đồ Cây Giả Thuyết (McKinsey Issue Tree / Diagnostic Hypothesis Framework)
     trực tiếp từ dữ liệu thực tế:
@@ -5809,15 +6087,14 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
     prefix = "$" if is_money else ""
 
     def _fmt(v):
-        if is_count_metric:
-            return f"{int(round(v)):,}"
-        if is_money and is_vnd_primary:
-            return _format_insight_currency_impl(v, primary_col, is_count_metric=is_count_metric, force_vnd=True)
-        if abs(v) >= 100:
-            return f"{prefix}{v:,.0f}"
-        if abs(v - round(v)) < 1e-4:
-            return f"{prefix}{int(round(v)):,}"
-        return f"{prefix}{v:,.2f}"
+        return _format_diagnostic_metric_value(
+            v,
+            primary_col=primary_col,
+            is_money=is_money,
+            is_vnd_primary=is_vnd_primary,
+            is_count_metric=is_count_metric,
+            is_en=is_en,
+        )
 
     total_val = float(vals.sum())
     mean_val = float(vals.mean())
@@ -5989,10 +6266,8 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                     f"KPI '{top_entity}' reached {_fmt(max_val)}{f' alongside {sec_str}' if sec_str else ''}{f', yielding {aov_fmt} ({aov_lbl})' if aov_fmt else ''} in the queried period."
                 ),
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (ƯU TIÊN #1)" if not is_en else "CONFIRMED (PRIORITY #1)",
-                "confidence": 89,
-                "impact": 92,
-                "priority_score": 82,
+                "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                "rank": 1,
             },
             {
                 "id": "H2",
@@ -6002,39 +6277,19 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                     "Hypothesis 2: Pareto concentration across core products/categories and primary channels"
                 ),
                 "evidence": (
-                    f"Tổng quy mô {_fmt(max_val)} ở cấp độ vĩ mô thường được tạo nên bởi nhóm sản phẩm/kênh bán mũi nhọn; cần phân rã đa chiều để tối ưu hóa từng phân khúc."
+                    f"Tổng quy mô {_fmt(max_val)} ở cấp độ tổng hợp cần được phân rã theo mặt hàng và kênh bán để xác định nhóm đóng góp lớn nhất."
                     if not is_en else
-                    f"Macro scale of {_fmt(max_val)} is typically concentrated in top SKUs/channels; multi-dimensional drill-down will isolate top contributors."
+                    f"Macro scale of {_fmt(max_val)} should be drilled down by product/SKU and channel to pinpoint top contributors."
                 ),
                 "status": "PARTIAL",
-                "status_label": "ĐỒNG TÁC ĐỘNG (ƯU TIÊN #2)" if not is_en else "CO-DRIVER (PRIORITY #2)",
-                "confidence": 74,
-                "impact": 78,
-                "priority_score": 58,
-            },
-            {
-                "id": "H3",
-                "title": (
-                    "Giả thuyết 3: Sai lệch do cộng trùng bản ghi hoặc tính lẫn các đơn hàng đã hủy / không hợp lệ"
-                    if not is_en else
-                    "Hypothesis 3: Distortion from duplicate joins or inclusion of canceled/invalid transactions"
-                ),
-                "evidence": (
-                    "Bộ lọc truy vấn và kiểm toán 4 trụ cột xác nhận chỉ tổng hợp các bản ghi hợp lệ, không có hiện tượng nhân bản dòng hay nhiễu số liệu."
-                    if not is_en else
-                    "Query filters and 4-pillar audit confirm only valid records were aggregated without duplicate row inflation."
-                ),
-                "status": "REJECTED",
-                "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                "confidence": 12,
-                "impact": 25,
-                "priority_score": 3,
+                "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                "rank": 2,
             },
         ]
         conclusion = (
-            f"Kết luận Kiểm định: Chỉ số '{top_entity}' đạt {_fmt(max_val)}{f' ({sec_str}{f', bình quân {aov_fmt}' if aov_fmt else ''})' if sec_str else ''} đã được xác thực toàn vẹn (Độ chính xác H1: 89%). Khuyến nghị phân rã chi tiết theo Sản phẩm/Nhóm món, Kênh bán và Chuỗi thời gian để thúc đẩy các mũi nhọn tăng trưởng."
+            f"Kết luận từ dữ liệu: Chỉ số '{top_entity}' đạt {_fmt(max_val)}{f' ({sec_str}{f', bình quân {aov_fmt}' if aov_fmt else ''})' if sec_str else ''}. Khuyến nghị phân rã chi tiết theo Sản phẩm/Nhóm món, Kênh bán và Chuỗi thời gian để thúc đẩy các mũi nhọn tăng trưởng."
             if not is_en else
-            f"Diagnostic Conclusion: Macro KPI '{top_entity}' at {_fmt(max_val)}{f' ({sec_str}{f', averaging {aov_fmt}' if aov_fmt else ''})' if sec_str else ''} is fully verified (H1 confidence: 89%). Next step: drill down by product, channel, and time period."
+            f"Data Conclusion: Macro KPI '{top_entity}' stands at {_fmt(max_val)}{f' ({sec_str}{f', averaging {aov_fmt}' if aov_fmt else ''})' if sec_str else ''}. Next step: drill down by product, channel, and time period."
         )
         summary_takeaway = (
             f"Kết luận chính: {top_entity} đạt {_fmt(max_val)} phản ánh quy mô giao dịch thực chất; nên bóc tách tiếp theo nhóm hàng và kênh bán để tìm động lực tăng trưởng."
@@ -6058,44 +6313,30 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                         if not is_en else "Hypothesis 1: High-value core execution driving peak scale"
                     )
                 ),
-                "evidence": f"Thực thể '{top_entity}' đạt mức đỉnh {_fmt(max_val)} trong kỳ khảo sát, giữ vị trí dẫn đầu toàn hệ thống." if not is_en else f"Entity '{top_entity}' reached {_fmt(max_val)} in the target period, leading the entire system.",
+                "evidence": f"Thực thể '{top_entity}' đạt mức {_fmt(max_val)} trong kỳ khảo sát, là tâm điểm nổi bật của tập kết quả." if not is_en else f"Entity '{top_entity}' reached {_fmt(max_val)} in the target period.",
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (ƯU TIÊN #1)" if not is_en else "CONFIRMED (PRIORITY #1)",
-                "confidence": 89,
-                "impact": 92,
-                "priority_score": 82,
+                "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                "rank": 1,
             },
             {
                 "id": "H2",
                 "title": (
                     "Giả thuyết 2: Tác động cộng hưởng từ thâm niên chuyên môn và cơ cấu phân bổ nguồn lực"
                     if is_hr and not is_en else (
-                        "Giả thuyết 2: Đóng góp từ danh mục sản phẩm chủ lực biên lợi nhuận cao"
+                        "Giả thuyết 2: Đóng góp từ danh mục sản phẩm chủ lực và nhịp đặt hàng lặp lại"
                         if not is_en else "Hypothesis 2: Synergistic contribution from core portfolio/tenure structure"
                     )
                 ),
                 "evidence": f"Kết quả của '{top_entity}' gắn liền với nền tảng vận hành ổn định và phân bổ nguồn lực trọng điểm." if not is_en else f"Performance of '{top_entity}' is anchored by consistent operational allocation.",
                 "status": "PARTIAL",
-                "status_label": "TÁC ĐỘNG THỨ CẤP" if not is_en else "SECONDARY DRIVER",
-                "confidence": 72,
-                "impact": 75,
-                "priority_score": 54,
+                "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                "rank": 2,
             },
-            {
-                "id": "H3",
-                "title": "Giả thuyết 3: Đột biến ngắn hạn do yếu tố ngẫu nhiên hoặc sai lệch ghi nhận dữ liệu" if not is_en else "Hypothesis 3: One-off anomaly or data logging distortion",
-                "evidence": "Dữ liệu kiểm toán 4 trụ cột xác nhận số liệu phân bổ thực chất, không có dấu hiệu trùng lặp hay sai lệch." if not is_en else "4-pillar audit confirms organic data distribution without artificial duplication.",
-                "status": "REJECTED",
-                "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                "confidence": 12,
-                "impact": 25,
-                "priority_score": 3,
-            }
         ]
         conclusion = (
-            f"Kết luận Kiểm định: Giả thuyết H1 có độ chính xác cao nhất (89%). Kết quả dẫn đầu của '{top_entity}' ({_fmt(max_val)}) phản ánh năng lực thực chất và cần được chuẩn hóa thành mốc chuẩn tham chiếu."
+            f"Kết luận từ dữ liệu: '{top_entity}' ghi nhận kết quả {_fmt(max_val)} trong phạm vi truy vấn và nên được giữ ổn định làm mốc chuẩn tham chiếu."
             if not is_en else
-            f"Diagnostic Conclusion: Hypothesis H1 holds the highest confidence (89%). '{top_entity}' ({_fmt(max_val)}) reflects organic leadership and serves as the primary benchmark."
+            f"Data Conclusion: '{top_entity}' recorded {_fmt(max_val)} within the queried scope and serves as the primary operational benchmark."
         )
         summary_takeaway = (
             f"Kết luận chính: {top_entity} dẫn đầu ở mức {_fmt(max_val)}; nên giữ ổn định nguồn hàng/chất lượng và dùng làm mốc chuẩn tham chiếu."
@@ -6156,10 +6397,8 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 ),
                 "evidence": ev_h1_vi if not is_en else ev_h1_en,
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (NGUYÊN NHÂN GỐC #1)" if not is_en else "CONFIRMED (ROOT CAUSE #1)",
-                "confidence": 96,
-                "impact": 95,
-                "priority_score": 91,
+                "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                "rank": 1,
             },
             {
                 "id": "H2",
@@ -6170,36 +6409,16 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 ),
                 "evidence": ev_h2_vi if not is_en else ev_h2_en,
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (CÂN BẰNG ĐÃI NGỘ)" if not is_en else "CONFIRMED (ESG PARITY)",
-                "confidence": 94,
-                "impact": 88,
-                "priority_score": 83,
+                "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                "rank": 2,
             },
-            {
-                "id": "H3",
-                "title": (
-                    "Giả thuyết 3: Tồn tại rào cản phân biệt đãi ngộ (Gender Pay Gap) làm lệch tỷ trọng quỹ lương"
-                    if not is_en else
-                    "Hypothesis 3: Systemic gender pay discrimination causing payroll share disparity"
-                ),
-                "evidence": (
-                    "Bị bác bỏ hoàn toàn bởi dữ liệu kiểm toán: Tỷ trọng quỹ lương tương ứng 1:1 với quy mô nhân sự, không tồn tại bất bình đẳng thu nhập trên từng cá nhân."
-                    if not is_en else
-                    "Completely refuted by audit data: Payroll share scales 1:1 with headcount, with zero per-capita compensation discrimination."
-                ),
-                "status": "REJECTED",
-                "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                "confidence": 6,
-                "impact": 20,
-                "priority_score": 1,
-            }
         ]
         conclusion = (
-            f"Kết luận Kiểm định: Giả thuyết H1 (96%) và H2 (94%) được xác nhận. Việc nhóm '{top_entity}' chiếm {top_share:.2f}% tổng quỹ lương ({_fmt(max_val)}) so với {bot_share:.2f}% của '{bot_entity}' ({_fmt(min_val)}) hoàn toàn do quy mô số lượng nhân sự ({top_hc_val:,} vs {bot_hc_val:,} người), trong khi mức lương bình quân cá nhân đạt trạng thái bình đẳng giới tuyệt đối."
+            f"Kết luận từ dữ liệu: Việc nhóm '{top_entity}' chiếm {top_share:.2f}% tổng quỹ lương ({_fmt(max_val)}) so với {bot_share:.2f}% của '{bot_entity}' ({_fmt(min_val)}) phản ánh trực tiếp quy mô số lượng nhân sự ({top_hc_val:,} vs {bot_hc_val:,} người), trong khi mức lương bình quân cá nhân giữa hai nhóm là tương đương."
             if (not is_en and top_hc_val is not None) else (
-                f"Kết luận Kiểm định: Giả thuyết H1 (96%) và H2 (94%) được xác nhận. Sự khác biệt quy mô giữa '{top_entity}' ({top_share:.2f}%) và '{bot_entity}' ({bot_share:.2f}%) phản ánh tỷ lệ định biên nhân sự, trong khi chính sách đãi ngộ cá nhân hoàn toàn công bằng."
+                f"Kết luận từ dữ liệu: Sự khác biệt quy mô giữa '{top_entity}' ({top_share:.2f}%) và '{bot_entity}' ({bot_share:.2f}%) phản ánh tỷ lệ định biên nhân sự, trong khi mức đãi ngộ bình quân cá nhân không có chênh lệch đáng kể."
                 if not is_en else
-                f"Diagnostic Conclusion: H1 (96%) and H2 (94%) confirmed. The {top_share:.2f}% vs {bot_share:.2f}% split between '{top_entity}' and '{bot_entity}' reflects workforce headcount size rather than pay disparity, with per-capita compensation achieving strict ESG parity."
+                f"Data Conclusion: The {top_share:.2f}% vs {bot_share:.2f}% split between '{top_entity}' and '{bot_entity}' reflects workforce headcount size rather than per-capita pay disparity."
             )
         )
         summary_takeaway = (
@@ -6252,45 +6471,23 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                         f"Tested across {len(df)} periods: Scale expanded from {bot_entity} ({_fmt(min_val)}) to peak at {top_entity} ({_fmt(max_val)}, {gap_ratio_fmt}x higher), surpassing the period mean of {_fmt(mean_val)}."
                     ),
                     "status": "CONFIRMED",
-                    "status_label": "ĐÃ KIỂM CHỨNG (NGUYÊN NHÂN GỐC #1)" if not is_en else "CONFIRMED (ROOT CAUSE #1)",
-                    "confidence": 95,
-                    "impact": 94,
-                    "priority_score": 89,
+                    "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                    "rank": 1,
                 },
                 {
                     "id": "H2",
                     "title": h2_title_vi if not is_en else h2_title_en,
                     "evidence": h2_ev_vi if not is_en else h2_ev_en,
                     "status": "CONFIRMED",
-                    "status_label": "ĐÃ KIỂM CHỨNG (ĐỒNG TÁC ĐỘNG #2)" if not is_en else "CONFIRMED (CO-DRIVER #2)",
-                    "confidence": 88,
-                    "impact": 84,
-                    "priority_score": 74,
+                    "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                    "rank": 2,
                 },
-                {
-                    "id": "H3",
-                    "title": (
-                        "Giả thuyết 3: Suy thoái hoạt động kinh doanh hoặc cắt giảm lương hàng loạt trong kỳ cuối"
-                        if not is_en else
-                        "Hypothesis 3: Systemic business contraction or across-the-board salary cuts"
-                    ),
-                    "evidence": (
-                        "Bị bác bỏ hoàn toàn bởi dữ liệu kiểm toán: Mức đãi ngộ bình quân cá nhân vẫn duy trì đà tăng trưởng dương liên tục qua các năm, không có hiện tượng cắt giảm thu nhập."
-                        if not is_en else
-                        "Refuted by audit data: Per-capita average compensation maintained positive year-over-year growth with zero wage reduction."
-                    ),
-                    "status": "REJECTED",
-                    "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                    "confidence": 8,
-                    "impact": 20,
-                    "priority_score": 2,
-                }
             ]
             conclusion = (
-                f"Kết luận Kiểm định: Giả thuyết H1 (95%) và H2 (88%) được xác nhận. Quá trình tăng trưởng từ {bot_entity} ({_fmt(min_val)}) lên đỉnh {top_entity} ({_fmt(max_val)}) là kết quả của việc mở rộng quy mô nhân sự và tích lũy thâm niên qua từng năm"
-                + (", còn sự sụt giảm tổng quỹ lương năm 2002 thuần túy do kỳ dữ liệu chỉ ghi nhận 8 tháng đầu năm." if (has_2002_cutoff and is_money) else ".")
+                f"Kết luận từ dữ liệu: Quá trình tăng trưởng từ {bot_entity} ({_fmt(min_val)}) lên đỉnh {top_entity} ({_fmt(max_val)}) gắn với việc mở rộng quy mô nhân sự và tích lũy thâm niên qua từng năm"
+                + (", còn sự sụt giảm tổng quỹ lương năm 2002 do kỳ dữ liệu chỉ ghi nhận 8 tháng đầu năm." if (has_2002_cutoff and is_money) else ".")
                 if not is_en else
-                f"Diagnostic Conclusion: H1 (95%) and H2 (88%) confirmed. Growth from {bot_entity} ({_fmt(min_val)}) to peak {top_entity} ({_fmt(max_val)}) reflects multi-year workforce expansion and tenure compounding."
+                f"Data Conclusion: Growth from {bot_entity} ({_fmt(min_val)}) to peak {top_entity} ({_fmt(max_val)}) reflects multi-year workforce expansion and tenure compounding."
             )
             summary_takeaway = (
                 f"Kết luận chính: Cao điểm ở {top_entity} ({_fmt(max_val)}) gấp {gap_ratio_fmt} lần mức thấp nhất {bot_entity} ({_fmt(min_val)}), cho thấy biến động rõ rệt theo thời gian cần chủ động kế hoạch chuẩn bị."
@@ -6320,7 +6517,6 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 if not is_en else
                 f"Diagnosing multi-period performance variance across {ent_plural_en} (Peak: {top_entity} at {_fmt(max_val)} vs Trough: {bot_entity} at {_fmt(min_val)}, Volatility CV = {cv_pct:,.1f}%)"
             )
-            conf_h1 = min(94, max(78, int(65 + min(cv_pct, 30))))
             branches = [
                 {
                     "id": "H1",
@@ -6335,10 +6531,8 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                         f"Tested across {len(df)} periodic observations: {top_entity} reached {_fmt(max_val)}, {gap_ratio_fmt}x higher than {bot_entity} ({_fmt(min_val)}), and outpaced the portfolio mean ({_fmt(mean_val)}/record) by +{((max_val - mean_val)/mean_val*100) if mean_val else 0:,.1f}%."
                     ),
                     "status": "CONFIRMED",
-                    "status_label": "ĐÃ KIỂM CHỨNG (ƯU TIÊN #1)" if not is_en else "CONFIRMED (PRIORITY #1)",
-                    "confidence": conf_h1,
-                    "impact": 90,
-                    "priority_score": int(conf_h1 * 0.9),
+                    "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                    "rank": 1,
                 },
                 {
                     "id": "H2",
@@ -6353,34 +6547,14 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                         f"Trend across periods demonstrates noticeable divergence in market responsiveness across operating units, reflecting customer portfolio differences."
                     ),
                     "status": "PARTIAL",
-                    "status_label": "ĐỒNG TÁC ĐỘNG (ƯU TIÊN #2)" if not is_en else "CO-DRIVER (PRIORITY #2)",
-                    "confidence": 74,
-                    "impact": 78,
-                    "priority_score": 58,
+                    "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                    "rank": 2,
                 },
-                {
-                    "id": "H3",
-                    "title": (
-                        "Giả thuyết 3: Suy thoái cơ cấu mang tính hệ thống trên toàn bộ danh mục hoạt động"
-                        if not is_en else
-                        "Hypothesis 3: Systemic structural decline across all operational units"
-                    ),
-                    "evidence": (
-                        f"Mức bình quân toàn chuỗi vẫn duy trì ở mức {_fmt(mean_val)} (tổng giá trị {len(df)} quan sát đạt {_fmt(total_val)}), bác bỏ nguy cơ suy thoái trên diện rộng."
-                        if not is_en else
-                        f"Portfolio baseline remained stable at {_fmt(mean_val)} (cumulative {_fmt(total_val)} across {len(df)} records), refuting systemic downturn."
-                    ),
-                    "status": "REJECTED",
-                    "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                    "confidence": 18,
-                    "impact": 35,
-                    "priority_score": 6,
-                }
             ]
             conclusion = (
-                f"Kết luận Kiểm định: Giả thuyết H1 (Độ tin cậy {conf_h1}%) được xác nhận. Kết quả dẫn đầu của {top_entity} ({_fmt(max_val)}) phản ánh khả năng tận dụng thời điểm vàng tối ưu, trong khi khoảng cách gấp {gap_ratio_fmt} lần so với {bot_entity} ({_fmt(min_val)}) đòi hỏi chiến lược tái phân bổ nguồn lực và hỗ trợ kích cầu trọng điểm."
+                f"Kết luận từ dữ liệu: Kết quả dẫn đầu của {top_entity} ({_fmt(max_val)}) vượt xa {bot_entity} ({_fmt(min_val)}, gấp {gap_ratio_fmt} lần) cho thấy chênh lệch rõ rệt theo chu kỳ thời gian và cần tái phân bổ nguồn lực hỗ trợ nhóm thấp hơn."
                 if not is_en else
-                f"Diagnostic Conclusion: Hypothesis H1 (Confidence {conf_h1}%) confirmed. Outperformance by {top_entity} ({_fmt(max_val)}) reflects superior cycle capture, while the {gap_ratio_fmt}x spread over {bot_entity} ({_fmt(min_val)}) warrants targeted commercial support."
+                f"Data Conclusion: Outperformance by {top_entity} ({_fmt(max_val)}) creates a {gap_ratio_fmt}x spread over {bot_entity} ({_fmt(min_val)}), reflecting cyclical variance and warranting targeted commercial support."
             )
             summary_takeaway = (
                 f"Kết luận chính: Cao điểm ở {top_entity} ({_fmt(max_val)}) gấp {gap_ratio_fmt} lần mức thấp nhất {bot_entity} ({_fmt(min_val)}), cho thấy biến động rõ rệt theo thời gian cần chủ động kế hoạch chuẩn bị."
@@ -6393,43 +6567,28 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 if not is_en else
                 f"Diagnosing time-series volatility drivers (Peak period: {top_entity} at {_fmt(max_val)} vs Trough period: {bot_entity} at {_fmt(min_val)}, CV = {cv_pct:,.1f}%)"
             )
-            conf_h1 = min(94, max(78, int(65 + min(cv_pct, 30))))
             branches = [
                 {
                     "id": "H1",
                     "title": "Giả thuyết 1: Tính chu kỳ mùa vụ (Seasonality) & điểm rơi chiến dịch thúc đẩy kỳ cao điểm" if not is_en else "Hypothesis 1: Seasonal cycles & campaign timing driving peak period surges",
                     "evidence": f"Kiểm định trên {len(df)} mốc thời gian: Kỳ đạt đỉnh tại '{top_entity}' ({_fmt(max_val)}) cao gấp {gap_ratio_fmt} lần so với kỳ chạm đáy '{bot_entity}' ({_fmt(min_val)}), vượt mức trung bình chu kỳ ({_fmt(mean_val)}/kỳ) tới +{((max_val - mean_val)/mean_val*100) if mean_val else 0:,.1f}%." if not is_en else f"Tested across {len(df)} periods: Peak at '{top_entity}' ({_fmt(max_val)}) is {gap_ratio_fmt}x higher than trough '{bot_entity}' ({_fmt(min_val)}).",
                     "status": "CONFIRMED",
-                    "status_label": "ĐÃ KIỂM CHỨNG (ƯU TIÊN #1)" if not is_en else "CONFIRMED (PRIORITY #1)",
-                    "confidence": conf_h1,
-                    "impact": 90,
-                    "priority_score": int(conf_h1 * 0.9),
+                    "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                    "rank": 1,
                 },
                 {
                     "id": "H2",
                     "title": "Giả thuyết 2: Hiệu ứng dồn nhu cầu vào giai đoạn cao điểm và chững lại ở kỳ kế tiếp" if not is_en else "Hypothesis 2: Post-peak demand pull-forward and cyclical cooldown",
                     "evidence": f"Xu hướng đầu–cuối chuỗi thời gian biến động {growth_pct:+,.1f}% (từ {_fmt(first_val)} đến {_fmt(last_val)}), phản ánh nhịp độ phân bổ theo chu kỳ hoạt động." if not is_en else f"Start-to-end trajectory shifted {growth_pct:+,.1f}% ({_fmt(first_val)} to {_fmt(last_val)}), confirming cyclical pacing.",
                     "status": "PARTIAL",
-                    "status_label": "ĐỒNG TÁC ĐỘNG (ƯU TIÊN #2)" if not is_en else "CO-DRIVER (PRIORITY #2)",
-                    "confidence": 74,
-                    "impact": 78,
-                    "priority_score": 58,
+                    "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                    "rank": 2,
                 },
-                {
-                    "id": "H3",
-                    "title": "Giả thuyết 3: Suy giảm cấu trúc dài hạn qua các kỳ hoạt động" if not is_en else "Hypothesis 3: Structural long-term contraction across all periods",
-                    "evidence": f"Quy mô bình quân toàn chuỗi vẫn duy trì ở mức {_fmt(mean_val)}/kỳ (tổng lũy kế {len(df)} kỳ đạt {_fmt(total_val)}), bác bỏ giả thuyết suy thoái hệ thống." if not is_en else f"Period average maintained {_fmt(mean_val)}/period (cumulative {_fmt(total_val)}), ruling out systemic collapse.",
-                    "status": "REJECTED",
-                    "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                    "confidence": 18,
-                    "impact": 35,
-                    "priority_score": 6,
-                }
             ]
             conclusion = (
-                f"Kết luận Kiểm định: Giả thuyết H1 ({conf_h1}% chính xác) và H2 (74% chính xác) tồn tại song song. Biến động giữa kỳ đỉnh '{top_entity}' ({_fmt(max_val)}) và kỳ đáy '{bot_entity}' ({_fmt(min_val)}) mang tính chu kỳ thời gian rõ nét."
+                f"Kết luận từ dữ liệu: Biến động giữa kỳ đỉnh '{top_entity}' ({_fmt(max_val)}) và kỳ đáy '{bot_entity}' ({_fmt(min_val)}, gấp {gap_ratio_fmt} lần) mang tính chu kỳ theo thời gian (CV = {cv_pct:,.1f}%)."
                 if not is_en else
-                f"Diagnostic Conclusion: H1 ({conf_h1}% confidence) and H2 (74% confidence) co-exist, driven by cyclical seasonality between '{top_entity}' and '{bot_entity}'."
+                f"Data Conclusion: Variance between peak '{top_entity}' ({_fmt(max_val)}) and trough '{bot_entity}' ({_fmt(min_val)}, {gap_ratio_fmt}x spread) reflects clear periodic seasonality (CV = {cv_pct:,.1f}%)."
             )
             summary_takeaway = (
                 f"Kết luận chính: Cao điểm ở {top_entity} ({_fmt(max_val)}) gấp {gap_ratio_fmt} lần mức thấp nhất {bot_entity} ({_fmt(min_val)}), cho thấy biến động rõ rệt theo thời gian cần chủ động kế hoạch chuẩn bị."
@@ -6443,7 +6602,6 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             if not is_en else
             f"Diagnosing workforce staffing architecture between largest division ('{top_entity}': {_fmt(max_val)} staff) and leanest division ('{bot_entity}': {_fmt(min_val)} staff)"
         )
-        conf_h1 = 95
         if is_minmax_pair:
             ev_h1_vi = (
                 f"Kiểm định định lượng 2 cực định biên: Khối thực thi cốt lõi '{top_entity}' quy tụ {_fmt(max_val)} nhân sự, "
@@ -6489,10 +6647,8 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 ),
                 "evidence": ev_h1_vi if not is_en else ev_h1_en,
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (NGUYÊN NHÂN GỐC #1)" if not is_en else "CONFIRMED (ROOT CAUSE #1)",
-                "confidence": conf_h1,
-                "impact": 94,
-                "priority_score": 89,
+                "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                "rank": 1,
             },
             {
                 "id": "H2",
@@ -6503,34 +6659,14 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 ),
                 "evidence": ev_h2_vi if not is_en else ev_h2_en,
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (ĐỒNG TÁC ĐỘNG #2)" if not is_en else "CONFIRMED (CO-DRIVER #2)",
-                "confidence": 84,
-                "impact": 82,
-                "priority_score": 69,
+                "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                "rank": 2,
             },
-            {
-                "id": "H3",
-                "title": (
-                    f"Giả thuyết 3: Khối '{bot_entity}' bị suy giảm hiệu suất hoặc thiếu hụt biên chế trầm trọng"
-                    if not is_en else
-                    f"Hypothesis 3: '{bot_entity}' suffers from operational underperformance or severe understaffing"
-                ),
-                "evidence": (
-                    f"Bị bác bỏ hoàn toàn: Quy mô {_fmt(min_val)} nhân sự của '{bot_entity}' là chuẩn định biên tinh gọn của khối chức năng chuyên môn (G&A), hoàn toàn không phải yếu kém vận hành."
-                    if not is_en else
-                    f"Refuted by organizational audit: '{bot_entity}' headcount ({_fmt(min_val)}) reflects optimal G&A overhead control rather than operational underperformance."
-                ),
-                "status": "REJECTED",
-                "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                "confidence": 8,
-                "impact": 18,
-                "priority_score": 1,
-            }
         ]
         conclusion = (
-            f"Kết luận Kiểm định: Giả thuyết H1 (95%) và H2 (84%) được xác nhận. Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)} người) và '{bot_entity}' ({_fmt(min_val)} người) phản ánh cấu trúc tổ chức chuẩn mực: dồn nguồn lực cho khối tạo giá trị cốt lõi ('{top_entity}') và duy trì bộ máy quản trị/tài chính ('{bot_entity}') tinh gọn, hiệu năng cao."
+            f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)} người) và '{bot_entity}' ({_fmt(min_val)} người) phản ánh sự tập trung nhân sự ở khối tạo giá trị cốt lõi và bộ máy quản trị tinh gọn hơn."
             if not is_en else
-            f"Diagnostic Conclusion: H1 (95%) and H2 (84%) confirmed. The {gap_ratio_fmt}x headcount ratio between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) reflects healthy organizational design: concentrating talent in core delivery while keeping back-office G&A lean."
+            f"Data Conclusion: The {gap_ratio_fmt}x headcount ratio between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) reflects concentrating talent in core delivery while keeping back-office G&A lean."
         )
         summary_takeaway = (
             f"Kết luận chính: Nhân sự tập trung nhiều nhất ở khối trực tiếp ({top_entity}: {_fmt(max_val)} người) trong khi khối hỗ trợ ({bot_entity}: {_fmt(min_val)} người) được giữ tinh gọn."
@@ -6544,7 +6680,6 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             if not is_en else
             f"Diagnosing compensation allocation between leading cohort ('{top_entity}': {_fmt(max_val)}) and smallest cohort ('{bot_entity}': {_fmt(min_val)})"
         )
-        conf_h1 = min(95, max(82, int(72 + min(top_share * 0.4, 22))))
         if is_minmax_pair:
             ev_h1_vi = f"Kiểm định định lượng 2 cực: Nhóm '{top_entity}' đạt {_fmt(max_val)}, gấp {gap_ratio_fmt} lần (chênh lệch {_fmt(net_gap)}) so với nhóm '{bot_entity}' ({_fmt(min_val)})."
             ev_h1_en = f"Quantitative extreme-pair test: '{top_entity}' reaches {_fmt(max_val)}, standing {gap_ratio_fmt}x (spread of {_fmt(net_gap)}) above '{bot_entity}' ({_fmt(min_val)})."
@@ -6564,10 +6699,8 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 ),
                 "evidence": ev_h1_vi if not is_en else ev_h1_en,
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (ƯU TIÊN #1)" if not is_en else "CONFIRMED (PRIORITY #1)",
-                "confidence": conf_h1,
-                "impact": 92,
-                "priority_score": int(conf_h1 * 0.92),
+                "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                "rank": 1,
             },
             {
                 "id": "H2",
@@ -6582,34 +6715,14 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                     f"Group mean stands at {_fmt(mean_val)} with a Coefficient of Variation (CV) of {cv_pct:,.1f}%, reflecting functional specialization and span-of-control design."
                 ),
                 "status": "PARTIAL",
-                "status_label": "ĐỒNG TÁC ĐỘNG (ƯU TIÊN #2)" if not is_en else "CO-DRIVER (PRIORITY #2)",
-                "confidence": 78,
-                "impact": 80,
-                "priority_score": 62,
+                "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                "rank": 2,
             },
-            {
-                "id": "H3",
-                "title": (
-                    "Giả thuyết 3: Sai lệch do trùng lặp hồ sơ nhân sự hoặc lỗi hạch toán dữ liệu"
-                    if not is_en else
-                    "Hypothesis 3: Distortion from duplicate personnel records or payroll logging errors"
-                ),
-                "evidence": (
-                    f"Hệ thống kiểm định dữ liệu đã kiểm tra chéo {len(df)} nhóm dữ liệu: 100% bản ghi hợp lệ, không phát hiện trùng bản ghi hay dữ liệu bất hợp lý."
-                    if not is_en else
-                    f"Data Auditor cross-checked all {len(df)} cohorts: 100% valid records, zero duplicate join inflation."
-                ),
-                "status": "REJECTED",
-                "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                "confidence": 10,
-                "impact": 20,
-                "priority_score": 2,
-            }
         ]
         conclusion = (
-            f"Kết luận Kiểm định: Giả thuyết H1 ({conf_h1}% chính xác) kết hợp H2 (78%) phản ánh đúng bản chất quản trị. Khoảng cách giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) bắt nguồn từ cấu trúc định biên nhân sự và phân tầng ngạch bậc chuyên môn trong tổ chức."
+            f"Kết luận từ dữ liệu: Khoảng cách giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) bắt nguồn từ cấu trúc định biên nhân sự và phân tầng ngạch bậc chuyên môn (trung bình nhóm: {_fmt(mean_val)})."
             if not is_en else
-            f"Diagnostic Conclusion: Hypothesis H1 ({conf_h1}% confidence) and H2 (78%) explain the variance between '{top_entity}' and '{bot_entity}' via workforce staffing structure and functional grade mix."
+            f"Data Conclusion: The variance between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) reflects workforce staffing structure and functional grade mix (group mean: {_fmt(mean_val)})."
         )
         summary_takeaway = (
             f"Kết luận chính: Khoảng cách giữa {top_entity} ({_fmt(max_val)}) và {bot_entity} ({_fmt(min_val)}) phản ánh cơ cấu nhân sự và cấp bậc chuyên môn khác nhau giữa các bộ phận."
@@ -6618,18 +6731,18 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
         )
     else:
         # Phân tích xếp hạng / so sánh Thương mại (Sản phẩm, Thị trường, Đội ngũ, Nhân viên Kinh doanh)
+        nouns_comm = _get_diagnostic_entity_nouns(entity_type, label_col=str(label_col or ""), user_query=user_query)
         problem_stmt = (
-            f"Chẩn đoán sự phân hóa hiệu suất giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) trên tập {len(df)} thực thể khảo sát"
+            f"Chẩn đoán sự phân hóa hiệu suất giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) trên tập {len(df)} {nouns_comm['plural_vi']}"
             if not is_en else
-            f"Diagnosing performance dispersion between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) across {len(df)} analyzed entities"
+            f"Diagnosing performance dispersion between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) across {len(df)} analyzed items"
         )
-        conf_h1 = min(95, max(80, int(70 + min(top_share * 0.4, 25))))
         if is_minmax_pair:
-            ev_comm_h1_vi = f"Kiểm định định lượng 2 cực: Thực thể dẫn đầu '{top_entity}' đạt {_fmt(max_val)}, cao gấp {gap_ratio_fmt} lần (chênh lệch {_fmt(net_gap)}) so với '{bot_entity}' ({_fmt(min_val)})."
-            ev_comm_h1_en = f"Quantitative extreme-pair test: Leading entity '{top_entity}' reached {_fmt(max_val)}, standing {gap_ratio_fmt}x (spread of {_fmt(net_gap)}) above '{bot_entity}' ({_fmt(min_val)})."
+            ev_comm_h1_vi = f"Kiểm định định lượng 2 cực: {nouns_comm['leader_vi']} '{top_entity}' đạt {_fmt(max_val)}, cao gấp {gap_ratio_fmt} lần (chênh lệch {_fmt(net_gap)}) so với '{bot_entity}' ({_fmt(min_val)})."
+            ev_comm_h1_en = f"Quantitative extreme-pair test: {nouns_comm['leader_en']} '{top_entity}' reached {_fmt(max_val)}, standing {gap_ratio_fmt}x (spread of {_fmt(net_gap)}) above '{bot_entity}' ({_fmt(min_val)})."
         else:
-            top3_clause_vi = f"Top 3 đơn vị đầu bảng nắm giữ tới {top3_share:,.1f}% toàn hệ thống, " if len(df) >= 5 else ""
-            top3_clause_en = f"Top 3 entities control {top3_share:,.1f}% of total volume, " if len(df) >= 5 else ""
+            top3_clause_vi = f"Top 3 đầu bảng đóng góp tới {top3_share:,.1f}% toàn nhóm, " if len(df) >= 5 else ""
+            top3_clause_en = f"Top 3 items control {top3_share:,.1f}% of total volume, " if len(df) >= 5 else ""
             ev_comm_h1_vi = f"Kiểm định định lượng: Riêng '{top_entity}' chiếm {top_share:,.1f}% tổng quy mô khảo sát ({_fmt(max_val)} / {_fmt(total_val)}). {top3_clause_vi}gấp {gap_ratio_fmt} lần so với '{bot_entity}' ({_fmt(min_val)})."
             ev_comm_h1_en = f"Quantitative test: '{top_entity}' alone accounts for {top_share:,.1f}% ({_fmt(max_val)} / {_fmt(total_val)}). {top3_clause_en}standing {gap_ratio_fmt}x above '{bot_entity}' ({_fmt(min_val)})."
 
@@ -6665,10 +6778,8 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 "title": h1_title_vi if not is_en else h1_title_en,
                 "evidence": ev_comm_h1_vi if not is_en else ev_comm_h1_en,
                 "status": "CONFIRMED",
-                "status_label": "ĐÃ KIỂM CHỨNG (ƯU TIÊN #1)" if not is_en else "CONFIRMED (PRIORITY #1)",
-                "confidence": conf_h1,
-                "impact": 94,
-                "priority_score": int(conf_h1 * 0.94),
+                "status_label": "YẾU TỐ CHÍNH (#1)" if not is_en else "PRIMARY DRIVER (#1)",
+                "rank": 1,
             },
             {
                 "id": "H2",
@@ -6679,40 +6790,28 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                     f"Analyzed mean is {_fmt(mean_val)} with a Coefficient of Variation (CV) of {cv_pct:,.1f}%, confirming dispersion between '{top_entity}' and '{bot_entity}'."
                 ),
                 "status": "PARTIAL",
-                "status_label": "ĐỒNG TÁC ĐỘNG (ƯU TIÊN #2)" if not is_en else "CO-DRIVER (PRIORITY #2)",
-                "confidence": 76,
-                "impact": 80,
-                "priority_score": 61,
+                "status_label": "YẾU TỐ BỔ TRỢ (#2)" if not is_en else "SECONDARY DRIVER (#2)",
+                "rank": 2,
             },
-            {
-                "id": "H3",
-                "title": (
-                    "Giả thuyết 3: Sai lệch do lỗi ghi nhận dữ liệu hoặc thiếu hụt danh mục phân bổ"
-                    if not is_en else
-                    "Hypothesis 3: Distortion from data logging errors or unallocated records"
-                ),
-                "evidence": (
-                    f"Hệ thống kiểm định dữ liệu đã kiểm tra chéo {len(df)} dòng dữ liệu: 100% bản ghi hợp lệ, không phát hiện trùng bản ghi hay giá trị âm bất hợp lý."
-                    if not is_en else
-                    f"Data Auditor cross-checked all {len(df)} rows: 100% valid records, zero duplicate join inflation or corrupted entries."
-                ),
-                "status": "REJECTED",
-                "status_label": "BÁC BỎ QUA DATA" if not is_en else "REJECTED BY DATA",
-                "confidence": 14,
-                "impact": 25,
-                "priority_score": 4,
-            }
         ]
         conclusion = (
-            f"Kết luận Kiểm định: Ưu tiên xử lý theo Giả thuyết H1 (Độ chính xác {conf_h1}%, Điểm tác động {int(conf_h1 * 0.94)}/100) kết hợp H2 (76%). Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) phản ánh sự tập trung sức mua ở nhóm trọng tâm và độ chênh về hiệu quả khai thác thực tế."
+            f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) cho thấy sức mua tập trung mạnh vào nhóm đầu bảng và độ phân hóa rõ rệt giữa các mặt hàng (CV = {cv_pct:,.1f}%)."
             if not is_en else
-            f"Diagnostic Conclusion: Prioritize Hypothesis H1 ({conf_h1}% confidence, Impact Score {int(conf_h1 * 0.94)}/100) alongside H2 (76%). The {gap_ratio_fmt}x gap between '{top_entity}' and '{bot_entity}' stems from Pareto resource concentration and execution variance."
+            f"Data Conclusion: The {gap_ratio_fmt}x gap between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) stems from demand concentration in top performers and portfolio dispersion (CV = {cv_pct:,.1f}%)."
         )
         summary_takeaway = (
             f"Kết luận chính: Sức mua đang tập trung mạnh vào {top_entity} ({_fmt(max_val)}, gấp {gap_ratio_fmt} lần {bot_entity}); cần giữ đủ hàng nhóm bán chạy và cải thiện sức bán nhóm cuối bảng."
             if not is_en else
             f"Key Takeaway: Demand concentrates in {top_entity} ({_fmt(max_val)}, {gap_ratio_fmt}x above {bot_entity}); protect top-seller stock and lift lower performers."
         )
+
+    is_positive_subset_query = bool(
+        re.search(
+            r"(?:vượt\s+trên\s+mức\s+trung\s+bình|vượt\s+mức\s+trung\s+bình|trên\s+mức\s+trung\s+bình|cao\s+hơn\s+(?:mức\s+)?trung\s+bình|lớn\s+hơn\s+(?:mức\s+)?trung\s+bình|above\s+average|higher\s+than\s+average)",
+            q_low,
+        )
+        or (gap_ratio > 0 and gap_ratio < 1.35 and len(df) <= 4)
+    )
 
     return {
         "problem_statement": problem_stmt,
@@ -6731,6 +6830,10 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
         "bot_share": bot_share,
         "top3_share": top3_share,
         "cv_pct": cv_pct,
+        "n_rows": len(df),
+        "label_col": str(label_col or ""),
+        "user_query": user_query,
+        "is_positive_subset_query": is_positive_subset_query,
         "entity_type": entity_type,
         "is_time_series": is_time_series,
         "is_multi_entity_time_series": is_multi_entity_time_series,
@@ -6800,15 +6903,14 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
     prefix = "$" if is_money else ""
 
     def _fmt(v):
-        if is_count_metric:
-            return f"{int(round(v)):,}"
-        if is_money and is_vnd_primary:
-            return _format_insight_currency_impl(v, primary_col, is_count_metric=is_count_metric, force_vnd=True)
-        if abs(v) >= 100:
-            return f"{prefix}{v:,.0f}"
-        if abs(v - round(v)) < 1e-4:
-            return f"{prefix}{int(round(v)):,}"
-        return f"{prefix}{v:,.2f}"
+        return _format_diagnostic_metric_value(
+            v,
+            primary_col=primary_col,
+            is_money=is_money,
+            is_vnd_primary=is_vnd_primary,
+            is_count_metric=is_count_metric,
+            is_en=is_en,
+        )
 
     work_df = df[[unit_col, primary_col]].copy()
     work_df[primary_col] = pd.to_numeric(work_df[primary_col], errors="coerce")
@@ -6972,11 +7074,11 @@ def _build_distinct_execution_detail(
 
     branches = tree.get("branches", [])
     confirmed_or_partial = [b for b in branches if b.get("status") in ("CONFIRMED", "PARTIAL")]
-    confirmed_or_partial.sort(key=lambda x: (x.get("priority_score", 0), x.get("confidence", 0)), reverse=True)
+    confirmed_or_partial.sort(key=lambda x: x.get("rank", 99))
     h1 = confirmed_or_partial[0] if len(confirmed_or_partial) >= 1 else (branches[0] if branches else {})
     h2 = confirmed_or_partial[1] if len(confirmed_or_partial) >= 2 else (branches[1] if len(branches) >= 2 else {})
-    h1_id, h1_conf, h1_prio = h1.get("id", "H1"), h1.get("confidence", 80), h1.get("priority_score", 85)
-    h2_id, h2_conf = h2.get("id", "H2"), h2.get("confidence", 76)
+    h1_id = h1.get("id", "H1")
+    h2_id = h2.get("id", "H2")
 
     if unit_diag:
         u_name = unit_diag.get("unit_name", "")
@@ -7014,7 +7116,7 @@ def _build_distinct_execution_detail(
                     stat_line = f"**Quantitative Benchmark**: **{u_name}** ranks **#{u_rank}/{n_units}** at **{u_fmt}** (**{u_share:.1f}%** share), beating the company mean (**{u_mean_fmt}**) by **{u_vs_mean:+.1f}%**, with a **-{u_gap_top}** gap (**{u_pct_top:.1f}%** ratio) to #1 **{u_top_name}** (**{u_top_fmt}**){sec_str}."
                 else:
                     stat_line = f"**Quantitative Benchmark**: **{u_name}** ranks **#{u_rank}/{n_units}** at **{u_fmt}** (**{u_share:.1f}%** share), trailing the company mean (**{u_mean_fmt}**) by **{u_vs_mean:.1f}%** (**-{u_gap_mean}** deficit) and #1 **{u_top_name}** (**{u_top_fmt}**) by **-{u_gap_top}**{sec_str}."
-                steps_line = f"**14-Day Execution Steps**: (1) Audit top 20% core accounts/channels driving **{u_name}**; (2) Lock 100% safety stock & fulfillment SLA; (3) Remove immediate conversion bottlenecks identified under **{h1_id}** ({h1_conf}% accuracy)."
+                steps_line = f"**14-Day Execution Steps**: (1) Audit top 20% core accounts/channels driving **{u_name}**; (2) Lock 100% safety stock & fulfillment SLA; (3) Remove immediate conversion bottlenecks aligned with **{h1_id}**."
             else:
                 if u_rank == 1:
                     stat_line = f"**Số liệu đối chiếu**: **{u_name}** đứng **Hạng #1/{n_units}** toàn hệ thống với **{u_fmt}** (chiếm **{u_share:.1f}%** tổng quy mô **{u_tot_fmt}**), vượt chuẩn bình quân (**{u_mean_fmt}**) tới **{u_vs_mean:+.1f}%** và dẫn trước vị trí #2 **{u_sec_name}** (**{u_sec_fmt}**) khoảng cách **+{u_lead_sec}**{sec_str}."
@@ -7023,13 +7125,13 @@ def _build_distinct_execution_detail(
                 else:
                     stat_line = f"**Số liệu đối chiếu**: **{u_name}** xếp **Hạng #{u_rank}/{n_units}** với **{u_fmt}** (tỷ trọng **{u_share:.1f}%**), thấp hơn chuẩn bình quân (**{u_mean_fmt}**) là **{u_vs_mean:.1f}%** (hụt **-{u_gap_mean}**) và kém vị trí #1 **{u_top_name}** (**{u_top_fmt}**) tới **-{u_gap_top}**{sec_str}."
                 if entity_type == "product":
-                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Giữ đủ tồn kho an toàn không đứt hàng cho **{u_name}**; (2) Ưu tiên trưng bày ở vị trí dễ thấy tại quầy / kệ; (3) Theo dõi tỷ lệ đáp ứng đơn hàng theo căn cứ **{h1_id}** ({h1_conf}%)."
+                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Giữ đủ tồn kho an toàn không đứt hàng cho **{u_name}**; (2) Ưu tiên trưng bày ở vị trí dễ thấy tại quầy / kệ; (3) Theo dõi tỷ lệ đáp ứng đơn hàng theo yếu tố **{h1_id}**."
                 elif entity_type == "geo":
-                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Rà soát danh sách đại lý / khách hàng trọng điểm tại **{u_name}**; (2) Đối chiếu độ phủ các mặt hàng chủ lực so với **{u_top_name}**; (3) Khóa lịch đặt hàng đầu kỳ theo căn cứ **{h1_id}** ({h1_conf}%)."
+                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Rà soát danh sách đại lý / khách hàng trọng điểm tại **{u_name}**; (2) Đối chiếu độ phủ các mặt hàng chủ lực so với **{u_top_name}**; (3) Khóa lịch đặt hàng đầu kỳ theo yếu tố **{h1_id}**."
                 elif entity_type in ("team", "employee"):
-                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Rà soát 1-1 danh mục báo giá / đơn hàng lớn nhất của **{u_name}** trong tuần này; (2) Ưu tiên nguồn hàng và mức chiết khấu hợp lý cho khách hàng tiềm năng cao; (3) Tháo gỡ vướng mắc chốt đơn theo căn cứ **{h1_id}** ({h1_conf}%)."
+                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Rà soát 1-1 danh mục báo giá / đơn hàng lớn nhất của **{u_name}** trong tuần này; (2) Ưu tiên nguồn hàng và mức chiết khấu hợp lý cho khách hàng tiềm năng cao; (3) Tháo gỡ vướng mắc chốt đơn theo yếu tố **{h1_id}**."
                 else:
-                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Khoanh vùng 20% mặt hàng / khách hàng tạo ra 80% doanh thu tại **{u_name}**; (2) Ưu tiên đủ vốn và nguồn lực vận hành; (3) Xử lý dứt điểm nguyên nhân gốc **{h1_id}** (độ tin cậy {h1_conf}%)."
+                    steps_line = f"**Hướng dẫn triển khai (0–14 ngày)**: (1) Khoanh vùng 20% mặt hàng / khách hàng tạo ra 80% doanh thu tại **{u_name}**; (2) Ưu tiên đủ vốn và nguồn lực vận hành; (3) Xử lý dứt điểm điểm nghẽn theo yếu tố **{h1_id}**."
             return f"{stat_line}<br/>{steps_line}"
 
         elif idx == 1:
@@ -7043,12 +7145,12 @@ def _build_distinct_execution_detail(
                     steps_line = (
                         f"**30–90 Day Execution Steps**: (1) Break down the **+{u_next_delta}** target into weekly sprint quotas (**+{u_weekly_delta}/week**) assigned directly to sales rep **{u_name}**; "
                         f"(2) Deploy upsell and cross-sell scripts on high-conversion products for each deal; "
-                        f"(3) Conduct 1-on-1 field coaching anchored to **{h2_id}** ({h2_conf}% co-driver)."
+                        f"(3) Conduct 1-on-1 field coaching aligned with **{h2_id}**."
                     )
                 else:
                     steps_line = (
                         f"**30–90 Day Execution Steps**: (1) Break down the **+{u_next_delta}** incremental target into weekly sprint quotas (**+{u_weekly_delta}/week**); "
-                        f"(2) Launch tiered volume rebates & cross-sell bundles anchored to **{h2_id}** ({h2_conf}% co-driver); "
+                        f"(2) Launch tiered volume rebates & cross-sell bundles aligned with **{h2_id}**; "
                         f"(3) Track basket size (AOV) and reorder frequency bi-weekly."
                     )
             else:
@@ -7068,30 +7170,30 @@ def _build_distinct_execution_detail(
                     steps_line = (
                         f"**Hướng dẫn triển khai (30–90 ngày)**: (1) Thiết kế gói bán kèm ghép **{u_name}** với các mặt hàng biên lợi nhuận cao để nâng giá trị đơn hàng; "
                         f"(2) Áp dụng ưu đãi theo số lượng mua cho khách / đại lý nhập vượt mức **+{u_weekly_delta}/tuần**; "
-                        f"(3) Tối ưu khuyến mãi tại điểm bán theo nguyên nhân đồng tác động **{h2_id}** ({h2_conf}%)."
+                        f"(3) Tối ưu khuyến mãi tại điểm bán theo yếu tố **{h2_id}**."
                     )
                 elif entity_type == "geo":
                     steps_line = (
                         f"**Hướng dẫn triển khai (30–90 ngày)**: (1) Phân bổ mục tiêu tăng thêm **+{u_next_delta}** (**+{u_weekly_delta}/tuần**) xuống từng đại lý / điểm bán tại **{u_name}**; "
                         f"(2) Kích hoạt chương trình ưu đãi đặt hàng sớm và gói bán kèm theo khu vực; "
-                        f"(3) Mở rộng độ phủ điểm bán lẻ theo căn cứ **{h2_id}** ({h2_conf}%)."
+                        f"(3) Mở rộng độ phủ điểm bán lẻ theo yếu tố **{h2_id}**."
                     )
                 elif entity_type == "employee":
                     steps_line = (
                         f"**Hướng dẫn triển khai (30–90 ngày)**: (1) Chia nhỏ mục tiêu **+{u_next_delta}** thành định mức tuần (**+{u_weekly_delta}/tuần**) giao trực tiếp cho nhân sự **{u_name}**; "
                         f"(2) Áp dụng cách gợi ý mua thêm / bán kèm các mặt hàng chủ lực trên mỗi đơn hàng; "
-                        f"(3) Quản lý kèm cặp thực chiến 1-1 để nâng tỷ lệ chốt đơn theo căn cứ **{h2_id}** ({h2_conf}%)."
+                        f"(3) Quản lý kèm cặp thực chiến 1-1 để nâng tỷ lệ chốt đơn theo yếu tố **{h2_id}**."
                     )
                 elif entity_type == "team":
                     steps_line = (
                         f"**Hướng dẫn triển khai (30–90 ngày)**: (1) Chia nhỏ mục tiêu **+{u_next_delta}** thành định mức tuần (**+{u_weekly_delta}/tuần**) cho từng thành viên trong đội **{u_name}**; "
                         f"(2) Áp dụng cách gợi ý mua thêm / bán kèm các mặt hàng chủ lực trên mỗi đơn hàng; "
-                        f"(3) Kèm cặp thực tế để nâng tỷ lệ chốt đơn theo căn cứ **{h2_id}** ({h2_conf}%)."
+                        f"(3) Kèm cặp thực tế để nâng tỷ lệ chốt đơn theo yếu tố **{h2_id}**."
                     )
                 else:
                     steps_line = (
                         f"**Hướng dẫn triển khai (30–90 ngày)**: (1) Phân rã mục tiêu tăng thêm **+{u_next_delta}** thành định mức theo tuần (**+{u_weekly_delta}/tuần**) tại **{u_name}**; "
-                        f"(2) Triển khai gói đòn bẩy khuyến khích hiệu suất gắn với nguyên nhân **{h2_id}** ({h2_conf}%); "
+                        f"(2) Triển khai gói đòn bẩy khuyến khích hiệu suất gắn với yếu tố **{h2_id}**; "
                         f"(3) Đối soát tỷ lệ hoàn thành chỉ tiêu vào cuối mỗi tháng."
                     )
             return f"{stat_line}<br/>{steps_line}"
@@ -7173,13 +7275,13 @@ def _build_distinct_execution_detail(
                     steps_line = (
                         f"**Hướng dẫn chuẩn hóa & kiểm soát (Quý/Năm)**: (1) Chuẩn hóa cách tiếp cận khách hàng và danh mục sản phẩm của **#1 {u_top_name}** thành tài liệu hướng dẫn nội bộ; "
                         f"(2) Thiết lập cảnh báo tiến độ hàng tuần nếu kết quả của **{u_name}** lệch quá **±5%** so với đường chuẩn **{u_mean_fmt}**; "
-                        f"(3) Đồng bộ tiêu chí đánh giá từ **{h1_id}** ({h1_conf}%) & **{h2_id}** ({h2_conf}%) vào kế hoạch phát triển cá nhân."
+                        f"(3) Đồng bộ tiêu chí đánh giá từ **{h1_id}** & **{h2_id}** vào kế hoạch phát triển cá nhân."
                     )
                 else:
                     steps_line = (
                         f"**Hướng dẫn chuẩn hóa & kiểm soát (Quý/Năm)**: (1) Đóng gói quy trình đặt hàng, cơ cấu mặt hàng và tiêu chuẩn xử lý đơn hiệu quả nhất thành quy trình chuẩn; "
                         f"(2) Thiết lập cảnh báo tiến độ hàng tuần nếu kết quả của **{u_name}** lệch quá **±5%** so với đường chuẩn **{u_mean_fmt}**; "
-                        f"(3) Đồng bộ quy chuẩn quản lý từ **{h1_id}** ({h1_conf}%) & **{h2_id}** ({h2_conf}%) sang các kỳ kế hoạch tiếp theo."
+                        f"(3) Đồng bộ quy chuẩn quản lý từ **{h1_id}** & **{h2_id}** sang các kỳ kế hoạch tiếp theo."
                     )
             return f"{stat_line}<br/>{steps_line}"
 
@@ -7194,19 +7296,19 @@ def _build_distinct_execution_detail(
         sec_clause_en = f" (alongside **{sec_str}**{f', averaging **{aov_fmt}**' if aov_fmt else ''})" if sec_str else ""
         if idx == 0:
             if is_en:
-                stat_line = f"**Macro KPI Verification**: **{top_ent}** stands at **{top_v}**{sec_clause_en}, validated across 100% of qualifying records."
-                steps_line = f"**Execution Steps (0–30 Days)**: (1) Drill down **{top_ent}** (**{top_v}**) by product, channel, and order status; (2) Lock fulfillment SLAs and reduce canceled/invalid orders under **{h1_id}** ({h1_conf}% accuracy); (3) Track daily cash-flow & order conversion."
+                stat_line = f"**Macro KPI Verification**: **{top_ent}** stands at **{top_v}**{sec_clause_en}, validated across qualifying records."
+                steps_line = f"**Execution Steps (0–30 Days)**: (1) Drill down **{top_ent}** (**{top_v}**) by product, channel, and order status; (2) Lock fulfillment SLAs and reduce canceled/invalid orders aligned with **{h1_id}**; (3) Track daily cash-flow & order conversion."
             else:
-                stat_line = f"**Số liệu đối chiếu chỉ số tổng hợp**: **{top_ent}** ghi nhận **{top_v}**{sec_clause_vi}, đã được kiểm chứng toàn vẹn trên tập bản ghi hợp lệ."
-                steps_line = f"**Hướng dẫn triển khai (0–30 ngày)**: (1) Phân rã **{top_ent}** (**{top_v}**) theo từng Nhóm món/Sản phẩm, Kênh bán và Trạng thái đơn; (2) Khóa quy trình xử lý đơn theo căn cứ **{h1_id}** (độ chính xác {h1_conf}%) để giảm tỷ lệ hủy đơn; (3) Theo dõi sát tốc độ thu tiền và hoàn thành đơn hàng."
+                stat_line = f"**Số liệu đối chiếu chỉ số tổng hợp**: **{top_ent}** ghi nhận **{top_v}**{sec_clause_vi} trên tập bản ghi hợp lệ."
+                steps_line = f"**Hướng dẫn triển khai (0–30 ngày)**: (1) Phân rã **{top_ent}** (**{top_v}**) theo từng Nhóm món/Sản phẩm, Kênh bán và Trạng thái đơn; (2) Khóa quy trình xử lý đơn theo yếu tố **{h1_id}** để giảm tỷ lệ hủy đơn; (3) Theo dõi sát tốc độ thu tiền và hoàn thành đơn hàng."
             return f"{stat_line}<br/>{steps_line}"
         elif idx == 1:
             if is_en:
                 stat_line = f"**Unit Economics & Uplift Target**: Current baseline is **{top_v}**{f' at **{aov_fmt}**' if aov_fmt else ''}, targeting a **+15% expansion ({nxt_15})** in the next cycle."
-                steps_line = f"**Execution Steps (1–2 Quarters)**: (1) Launch combo bundling and cross-selling to lift average basket size{f' above **{aov_fmt}**' if aov_fmt else ''}; (2) Focus promotional spend on top-performing SKUs/channels per **{h2_id}** ({h2_conf}% co-driver); (3) Review weekly conversion pacing."
+                steps_line = f"**Execution Steps (1–2 Quarters)**: (1) Launch combo bundling and cross-selling to lift average basket size{f' above **{aov_fmt}**' if aov_fmt else ''}; (2) Focus promotional spend on top-performing SKUs/channels per **{h2_id}**; (3) Review weekly conversion pacing."
             else:
                 stat_line = f"**Hiệu suất đơn vị & Mục tiêu kỳ tới**: Đường cơ sở hiện tại đạt **{top_v}**{f' với hiệu suất **{aov_fmt}**' if aov_fmt else ''}, hướng tới mục tiêu tăng trưởng **+15% ({nxt_15})** trong chu kỳ tới."
-                steps_line = f"**Hướng dẫn triển khai (1–2 Quý)**: (1) Triển khai gói bán kèm / gợi ý mua thêm để nâng giá trị trung bình đơn hàng{f' vượt mốc **{aov_fmt}**' if aov_fmt else ''}; (2) Ưu tiên khuyến mãi cho các mặt hàng chủ lực theo giả thuyết **{h2_id}** ({h2_conf}%); (3) Đối soát mục tiêu tăng trưởng hàng tuần."
+                steps_line = f"**Hướng dẫn triển khai (1–2 Quý)**: (1) Triển khai gói bán kèm / gợi ý mua thêm để nâng giá trị trung bình đơn hàng{f' vượt mốc **{aov_fmt}**' if aov_fmt else ''}; (2) Ưu tiên khuyến mãi cho các mặt hàng chủ lực theo yếu tố **{h2_id}**; (3) Đối soát mục tiêu tăng trưởng hàng tuần."
             return f"{stat_line}<br/>{steps_line}"
         else:
             if is_en:
@@ -7217,29 +7319,54 @@ def _build_distinct_execution_detail(
                 steps_line = f"**Hướng dẫn triển khai (Chu kỳ Quý/Năm)**: (1) Chuẩn hóa quy trình ghi nhận doanh thu và đối soát đơn hàng hợp lệ; (2) Thiết lập bảng theo dõi phân rã tự động theo mặt hàng, kênh bán và khung giờ/ngày; (3) Áp dụng cảnh báo sớm khi tỷ lệ đơn hủy vượt ngưỡng."
             return f"{stat_line}<br/>{steps_line}"
 
+    n_rows_tree = int(tree.get("n_rows", 0) or 0)
+    nouns = _get_diagnostic_entity_nouns(
+        entity_type,
+        label_col=str(tree.get("label_col", "")),
+        user_query=str(tree.get("user_query", "")),
+    )
+    leader_vi = nouns["leader_vi"]
+    leader_en = nouns["leader_en"]
+    is_pos_subset = bool(tree.get("is_positive_subset_query", False))
+
     if idx == 0:
         if is_en:
-            stat_line = f"**Macro Benchmark**: Leading entity **{top_ent}** reaches **{top_v}** (**{top_sh:.1f}%** of total **{tot_v}**), compared to the system mean of **{mean_v}** and lowest entity **{bot_ent}** at **{bot_v}** (spread: **{net_gap_v}** • **{gap_ratio_v}x**)."
-            steps_line = f"**Execution Steps (0–30 Days)**: (1) Lock working capital & safety stock buffers for **{top_ent}** (**{top_v}**); (2) Prioritize resource allocation by **{h1_id}** ({h1_conf}% accuracy, Priority {h1_prio}/100); (3) Establish weekly cash-flow & fulfillment tracking."
+            stat_line = f"**Quantitative Benchmark**: {leader_en} **{top_ent}** reaches **{top_v}** (**{top_sh:.1f}%** of total **{tot_v}**), above the group average (**{mean_v}**) and **{gap_ratio_v}x** higher than **{bot_ent}** (**{bot_v}**, difference: **{net_gap_v}**)."
+            steps_line = f"**Execution Steps (0–30 Days)**: (1) Maintain safety stock and working capital for **{top_ent}** (**{top_v}**) to prevent stockouts; (2) Prioritize display and quick order fulfillment on primary channels; (3) Track weekly sales velocity and fulfillment rate."
         else:
-            stat_line = f"**Số liệu đối chiếu toàn cục**: Thực thể dẫn đầu **{top_ent}** đạt **{top_v}** (chiếm **{top_sh:.1f}%** tổng quy mô **{tot_v}**), vượt chuẩn bình quân hệ thống (**{mean_v}**) và gấp **{gap_ratio_v} lần** so với **{bot_ent}** (**{bot_v}**, chênh lệch tuyệt đối **{net_gap_v}**)."
-            steps_line = f"**Hướng dẫn triển khai (0–30 ngày)**: (1) Ưu tiên khóa hạn mức vốn lưu động và tồn kho đệm cho mũi nhọn **{top_ent}** (**{top_v}**); (2) Phân bổ nguồn lực trực tiếp theo giả thuyết trọng tâm **{h1_id}** (độ chính xác {h1_conf}%, điểm ưu tiên {h1_prio}/100); (3) Thiết lập cơ chế bảo vệ dòng tiền chủ lực hàng tuần."
+            stat_line = f"**Số liệu đối chiếu**: {leader_vi} **{top_ent}** đạt **{top_v}** (chiếm **{top_sh:.1f}%** trên tổng **{tot_v}**), cao hơn mức trung bình nhóm (**{mean_v}**) và gấp **{gap_ratio_v} lần** so với **{bot_ent}** (**{bot_v}**, chênh lệch **{net_gap_v}**)."
+            steps_line = f"**Hướng dẫn triển khai (0–30 ngày)**: (1) Đảm bảo đủ tồn kho và vốn nhập hàng cho **{top_ent}** (**{top_v}**) để không đứt hàng; (2) Ưu tiên trưng bày hoặc giới thiệu nổi bật trên kênh bán chính; (3) Theo dõi doanh thu và tốc độ bán thực tế hàng tuần."
         return f"{stat_line}<br/>{steps_line}"
     elif idx == 1:
         if is_en:
-            stat_line = f"**Portfolio & Variance Metrics**: Top-3 concentration stands at **{top3_sh:.1f}%** of total **{tot_v}**, with a **{net_gap_v}** gap between **{top_ent}** (**{top_v}**) and **{bot_ent}** (**{bot_v}** around baseline **{mean_v}**)."
-            steps_line = f"**Execution Steps (1–2 Quarters)**: (1) Deploy targeted growth incentives for mid-tier units near **{mean_v}**; (2) Activate cross-selling & commercial levers validated in **{h2_id}** ({h2_conf}% co-driver); (3) Narrow at least 30% of the below-benchmark variance within 90 days."
+            conc_clause_en = (
+                f"Top 3 items account for **{top3_sh:.1f}%** of total **{tot_v}**"
+                if n_rows_tree >= 5
+                else f"**{top_ent}** accounts for **{top_sh:.1f}%** of total **{tot_v}**"
+            )
+            stat_line = f"**Contribution & Spread**: {conc_clause_en}; the difference between highest (**{top_ent}**: **{top_v}**) and lowest in table (**{bot_ent}**: **{bot_v}**) is **{net_gap_v}** (group average: **{mean_v}**)."
+            steps_line = f"**Execution Steps (1–2 Quarters)**: (1) Promote cross-selling and combo offers for items near the **{mean_v}** average to diversify revenue; (2) Use basket bundles to lift average order value; (3) Review monthly sales balance across items."
         else:
-            stat_line = f"**Số liệu cấu trúc & phân hóa**: Nhóm dẫn đầu chiếm **{top3_sh:.1f}%** tổng quy mô (**{tot_v}**), biên độ chênh lệch giữa đỉnh (**{top_ent}**: **{top_v}**) và đáy (**{bot_ent}**: **{bot_v}**) là **{net_gap_v}** xoay quanh mốc chuẩn trung bình **{mean_v}**."
-            steps_line = f"**Hướng dẫn triển khai (1–2 Quý)**: (1) Bơm gói kích cầu có mục tiêu cho nhóm đơn vị tiệm cận chuẩn **{mean_v}** để tạo trụ cột thứ hai; (2) Kích hoạt đòn bẩy bán chéo/tối ưu quy trình theo giả thuyết đồng tác động **{h2_id}** ({h2_conf}%); (3) Đặt chỉ tiêu thu hẹp tối thiểu 30% khoảng hụt của nhóm dưới chuẩn trong 90 ngày tới."
+            conc_clause_vi = (
+                f"Top 3 đầu bảng chiếm **{top3_sh:.1f}%** tổng quy mô (**{tot_v}**)"
+                if n_rows_tree >= 5
+                else f"Riêng **{top_ent}** chiếm **{top_sh:.1f}%** tổng quy mô khảo sát (**{tot_v}**)"
+            )
+            stat_line = f"**Cơ cấu & độ chênh lệch**: {conc_clause_vi}; khoảng cách giữa mức cao nhất (**{top_ent}**: **{top_v}**) và mức thấp nhất trong bảng (**{bot_ent}**: **{bot_v}**) là **{net_gap_v}** (mức trung bình đạt **{mean_v}**)."
+            steps_line = f"**Hướng dẫn triển khai (1–2 Quý)**: (1) Đẩy mạnh bán kèm hoặc gợi ý mua thêm cho các mặt hàng quanh mức trung bình **{mean_v}** để tạo thêm nguồn thu ổn định; (2) Kết hợp gói ưu đãi theo đơn hàng nhằm nâng giá trị mỗi giao dịch; (3) Theo dõi sự đồng đều doanh thu giữa các mã hàng mỗi tháng."
         return f"{stat_line}<br/>{steps_line}"
     else:
         if is_en:
-            stat_line = f"**Governance & ROI Baseline**: System benchmark anchored at **{mean_v}** across **{tot_v}** total volume; lowest segment **{bot_ent}** (**{bot_v}**) requires margin & ROI audit under **{h1_id}** & **{h2_id}**."
-            steps_line = f"**Execution Steps ( Quarterly/Annual)**: (1) Audit net margin & operating cost of **{bot_ent}** (**{bot_v}**); (2) Replicate proven SOPs from **{top_ent}** (**{top_v}**) across all units; (3) Replace static flat targets with dynamic rolling KPIs."
+            stat_line = f"**Efficiency & Margin Review**: Group average stands at **{mean_v}** across **{tot_v}** total; review actual margin and turnover of **{bot_ent}** (**{bot_v}**) alongside **{top_ent}** (**{top_v}**)."
+            steps_line = f"**Execution Steps (Quarterly/Annual)**: (1) Compare net margin and holding cost of **{bot_ent}** (**{bot_v}**) and **{top_ent}** (**{top_v}**); (2) Apply proven sales practices across the catalog; (3) Adjust restock quantities dynamically by period demand."
         else:
-            stat_line = f"**Định chuẩn hiệu quả & lãi ròng**: Đường cơ sở toàn hệ thống neo tại mốc **{mean_v}** (trên tổng **{tot_v}**); nhóm cuối bảng **{bot_ent}** (**{bot_v}**) cần rà soát lãi ròng theo chuẩn **{h1_id}** & **{h2_id}**."
-            steps_line = f"**Hướng dẫn triển khai (Chu kỳ Quý/Năm)**: (1) Rà soát lãi ròng & chi phí duy trì tại **{bot_ent}** (**{bot_v}**) để quyết định ghép gói bán kèm hoặc điều chỉnh lại; (2) Nhân rộng quy trình chuẩn từ **{top_ent}** (**{top_v}**) toàn hệ thống; (3) Giao mục tiêu linh hoạt theo từng kỳ thay cho định mức cố định."
+            bot_role_clause = (
+                f"mặt hàng cùng nhóm dẫn đầu **{bot_ent}** đạt **{bot_v}**"
+                if is_pos_subset
+                else f"**{bot_ent}** đạt **{bot_v}**"
+            )
+            stat_line = f"**Đối chiếu hiệu quả & biên lợi nhuận**: Mức trung bình của tập dữ liệu đang ở **{mean_v}** (trên tổng **{tot_v}**); {bot_role_clause} cần được đối chiếu biên lợi nhuận và tốc độ xoay vòng vốn."
+            steps_line = f"**Hướng dẫn triển khai (Chu kỳ Quý/Năm)**: (1) Rà soát giá nhập, biên lợi nhuận và chi phí duy trì của **{bot_ent}** (**{bot_v}**) để tối ưu gói bán kèm hoặc định mức nhập; (2) Áp dụng cách trưng bày và tư vấn hiệu quả từ **{top_ent}** (**{top_v}**) cho các mã hàng khác; (3) Điều chỉnh lượng nhập hàng linh hoạt theo sức mua thực tế từng kỳ."
         return f"{stat_line}<br/>{steps_line}"
 
 
@@ -7275,52 +7402,44 @@ def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = 
     """
     branches = tree.get("branches", [])
     confirmed_or_partial = [b for b in branches if b.get("status") in ("CONFIRMED", "PARTIAL")]
-    confirmed_or_partial.sort(key=lambda x: (x.get("priority_score", 0), x.get("confidence", 0)), reverse=True)
+    confirmed_or_partial.sort(key=lambda x: x.get("rank", 99))
 
     h1 = confirmed_or_partial[0] if len(confirmed_or_partial) >= 1 else (branches[0] if branches else {})
     h2 = confirmed_or_partial[1] if len(confirmed_or_partial) >= 2 else (branches[1] if len(branches) >= 2 else {})
-    rejected = next((b for b in branches if b.get("status") == "REJECTED"), None)
 
     h1_id = h1.get("id", "H1")
-    h1_conf = h1.get("confidence", 90)
-    h1_imp = h1.get("impact", 92)
-    h1_prio = h1.get("priority_score", 85)
     h1_title = re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(h1.get("title", "")), flags=re.IGNORECASE).strip()
 
     h2_id = h2.get("id", "H2")
-    h2_conf = h2.get("confidence", 76)
     h2_title = re.sub(r"^(?:Giả thuyết\s*\d+|Hypothesis\s*\d+)\s*:\s*", "", str(h2.get("title", "")), flags=re.IGNORECASE).strip()
 
-    rej_id = rejected.get("id", "H3") if rejected else "H3"
-    rej_conf = rejected.get("confidence", 12) if rejected else 12
-
     if is_en:
-        gate_badge = f"DATA-VERIFIED STRATEGY GATE • Prioritized by {h1_id} ({h1_conf}% Accuracy • Impact {h1_prio}/100)"
+        gate_badge = f"DATA-GROUNDED STRATEGY • Focus: {h1_id} & {h2_id}"
         gate_summary = (
-            f"Recommendations below are unlocked ONLY after validating **{h1_id}** ({h1_title} — **{h1_conf}% confidence**) "
-            f"and co-driver **{h2_id}** (**{h2_conf}% confidence**), while ruling out **{rej_id}** ({rej_conf}%)."
+            f"Recommendations below are anchored to observed data patterns in **{h1_id}** ({h1_title}) "
+            f"and secondary driver **{h2_id}**."
         )
-        tag_h1 = f" `[Verified by {h1_id} • {h1_conf}% Accuracy]`"
-        tag_h2 = f" `[Verified by {h2_id} • {h2_conf}% Co-driver]`"
-        tag_sys = f" `[Governance Standard • {h1_id} & {h2_id}]`"
+        tag_h1 = f" `[Basis: {h1_id}]`"
+        tag_h2 = f" `[Basis: {h2_id}]`"
+        tag_sys = f" `[Data Summary • {h1_id} & {h2_id}]`"
         evid_pills = [
-            f"Verified: {h1_id} ({h1_conf}% accuracy)",
-            f"Co-driver: {h2_id} ({h2_conf}% accuracy)",
-            f"Standard: {h1_id} & {h2_id} Governance",
+            f"Basis: {h1_id} (Primary driver)",
+            f"Basis: {h2_id} (Secondary driver)",
+            f"Basis: Data summary ({h1_id} & {h2_id})",
         ]
     else:
-        gate_badge = f"CỔNG KIỂM CHỨNG GIẢ THUYẾT • Ưu tiên từ {h1_id} (Độ chính xác {h1_conf}% • Điểm ưu tiên {h1_prio}/100)"
+        gate_badge = f"CĂN CỨ PHÂN TÍCH DỮ LIỆU • Trọng tâm: {h1_id} & {h2_id}"
         gate_summary = (
-            f"Chiến lược dưới đây chỉ được kích hoạt sau khi kiểm chứng dữ liệu xác nhận **{h1_id}** (*{h1_title}* — **Độ chính xác {h1_conf}%**) "
-            f"và nguyên nhân đồng tác động **{h2_id}** (**{h2_conf}%**), đồng thời đã bác bỏ giả thuyết nhiễu **{rej_id}** ({rej_conf}%)."
+            f"Khuyến nghị bên dưới dựa trên dữ liệu thực tế ghi nhận từ **{h1_id}** (*{h1_title}*) "
+            f"và yếu tố bổ trợ **{h2_id}**."
         )
-        tag_h1 = f" `[Kiểm chứng từ {h1_id} • {h1_conf}% chính xác]`"
-        tag_h2 = f" `[Kiểm chứng từ {h2_id} • {h2_conf}% đồng tác động]`"
-        tag_sys = f" `[Chuẩn hóa Quản trị • {h1_id} & {h2_id}]`"
+        tag_h1 = f" `[Căn cứ: {h1_id}]`"
+        tag_h2 = f" `[Căn cứ: {h2_id}]`"
+        tag_sys = f" `[Tổng hợp dữ liệu • {h1_id} & {h2_id}]`"
         evid_pills = [
-            f"Căn cứ: {h1_id} ({h1_conf}% chính xác)",
-            f"Căn cứ: {h2_id} ({h2_conf}% đồng tác động)",
-            f"Căn cứ: Chuẩn Quản trị ({h1_id} & {h2_id})",
+            f"Căn cứ: {h1_id} (Yếu tố chính)",
+            f"Căn cứ: {h2_id} (Yếu tố bổ trợ)",
+            f"Căn cứ: Tổng hợp dữ liệu ({h1_id} & {h2_id})",
         ]
 
     # Xây dựng bộ nhãn Mục tiêu (Target Pill) & Đòn bẩy (Lever Pill) tách biệt khỏi câu văn
@@ -7371,17 +7490,18 @@ def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = 
                 f"Mục tiêu (+15%): {nxt_15_gate}",
             ]
     else:
+        is_pos_subset_pill = bool(tree.get("is_positive_subset_query", False))
         if is_en:
             target_pills = [
-                f"Anchor: {top_ent} ({top_v})",
-                f"Baseline Target: {mean_v}",
-                f"Focus Floor: {bot_ent} ({bot_v})",
+                f"Leader #1: {top_ent} ({top_v})",
+                f"Group Mean: {mean_v}",
+                f"Peer Benchmark: {bot_ent} ({bot_v})" if is_pos_subset_pill else f"Focus Floor: {bot_ent} ({bot_v})",
             ]
         else:
             target_pills = [
-                f"Mũi nhọn: {top_ent} ({top_v})",
-                f"Mốc chuẩn TB: {mean_v}",
-                f"Vùng cần nâng: {bot_ent} ({bot_v})",
+                f"Đứng đầu #1: {top_ent} ({top_v})",
+                f"Trung bình nhóm: {mean_v}",
+                f"Đối chiếu: {bot_ent} ({bot_v})" if is_pos_subset_pill else f"Cần cải thiện: {bot_ent} ({bot_v})",
             ]
 
     if is_ts:
@@ -7470,7 +7590,7 @@ def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = 
             clean_headline = re.sub(r"^[🔴🟡🟢\s•]+", "", raw_str).split(":")[0].replace("**", "").strip()
             body_part = ":".join(raw_str.split(":")[1:]).strip() if ":" in raw_str else raw_str
 
-        body_untagged = re.sub(r"`\[(?:Kiểm chứng từ|Verified by|Chuẩn hóa Quản trị|Governance Standard)[^\]]+\]`\s*:?\s*", "", body_part).strip()
+        body_untagged = re.sub(r"`\[(?:Kiểm chứng từ|Verified by|Chuẩn hóa Quản trị|Governance Standard|Căn cứ|Basis|Tổng hợp dữ liệu|Data Summary)[^\]]+\]`\s*:?\s*", "", body_part).strip()
         brief_verdict = _extract_clean_brief_action(body_untagged)
         distinct_detail = _build_distinct_execution_detail(
             idx=idx,
@@ -7493,7 +7613,7 @@ def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = 
             "detail_note": distinct_detail,
         })
 
-        if "Kiểm chứng từ H" in raw_str or "Verified by H" in raw_str or "Chuẩn hóa Quản trị" in raw_str:
+        if "Kiểm chứng từ H" in raw_str or "Verified by H" in raw_str or "Chuẩn hóa Quản trị" in raw_str or "Căn cứ: H" in raw_str or "Basis: H" in raw_str:
             tagged_actions.append(raw_str)
             continue
         tag_to_insert = tag_h1 if idx == 0 else (tag_h2 if idx == 1 else tag_sys)
@@ -7510,14 +7630,8 @@ def _attach_hypothesis_gate_and_tags(plan_dict: dict, tree: dict, is_en: bool = 
         "gate_summary": gate_summary,
         "h1_id": h1_id,
         "h1_title": h1_title,
-        "h1_confidence": h1_conf,
-        "h1_impact": h1_imp,
-        "h1_priority_score": h1_prio,
         "h2_id": h2_id,
         "h2_title": h2_title,
-        "h2_confidence": h2_conf,
-        "rejected_id": rej_id,
-        "rejected_confidence": rej_conf,
     }
     return plan_dict
 
@@ -7587,15 +7701,14 @@ def _generate_unit_scoped_lead_plan(
     prefix = "$" if is_money else ""
 
     def _fmt(v):
-        if is_count_metric:
-            return f"{int(round(v)):,}"
-        if is_money and is_vnd_primary:
-            return _format_insight_currency_impl(v, primary_col, is_count_metric=is_count_metric, force_vnd=True)
-        if abs(v) >= 100:
-            return f"{prefix}{v:,.0f}"
-        if abs(v - round(v)) < 1e-4:
-            return f"{prefix}{int(round(v)):,}"
-        return f"{prefix}{v:,.2f}"
+        return _format_diagnostic_metric_value(
+            v,
+            primary_col=primary_col,
+            is_money=is_money,
+            is_vnd_primary=is_vnd_primary,
+            is_count_metric=is_count_metric,
+            is_en=is_en,
+        )
 
     gap_to_mean = abs(u_val - mean_val)
     gap_to_mean_fmt = _fmt(gap_to_mean)
@@ -8456,6 +8569,16 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
             }
 
     # 3. TRƯỜNG HỢP KINH DOANH / THƯƠNG MẠI (PHÂN TÁCH RÕ: SẢN PHẨM SKU vs THỊ TRƯỜNG GEO vs ĐỘI BÁN HÀNG TEAM vs NHÂN VIÊN EMPLOYEE)
+    nouns_plan = _get_diagnostic_entity_nouns(
+        entity_type,
+        label_col=str(tree.get("label_col", "")),
+        user_query=user_query,
+    )
+    leader_vi_p = nouns_plan["leader_vi"]
+    leader_short_vi_p = nouns_plan["leader_short_vi"]
+    leader_en_p = nouns_plan["leader_en"]
+    is_pos_subset_plan = bool(tree.get("is_positive_subset_query", False))
+
     if is_minmax_pair:
         conc_comm_vi = f"Chênh lệch 2 cực ({top_ent} vs {bot_ent}): Gấp {gap_ratio_v} lần ({net_gap_v})"
         conc_comm_en = f"Extreme Pair Spread ({top_ent} vs {bot_ent}): {gap_ratio_v}x ({net_gap_v})"
@@ -8464,11 +8587,11 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
         top_contrib_vi = f"đạt **{top_v}** (gấp **{gap_ratio_v} lần** so với **{bot_ent}**)"
         top_contrib_en = f"at **{top_v}** (**{gap_ratio_v}x** above **{bot_ent}**)"
     else:
-        conc_comm_vi = f"Mức độ tập trung Top 3: Chiếm {top3_sh:.1f}% tổng quy mô" if n_rows >= 5 else f"Tỷ trọng dẫn đầu ({top_ent}): Chiếm {top_sh:.1f}% tổng quy mô"
-        conc_comm_en = f"Top-3 Concentration Risk: {top3_sh:.1f}% of total volume" if n_rows >= 5 else f"Leader Share ({top_ent}): {top_sh:.1f}% of total volume"
-        conc_act_vi = f"Nhóm Top 3 dẫn đầu đang chiếm tới **{top3_sh:.1f}%** tỷ trọng" if n_rows >= 5 else f"Thực thể dẫn đầu (**{top_ent}**) đang chiếm tới **{top_sh:.1f}%** tỷ trọng"
-        conc_act_en = f"Top 3 entities currently hold {top3_sh:.1f}% of total output" if n_rows >= 5 else f"Leading entity ('{top_ent}') currently holds {top_sh:.1f}% of total output"
-        top_contrib_vi = f"đạt **{top_v}**, đóng góp **{top_sh:.1f}%** toàn cục"
+        conc_comm_vi = f"Mức độ tập trung Top 3: Chiếm {top3_sh:.1f}% tổng quy mô" if n_rows >= 5 else f"{leader_vi_p} ({top_ent}): Chiếm {top_sh:.1f}% tổng quy mô"
+        conc_comm_en = f"Top-3 Concentration: {top3_sh:.1f}% of total volume" if n_rows >= 5 else f"{leader_en_p} ({top_ent}): {top_sh:.1f}% of total volume"
+        conc_act_vi = f"Top 3 đầu bảng đang chiếm tới **{top3_sh:.1f}%** tỷ trọng" if n_rows >= 5 else f"{leader_vi_p} (**{top_ent}**) đang chiếm **{top_sh:.1f}%** tỷ trọng"
+        conc_act_en = f"Top 3 items currently hold {top3_sh:.1f}% of total output" if n_rows >= 5 else f"{leader_en_p} ('{top_ent}') currently holds {top_sh:.1f}% of total output"
+        top_contrib_vi = f"đạt **{top_v}**, đóng góp **{top_sh:.1f}%** tổng quy mô"
         top_contrib_en = f"at **{top_v}**, contributing **{top_sh:.1f}%** of total volume"
 
     if persona == "ceo":
@@ -8484,21 +8607,26 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
                 "actions": [
                     f"**[Capital & Working Capital Prioritization]**: Protect inventory buffer and commercial budget for the top-performing core (**{top_ent}** {top_contrib_en}) to lock in primary cash flow.",
                     f"**[Portfolio Concentration De-risking]**: {conc_act_en}. Reallocate growth investments toward mid-tier segments near the **{mean_v}** benchmark to reduce single-point dependency.",
-                    f"**[Structural ROI & Margin Audit]**: Conduct a profitability and channel-cost audit on the lowest-volume segment (**{bot_ent}** at **{bot_v}**) to decide between bundling, repositioning, or SKU/channel rationalization."
+                    f"**[Structural ROI & Margin Audit]**: Conduct a profitability and channel-cost audit on **{bot_ent}** (**{bot_v}**) to optimize bundling, pricing, and inventory turnover."
                 ]
             }
+        act3_ceo_vi = (
+            f"**[Tối ưu biên lợi nhuận & định mức nhập hàng]**: Đối chiếu giá nhập, tiền lãi thực tế và tốc độ xoay vòng vốn của **{bot_ent}** (**{bot_v}**) cùng nhóm bán chạy để tối ưu chính sách nhập hàng và gói bán kèm."
+            if is_pos_subset_plan
+            else f"**[Đánh giá lãi ròng & cơ cấu lại danh mục]**: Kiểm tra lại tiền lãi thực tế và chi phí duy trì của **{bot_ent}** (đạt **{bot_v}**) để điều chỉnh giá, ghép gói bán kèm hoặc cơ cấu lại lượng nhập."
+        )
         return {
             "role_title": "CHỦ CỬA HÀNG / QUẢN LÝ CHUNG • TỔNG QUAN & PHÂN BỔ NGUỒN LỰC",
-            "role_focus": "Trọng tâm: Giữ nguồn thu ổn định, giảm rủi ro phụ thuộc một nhóm hàng và cân đối lãi ròng",
+            "role_focus": "Trọng tâm: Giữ nguồn thu ổn định, giảm rủi ro phụ thuộc một mã hàng và tối ưu biên lợi nhuận",
             "kpis": [
                 f"Quy mô khảo sát: {tot_v} (Trung bình: {mean_v})" if not is_minmax_pair else f"Biên độ 2 cực: {top_ent} ({top_v}) vs {bot_ent} ({bot_v})",
                 conc_comm_vi,
                 "Mục tiêu: Tối ưu biên lợi nhuận thêm +12% đến +18%"
             ],
             "actions": [
-                f"**[Giữ đủ hàng & vốn cho nhóm bán chạy]**: Ưu tiên đảm bảo tồn kho và vốn lưu động cho nhóm dẫn đầu (**{top_ent}** {top_contrib_vi}) để giữ vững dòng tiền chính của cửa hàng.",
-                f"**[Giảm rủi ro phụ thuộc vào một nguồn thu]**: {conc_act_vi}. Chủ cửa hàng / quản lý nên dành thêm nguồn lực đẩy nhóm tiệm cận mức trung bình **{mean_v}** để tạo thêm nguồn thu thứ hai.",
-                f"**[Đánh giá lãi ròng & cơ cấu lại danh mục]**: Kiểm tra lại tiền lãi thực tế và chi phí duy trì của nhóm cuối bảng (**{bot_ent}** đạt **{bot_v}**) để điều chỉnh giá, ghép gói bán kèm hoặc cắt giảm mặt hàng không hiệu quả."
+                f"**[Giữ đủ hàng & vốn cho mặt hàng chủ lực]**: Ưu tiên đảm bảo tồn kho và vốn lưu động cho {leader_short_vi_p} (**{top_ent}** {top_contrib_vi}) để giữ vững dòng tiền chính của cửa hàng.",
+                f"**[Phát triển đồng đều các nguồn thu chủ lực]**: {conc_act_vi}. Chủ cửa hàng / quản lý nên đẩy mạnh bán kèm cho các mặt hàng quanh mức trung bình **{mean_v}** để tạo thêm nguồn thu ổn định.",
+                act3_ceo_vi,
             ]
         }
 

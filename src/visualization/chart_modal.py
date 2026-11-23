@@ -17,7 +17,7 @@ from src.i18n import get_current_language, t
 # Module-level SVG icon helpers for recommendations and action items
 SVG_SLUMP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2.2" style="vertical-align:-1px;"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline><polyline points="17 18 23 18 23 12"></polyline></svg>'
 SVG_PEAK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.2" style="vertical-align:-1px;"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>'
-SVG_TARGET = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2.2" style="vertical-align:-1px;"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>'
+SVG_TARGET = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2.2" style="vertical-align:-1px;"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>'
 SVG_RANK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.2" style="vertical-align:-1px;"><circle cx="12" cy="8" r="7"></circle><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline></svg>'
 SVG_BOX = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="2.2" style="vertical-align:-1px;"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>'
 SVG_DOLLAR = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00DF8F" stroke-width="2.2" style="vertical-align:-1px;"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>'
@@ -44,8 +44,8 @@ def _clean_html_text(text: str) -> str:
     t = re.sub(r"\*\*(.*?)\*\*", lambda m: f"<b>{m.group(1)}</b>", t)
     # 2. Convert italic *text* or _text_ -> <i>\1</i>
     t = re.sub(r"\*(.*?)\*", lambda m: f"<i>{m.group(1)}</i>", t)
-    # 3. Convert inline code `text` -> <span style="color: #00F0FF; font-weight: 600;">\1</span>
-    t = re.sub(r"`(.*?)`", lambda m: f'<span style="color: #00F0FF; font-weight: 600;">{m.group(1)}</span>', t)
+    # 3. Convert inline code `text` -> <span style="color: #60A5FA; font-weight: 600;">\1</span>
+    t = re.sub(r"`(.*?)`", lambda m: f'<span style="color: #60A5FA; font-weight: 600;">{m.group(1)}</span>', t)
     # 4. Strip any dangling/stray markdown artifacts
     t = t.replace("**", "").replace("*", "").replace("`", "").replace("^", "")
     # 5. Fix spaces before punctuation like " ." -> "."
@@ -87,24 +87,44 @@ def _format_metric_val(val: float, metric_name: str = "") -> str:
         unit = "boxes" if is_en else "hộp"
         return f"{int(val):,} {unit}"
         
-    # 5. Currency (Sales, Revenue, Salary, Cost, Profit, Spread $)
-    is_currency = any(k in m_lower for k in ["sales", "doanh", "thu", "lương", "salary", "payroll", "amount", "cost", "giá", "$", "tiền", "profit", "lợi nhuận", "budget", "quỹ", "biên độ thay đổi", "tháng cao nhất", "tháng thấp nhất", "mức tăng"])
+    # 5. Vietnamese Currency (VND / đ)
+    is_vnd = (
+        any(k in m_lower for k in [
+            "(đ)", " đ", "vnđ", "vnd", "đồng", "doanh_thu", "doanh thu", "doanhthu",
+            "thanh_tien", "thành tiền", "thanhtien", "tong_tien", "tổng tiền",
+            "tien_nhap", "tiền nhập", "cong_no", "công nợ", "con_no", "còn nợ",
+            "da_thanh_toan", "đã thanh toán", "gia_ban", "giá bán", "gia_von", "giá vốn",
+            "don_gia", "đơn giá",
+        ])
+        and "$" not in m_lower
+        and "usd" not in m_lower
+    )
+    if is_vnd:
+        return f"{int(round(val)):,} đ"
+
+    # 6. USD / General Currency (Sales, Revenue, Salary, Cost, Profit, Spread $)
+    is_currency = any(k in m_lower for k in ["sales", "doanh số", "lương", "salary", "payroll", "amount", "cost", "giá", "$", "tiền", "profit", "lợi nhuận", "budget", "quỹ", "biên độ thay đổi", "tháng cao nhất", "tháng thấp nhất", "mức tăng"])
     prefix = "$" if is_currency and not any(k in m_lower for k in ["vnđ", "đồng", "%"]) else ""
     
     abs_v = abs(val)
     sign_prefix = "-" if val < 0 else ""
     if abs_v < 1e-9:
         return f"{prefix}0"
-    elif abs_v >= 1_000_000_000:
-        return f"{sign_prefix}{prefix}{abs_v/1_000_000_000:.2f}B"
-    elif abs_v >= 1_000_000:
-        return f"{sign_prefix}{prefix}{abs_v/1_000_000:.2f}M"
-    elif abs_v >= 1_000:
-        return f"{sign_prefix}{prefix}{abs_v/1_000:.1f}k"
-    elif isinstance(val, int) or (isinstance(val, float) and val.is_integer()):
-        return f"{sign_prefix}{prefix}{int(abs_v):,}"
+    elif prefix == "$":
+        if abs_v >= 1_000_000_000:
+            return f"{sign_prefix}{prefix}{abs_v/1_000_000_000:.2f}B"
+        elif abs_v >= 1_000_000:
+            return f"{sign_prefix}{prefix}{abs_v/1_000_000:.2f}M"
+        elif abs_v >= 1_000:
+            return f"{sign_prefix}{prefix}{abs_v/1_000:.1f}k"
+        elif isinstance(val, int) or (isinstance(val, float) and val.is_integer()):
+            return f"{sign_prefix}{prefix}{int(abs_v):,}"
+        else:
+            return f"{sign_prefix}{prefix}{abs_v:,.2f}"
     else:
-        return f"{sign_prefix}{prefix}{abs_v:,.2f}"
+        if isinstance(val, int) or (isinstance(val, float) and abs(val - round(val)) < 1e-6):
+            return f"{sign_prefix}{int(round(abs_v)):,}"
+        return f"{sign_prefix}{abs_v:,.1f}"
 
 
 def _get_effective_metric_and_label(
@@ -116,16 +136,34 @@ def _get_effective_metric_and_label(
     if df is None or df.empty:
         return None, None, None
 
-    q_low = str(user_query or "").lower()
-    cols_map = {str(c).lower(): c for c in df.columns}
+    valid_num_cols = [c for c in df.select_dtypes(include="number").columns if not is_id_like(c)]
 
-    # 1. Try extracting from Figure data traces if available
+    # 1. Try extracting from Figure data traces if available (including Pie / Donut charts!)
     fig_metric = None
     fig_label = None
     if fig is not None and hasattr(fig, "data") and len(fig.data) > 0:
         try:
             trace = fig.data[0]
-            if getattr(trace, "orientation", "") == "h":
+            t_type = getattr(trace, "type", "")
+            if t_type == "pie" or hasattr(trace, "values"):
+                t_vals = getattr(trace, "values", None)
+                if t_vals is not None and len(t_vals) == len(df):
+                    t_floats = [float(x) for x in t_vals]
+                    for nc in valid_num_cols:
+                        col_floats = pd.to_numeric(df[nc], errors="coerce").fillna(0.0).tolist()
+                        if len(col_floats) == len(t_floats) and all(abs(a - b) < 1e-3 for a, b in zip(t_floats, col_floats)):
+                            fig_metric = nc
+                            break
+                t_lbls = getattr(trace, "labels", None)
+                if t_lbls is not None and len(t_lbls) == len(df):
+                    t_strs = [str(x) for x in t_lbls]
+                    for c in df.columns:
+                        if c not in valid_num_cols:
+                            col_strs = df[c].astype(str).tolist()
+                            if col_strs == t_strs:
+                                fig_label = c
+                                break
+            elif getattr(trace, "orientation", "") == "h":
                 cand_x_name = getattr(trace, "name", None)
                 if hasattr(trace, "x") and hasattr(trace.x, "name") and trace.x.name in df.columns:
                     fig_metric = trace.x.name
@@ -145,10 +183,9 @@ def _get_effective_metric_and_label(
             pass
 
     measure_cols, cat_cols, time_col = get_axis_columns(df)
-    valid_num_cols = [c for c in df.select_dtypes(include="number").columns if not is_id_like(c)]
     cand_measures = measure_cols if measure_cols else valid_num_cols
 
-    # 2. High-priority analytical target column resolution (prevents picking H1 baseline instead of Improvement % or Spread $)
+    # 2. High-priority analytical target column resolution
     priority_metric = None
     # 2a. Monthly Revenue Spread / Volatility
     for c in cand_measures:
@@ -163,14 +200,26 @@ def _get_effective_metric_and_label(
             if any(k in c_low for k in ["tỷ lệ cải thiện", "mức độ cải thiện", "improvement_pct", "tổng tăng trưởng chuỗi", "tăng trưởng chuỗi (%"]):
                 priority_metric = c
                 break
-    # 2c. Query-aware primary insight column selector from heuristics
-    if not priority_metric and cand_measures and user_query:
+    # 2c. If fig_metric was explicitly matched from the plotted chart trace (e.g. Pie values or Bar trace), trust it!
+    if not priority_metric and fig_metric and fig_metric in df.columns and not is_id_like(fig_metric):
+        priority_metric = fig_metric
+    # 2d. Query-aware primary insight column selector from heuristics (fixed 2-argument call)
+    if not priority_metric and cand_measures:
         try:
-            prim_col, _ = select_primary_insight_columns(df, cand_measures, user_query)
+            prim_col, _ = select_primary_insight_columns(df, user_query=user_query)
             if prim_col and prim_col in df.columns and not is_id_like(prim_col):
                 priority_metric = prim_col
         except Exception:
             pass
+    # 2e. Prefer non-zero monetary/value columns (MetricSum, Doanh thu, Thành tiền, Revenue) over Count
+    if not priority_metric and len(cand_measures) > 1:
+        for c in cand_measures:
+            c_low = str(c).lower()
+            if any(k in c_low for k in ["metricsum", "doanh thu", "doanh_thu", "thành tiền", "thanh_tien", "tổng tiền", "tong_tien", "revenue", "sales", "amount", "lương", "salary", "payroll", "công nợ", "cong_no"]):
+                s_num = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+                if s_num.abs().sum() > 0:
+                    priority_metric = c
+                    break
 
     if priority_metric and priority_metric in df.columns:
         main_metric = priority_metric
@@ -184,38 +233,147 @@ def _get_effective_metric_and_label(
     if not main_metric or main_metric not in df.columns:
         return None, None, None
 
-    # 3. Determine label column (prioritize primary entity names over auxiliary metadata/date columns)
-    aux_text_keywords = [
-        "trạng thái", "xu hướng", "chi tiết", "các tháng", "chuỗi", "đạt đỉnh",
-        "chạm đáy", "ngày mở bán", "first_sale", "status", "trend", "note", "ghi chú"
-    ]
-    entity_keywords = [
-        "salesperson", "nhân viên", "employee", "manager", "product", "sản phẩm",
-        "team", "nhóm", "đội", "country", "quốc gia", "thị trường", "dept",
-        "department", "phòng", "title", "chức danh", "customer", "khách hàng", "name", "tên"
-    ]
+    # 3. Determine label column
     all_non_num = [c for c in df.columns if c != main_metric and not is_id_like(c) and c not in valid_num_cols]
-    primary_entity_cols = [
-        c for c in all_non_num
-        if any(k in str(c).lower() for k in entity_keywords)
-        and not any(ak in str(c).lower() for ak in aux_text_keywords)
-    ]
-
-    if primary_entity_cols:
-        label_col = primary_entity_cols[0]
-    elif fig_label and fig_label in df.columns and fig_label != main_metric and not any(ak in str(fig_label).lower() for ak in aux_text_keywords):
-        label_col = fig_label
-    elif time_col and time_col != main_metric and not any(ak in str(time_col).lower() for ak in aux_text_keywords):
-        label_col = time_col
-    elif cat_cols:
-        clean_cats = [c for c in cat_cols if not any(ak in str(c).lower() for ak in aux_text_keywords)]
-        label_col = clean_cats[0] if clean_cats else cat_cols[0]
+    if len(all_non_num) == 1:
+        label_col = all_non_num[0]
     else:
-        other_cols = [c for c in df.columns if c != main_metric and not is_id_like(c)]
-        label_col = other_cols[0] if other_cols else (df.columns[0] if len(df.columns) > 1 else None)
+        aux_text_keywords = [
+            "xu hướng", "chi tiết", "các tháng", "chuỗi", "đạt đỉnh",
+            "chạm đáy", "ngày mở bán", "first_sale", "trend", "note", "ghi chú"
+        ]
+        entity_keywords = [
+            "salesperson", "nhân viên", "employee", "manager", "product", "sản phẩm",
+            "thuốc", "món", "vật liệu", "kênh", "channel", "thanh toán", "payment",
+            "team", "nhóm", "đội", "country", "quốc gia", "thị trường", "dept",
+            "department", "phòng", "title", "chức danh", "customer", "khách hàng",
+            "nhà cung cấp", "supplier", "name", "tên"
+        ]
+        primary_entity_cols = [
+            c for c in all_non_num
+            if any(k in str(c).lower() for k in entity_keywords)
+            and not any(ak in str(c).lower() for ak in aux_text_keywords)
+        ]
+
+        if fig_label and fig_label in df.columns and fig_label != main_metric:
+            label_col = fig_label
+        elif primary_entity_cols:
+            label_col = primary_entity_cols[0]
+        elif time_col and time_col != main_metric and not any(ak in str(time_col).lower() for ak in aux_text_keywords):
+            label_col = time_col
+        elif cat_cols:
+            clean_cats = [c for c in cat_cols if not any(ak in str(c).lower() for ak in aux_text_keywords)]
+            label_col = clean_cats[0] if clean_cats else cat_cols[0]
+        else:
+            other_cols = [c for c in df.columns if c != main_metric and not is_id_like(c)]
+            label_col = other_cols[0] if other_cols else (df.columns[0] if len(df.columns) > 1 else None)
 
     val_series = pd.to_numeric(df[main_metric], errors="coerce").dropna()
     return main_metric, label_col, val_series
+
+
+def _resolve_dimension_entity_info(
+    df: Optional[pd.DataFrame],
+    title: str,
+    user_query: str,
+    label_col: Optional[str],
+    is_en: bool = False,
+) -> tuple[str, str, str, str]:
+    """Classify the chart's dimension into a precise semantic kind and return
+    (entity_kind, unit_plural_vi, unit_singular_vi, unit_plural_en)."""
+    t_low = f"{title or ''} {user_query or ''}".lower()
+    l_low = str(label_col or "").lower()
+    combined = f"{t_low} {l_low}"
+
+    sample_vals: list[str] = []
+    if df is not None and not df.empty and label_col and label_col in df.columns:
+        sample_vals = [str(v).strip().lower() for v in df[label_col].dropna().head(12)]
+    vals_blob = " ".join(sample_vals)
+
+    # 1. Time Series
+    if (label_col and df is not None and label_col in df.columns and _is_time_column(label_col, df[label_col])) or any(
+        k in l_low for k in ["ngày", "tháng", "năm", "quý", "date", "month", "year", "quarter", "timeperiod", "weekday"]
+    ):
+        if "ngày" in combined or "daily" in combined or "date" in l_low:
+            return "time_series", "ngày", "ngày", "days"
+        if "tháng" in combined or "month" in combined:
+            return "time_series", "tháng", "tháng", "months"
+        if "năm" in combined or "year" in combined:
+            return "time_series", "năm", "năm", "years"
+        return "time_series", "mốc thời gian", "kỳ", "time periods"
+
+    # 2. Sales / Distribution Channel (Kênh bán: Tại quầy, Zalo, Online, Mang về...)
+    channel_val_markers = {"tại quầy", "tai quay", "zalo", "online", "website", "shopee", "grab", "tiktok", "mang về", "tại quán", "giao hàng", "app"}
+    if (
+        any(k in combined for k in ["kênh bán", "kenh_ban", "kenh ban", "kênh phân phối", "sales channel", "channel", "hình thức bán"])
+        or any(v in channel_val_markers for v in sample_vals)
+    ):
+        return "channel", "kênh bán", "kênh", "sales channels"
+
+    # 3. Payment Method (Phương thức thanh toán: Tiền mặt, Chuyển khoản, Momo...)
+    payment_val_markers = {"tiền mặt", "tien mat", "chuyển khoản", "chuyen khoan", "momo", "thẻ", "ví điện tử", "qr", "vnpay", "zalopay"}
+    if (
+        any(k in combined for k in ["thanh toán", "thanh_toan", "payment", "hình thức trả"])
+        or any(v in payment_val_markers for v in sample_vals)
+    ):
+        return "payment", "phương thức thanh toán", "phương thức", "payment methods"
+
+    # 4. Order / Transaction Status (Trạng thái: Hoàn tất, Đã hủy, Đang giao...)
+    status_val_markers = {"hoàn tất", "đã hủy", "trả lại", "chờ xử lý", "đang giao", "đã thanh toán", "chưa thanh toán", "còn nợ"}
+    if (
+        any(k in combined for k in ["trạng thái", "trang_thai", "tình trạng", "order status"])
+        or (sample_vals and sum(1 for v in sample_vals if v in status_val_markers) >= max(1, len(sample_vals) // 2))
+    ):
+        return "status", "nhóm trạng thái", "trạng thái", "status groups"
+
+    # 5. Customer / Client / Account
+    if any(k in combined for k in ["khách hàng", "khach_hang", "ten_khach_hang", "customer", "client", "account", "đại lý", "người mua"]):
+        return "customer", "khách hàng", "khách hàng", "customers"
+
+    # 6. Supplier / Vendor
+    if any(k in combined for k in ["nhà cung cấp", "nha_cung_cap", "nhà cung ứng", "supplier", "vendor", "ncc"]):
+        return "supplier", "nhà cung cấp", "nhà cung cấp", "suppliers"
+
+    # 7. Department (Phòng ban)
+    if any(k in combined for k in ["phòng ban", "phong_ban", "department", "dept", "bộ phận"]):
+        return "department", "phòng ban", "phòng ban", "departments"
+
+    # 8. Job Title (Chức danh)
+    if any(k in combined for k in ["chức danh", "chuc_danh", "job title", "vị trí", "chức vụ"]) or l_low == "title":
+        return "title", "chức danh", "chức danh", "job titles"
+
+    # 9. Gender (Giới tính)
+    if any(k in combined for k in ["giới tính", "gioi_tinh", "gender", "nam/nữ"]):
+        return "gender", "nhóm giới tính", "nhóm", "gender groups"
+
+    # 10. Geography / Market
+    if any(k in combined for k in ["thị trường", "quốc gia", "khu vực", "thành phố", "tỉnh", "country", "geo", "market", "region", "city"]):
+        return "geo", "thị trường", "thị trường", "markets"
+
+    # 11. Sales Team / Branch
+    if any(k in combined for k in ["đội ngũ", "team", "chi nhánh", "branch", "cửa hàng", "store"]):
+        return "team", "đội kinh doanh", "đội", "sales teams"
+
+    # 12. Employee / Salesperson / Manager
+    if any(k in combined for k in ["nhân viên", "nhân sự", "salesperson", "sales rep", "representative", "employee", "quản lý", "manager", "người bán"]):
+        return "employee", "nhân sự", "nhân sự", "employees"
+
+    # 13. Product / Medicine / Menu Item / Material / SKU
+    if any(k in combined for k in ["tên thuốc", "ten_thuoc", "loại thuốc", "thuốc"]):
+        return "product", "loại thuốc", "loại thuốc", "medicines"
+    if any(k in combined for k in ["tên món", "ten_mon", "nhóm món", "nhom_mon", "đồ uống", "món"]):
+        return "product", "món", "món", "menu items"
+    if any(k in combined for k in ["vật liệu", "ten_vl", "tên vật liệu"]):
+        return "product", "mặt hàng vật liệu", "mặt hàng", "materials"
+    if any(k in combined for k in ["sản phẩm", "san_pham", "product", "sku", "mặt hàng", "hàng hóa", "chocolate"]):
+        return "product", "sản phẩm", "sản phẩm", "products"
+
+    # 14. Fallback using clean label_col if meaningful
+    if label_col and l_low not in ("category", "status", "type", "group", "name"):
+        clean_lbl = str(label_col).replace("_", " ").strip().lower()
+        return "general", clean_lbl, clean_lbl, f"{clean_lbl} groups"
+
+    return "general", "nhóm phân loại", "nhóm", "segments"
 
 
 def _is_time_column(col_name: str, series: Optional[pd.Series] = None) -> bool:
@@ -355,7 +513,7 @@ def generate_chart_smart_explanation(
     ) or ("luân chuyển" in combined_text and ("chức danh" in combined_text or "tăng lương" in combined_text or "30 ngày" in combined_text)):
         if is_en:
             explanation = (
-                "**Executive Takeaway:** Internal transfer volume expanded dramatically (**40x increase**, from 87 to ~3,600 moves/year), "
+                "Internal transfer volume expanded dramatically (**40x increase**, from 87 to ~3,600 moves/year), "
                 "yet corporate HR infrastructure failed to scale proportionally: **30-day title adjustment rates collapsed from 17.2% down to 0.7%** "
                 "(only 1 in 140 transfers earned timely title recognition). Meanwhile, compensation adjustment rates stagnated rigidly around **15%–20%**, "
                 "proving that salary reviews were coupled to fixed annual calendar cycles rather than event-driven lateral transitions."
@@ -379,7 +537,7 @@ def generate_chart_smart_explanation(
             ]
         else:
             explanation = (
-                "**Thông Điệp Điều Hành Cốt Lõi:** Khối lượng luân chuyển phòng ban tăng trưởng bùng nổ (**gấp 40 lần**, từ 87 lên gần 3.600 ca/năm), "
+                "Khối lượng luân chuyển phòng ban tăng trưởng bùng nổ (**gấp 40 lần**, từ 87 lên gần 3.600 ca/năm), "
                 "tuy nhiên hệ thống quản trị nhân sự không mở rộng quy mô tương ứng: **Tỷ lệ đổi chức danh trong 30 ngày sụp đổ từ 17.2% xuống chỉ còn 0.7%** "
                 "(tức chỉ 1 trong 140 ca điều chuyển được cập nhật chức danh kịp thời). Trong khi đó, tỷ lệ tăng lương đi ngang bất biến quanh mức **15%–20%**, "
                 "chứng minh cơ chế đãi ngộ bị đóng khung theo chu kỳ lịch cố định hàng năm, hoàn toàn tách rời khỏi các quyết định điều chuyển nhân sự."
@@ -412,7 +570,7 @@ def generate_chart_smart_explanation(
     ) or ("nữ" in combined_text and ("quản lý" in combined_text or "trưởng phòng" in combined_text or "manager" in combined_text)):
         if is_en:
             explanation = (
-                "**Executive Takeaway:** Gender representation in leadership is well-balanced (**40%–100% female managers**) across 7 of 9 departments "
+                "Gender representation in leadership is well-balanced (**40%–100% female managers**) across 7 of 9 departments "
                 "(Human Resources at 100%, Customer Service & Quality Management at 75%). However, a **critical structural bottleneck** exists in the Commercial Block "
                 "(Sales & Marketing) with **0.0% female leadership (0/4 appointments)**, despite over 20,000 qualified female Senior Staff in the organizational pipeline."
             )
@@ -435,7 +593,7 @@ def generate_chart_smart_explanation(
             ]
         else:
             explanation = (
-                "**Thông Điệp Điều Hành Cốt Lõi:** Cơ cấu lãnh đạo nữ đạt mức cân bằng chuẩn mực (**40%–100% nữ quản lý**) tại 7/9 phòng ban "
+                "Cơ cấu lãnh đạo nữ đạt mức cân bằng chuẩn mực (**40%–100% nữ quản lý**) tại 7/9 phòng ban "
                 "(Human Resources đạt 100%, Customer Service và Quality Management đạt 75%). Tuy nhiên, tồn tại **nút thắt cổ chai mang tính cấu trúc** tại Khối Thương mại "
                 "(Sales & Marketing) với **0.0% nữ lãnh đạo (0/4 ca bổ nhiệm lịch sử)**, mặc dù toàn công ty có hơn 20.000 nữ nhân sự ngạch Senior Staff có đủ năng lực kế cận."
             )
@@ -467,7 +625,7 @@ def generate_chart_smart_explanation(
     ) or ("thăng chức" in combined_text and ("thời gian" in combined_text or "chờ" in combined_text or "năm" in combined_text or "tiến trình" in combined_text)):
         if is_en:
             explanation = (
-                "**Executive Takeaway:** Average time to promotion across all 9 departments demonstrates **extreme mechanical uniformity at a 7.0-year median** "
+                "Average time to promotion across all 9 departments demonstrates **extreme mechanical uniformity at a 7.0-year median** "
                 "(a negligible spread of only **~1.3 months**, spanning 6.92 years in Customer Service to 7.03 years in Development). "
                 "This total lack of variance proves that career progression has operated on a rigid calendar-tenure lockstep rather than meritocracy-driven fast tracks."
             )
@@ -485,7 +643,7 @@ def generate_chart_smart_explanation(
             ]
         else:
             explanation = (
-                "**Thông Điệp Điều Hành Cốt Lõi:** Thời gian chờ thăng chức trung bình giữa cả 9 phòng ban **đồng nhất tuyệt đối ở mức trung vị 7.0 năm** "
+                "Thời gian chờ thăng chức trung bình giữa cả 9 phòng ban **đồng nhất tuyệt đối ở mức trung vị 7.0 năm** "
                 "(biên độ chênh lệch cực hẹp chỉ **~1.3 tháng**, từ 6.92 năm tại Customer Service đến 7.03 năm tại Development). "
                 "Hiện tượng thiếu vắng sự phân hóa chỉ ra rằng tiến trình thăng chức vận hành theo thâm niên niên hạn cơ học, thiếu cơ chế đề bạt vượt cấp (Fast-track) cho nhân sự có hiệu suất đột phá."
             )
@@ -512,7 +670,7 @@ def generate_chart_smart_explanation(
     ):
         if is_en:
             explanation = (
-                "**Executive Takeaway:** No job title breaches the **8.0% random chance line**, but two entry-level titles — **Staff (7.44%, LIFT 0.93)** "
+                "No job title breaches the **8.0% random chance line**, but two entry-level titles — **Staff (7.44%, LIFT 0.93)** "
                 "and **Assistant Engineer (7.05%, LIFT 0.88)** — approach warning levels due to external hiring wage premiums. "
                 "In contrast, the **Manager tier (0.0%)** is completely insulated from wage compression risks."
             )
@@ -530,7 +688,7 @@ def generate_chart_smart_explanation(
             ]
         else:
             explanation = (
-                "**Thông Điệp Điều Hành Cốt Lõi:** Không có chức danh nào vượt qua ngưỡng ép lương ngẫu nhiên **8.0%**, tuy nhiên 2 chức danh cấp cơ sở là "
+                "Không có chức danh nào vượt qua ngưỡng ép lương ngẫu nhiên **8.0%**, tuy nhiên 2 chức danh cấp cơ sở là "
                 "**Staff (7.44%, LIFT 0.93)** và **Assistant Engineer (7.05%, LIFT 0.88)** đang tiệm cận mức cảnh báo do chính sách trả thù lao ưu đãi khi tuyển mới. "
                 "Trong khi đó, ngạch **Manager (0.0%)** hoàn toàn miễn nhiễm với rủi ro nén lương."
             )
@@ -557,7 +715,7 @@ def generate_chart_smart_explanation(
     ) or ("thâm niên" in combined_text and ("nghỉ việc" in combined_text or "turnover" in combined_text or "biến động" in combined_text)):
         if is_en:
             explanation = (
-                "**Executive Takeaway:** Manager tenure fluctuates widely (**5.9y in Production to 12.6y in Finance, a >2x spread**), yet department turnover "
+                "Manager tenure fluctuates widely (**5.9y in Production to 12.6y in Finance, a >2x spread**), yet department turnover "
                 "remains flat across all units around **27.59% (tight 25.5%–28.4% band)**. Deep audit reveals this divergence stems from bundling "
                 "**31,579 internal lateral transfers (34.5%)** into gross departure figures, proving manager tenure has no causal link with true employee attrition."
             )
@@ -575,7 +733,7 @@ def generate_chart_smart_explanation(
             ]
         else:
             explanation = (
-                "**Thông Điệp Điều Hành Cốt Lõi:** Thâm niên của các trưởng phòng biến động rất mạnh (**từ 5.9 năm tại Production đến 12.6 năm tại Finance, chênh lệch hơn 2 lần**), "
+                "Thâm niên của các trưởng phòng biến động rất mạnh (**từ 5.9 năm tại Production đến 12.6 năm tại Finance, chênh lệch hơn 2 lần**), "
                 "nhưng tỷ lệ biến động nhân sự (turnover) của các phòng ban lại đi ngang bất biến quanh mức **27.59% (biên độ hẹp 25.5%–28.4%)**. "
                 "Phân tích sâu chỉ ra độ lệch này xuất phát từ việc báo cáo gộp **31.579 ca luân chuyển nội bộ (34.5%)** vào số liệu thôi việc, chứng minh thâm niên quản lý không phải là nguyên nhân quyết định tỷ lệ nghỉ việc."
             )
@@ -601,7 +759,7 @@ def generate_chart_smart_explanation(
     if (male_cols and female_cols) or ("giới tính" in combined_text and ("lương" in combined_text or "salary" in combined_text)):
         if is_en:
             explanation = (
-                "**Executive Takeaway:** Compensation parity between genders is virtually absolute (**<0.3% gap**) across all individual professional and technical roles "
+                "Compensation parity between genders is virtually absolute (**<0.3% gap**) across all individual professional and technical roles "
                 "(Senior Staff, Senior Engineer, Technique Leader, Staff, Engineer, and Assistant Engineer). "
                 "The only divergence appears at the **Manager tier (~4.8% difference)**, driven by historical management tenure rather than wage grid disparity."
             )
@@ -619,7 +777,7 @@ def generate_chart_smart_explanation(
             ]
         else:
             explanation = (
-                "**Thông Điệp Điều Hành Cốt Lõi:** Mức lương giữa nhân viên Nam và Nữ đạt trạng thái **công bằng và bình đẳng gần như tuyệt đối (chênh lệch < 0.3%)** "
+                "Mức lương giữa nhân viên Nam và Nữ đạt trạng thái **công bằng và bình đẳng gần như tuyệt đối (chênh lệch < 0.3%)** "
                 "trên toàn bộ 6/7 ngạch chức danh chuyên môn (Senior Staff, Senior Engineer, Technique Leader, Staff, Engineer và Assistant Engineer). "
                 "Chỉ có duy nhất ngạch **Manager ghi nhận mức chênh lệch nhẹ ~4.8%** ($79.4k Nam vs $75.7k Nữ), phản ánh sự khác biệt về thâm niên bổ nhiệm lịch sử thay vì khung thang bảng lương."
             )
@@ -652,7 +810,7 @@ def generate_chart_smart_explanation(
             h2_col = h2_cols[0] if h2_cols else None
             diff_col = diff_cols[0] if diff_cols else None
             _, label_col, _ = _get_effective_metric_and_label(df, fig, user_query=user_query or title)
-            ent_name_vi = detect_analysis_entity_type(df, user_query or title, label_col) if label_col else "đối tượng"
+            _, ent_name_vi, _, _ = _resolve_dimension_entity_info(df, title, user_query, label_col, is_en=is_en)
 
             work_df = df.copy()
             work_df["_imp_num"] = pd.to_numeric(work_df[imp_col], errors="coerce").fillna(0.0)
@@ -707,9 +865,9 @@ def generate_chart_smart_explanation(
             portfolio_imp_pct = ((avg_h2 - avg_h1) / avg_h1 * 100.0) if avg_h1 > 0 else float(work_df["_imp_num"].mean())
 
             explanation = (
-                f"**Thông Điệp Điều Hành Cốt Lõi (Chuyên Gia BI):** Trọng tâm bài toán là đánh giá **tốc độ bứt phá doanh số bình quân tháng từ Nửa Đầu Năm (H1) sang Nửa Cuối Năm (H2)** thay vì chỉ nhìn vào quy mô tĩnh. "
-                f"Ngôi vị **Quán quân cải thiện hiệu suất** thuộc về **{top1_lbl}** với mức tăng trưởng **+{top1_pct:.2f}%** "
-                f"(từ **${top1_h1:,.2f}/tháng** ở H1 vọt lên **${top1_h2:,.2f}/tháng** ở H2, tương đương **+${top1_diff:,.2f}/tháng**), theo sát bởi Á quân **{top2_lbl}** (**+{top2_pct:.2f}%**, **+${top2_diff:,.2f}/tháng**). "
+                f"Đánh giá **tốc độ tăng trưởng doanh số bình quân tháng từ Nửa Đầu Năm (H1) sang Nửa Cuối Năm (H2)**: "
+                f"**{top1_lbl}** dẫn đầu về tốc độ cải thiện với mức tăng **+{top1_pct:.2f}%** "
+                f"(từ **${top1_h1:,.2f}/tháng** ở H1 lên **${top1_h2:,.2f}/tháng** ở H2, tương đương **+${top1_diff:,.2f}/tháng**), tiếp theo là **{top2_lbl}** (**+{top2_pct:.2f}%**, **+${top2_diff:,.2f}/tháng**). "
                 + (
                     f"Nếu xét theo **quy mô tiền tuyệt đối tăng thêm**, **{abs_lbl}** dẫn đầu với **+${abs_diff:,.2f}/tháng** (**+{abs_pct:.2f}%**). "
                     if abs_lbl != top1_lbl else ""
@@ -726,17 +884,17 @@ def generate_chart_smart_explanation(
 
             anomalies = [
                 {
-                    "badge": "Quán Quân Bứt Phá H2",
+                    "badge": "Dẫn Đầu Bứt Phá H2",
                     "color": "#10B981",
                     "text": f"<b>{top1_lbl}</b> dẫn đầu toàn bộ bảng xếp hạng cải thiện với tốc độ <b>+{top1_pct:.2f}%</b> (H1: <b>${top1_h1:,.2f}</b> ➔ H2: <b>${top1_h2:,.2f}/tháng</b>, tăng <b>+${top1_diff:,.2f}/tháng</b>)."
                 },
                 {
                     "badge": "Động Lực Tăng Tuyệt Đối ($)",
-                    "color": "#00F0FF",
+                    "color": "#60A5FA",
                     "text": (
                         f"<b>{abs_lbl}</b> mang về giá trị tăng thêm tuyệt đối lớn nhất đạt <b>+${abs_diff:,.2f}/tháng</b> (<b>+{abs_pct:.2f}%</b>), đóng vai trò trụ cột kéo doanh số H2 toàn khối."
                         if abs_lbl != top1_lbl else
-                        f"Á quân <b>{top2_lbl}</b> đạt mức tăng trưởng <b>+{top2_pct:.2f}%</b> (tăng thêm <b>+${top2_diff:,.2f}/tháng</b>), tạo bộ đôi đầu tàu tăng tốc mạnh mẽ nhất trong H2."
+                        f"Vị trí thứ hai <b>{top2_lbl}</b> đạt mức tăng trưởng <b>+{top2_pct:.2f}%</b> (tăng thêm <b>+${top2_diff:,.2f}/tháng</b>), tạo bộ đôi tăng tốc mạnh nhất trong H2."
                     )
                 },
                 {
@@ -797,9 +955,9 @@ def generate_chart_smart_explanation(
             high_vol_cnt = int((work_df["_sp"] >= avg_sp).sum())
 
             explanation = (
-                f"**Thông Điệp Điều Hành Cốt Lõi (Quản Trị Chuỗi Cung Ứng & Doanh Thu):** Phân tích biên độ dao động doanh thu tháng (`MAX - MIN`) trên **{len(work_df)} sản phẩm** chỉ ra rủi ro tính thời vụ rất lớn với biên độ trung bình toàn danh mục lên tới **${avg_sp:,.2f}/tháng** (**{high_vol_cnt}/{len(work_df)} SKU** vượt ngưỡng trung bình). "
-                f"**{t1_name}** là sản phẩm có **biên độ thay đổi tuyệt đối lớn nhất** đạt **${float(top1['_sp']):,.2f}** (từ đáy **${float(top1['_lw']):,.2f}**{t1_lw_m} vọt lên đỉnh **${float(top1['_pk']):,.2f}**{t1_pk_m}, biến động **+{float(top1['_vp']):.2f}%**), theo sát bởi **{t2_name}** (**${float(top2['_sp']):,.2f}**, **+{float(top2['_vp']):.2f}%**). "
-                f"Xét về **tỷ lệ biến động tương đối (%)**, **{vp_name}** đứng đầu với mức chênh đỉnh/đáy **+{float(vp_top['_vp']):.2f}%** (biên độ **${float(vp_top['_sp']):,.2f}**), trong khi **{b1_name}** đóng vai trò **mỏ neo dòng tiền ổn định nhất** (biên độ thấp nhất **${float(bot1['_sp']):,.2f}**, **+{float(bot1['_vp']):.2f}%**)."
+                f"Phân tích biên độ dao động doanh thu tháng (`MAX - MIN`) trên **{len(work_df)} sản phẩm** chỉ ra biên độ trung bình toàn danh mục đạt **${avg_sp:,.2f}/tháng** (**{high_vol_cnt}/{len(work_df)} SKU** vượt ngưỡng trung bình). "
+                f"**{t1_name}** là sản phẩm có **biên độ thay đổi tuyệt đối lớn nhất** đạt **${float(top1['_sp']):,.2f}** (từ đáy **${float(top1['_lw']):,.2f}**{t1_lw_m} vọt lên đỉnh **${float(top1['_pk']):,.2f}**{t1_pk_m}, biến động **+{float(top1['_vp']):.2f}%**), tiếp theo là **{t2_name}** (**${float(top2['_sp']):,.2f}**, **+{float(top2['_vp']):.2f}%**). "
+                f"Xét về **tỷ lệ biến động tương đối (%)**, **{vp_name}** đứng đầu với mức chênh đỉnh/đáy **+{float(vp_top['_vp']):.2f}%** (biên độ **${float(vp_top['_sp']):,.2f}**), trong khi **{b1_name}** duy trì dòng tiền ổn định nhất (biên độ thấp nhất **${float(bot1['_sp']):,.2f}**, **+{float(bot1['_vp']):.2f}%**)."
             )
 
             anomalies = [
@@ -855,10 +1013,10 @@ def generate_chart_smart_explanation(
             g_win = str(g_top[s_win_col]) if s_win_col and s_win_col in work_df.columns else ""
 
             explanation = (
-                f"**Thông Điệp Điều Hành Cốt Lõi (Động Lực Tăng Trưởng Liên Tiếp):** Toàn danh mục có **{len(work_df)} đối tượng** xác lập chuỗi tăng trưởng doanh số liên tục từ **3 tháng liên tiếp trở lên**. "
-                f"**{t1_name}** dẫn đầu tuyệt đối cả về độ dài chuỗi (**{t1_len} tháng liên tiếp**: `{t1_win}`) lẫn tổng biên độ bứt phá lũy kế (**+{t1_tot:.2f}%**). "
-                f"Trong nhóm chuỗi 3 tháng liên tiếp, **{g_name}** đạt gia tốc ấn tượng nhất với **+{g_tot:.2f}%** (`{g_win}`). "
-                f"Đặc biệt, phần lớn các chuỗi tăng trưởng hội tụ tại cửa sổ **tháng 08 ➔ tháng 10**, phản ánh chu kỳ tích trữ hàng hóa chiến lược của kênh phân phối trước mùa lễ hội Q4."
+                f"Toàn danh mục có **{len(work_df)} đối tượng** xác lập chuỗi tăng trưởng doanh số liên tục từ **3 tháng liên tiếp trở lên**. "
+                f"**{t1_name}** dẫn đầu cả về độ dài chuỗi (**{t1_len} tháng liên tiếp**: `{t1_win}`) lẫn tổng biên độ tăng lũy kế (**+{t1_tot:.2f}%**). "
+                f"Trong nhóm chuỗi 3 tháng liên tiếp, **{g_name}** đạt mức tăng cao nhất với **+{g_tot:.2f}%** (`{g_win}`). "
+                f"Phần lớn các chuỗi tăng trưởng hội tụ tại giai đoạn **tháng 08 ➔ tháng 10**, phản ánh chu kỳ nhập hàng trước mùa cao điểm Q4."
             )
             anomalies = [
                 {
@@ -873,7 +1031,7 @@ def generate_chart_smart_explanation(
                 },
                 {
                     "badge": "Cửa Sổ Cộng Hưởng Mùa Vụ",
-                    "color": "#00F0FF",
+                    "color": "#60A5FA",
                     "text": f"Sự đồng thuận tăng trưởng tập trung cao độ vào giai đoạn <b>Cuối Quý 3 – Đầu Quý 4 (Tháng 08 ➔ Tháng 10)</b>, là thời điểm vàng để khóa hợp đồng cung ứng và mở rộng độ phủ."
                 }
             ]
@@ -895,10 +1053,7 @@ def generate_chart_smart_explanation(
             max_val = float(val_series.max())
             min_val = float(val_series.min())
             avg_val = float(val_series.mean())
-            med_val = float(val_series.median())
             tot_val = float(val_series.sum())
-            std_val = float(val_series.std()) if len(val_series) > 1 else 0.0
-            cv_pct = (std_val / abs(avg_val) * 100.0) if abs(avg_val) > 1e-9 else 0.0
 
             sorted_s = val_series.sort_values(ascending=False)
             max_row_idx = sorted_s.index[0]
@@ -910,28 +1065,90 @@ def generate_chart_smart_explanation(
             min_lbl = format_anomaly_label(df.loc[min_row_idx, label_col], label_col) if label_col and label_col in df.columns else "Bottom"
             sec_val = float(sorted_s.iloc[1]) if len(sorted_s) > 1 else max_val
             ratio = (max_val / min_val) if min_val > 0 else 0.0
-            above_avg_cnt = int((val_series >= avg_val).sum())
+            max_share = (max_val / tot_val * 100.0) if tot_val > 0 else 0.0
+            sec_share = (sec_val / tot_val * 100.0) if tot_val > 0 else 0.0
+            min_share = (min_val / tot_val * 100.0) if tot_val > 0 else 0.0
             top3_share = (float(sorted_s.iloc[:min(3, len(sorted_s))].sum()) / tot_val * 100.0) if tot_val > 0 and len(sorted_s) >= 3 else 0.0
 
-            clean_metric_name = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(main_metric)).replace("_", " ").strip()
-            unit_name_vi = detect_analysis_entity_type(df, effective_q, label_col) if label_col else "đối tượng"
+            raw_m_str = str(main_metric)
+            if raw_m_str.lower() in ("metricsum", "total", "value"):
+                trace_name = getattr(fig.data[0], "name", "") if (fig is not None and hasattr(fig, "data") and len(fig.data) > 0) else ""
+                if trace_name and str(trace_name).lower() not in ("metricsum", "total", "value", "trace 0"):
+                    clean_metric_name = str(trace_name)
+                elif "thành tiền" in f"{title} {user_query}".lower():
+                    clean_metric_name = "Amount" if is_en else "Thành tiền"
+                elif "doanh thu" in f"{title} {user_query}".lower() or (not is_en and max_val >= 10000):
+                    clean_metric_name = "Revenue" if is_en else "Doanh thu"
+                else:
+                    clean_metric_name = "Total Value" if is_en else "Giá trị"
+            elif raw_m_str.lower() == "count":
+                clean_metric_name = "Transactions" if is_en else "Số giao dịch"
+            else:
+                clean_metric_name = re.sub(r"\s*\([đ$%]\)\s*$", "", raw_m_str, flags=re.IGNORECASE).strip()
+                clean_metric_name = re.sub(r"([a-z])([A-Z])", r"\1 \2", clean_metric_name).replace("_", " ").strip()
+
+            metric_for_fmt = main_metric
+            if raw_m_str.lower() == "metricsum" and (
+                any(k in f"{title} {user_query} {custom_explanation}".lower() for k in ["doanh thu", "thành tiền", "tiền nhập", "công nợ", "vnđ", "vnd", "(đ)"])
+                or (not is_en and max_val >= 10000)
+            ):
+                metric_for_fmt = f"{clean_metric_name} (đ)"
+
+            entity_kind, unit_plural_vi, unit_singular_vi, unit_plural_en = _resolve_dimension_entity_info(
+                df, title, effective_q, label_col, is_en=is_en
+            )
+
+            tot_fmt = _format_metric_val(tot_val, metric_for_fmt)
+            avg_fmt = _format_metric_val(avg_val, metric_for_fmt)
+            max_fmt = _format_metric_val(max_val, metric_for_fmt)
+            sec_fmt = _format_metric_val(sec_val, metric_for_fmt)
+            min_fmt = _format_metric_val(min_val, metric_for_fmt)
+            is_rate_or_avg = any(k in raw_m_str.lower() for k in ["%", "tỷ lệ", "rate", "pct", "tb", "avg"])
 
             if is_en:
-                unit_name = "sales representatives" if "nhân viên" in unit_name_vi else ("products" if "sản phẩm" in unit_name_vi else ("markets" if "thị trường" in unit_name_vi else "entities"))
-                explanation = (
-                    f"**Executive BI Synthesis:** Across **{len(df)} {unit_name}** evaluated on **{clean_metric_name}**, the portfolio mean stands at **{_format_metric_val(avg_val, main_metric)}** (median: **{_format_metric_val(med_val, main_metric)}**), with **{above_avg_cnt}/{len(df)} {unit_name}** outperforming the benchmark. "
-                    f"**{max_lbl}** leads at **{_format_metric_val(max_val, main_metric)}**, followed by **{sec_lbl}** (**{_format_metric_val(sec_val, main_metric)}**), creating a **{ratio:.1f}x spread** over **{min_lbl}** (**{_format_metric_val(min_val, main_metric)}**)."
-                )
+                if entity_kind == "time_series":
+                    explanation = (
+                        f"Across **{len(df)} {unit_plural_en}**, total **{clean_metric_name}** reached **{tot_fmt}** (average **{avg_fmt}** per period). "
+                        f"The peak occurred at **{max_lbl}** (**{max_fmt}**) and the lowest point at **{min_lbl}** (**{min_fmt}**, a **{ratio:.1f}x** ratio)."
+                    )
+                elif len(df) == 2:
+                    explanation = (
+                        f"Total **{clean_metric_name}** reached **{tot_fmt}** across **2 {unit_plural_en}**. "
+                        f"**{max_lbl}** accounts for the larger share with **{max_fmt}** (**{max_share:.1f}%**), which is **{ratio:.1f}x** higher than **{min_lbl}** (**{min_fmt}**, **{min_share:.1f}%**)."
+                    )
+                else:
+                    tot_clause = f"total **{clean_metric_name}** reached **{tot_fmt}** (average **{avg_fmt}**)" if not is_rate_or_avg else f"average **{clean_metric_name}** stands at **{avg_fmt}**"
+                    explanation = (
+                        f"Across **{len(df)} {unit_plural_en}**, {tot_clause}. "
+                        f"**{max_lbl}** leads with **{max_fmt}** (**{max_share:.1f}%** share), followed by **{sec_lbl}** (**{sec_fmt}**, **{sec_share:.1f}%**), while **{min_lbl}** is lowest at **{min_fmt}** (**{ratio:.1f}x** difference from the leader)."
+                    )
             else:
-                share_clause = f", trong đó **Top 3 nắm giữ {top3_share:.1f}%** tổng quy mô toàn tập" if top3_share > 0 and not any(k in str(main_metric).lower() for k in ["%", "tỷ lệ", "rate", "pct", "tb", "avg"]) else ""
-                explanation = (
-                    f"**Thông Điệp Điều Hành Cốt Lõi (Chuyên Gia BI):** Phân tích **{len(df)} {unit_name_vi}** theo chỉ số **{clean_metric_name}** ghi nhận mặt bằng trung bình đạt **{_format_metric_val(avg_val, main_metric)}** (trung vị: **{_format_metric_val(med_val, main_metric)}**), với **{above_avg_cnt}/{len(df)} {unit_name_vi}** vượt ngưỡng chuẩn{share_clause}. "
-                    f"Ngôi đầu thuộc về **{max_lbl}** (**{_format_metric_val(max_val, main_metric)}**), theo sát bởi Á quân **{sec_lbl}** (**{_format_metric_val(sec_val, main_metric)}**), tạo biên độ phân hóa **{ratio:.1f} lần** (độ lệch chuẩn CV **{cv_pct:.1f}%**) so với vị trí cuối **{min_lbl}** (**{_format_metric_val(min_val, main_metric)}**)."
-                )
+                if entity_kind == "time_series":
+                    drop_pct = ((max_val - min_val) / max_val * 100.0) if max_val > 0 else 0.0
+                    explanation = (
+                        f"Qua **{len(df)} {unit_plural_vi}**, tổng **{clean_metric_name}** đạt **{tot_fmt}** (trung bình **{avg_fmt}**/{unit_singular_vi}). "
+                        f"Mức cao nhất ghi nhận tại **{max_lbl}** (**{max_fmt}**) và thấp nhất tại **{min_lbl}** (**{min_fmt}**, biên độ chênh lệch đỉnh – đáy **{drop_pct:.1f}%**)."
+                    )
+                elif len(df) == 2:
+                    explanation = (
+                        f"Tổng **{clean_metric_name}** đạt **{tot_fmt}** phân bổ trên **2 {unit_plural_vi}**. "
+                        f"**{max_lbl}** chiếm tỷ trọng lớn hơn với **{max_fmt}** (**{max_share:.1f}%**), gấp **{ratio:.1f} lần** so với **{min_lbl}** (**{min_fmt}**, chiếm **{min_share:.1f}%**)."
+                    )
+                else:
+                    tot_clause = (
+                        f"tổng **{clean_metric_name}** đạt **{tot_fmt}** (trung bình **{avg_fmt}**/{unit_singular_vi})"
+                        if not is_rate_or_avg else
+                        f"mức **{clean_metric_name}** trung bình đạt **{avg_fmt}**"
+                    )
+                    top3_clause = f"; **Top 3** chiếm **{top3_share:.1f}%** tổng quy mô" if (top3_share > 0 and not is_rate_or_avg and len(df) >= 4) else ""
+                    explanation = (
+                        f"Trên **{len(df)} {unit_plural_vi}**, {tot_clause}{top3_clause}. "
+                        f"**{max_lbl}** đứng đầu với **{max_fmt}** (chiếm **{max_share:.1f}%**), tiếp theo là **{sec_lbl}** (**{sec_fmt}**, **{sec_share:.1f}%**); nhóm thấp nhất là **{min_lbl}** (**{min_fmt}**, chênh lệch **{ratio:.1f} lần** so với vị trí dẫn đầu)."
+                    )
         else:
             explanation = custom_explanation if custom_explanation and not ("câu hỏi:" in custom_explanation.lower() or "for query:" in custom_explanation.lower()) else (
-                f"The **{title}** chart presents high-fidelity multi-metric distributions for leadership decision-making." if is_en else
-                f"Biểu đồ **{title}** tổng hợp phân phối đa chỉ số hỗ trợ ban lãnh đạo đưa ra các quyết định điều hành chính xác."
+                f"The **{title}** chart summarizes key distributions across segments." if is_en else
+                f"Biểu đồ **{title}** tổng hợp cơ cấu và xu hướng phân bổ dữ liệu."
             )
 
         # Standard statistical anomalies
@@ -939,21 +1156,20 @@ def generate_chart_smart_explanation(
             msg = finding.get("message", "")
             f_type = finding.get("type", "")
             if "spike" in f_type:
-                anomalies.append({"badge": "Spike ↑" if is_en else "Đột Biến Tăng ↑", "color": "#10B981", "text": msg})
+                anomalies.append({"badge": "Spike ↑" if is_en else "Biến Động Tăng ↑", "color": "#10B981", "text": msg})
             elif "drop" in f_type or "sparsity" in f_type:
-                anomalies.append({"badge": "Sharp Drop ↓" if is_en else "Sụt Giảm Mạnh ↓", "color": "#EF4444", "text": msg})
+                anomalies.append({"badge": "Drop ↓" if is_en else "Biến Động Giảm ↓", "color": "#EF4444", "text": msg})
             elif "outlier" in f_type:
-                anomalies.append({"badge": "Outlier" if is_en else "Ngoại Lai (Outlier)", "color": "#F59E0B", "text": msg})
+                anomalies.append({"badge": "Outlier" if is_en else "Điểm Ngoại Lai", "color": "#F59E0B", "text": msg})
             elif "concentration" in f_type:
-                anomalies.append({"badge": "Concentration Risk" if is_en else "Rủi Ro Tập Trung", "color": "#8B5CF6", "text": msg})
+                anomalies.append({"badge": "Concentration" if is_en else "Tỷ Trọng Tập Trung", "color": "#8B5CF6", "text": msg})
 
         if main_metric and val_series is not None and not val_series.empty and len(val_series) >= 2:
-            if not any("Chênh lệch" in a["text"] or "Divergence" in a.get("badge", "") or "Dẫn Đầu" in a.get("badge", "") for a in anomalies):
+            if not any("Chênh lệch" in a["text"] or "Divergence" in a.get("badge", "") or "Dẫn Đầu" in a.get("badge", "") or "Tỷ Trọng" in a.get("badge", "") for a in anomalies):
                 if is_en:
-                    anomalies.append({"badge": "Top Benchmark Leader", "color": "#00F0FF", "text": f"<b>{max_lbl}</b> leads at <b>{_format_metric_val(max_val, main_metric)}</b> (+{((max_val - avg_val)/abs(avg_val)*100) if avg_val else 0:.1f}% above average), differing by <b>{ratio:.1f}x</b> vs <b>{min_lbl}</b> ({_format_metric_val(min_val, main_metric)})."})
+                    anomalies.append({"badge": "Leading Share", "color": "#60A5FA", "text": f"<b>{max_lbl}</b> contributes <b>{max_fmt}</b> (<b>{max_share:.1f}%</b> of total), <b>{ratio:.1f}x</b> higher than <b>{min_lbl}</b> ({min_fmt})."})
                 else:
-                    pct_vs_avg = ((max_val - avg_val) / abs(avg_val) * 100.0) if abs(avg_val) > 1e-9 else 0.0
-                    anomalies.append({"badge": "Đầu Tàu Dẫn Dắt", "color": "#00F0FF", "text": f"<b>{max_lbl}</b> dẫn đầu với <b>{_format_metric_val(max_val, main_metric)}</b> (vượt chuẩn trung bình <b>+{pct_vs_avg:.1f}%</b>), bỏ xa <b>{min_lbl}</b> ({_format_metric_val(min_val, main_metric)}, gấp <b>{ratio:.1f} lần</b>)."})
+                    anomalies.append({"badge": "Tỷ Trọng Cao Nhất", "color": "#60A5FA", "text": f"<b>{max_lbl}</b> đóng góp <b>{max_fmt}</b> (chiếm <b>{max_share:.1f}%</b> tổng {clean_metric_name.lower()}), gấp <b>{ratio:.1f} lần</b> so với <b>{min_lbl}</b> ({min_fmt})."})
 
     except Exception:
         pass
@@ -1629,10 +1845,181 @@ def generate_contextual_action_recommendations(
                 "action": "Áp dụng cơ cấu thưởng bậc thang theo các mốc doanh số để khuyến khích bứt phá mục tiêu cá nhân, đồng thời giảm mức độ phụ thuộc doanh thu vào một vài cá nhân chủ chốt."
             })
 
+    entity_kind, unit_plural_vi, _, _ = _resolve_dimension_entity_info(
+        df, title, effective_query if effective_query else title, label_col, is_en=is_en
+    )
+    metric_for_fmt = main_metric
+    if str(main_metric).lower() == "metricsum" and (
+        any(k in f"{title} {user_query}".lower() for k in ["doanh thu", "thành tiền", "tiền nhập", "công nợ", "vnđ", "vnd", "(đ)"])
+        or (not is_en and float(val_series.max()) >= 10000)
+    ):
+        metric_for_fmt = "Doanh thu (đ)"
+
     # -------------------------------------------------------------
-    # CASE 7: PRODUCTS & CATEGORIES
+    # CASE 6A: SALES & DISTRIBUTION CHANNELS (KÊNH BÁN)
     # -------------------------------------------------------------
-    elif ctx["topic"] == "product" or (label_col and any(k in str(label_col).lower() for k in ["product", "category", "danh mục", "sản phẩm", "item"])):
+    if entity_kind == "channel":
+        sorted_df = df.sort_values(by=main_metric, ascending=False)
+        top1_row = sorted_df.iloc[0]
+        bot_row = sorted_df.iloc[-1]
+        top1_name = str(top1_row[label_col]) if label_col and label_col in df.columns else ("Primary Channel" if is_en else "Kênh chủ lực")
+        bot_name = str(bot_row[label_col]) if label_col and label_col in df.columns else ("Secondary Channel" if is_en else "Kênh bổ trợ")
+        top1_val = float(top1_row[main_metric])
+        bot_val = float(bot_row[main_metric])
+        tot_v = float(val_series.sum())
+        top1_share = (top1_val / tot_v * 100.0) if tot_v > 0 else 0.0
+        bot_share = (bot_val / tot_v * 100.0) if tot_v > 0 else 0.0
+        top1_fmt = _format_metric_val(top1_val, metric_for_fmt)
+        bot_fmt = _format_metric_val(bot_val, metric_for_fmt)
+
+        if is_en:
+            recs.append({
+                "icon": svg_peak,
+                "title": f"Optimize Service & Basket Value on Leading Channel ({top1_name})",
+                "action": f"Maintain service speed and point-of-sale consultation on <b>{top1_name}</b> ({top1_fmt}, <b>{top1_share:.1f}%</b> share) to protect core revenue."
+            })
+            recs.append({
+                "icon": svg_target,
+                "title": f"Expand Conversion & Repeat Orders on {bot_name}",
+                "action": f"Strengthen repeat-order reminders, quick ordering, and delivery support on <b>{bot_name}</b> ({bot_fmt}, <b>{bot_share:.1f}%</b> share) to balance channel mix."
+            })
+            recs.append({
+                "icon": svg_balance,
+                "title": "Synchronize Customer Care Across Channels",
+                "action": f"Connect customer profiles from <b>{top1_name}</b> to <b>{bot_name}</b> for convenient re-ordering and higher retention."
+            })
+        else:
+            recs.append({
+                "icon": svg_peak,
+                "title": f"Tối ưu trải nghiệm & giá trị đơn hàng tại kênh chủ lực ({top1_name})",
+                "action": f"Duy trì tốc độ phục vụ và tư vấn bán kèm tại kênh <b>{top1_name}</b> ({top1_fmt}, chiếm <b>{top1_share:.1f}%</b>) để giữ vững nguồn doanh thu trụ cột."
+            })
+            recs.append({
+                "icon": svg_target,
+                "title": f"Thúc đẩy tần suất đặt hàng qua kênh {bot_name}",
+                "action": f"Đẩy mạnh nhắc lịch mua lại định kỳ, đặt hàng nhanh và giao tận nơi qua kênh <b>{bot_name}</b> ({bot_fmt}, chiếm <b>{bot_share:.1f}%</b>) nhằm mở rộng doanh thu đa kênh."
+            })
+            recs.append({
+                "icon": svg_balance,
+                "title": "Đồng bộ chăm sóc khách hàng giữa các kênh bán",
+                "action": f"Kết nối tệp khách mua trực tiếp tại <b>{top1_name}</b> sang kênh <b>{bot_name}</b> để tăng tỷ lệ khách quay lại mà không tốn thêm chi phí thu hút mới."
+            })
+        return recs
+
+    # -------------------------------------------------------------
+    # CASE 6B: PAYMENT METHODS (PHƯƠNG THỨC THANH TOÁN)
+    # -------------------------------------------------------------
+    if entity_kind == "payment":
+        sorted_df = df.sort_values(by=main_metric, ascending=False)
+        top1_row = sorted_df.iloc[0]
+        bot_row = sorted_df.iloc[-1]
+        top1_name = str(top1_row[label_col]) if label_col and label_col in df.columns else "Top 1"
+        bot_name = str(bot_row[label_col]) if label_col and label_col in df.columns else "Bottom"
+        top1_val = float(top1_row[main_metric])
+        bot_val = float(bot_row[main_metric])
+        tot_v = float(val_series.sum())
+        top1_share = (top1_val / tot_v * 100.0) if tot_v > 0 else 0.0
+        top1_fmt = _format_metric_val(top1_val, metric_for_fmt)
+        bot_fmt = _format_metric_val(bot_val, metric_for_fmt)
+
+        if is_en:
+            recs.append({
+                "icon": svg_dollar,
+                "title": f"Streamline Reconciliation for {top1_name} ({top1_share:.1f}%)",
+                "action": f"Automate daily end-of-shift cashflow reconciliation for <b>{top1_name}</b> ({top1_fmt}) to minimize settlement discrepancies."
+            })
+            recs.append({
+                "icon": svg_balance,
+                "title": f"Balance Payment Mix with {bot_name}",
+                "action": f"Ensure fast QR/digital checkout options alongside <b>{bot_name}</b> ({bot_fmt}) to speed up counter throughput during peak hours."
+            })
+        else:
+            recs.append({
+                "icon": svg_dollar,
+                "title": f"Chuẩn hóa đối soát dòng tiền qua {top1_name} ({top1_share:.1f}%)",
+                "action": f"Thực hiện đối soát tự động cuối mỗi ca cho phương thức <b>{top1_name}</b> ({top1_fmt}) nhằm đảm bảo khớp đúng 100% giữa hóa đơn và thực thu."
+            })
+            recs.append({
+                "icon": svg_balance,
+                "title": f"Đa dạng hóa tiện ích thanh toán ({bot_name})",
+                "action": f"Tích hợp sẵn mã QR động tại quầy cho <b>{bot_name}</b> ({bot_fmt}) để rút ngắn thời gian thanh toán trong khung giờ cao điểm."
+            })
+        return recs
+
+    # -------------------------------------------------------------
+    # CASE 6C: CUSTOMERS / SUPPLIERS / ORDER STATUS
+    # -------------------------------------------------------------
+    if entity_kind in ("customer", "supplier", "status"):
+        sorted_df = df.sort_values(by=main_metric, ascending=False)
+        top1_row = sorted_df.iloc[0]
+        bot_row = sorted_df.iloc[-1]
+        top1_name = str(top1_row[label_col]) if label_col and label_col in df.columns else "Top 1"
+        bot_name = str(bot_row[label_col]) if label_col and label_col in df.columns else "Bottom"
+        top1_val = float(top1_row[main_metric])
+        bot_val = float(bot_row[main_metric])
+        tot_v = float(val_series.sum())
+        top1_share = (top1_val / tot_v * 100.0) if tot_v > 0 else 0.0
+        top1_fmt = _format_metric_val(top1_val, metric_for_fmt)
+        bot_fmt = _format_metric_val(bot_val, metric_for_fmt)
+
+        if entity_kind == "customer":
+            recs.append({
+                "icon": svg_rank,
+                "title": f"Chăm sóc & giữ chân khách hàng trọng điểm ({top1_name})" if not is_en else f"Key Account Retention ({top1_name})",
+                "action": (
+                    f"Thiết lập chính sách chiết khấu bậc thang, hạn mức công nợ linh hoạt và lịch chăm sóc định kỳ cho <b>{top1_name}</b> ({top1_fmt}, chiếm <b>{top1_share:.1f}%</b>)."
+                    if not is_en else
+                    f"Provide tiered volume rebates and dedicated account support for <b>{top1_name}</b> ({top1_fmt}, <b>{top1_share:.1f}%</b> share)."
+                ),
+            })
+            recs.append({
+                "icon": svg_target,
+                "title": f"Mở rộng quy mô đơn hàng nhóm {bot_name}" if not is_en else f"Expand Order Volume for {bot_name}",
+                "action": (
+                    f"Rà soát nhu cầu mua hàng định kỳ của <b>{bot_name}</b> ({bot_fmt}) để chào gói đơn hàng gộp hoặc danh mục mặt hàng bổ sung."
+                    if not is_en else
+                    f"Review purchasing cadence for <b>{bot_name}</b> ({bot_fmt}) to propose bundled re-orders."
+                ),
+            })
+            return recs
+
+        if entity_kind == "supplier":
+            recs.append({
+                "icon": svg_box,
+                "title": f"Đàm phán giá nhập & chiết khấu với {top1_name}" if not is_en else f"Negotiate Volume Terms with {top1_name}",
+                "action": (
+                    f"Với tỷ trọng nhập hàng cao nhất tại <b>{top1_name}</b> ({top1_fmt}, chiếm <b>{top1_share:.1f}%</b>), cần đàm phán chiết khấu sản lượng và kỳ hạn thanh toán ưu đãi."
+                    if not is_en else
+                    f"Leverage top purchasing volume with <b>{top1_name}</b> ({top1_fmt}, <b>{top1_share:.1f}%</b>) for better unit pricing and credit terms."
+                ),
+            })
+            recs.append({
+                "icon": svg_balance,
+                "title": f"Đa dạng hóa nguồn cung dự phòng ({bot_name})" if not is_en else f"Maintain Backup Supply ({bot_name})",
+                "action": (
+                    f"Duy trì tỷ lệ đặt hàng hợp lý với <b>{bot_name}</b> ({bot_fmt}) để giảm rủi ro phụ thuộc vào một nhà cung cấp duy nhất."
+                    if not is_en else
+                    f"Keep active supply lines with <b>{bot_name}</b> ({bot_fmt}) to avoid single-vendor bottlenecks."
+                ),
+            })
+            return recs
+
+        if entity_kind == "status":
+            recs.append({
+                "icon": svg_activity,
+                "title": f"Duy trì tỷ lệ xử lý ở nhóm {top1_name} ({top1_share:.1f}%)" if not is_en else f"Sustain {top1_name} Rate ({top1_share:.1f}%)",
+                "action": (
+                    f"Giám sát quy trình thực hiện để giữ vững tỷ trọng nhóm <b>{top1_name}</b> ({top1_fmt}) và kiểm soát chặt các trường hợp thuộc nhóm <b>{bot_name}</b> ({bot_fmt})."
+                    if not is_en else
+                    f"Monitor operational workflows to keep <b>{top1_name}</b> ({top1_fmt}) high while minimizing <b>{bot_name}</b> ({bot_fmt})."
+                ),
+            })
+            return recs
+
+    # -------------------------------------------------------------
+    # CASE 7: PRODUCTS & CATEGORIES (ONLY WHEN ENTITY IS TRULY PRODUCT!)
+    # -------------------------------------------------------------
+    elif entity_kind == "product":
         sorted_df = df.sort_values(by=main_metric, ascending=False)
         top1_row = sorted_df.iloc[0]
         bot_row = sorted_df.iloc[-1]
@@ -1640,44 +2027,46 @@ def generate_contextual_action_recommendations(
         bot_name = str(bot_row[label_col]) if label_col and label_col in df.columns else ("Lowest SKU" if is_en else "Sản phẩm cuối")
         top1_val = float(top1_row[main_metric])
         bot_val = float(bot_row[main_metric])
+        top1_fmt = _format_metric_val(top1_val, metric_for_fmt)
+        bot_fmt = _format_metric_val(bot_val, metric_for_fmt)
         
         if is_en:
             recs.append({
                 "icon": svg_box,
                 "title": f"Cross-Selling & Bundle Strategy with {top1_name}",
-                "action": f"Bundle high-performing hero SKU <b>{top1_name}</b> ({_format_metric_val(top1_val, main_metric)}) with slower-moving products (<b>{bot_name}</b>) to maximize Average Order Value (AOV)."
+                "action": f"Bundle high-performing hero SKU <b>{top1_name}</b> ({top1_fmt}) with slower-moving products (<b>{bot_name}</b>: {bot_fmt}) to maximize Average Order Value (AOV)."
             })
             recs.append({
                 "icon": svg_dollar,
                 "title": "COGS Optimization & Gross Margin Protection",
-                "action": "Review manufacturing cost breakdowns and packaging supplier contracts for high-volume SKUs; renegotiate bulk purchase rates to expand gross margins."
+                "action": "Review cost breakdowns and supplier contracts for high-volume items; renegotiate purchase rates to expand gross margins."
             })
             recs.append({
                 "icon": svg_balance,
                 "title": "Velocity-Based Inventory Management",
-                "action": f"Adjust dynamic safety stock levels according to real-time sales velocity; run promotional clearance campaigns for slow-moving inventory ({bot_name})."
+                "action": f"Adjust safety stock levels according to actual sales velocity; run targeted promotions for slower-moving items ({bot_name})."
             })
         else:
             recs.append({
                 "icon": svg_box,
-                "title": f"Chiến lược Cross-Selling & Đóng gói combo với {top1_name}",
-                "action": f"Kết hợp dòng sản phẩm chủ lực dẫn đầu <b>{top1_name}</b> ({_format_metric_val(top1_val, main_metric)}) với các dòng sản phẩm có vòng quay chậm hơn (<b>{bot_name}</b>) thành combo ưu đãi nhằm tăng giá trị trung bình trên mỗi đơn hàng (AOV)."
+                "title": f"Chiến lược bán kèm & đóng gói combo với {top1_name}",
+                "action": f"Kết hợp mặt hàng chủ lực dẫn đầu <b>{top1_name}</b> ({top1_fmt}) với mặt hàng có doanh số thấp hơn (<b>{bot_name}</b>: {bot_fmt}) thành gói ưu đãi nhằm nâng giá trị trung bình mỗi đơn hàng."
             })
             recs.append({
                 "icon": svg_dollar,
-                "title": "Tối ưu giá vốn & Biên lợi nhuận (COGS Optimization)",
-                "action": f"Rà soát lại cơ cấu giá thành sản xuất và chi phí đóng gói của nhóm sản phẩm chiếm sản lượng lớn nhất; đàm phán lại chiết khấu nguyên vật liệu đầu vào để mở rộng biên lợi nhuận gộp."
+                "title": "Tối ưu giá nhập & biên lợi nhuận gộp",
+                "action": f"Rà soát lại giá vốn nhập hàng của nhóm {unit_plural_vi} bán chạy nhất (<b>{top1_name}</b>); ưu tiên đàm phán chiết khấu theo sản lượng để mở rộng biên lợi nhuận."
             })
             recs.append({
                 "icon": svg_balance,
-                "title": "Quản trị tồn kho theo tốc độ vòng quay",
-                "action": f"Điều chỉnh định mức tồn kho an toàn linh hoạt theo sức tiêu thụ thực tế; chủ động giải phóng hàng tồn kho đối với các mã sản phẩm chậm luân chuyển ({bot_name}) bằng chính sách xúc tiến thương mại."
+                "title": "Cân đối tồn kho theo tốc độ tiêu thụ",
+                "action": f"Đảm bảo đủ định mức tồn kho an toàn cho <b>{top1_name}</b> và rà soát lại vị trí trưng bày hoặc nhu cầu thực tế đối với <b>{bot_name}</b> ({bot_fmt})."
             })
 
     # -------------------------------------------------------------
     # CASE 8: CUSTOMER SERVICE / TICKETS
     # -------------------------------------------------------------
-    elif ctx["topic"] == "customer_service" or (label_col and any(k in str(label_col).lower() for k in ["ticket", "type", "priority", "status", "agent"])):
+    elif ctx["topic"] == "customer_service" or (label_col and any(k in str(label_col).lower() for k in ["ticket", "priority", "agent"])):
         sorted_df = df.sort_values(by=main_metric, ascending=False)
         top1_row = sorted_df.iloc[0]
         top1_name = str(top1_row[label_col]) if label_col and label_col in df.columns else ("Primary Ticket Type" if is_en else "Loại yêu cầu chính")
@@ -1687,7 +2076,7 @@ def generate_contextual_action_recommendations(
             recs.append({
                 "icon": svg_activity,
                 "title": f"SLA Optimization & Automated Routing for {top1_name}",
-                "action": f"Prioritize fast-track routing workflows and canned responses for the highest volume ticket category (<b>{top1_name}</b>: {_format_metric_val(top1_val, main_metric)}); expand self-service FAQ portals to deflect call center load."
+                "action": f"Prioritize fast-track routing workflows and canned responses for the highest volume ticket category (<b>{top1_name}</b>: {_format_metric_val(top1_val, metric_for_fmt)}); expand self-service FAQ portals to deflect call center load."
             })
             recs.append({
                 "icon": svg_target,
@@ -1703,7 +2092,7 @@ def generate_contextual_action_recommendations(
             recs.append({
                 "icon": svg_activity,
                 "title": f"Tối ưu SLA & Phân luồng tiếp nhận tự động cho {top1_name}",
-                "action": f"Ưu tiên phân luồng và thiết lập kịch bản phản hồi nhanh đối với nhóm yêu cầu chiếm tỷ trọng cao nhất (<b>{top1_name}</b>: {_format_metric_val(top1_val, main_metric)}); xây dựng tài liệu trợ giúp tự phục vụ (Self-service/FAQ) để giảm tải cho tổng đài."
+                "action": f"Ưu tiên phân luồng và thiết lập kịch bản phản hồi nhanh đối với nhóm yêu cầu chiếm tỷ trọng cao nhất (<b>{top1_name}</b>: {_format_metric_val(top1_val, metric_for_fmt)}); xây dựng tài liệu trợ giúp tự phục vụ (Self-service/FAQ) để giảm tải cho tổng đài."
             })
             recs.append({
                 "icon": svg_target,
@@ -1732,12 +2121,12 @@ def generate_contextual_action_recommendations(
             recs.append({
                 "icon": svg_target,
                 "title": f"Focus Core Resources on Top Contributors ({top1_name})",
-                "action": f"Prioritize operational capacity and strategic investment for <b>{top1_name}</b> ({_format_metric_val(top1_val, main_metric)}) to reinforce market dominance."
+                "action": f"Prioritize operational capacity and strategic investment for <b>{top1_name}</b> ({_format_metric_val(top1_val, metric_for_fmt)}) to reinforce market dominance."
             })
             recs.append({
                 "icon": svg_balance,
                 "title": f"Investigate Divergence & Support {bot_name}",
-                "action": f"Conduct in-depth performance reviews into friction points at <b>{bot_name}</b> ({_format_metric_val(bot_val, main_metric)}) to recalibrate targets or adjust execution."
+                "action": f"Conduct in-depth performance reviews into friction points at <b>{bot_name}</b> ({_format_metric_val(bot_val, metric_for_fmt)}) to recalibrate targets or adjust execution."
             })
             recs.append({
                 "icon": svg_activity,
@@ -1748,12 +2137,12 @@ def generate_contextual_action_recommendations(
             recs.append({
                 "icon": svg_target,
                 "title": f"Tập trung nguồn lực vào nhóm đóng góp chủ đạo ({top1_name})",
-                "action": f"Ưu tiên phân bổ nguồn lực và hỗ trợ vận hành cho <b>{top1_name}</b> ({_format_metric_val(top1_val, main_metric)}) nhằm tối ưu hóa hiệu suất và duy trì vị thế dẫn đầu."
+                "action": f"Ưu tiên phân bổ nguồn lực và hỗ trợ vận hành cho <b>{top1_name}</b> ({_format_metric_val(top1_val, metric_for_fmt)}) nhằm tối ưu hóa hiệu suất và duy trì vị thế dẫn đầu."
             })
             recs.append({
                 "icon": svg_balance,
                 "title": f"Rà soát nguyên nhân chênh lệch và hỗ trợ {bot_name}",
-                "action": f"Tiến hành đánh giá chuyên sâu các yếu tố cản trở tại <b>{bot_name}</b> ({_format_metric_val(bot_val, main_metric)}) để có kế hoạch tái phân bổ chỉ tiêu hoặc điều chỉnh phương án triển khai phù hợp."
+                "action": f"Tiến hành đánh giá chuyên sâu các yếu tố cản trở tại <b>{bot_name}</b> ({_format_metric_val(bot_val, metric_for_fmt)}) để có kế hoạch tái phân bổ chỉ tiêu hoặc điều chỉnh phương án triển khai phù hợp."
             })
             recs.append({
                 "icon": svg_activity,
@@ -1779,12 +2168,11 @@ def show_chart_zoom_dialog(
     clean_title = _clean_html_text(title)
 
     # Header
-    st.markdown(f"""<div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; margin-bottom: 14px;">
-<span style="font-size: 1.15rem; font-weight: 800; color: #FFFFFF; display: flex; align-items: center; gap: 8px;">
-<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2.2" style="vertical-align:-2px;"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+    st.markdown(f"""<div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px; margin-bottom: 14px;">
+<span style="font-size: 1.1rem; font-weight: 700; color: #F8FAFC; display: flex; align-items: center; gap: 8px;">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2" style="vertical-align:-2px;"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
 {clean_title}
 </span>
-<span class="crm-badge-neon">{badge}</span>
 </div>""", unsafe_allow_html=True)
 
     # 1. High-resolution expanded chart
@@ -1796,15 +2184,15 @@ def show_chart_zoom_dialog(
         cur_t = getattr(cur_m, "t", 0) or 0 if cur_m else 0
         cur_b = getattr(cur_m, "b", 0) or 0 if cur_m else 0
         fig_large.update_layout(
-            height=600,
+            height=540,
             margin=dict(
                 l=max(int(cur_l), 50),
                 r=max(int(cur_r), 55),
-                t=max(int(cur_t), 60),
-                b=max(int(cur_b), 65)
+                t=max(int(cur_t), 50),
+                b=max(int(cur_b), 55)
             ),
-            paper_bgcolor="#0F1324",
-            plot_bgcolor="#0F1324",
+            paper_bgcolor="#11141C",
+            plot_bgcolor="#11141C",
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
@@ -1830,14 +2218,13 @@ def show_chart_zoom_dialog(
     final_anomalies = custom_anomalies if custom_anomalies else auto_anomalies
 
     # 3. Business Explanation Section
-    exp_header = "Business Interpretation & Meaning:" if is_en else "Ý Nghĩa & Diễn Giải Nghiệp Vụ:"
+    exp_header = "Business Interpretation:" if is_en else "Diễn giải số liệu:"
     clean_smart_exp = _clean_html_text(smart_exp)
-    st.markdown(f"""<div style="background: linear-gradient(145deg, #151A30 0%, #0D1020 100%); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 12px; padding: 14px 18px; margin-top: 10px; margin-bottom: 14px;">
-<div style="font-size: 0.92rem; font-weight: 700; color: #00F0FF; margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
-<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2.2" style="vertical-align:-2px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+    st.markdown(f"""<div style="background: #11141C; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 14px 16px; margin-top: 10px; margin-bottom: 14px;">
+<div style="font-size: 0.88rem; font-weight: 600; color: #94A3B8; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
 <span>{exp_header}</span>
 </div>
-<div style="font-size: 0.86rem; color: #E2E8F0; line-height: 1.55;">
+<div style="font-size: 0.86rem; color: #F8FAFC; line-height: 1.55;">
 {clean_smart_exp}
 </div>
 </div>""", unsafe_allow_html=True)
@@ -1845,22 +2232,21 @@ def show_chart_zoom_dialog(
     # 4. Key Anomalies Section (Only render if there are actual anomalies to display)
     displayed_anomalies = (final_anomalies or [])[:4]
     if displayed_anomalies:
-        anom_header = "Key Anomalies & Notable Deviations:" if is_en else "Điểm Bất Thường & Biến Động Đáng Chú Ý:"
-        st.markdown(f"""<div style="font-size: 0.95rem; font-weight: 800; color: #FFFFFF; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
-<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.2" style="vertical-align:-2px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        anom_header = "Key Signals:" if is_en else "Điểm đáng chú ý:"
+        st.markdown(f"""<div style="font-size: 0.88rem; font-weight: 600; color: #94A3B8; margin-bottom: 8px;">
 <span>{anom_header}</span>
 </div>""", unsafe_allow_html=True)
 
-        default_badge = "Notice" if is_en else "Lưu Ý"
+        default_badge = "Signal" if is_en else "Điểm chính"
         for item in displayed_anomalies:
             badge_text = _clean_html_text(item.get("badge", default_badge))
-            color = item.get("color", "#00F0FF")
+            color = item.get("color", "#60A5FA")
             text = _clean_html_text(item.get("text", ""))
-            st.markdown(f"""<div style="background: rgba(255,255,255,0.03); border-left: 3px solid {color}; border-radius: 0 8px 8px 0; padding: 8px 12px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 10px;">
-<span style="background: {color}22; color: {color}; font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; border: 1px solid {color}44;">
-{badge_text}
+            st.markdown(f"""<div style="background: #11141C; border: 1px solid rgba(255, 255, 255, 0.08); border-left: 3px solid {color}; border-radius: 8px; padding: 9px 12px; margin-bottom: 8px; display: flex; align-items: baseline; gap: 10px;">
+<span style="color: {color}; font-size: 0.78rem; font-weight: 600; white-space: nowrap;">
+{badge_text}:
 </span>
-<span style="font-size: 0.84rem; color: #CBD5E1; line-height: 1.45;">
+<span style="font-size: 0.84rem; color: #E2E8F0; line-height: 1.45;">
 {text}
 </span>
 </div>""", unsafe_allow_html=True)
@@ -1881,19 +2267,18 @@ def show_chart_zoom_dialog(
             icon = r.get("icon", SVG_TARGET)
             r_title = _clean_html_text(r.get("title", ""))
             r_act = _clean_html_text(r.get("action", ""))
-            rec_items_html += f"""<div style="background: rgba(255,255,255,0.02); border-left: 3px solid #00F0FF; border-radius: 0 8px 8px 0; padding: 10px 14px; margin-bottom: 8px;">
-<div style="font-size: 0.88rem; font-weight: 700; color: #00F0FF; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+            rec_items_html += f"""<div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px;">
+<div style="font-size: 0.86rem; font-weight: 600; color: #F8FAFC; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
 <span>{icon}</span> <span>{r_title}</span>
 </div>
-<div style="font-size: 0.83rem; color: #CBD5E1; line-height: 1.5;">
+<div style="font-size: 0.82rem; color: #94A3B8; line-height: 1.5;">
 {r_act}
 </div>
 </div>"""
         
-        plan_header = "Direct Action Plan:" if is_en else "Đề Xuất Hành Động Trực Tiếp (Action Plan):"
-        st.markdown(f"""<div style="background: linear-gradient(145deg, rgba(0, 240, 255, 0.06) 0%, rgba(15, 23, 42, 0.6) 100%); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 12px; padding: 14px 18px; margin-top: 10px; margin-bottom: 14px;">
-<div style="font-size: 0.92rem; font-weight: 800; color: #FFFFFF; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2.2" style="vertical-align:-2px;"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+        plan_header = "Recommended Actions:" if is_en else "Gợi ý hành động:"
+        st.markdown(f"""<div style="background: #11141C; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 14px 16px; margin-top: 10px; margin-bottom: 14px;">
+<div style="font-size: 0.88rem; font-weight: 600; color: #94A3B8; margin-bottom: 10px;">
 <span>{plan_header}</span>
 </div>
 <div style="display: flex; flex-direction: column;">
@@ -1934,11 +2319,10 @@ def render_zoomable_chart_card(
     zoom_help = "Zoom chart & view anomaly analysis" if is_en else "Phóng to biểu đồ & xem phân tích điểm bất thường"
 
     # Header bar of chart card
-    c_head1, c_head2 = st.columns([5, 2])
+    c_head1, c_head2 = st.columns([4.8, 1.4], vertical_alignment="center")
     with c_head1:
-        st.markdown(f"""<div style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
-<span style="font-size: 0.95rem; font-weight: 800; color: #FFFFFF;">{title}</span>
-<span class="crm-badge-neon">{badge}</span>
+        st.markdown(f"""<div style="padding: 4px 0;">
+<span style="font-size: 0.94rem; font-weight: 600; color: #F8FAFC; letter-spacing: -0.01em;">{title}</span>
 </div>""", unsafe_allow_html=True)
     with c_head2:
         zoom_clicked = st.button(zoom_label, key=f"btn_zoom_{key}", use_container_width=True, help=zoom_help)

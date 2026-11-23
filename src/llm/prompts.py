@@ -8933,10 +8933,11 @@ QUY TẮC BẮT BUỘC (TUÂN THỦ TUYỆT ĐỐI):
         MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CÓ CỘT TỶ LỆ PHẦN TRĂM: `ROUND(TongGiaTri * 100.0 / (SELECT SUM(TongGiaTri) FROM ...), 2) AS TyLePhanTram` (hoặc Percentage)!
         TUYỆT ĐỐI CẤM chỉ SELECT tên nhóm và tổng tiền mà bỏ quên cột tỷ lệ phần trăm đóng góp!
         Bảng kết quả phải gồm tên đối tượng, tổng giá trị và tỷ lệ phần trăm đóng góp để hiển thị trực quan và vẽ biểu đồ tròn Donut cho người dùng.
-      + CẢNH BÁO BẮT BUỘC VỀ CHỈ SỐ ĐO LƯỜNG TRONG MỆNH ĐỀ SELECT (CHỐNG LỖI MẤT BIỂU ĐỒ):
-        Khi câu hỏi có điều kiện lọc theo chỉ số (ví dụ: 'vượt mức X', 'trên X', 'dưới X', 'đạt từ X trở lên', 'có hơn X...') hoặc dùng mệnh đề HAVING:
-        MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CHỨA CẢ CỘT ĐỊNH DANH (Tên nhân viên, Tên sản phẩm, Quốc gia, Đội ngũ...) VÀ CỘT CHỈ SỐ ĐO LƯỜNG ĐƯỢC TÍNH TOÁN (`SUM(s.Amount) AS TotalSales`, `SUM(s.Boxes) AS TotalBoxesSold`, `COUNT(...)`)!
-        TUYỆT ĐỐI CẤM chỉ SELECT mỗi tên thực thể rồi để ẩn chỉ số tính toán trong HAVING, vì hệ thống bắt buộc cần cột số đo lường để hiển thị số tiền/số lượng và vẽ biểu đồ kinh doanh!
+      + CẢNH BÁO BẮT BUỘC VỀ CHỈ SỐ ĐO LƯỜNG TRONG MỆNH ĐỀ SELECT (CHỐNG LỖI CHỈ IN TÊN ĐỐI TƯỢNG & MẤT BIỂU ĐỒ):
+        Khi câu hỏi hỏi đối tượng/danh sách đối tượng (Tên thuốc, Tên món, Sản phẩm, Mặt hàng, Vật liệu, Nhân viên, Khách hàng, Quốc gia, Đội ngũ, Kênh bán...) gắn với chỉ số đo lường (doanh thu, thành tiền, số lượng, lương, công nợ...) như 'vượt trên mức trung bình', 'cao hơn trung bình', 'dưới trung bình', 'vượt mức X', 'trên X', 'dưới X', 'cao nhất', 'thấp nhất', 'top N' hoặc dùng mệnh đề HAVING:
+        1. MỆNH ĐỀ SELECT BẮT BUỘC PHẢI CHỨA CẢ CỘT ĐỊNH DANH (Tên thuốc, Tên sản phẩm, Tên nhân viên, Quốc gia, Đội ngũ...) VÀ CỘT CHỈ SỐ ĐO LƯỜNG ĐƯỢC TÍNH TOÁN (`SUM(...) AS TotalSales / tong_doanh_thu`, `SUM(...) AS TotalBoxesSold / tong_so_luong`, `COUNT(...)`)!
+        2. Nếu so sánh với MỨC TRUNG BÌNH ('vượt trên mức trung bình', 'cao hơn trung bình', 'dưới mức trung bình') trên bảng giao dịch/hóa đơn: BẮT BUỘC phải `GROUP BY` theo đối tượng trong CTE (`WITH grouped AS (SELECT entity_col, SUM(metric_col) AS total_metric FROM ... GROUP BY entity_col)`) rồi mới lọc `WHERE total_metric > (SELECT AVG(total_metric) FROM grouped)` và `SELECT entity_col, total_metric FROM grouped ORDER BY total_metric DESC`!
+        3. TUYỆT ĐỐI CẤM chỉ SELECT mỗi 1 cột tên thực thể mà bỏ quên cột doanh thu/số lượng/mức lương đi kèm!
 5. ĐỊNH DẠNG ĐẦU RA (QUAN TRỌNG NHẤT):
    - CHỈ TRẢ VỀ DUY NHẤT 1 CÂU LỆNH SQL THUẦN (bắt đầu bằng chữ SELECT hoặc WITH), HOẶC đúng 1 dòng `UNANSWERABLE: <lý do thiếu cột/dữ liệu>` nếu schema không đủ thông tin.
    - TUYỆT ĐỐI KHÔNG bọc trong markdown code block (```sql hoặc ```), TUYỆT ĐỐI KHÔNG đặt dấu backtick ` ở đầu hay cuối câu lệnh (`SELECT...).

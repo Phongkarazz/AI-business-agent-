@@ -631,7 +631,8 @@ class TestUnanswerableGuardrails(unittest.TestCase):
             self.assertNotIn("Thực thể Trọng tâm: 1262000", sec)
         self.assertIn("Tổng Doanh Thu", sections["anomaly"])
         self.assertIn("Số Đơn Hợp Lệ", sections["anomaly"])
-        self.assertIn("140,222/đơn", sections["anomaly"])
+        self.assertIn("140,222 đ/đơn", sections["anomaly"])
+        self.assertNotIn(r"\$", sections["anomaly"])
 
         ht = generate_hypothesis_tree(df, user_query=q, is_en=False)
         self.assertEqual(ht["top_entity"], "Tổng Doanh Thu")
@@ -1374,6 +1375,676 @@ class TestUnanswerableGuardrails(unittest.TestCase):
             self.assertIn(tok, metric_blob, msg=f"Missing '{tok}' in KPI metrics: {metric_blob}")
         self.assertNotIn("$540,000", metric_blob)
         self.assertNotIn("$420,000", metric_blob)
+
+    def test_benchmark_average_entity_query_prints_revenue_with_entity_name(self) -> None:
+        from unittest.mock import patch
+        from datamate.agent import (
+            classify_expected_type,
+            extract_benchmark_average_entity_intent,
+            rewrite_ranked_entity_sql,
+            verify_sql_semantics,
+        )
+        from datamate.sql_executor import SQLExecutionResult
+        from src.database.business_upload import build_datamate_workspace_engine
+        from src.llm.datamate_bridge import run_datamate_enhanced_turn
+
+        q_above = "Những tên thuốc nào có doanh thu vượt trên mức trung bình?"
+        q_below = "Những tên thuốc nào có doanh thu dưới mức trung bình?"
+
+        self.assertEqual(extract_benchmark_average_entity_intent(q_above), ">")
+        self.assertEqual(extract_benchmark_average_entity_intent(q_below), "<")
+        an_above = classify_expected_type(q_above)
+        self.assertEqual(an_above.expected_type, "list")
+        self.assertTrue(an_above.money_like)
+
+        # 1) rewrite_ranked_entity_sql enriches both HAVING and CTE 1-column outer SELECTs
+        rewritten_hav = rewrite_ranked_entity_sql(
+            "SELECT ten_thuoc FROM hoa_don_ban WHERE trang_thai NOT IN ('Đã hủy', 'Trả lại') GROUP BY ten_thuoc HAVING SUM(doanh_thu) > 350000",
+            q_above,
+        )
+        self.assertIn("ROUND_HALF_UP(SUM(doanh_thu), 0) AS tong_doanh_thu", rewritten_hav)
+
+        rewritten_cte = rewrite_ranked_entity_sql(
+            "WITH grouped AS (SELECT ten_thuoc, ROUND_HALF_UP(SUM(doanh_thu), 0) AS tong_doanh_thu FROM hoa_don_ban WHERE trang_thai NOT IN ('Đã hủy', 'Trả lại') GROUP BY ten_thuoc) SELECT ten_thuoc FROM grouped WHERE tong_doanh_thu > (SELECT AVG(tong_doanh_thu) FROM grouped) ORDER BY tong_doanh_thu DESC",
+            q_above,
+        )
+        self.assertIn("SELECT ten_thuoc, tong_doanh_thu FROM grouped", rewritten_cte)
+
+        eng_ph, know_ph = build_datamate_workspace_engine(
+            PROJECT_ROOT / "data" / "demo_businesses" / "nha_thuoc_an_tam"
+        )
+        try:
+            # 2) verify_sql_semantics rejects ungrouped 1-column query with duplicate Panadol Extra rows
+            bad_ungrouped_sql = (
+                "SELECT ten_thuoc FROM hoa_don_ban WHERE trang_thai = 'Hoàn tất' "
+                "AND doanh_thu > (SELECT AVG(doanh_thu) FROM hoa_don_ban WHERE trang_thai = 'Hoàn tất')"
+            )
+            bad_ungrouped_res = SQLExecutionResult(
+                ok=True,
+                sql=bad_ungrouped_sql,
+                columns=["ten_thuoc"],
+                rows=[("Panadol Extra",), ("Men tiêu hóa Enterogermina",), ("Panadol Extra",), ("Vitamin C 500mg",)],
+                row_count=4,
+            )
+            sem_ok, sem_msg, sem_fatal = verify_sql_semantics(
+                bad_ungrouped_sql,
+                bad_ungrouped_res,
+                q_above,
+                know_ph,
+                an_above,
+            )
+            self.assertFalse(sem_ok)
+            self.assertTrue(sem_fatal)
+            self.assertIn("WITH grouped AS", sem_msg)
+            self.assertIn("tong_doanh_thu", sem_msg)
+
+            # 3) End-to-end turn even when LLM emits broken ungrouped 1-col SQL: repairs/falls back to 2-col grouped CTE
+            with patch(
+                "src.llm.datamate_bridge.VeraxusClientLLMBackend.generate",
+                return_value=f'{{"status": "ok", "sql": "{bad_ungrouped_sql}"}}',
+            ):
+                res_above = run_datamate_enhanced_turn(
+                    user_query=q_above,
+                    client=object(),
+                    provider="Ollama (Local AI Offline)",
+                    model_name="qwen2.5-coder:3b",
+                    knowledge=know_ph,
+                    lang="vi",
+                )
+            df_above = res_above.get("df")
+            self.assertIsNotNone(df_above)
+            self.assertEqual(list(df_above.columns), ["ten_thuoc", "tong_doanh_thu"])
+            self.assertEqual(len(df_above), 3)
+            self.assertEqual(df_above.iloc[0]["ten_thuoc"], "Panadol Extra")
+            self.assertEqual(int(df_above.iloc[0]["tong_doanh_thu"]), 540000)
+            self.assertEqual(df_above.iloc[1]["ten_thuoc"], "Men tiêu hóa Enterogermina")
+            self.assertEqual(int(df_above.iloc[1]["tong_doanh_thu"]), 480000)
+            self.assertEqual(df_above.iloc[2]["ten_thuoc"], "Vitamin C 500mg")
+            self.assertEqual(int(df_above.iloc[2]["tong_doanh_thu"]), 475000)
+
+            exp_above = res_above.get("explanation", "")
+            for tok in (
+                "Panadol Extra",
+                "540.000 VNĐ",
+                "Men tiêu hóa Enterogermina",
+                "480.000 VNĐ",
+                "Vitamin C 500mg",
+                "475.000 VNĐ",
+            ):
+                self.assertIn(tok, exp_above, msg=f"Missing '{tok}' in banner: {exp_above}")
+
+            # 4) Below-average query returns the 2 medicines < 356,000 VND with their revenues
+            with patch(
+                "src.llm.datamate_bridge.VeraxusClientLLMBackend.generate",
+                return_value=f'{{"status": "ok", "sql": "{bad_ungrouped_sql}"}}',
+            ):
+                res_below = run_datamate_enhanced_turn(
+                    user_query=q_below,
+                    client=object(),
+                    provider="Ollama (Local AI Offline)",
+                    model_name="qwen2.5-coder:3b",
+                    knowledge=know_ph,
+                    lang="vi",
+                )
+            df_below = res_below.get("df")
+            self.assertIsNotNone(df_below)
+            self.assertEqual(list(df_below.columns), ["ten_thuoc", "tong_doanh_thu"])
+            self.assertEqual(len(df_below), 2)
+            self.assertEqual(df_below.iloc[0]["ten_thuoc"], "Nước muối sinh lý")
+            self.assertEqual(int(df_below.iloc[0]["tong_doanh_thu"]), 120000)
+            self.assertEqual(df_below.iloc[1]["ten_thuoc"], "Si rô ho Bảo Thanh")
+            self.assertEqual(int(df_below.iloc[1]["tong_doanh_thu"]), 165000)
+
+            # 5) Verify Action Plan & Hypothesis Tree wording on both 2-col revenue df and 1-col fallback df
+            from src.analytics.heuristics import generate_persona_action_plan
+
+            plan_above = generate_persona_action_plan(df_above, persona="ceo", user_query=q_above, is_en=False)
+            blob_above = " ".join(plan_above.get("kpis", [])) + " " + " ".join(
+                f"{m.get('headline', '')} {m.get('brief_action', '')} {m.get('target_pill', '')} {m.get('detail_note', '')}"
+                for m in plan_above.get("micro_actions", [])
+            )
+            for banned in (
+                "Thực thể dẫn đầu",
+                "thực thể dẫn đầu",
+                "Nhóm dẫn đầu chiếm 100.0%",
+                "xoay quanh mốc chuẩn trung bình",
+                "chênh lệch tuyệt đối 1",
+                "Đường cơ sở toàn hệ thống neo tại mốc",
+                "theo chuẩn H1 & H2",
+                "cắt giảm mặt hàng không hiệu quả",
+            ):
+                self.assertNotIn(banned, blob_above, msg=f"Found banned robotic phrase '{banned}' in: {blob_above}")
+            for expected_tok in ("540,000 đ", "475,000 đ", "498,333 đ", "Mặt hàng đứng đầu"):
+                self.assertIn(expected_tok, blob_above, msg=f"Missing '{expected_tok}' in: {blob_above}")
+
+            # 6) Verify scalar import KPI summary has zero backslash '\$' and full Vietnamese diacritics ('Tổng Tiền Nhập', '840,000 đ')
+            import pandas as pd
+            from src.analytics.heuristics import escape_markdown_currency_symbols, split_insight_sections
+
+            df_imp = pd.DataFrame([{"tong_tien_nhap": 840000, "tong_so_luong_nhap": 20}])
+            sec_imp = split_insight_sections("", df=df_imp, user_query="Tổng tiền nhập thuốc và số lượng nhập", is_en=False)
+            full_imp_text = f"{sec_imp.get('anomaly', '')}\n{sec_imp.get('hypothesis', '')}\n{sec_imp.get('action_plan', '')}"
+            self.assertNotIn(r"\$", full_imp_text)
+            self.assertNotIn("$840,000", full_imp_text)
+            self.assertNotIn("Tổng Tiền Nhap", full_imp_text)
+            self.assertIn("Tổng Tiền Nhập", full_imp_text)
+            self.assertIn("Tổng Số Lượng Nhập", full_imp_text)
+            self.assertIn("840,000 đ", full_imp_text)
+            self.assertIn("42,000 đ/đơn vị", full_imp_text)
+            self.assertEqual(escape_markdown_currency_symbols(r"Doanh thu \$840,000 và \_test\*"), "Doanh thu $840,000 và _test*")
+        finally:
+            eng_ph.dispose()
+
+    def test_cafe_pho_viet_catalog_listing_and_spurious_date_guard(self) -> None:
+        from unittest.mock import patch
+        from datamate.agent import (
+            _match_requested_dimension_col,
+            build_catalog_listing_sql_spec,
+            classify_expected_type,
+            extract_temporal_context,
+            normalize_vn_question,
+            strip_spurious_single_day_filter,
+        )
+        from datamate.schema_context import ground_query_entities
+        from datamate.sql_executor import execute_sql_safe
+        from src.database.business_upload import build_datamate_workspace_engine
+        from src.llm.datamate_bridge import run_datamate_enhanced_turn
+
+        # 1) Classification distinguishes catalog listing ('list') vs scalar total/count ('number')
+        self.assertEqual(classify_expected_type("Danh sách những món thuộc nhóm Cà Phê").expected_type, "list")
+        self.assertEqual(classify_expected_type("Các món thuộc nhóm món Cà phê").expected_type, "list")
+        self.assertEqual(
+            classify_expected_type("Tổng doanh thu của các món thuộc nhóm Cà phê là bao nhiêu?").expected_type,
+            "number",
+        )
+        self.assertEqual(classify_expected_type("Có bao nhiêu món thuộc nhóm Cà phê?").expected_type, "number")
+
+        eng_cf, know_cf = build_datamate_workspace_engine(
+            PROJECT_ROOT / "data" / "demo_businesses" / "cafe_pho_viet"
+        )
+        try:
+            # 2) semantic_summary includes pure catalog tables (danhmucmon)
+            self.assertIn("danhmucmon", know_cf.semantic_summary)
+
+            # 3) Membership filter ('thuộc nhóm món Cà phê') must NOT force GROUP BY nhom_mon,
+            #    while true grouping breakdowns ('Nhóm món nào...', 'theo từng nhóm món') still match
+            self.assertIsNone(
+                _match_requested_dimension_col(
+                    normalize_vn_question("Các món thuộc nhóm món Cà phê"),
+                    know_cf,
+                )
+            )
+            self.assertIsNotNone(
+                _match_requested_dimension_col(
+                    normalize_vn_question("Nhóm món nào mang lại doanh thu cao nhất?"),
+                    know_cf,
+                )
+            )
+            self.assertIsNotNone(
+                _match_requested_dimension_col(
+                    normalize_vn_question("Tỷ lệ đóng góp thành tiền của từng nhóm món vào tổng số"),
+                    know_cf,
+                )
+            )
+
+            # 4) strip_spurious_single_day_filter removes unrequested equality date filters safely
+            q_open = "Danh sách những món thuộc nhóm Cà Phê"
+            an_open = classify_expected_type(q_open)
+            w_open, ts_open, bd_open, _ = extract_temporal_context(q_open, "2026-10-06", None)
+            an_open.temporal_windows = w_open
+            an_open.temporal_summary = ts_open
+            an_open.bounded_period = bd_open
+
+            stripped_and = strip_spurious_single_day_filter(
+                "SELECT dm.ten_mon, dm.don_gia FROM danhmucmon dm JOIN donhang dh ON dm.ten_mon = dh.ten_mon "
+                "WHERE dm.nhom_mon = 'Cà phê' AND dh.ngay_ban = '2026-10-06';",
+                q_open,
+                an_open,
+            )
+            self.assertNotIn("2026-10-06", stripped_and)
+            self.assertIn("dm.nhom_mon = 'Cà phê'", stripped_and)
+
+            stripped_lone = strip_spurious_single_day_filter(
+                "SELECT ten_mon, thanh_tien FROM donhang WHERE ngay_ban = '2026-10-06' ORDER BY ten_mon;",
+                q_open,
+                an_open,
+            )
+            self.assertNotIn("WHERE", stripped_lone.upper())
+            self.assertNotIn("2026-10-06", stripped_lone)
+
+            or_sql = "SELECT * FROM donhang WHERE trang_thai = 'Hoàn thành' OR ngay_ban = '2026-10-06';"
+            self.assertEqual(strip_spurious_single_day_filter(or_sql, q_open, an_open), or_sql)
+
+            q_today = "Hôm nay bán được những món nào?"
+            an_today = classify_expected_type(q_today)
+            w_t, ts_t, bd_t, _ = extract_temporal_context(q_today, "2026-10-06", None)
+            an_today.temporal_windows = w_t
+            an_today.temporal_summary = ts_t
+            an_today.bounded_period = bd_t
+            today_sql = "SELECT ten_mon, SUM(thanh_tien) FROM donhang WHERE ngay_ban = '2026-10-06' GROUP BY ten_mon;"
+            self.assertEqual(strip_spurious_single_day_filter(today_sql, q_today, an_today), today_sql)
+
+            # 5) build_catalog_listing_sql_spec queries danhmucmon directly with NORM_VN matching all 3 coffee items
+            ents_cf = ground_query_entities(q_open, know_cf, max_matches=12)
+            spec = build_catalog_listing_sql_spec(q_open, know_cf, an_open, ents_cf)
+            self.assertIsNotNone(spec)
+            self.assertEqual(spec["table"], "danhmucmon")
+            self.assertIn("NORM_VN(", spec["suggested_sql"])
+            res_spec = execute_sql_safe(know_cf.workspace.open_connection, spec["suggested_sql"], know_cf.valid_tables)
+            self.assertTrue(res_spec.ok)
+            self.assertEqual(
+                sorted(r[0] for r in res_spec.rows),
+                ["Bạc xỉu", "Cà phê muối", "Cà phê sữa đá"],
+            )
+
+            # Transactional ranking prompt must NOT trigger catalog-only spec
+            q_tx = "Top 5 món có Doanh Thu cao nhất trong tháng 10/2026?"
+            an_tx = classify_expected_type(q_tx)
+            self.assertIsNone(build_catalog_listing_sql_spec(q_tx, know_cf, an_tx, ents_cf))
+
+            # 6) End-to-end turn never blocks even if LLM emits wrong-case category + spurious date filter
+            bad_cat_sql = (
+                "SELECT dm.ten_mon, dm.don_gia FROM danhmucmon dm "
+                "JOIN donhang dh ON dm.ten_mon = dh.ten_mon "
+                "WHERE dm.nhom_mon = 'Cà Phê' AND dh.ngay_ban = '2026-10-06'"
+            )
+            with patch(
+                "src.llm.datamate_bridge.VeraxusClientLLMBackend.generate",
+                return_value=f'{{"status": "ok", "sql": "{bad_cat_sql}"}}',
+            ):
+                res_cat = run_datamate_enhanced_turn(
+                    user_query=q_open,
+                    client=object(),
+                    provider="Ollama (Local AI Offline)",
+                    model_name="qwen2.5-coder:3b",
+                    knowledge=know_cf,
+                    lang="vi",
+                )
+            df_cat = res_cat.get("df")
+            self.assertIsNotNone(df_cat)
+            self.assertFalse(df_cat.empty)
+            self.assertEqual(
+                sorted(df_cat["ten_mon"].tolist()),
+                ["Bạc xỉu", "Cà phê muối", "Cà phê sữa đá"],
+            )
+            exp_cat = res_cat.get("explanation", "")
+            self.assertNotIn("từ chối", exp_cat.lower())
+            self.assertNotIn("LỖI LỌC NGÀY THỪA", exp_cat)
+            for item_tok in ("Bạc xỉu", "39.000 VNĐ", "Cà phê muối", "40.000 VNĐ", "Cà phê sữa đá", "35.000 VNĐ"):
+                self.assertIn(item_tok, exp_cat, msg=f"Missing '{item_tok}' in banner: {exp_cat}")
+
+            # 7) Single-item catalog category ('Đá xay' -> Matcha đá xay, 55,000 VNĐ) prints item + unit price cleanly
+            q_ice = "Danh sách những món thuộc nhóm Đá xay"
+            with patch(
+                "src.llm.datamate_bridge.VeraxusClientLLMBackend.generate",
+                return_value='{"status": "ok", "sql": "SELECT ten_mon, nhom_mon, don_gia FROM danhmucmon WHERE NORM_VN(nhom_mon) = NORM_VN(\'Đá xay\');"}',
+            ):
+                res_ice = run_datamate_enhanced_turn(
+                    user_query=q_ice,
+                    client=object(),
+                    provider="Ollama (Local AI Offline)",
+                    model_name="qwen2.5-coder:3b",
+                    knowledge=know_cf,
+                    lang="vi",
+                )
+            df_ice = res_ice.get("df")
+            self.assertIsNotNone(df_ice)
+            self.assertEqual(df_ice["ten_mon"].tolist(), ["Matcha đá xay"])
+            exp_ice = res_ice.get("explanation", "")
+            self.assertIn("Matcha đá xay", exp_ice)
+            self.assertIn("55.000 VNĐ", exp_ice)
+        finally:
+            eng_cf.dispose()
+
+    def test_two_part_entity_plus_metric_sanofi_and_other_dbs(self) -> None:
+        from unittest.mock import patch
+
+        from datamate.agent import (
+            classify_expected_type,
+            verify_sql_semantics,
+        )
+        from datamate.schema_context import ground_query_entities
+        from datamate.sql_executor import execute_sql_safe
+        from src.database.business_upload import build_datamate_workspace_engine
+        from src.llm.datamate_bridge import run_datamate_enhanced_turn
+
+        eng_nt, know_nt = build_datamate_workspace_engine(
+            PROJECT_ROOT / "data" / "demo_businesses" / "nha_thuoc_an_tam"
+        )
+        try:
+            q_sanofi = "Nhà cung cấp Sanofi VN đã nhập những loại thuốc nào và tổng tiền nhập là bao nhiêu?"
+            an = classify_expected_type(q_sanofi)
+            self.assertEqual(an.expected_type, "table")
+            self.assertTrue(an.money_like)
+
+            ents = ground_query_entities(q_sanofi, know_nt, max_matches=12)
+
+            # 1) Semantic guard MUST reject scalar-only SQL that omits medicine name
+            scalar_sql = (
+                "SELECT ROUND_HALF_UP(SUM(so_luong_nhap * gia_nhap), 0) AS tong_tien_nhap "
+                "FROM phieu_nhap_thuoc WHERE NORM_VN(nha_cung_cap) = NORM_VN('Sanofi VN');"
+            )
+            res_scalar = execute_sql_safe(know_nt.workspace.open_connection, scalar_sql, know_nt.valid_tables)
+            self.assertTrue(res_scalar.ok)
+            sem_ok, sem_msg, sem_fatal = verify_sql_semantics(
+                scalar_sql, res_scalar, q_sanofi, know_nt, an, entity_matches=ents
+            )
+            self.assertFalse(sem_ok)
+            self.assertTrue(sem_fatal)
+            self.assertIn("ten_thuoc", sem_msg)
+
+            # 2) Semantic guard MUST also reject 2-numeric-col SQL still dropping ten_thuoc
+            two_num_sql = (
+                "SELECT SUM(so_luong_nhap) AS tong_sl, ROUND_HALF_UP(SUM(so_luong_nhap * gia_nhap), 0) AS tong_tien_nhap "
+                "FROM phieu_nhap_thuoc WHERE NORM_VN(nha_cung_cap) = NORM_VN('Sanofi VN');"
+            )
+            res_2num = execute_sql_safe(know_nt.workspace.open_connection, two_num_sql, know_nt.valid_tables)
+            sem_ok2, _, sem_fatal2 = verify_sql_semantics(
+                two_num_sql, res_2num, q_sanofi, know_nt, an, entity_matches=ents
+            )
+            self.assertFalse(sem_ok2)
+            self.assertTrue(sem_fatal2)
+
+            # 3) Full turn with mock LLM outputting scalar-only SQL recovers via deterministic fallback
+            with patch(
+                "src.llm.datamate_bridge.VeraxusClientLLMBackend.generate",
+                return_value=f'{{"status": "ok", "sql": "{scalar_sql}"}}',
+            ):
+                turn = run_datamate_enhanced_turn(
+                    user_query=q_sanofi,
+                    client=object(),
+                    provider="Ollama (Local AI Offline)",
+                    model_name="qwen2.5-coder:3b",
+                    knowledge=know_nt,
+                    lang="vi",
+                )
+            df_out = turn.get("df")
+            self.assertIsNotNone(df_out)
+            self.assertFalse(df_out.empty)
+            self.assertIn("ten_thuoc", df_out.columns)
+            self.assertIn("tong_tien_nhap", df_out.columns)
+            self.assertEqual(df_out["ten_thuoc"].tolist(), ["Men tiêu hóa Enterogermina"])
+            self.assertEqual(int(round(float(df_out["tong_tien_nhap"].iloc[0]))), 1150000)
+            exp = turn.get("explanation", "")
+            self.assertIn("Men tiêu hóa Enterogermina", exp)
+            self.assertIn("1.150.000 VNĐ", exp)
+        finally:
+            eng_nt.dispose()
+
+    def test_no_unprovable_hypothesis_scores_or_h3_rejection(self) -> None:
+        from src.analytics.heuristics import generate_hypothesis_tree, generate_persona_action_plan
+
+        dfs = [
+            (
+                pd.DataFrame(
+                    [
+                        {"ten_thuoc": "Panadol Extra", "doanh_thu": 540000},
+                        {"ten_thuoc": "Vitamin C 500mg", "doanh_thu": 475000},
+                        {"ten_thuoc": "Enterogermina", "doanh_thu": 120000},
+                    ]
+                ),
+                "Top 5 loại thuốc có Doanh Thu bán ra cao nhất trong tháng 10/2026?",
+            ),
+            (
+                pd.DataFrame(
+                    [
+                        {"ngay": "2026-10-01", "doanh_thu": 420000},
+                        {"ngay": "2026-10-02", "doanh_thu": 680000},
+                        {"ngay": "2026-10-03", "doanh_thu": 510000},
+                    ]
+                ),
+                "Xu hướng doanh thu theo từng ngày",
+            ),
+            (
+                pd.DataFrame([{"tong_doanh_thu": 1610000}]),
+                "Tổng doanh thu là bao nhiêu?",
+            ),
+        ]
+
+        banned_tokens = (
+            "bác bỏ qua data",
+            "rejected by data",
+            "độ chính xác",
+            "điểm ưu tiên",
+            "điểm tác động",
+            "/100",
+            "4/100",
+            "giả thuyết 3",
+            "hypothesis 3",
+            "h3",
+        )
+
+        for df_sample, q_sample in dfs:
+            for lang_flag in (False, True):
+                tree = generate_hypothesis_tree(df_sample, user_query=q_sample, is_en=lang_flag)
+                branches = tree.get("branches", [])
+                self.assertTrue(len(branches) >= 1)
+                for b in branches:
+                    self.assertNotEqual(b.get("status"), "REJECTED")
+                    self.assertNotEqual(b.get("id"), "H3")
+                    self.assertNotIn("confidence", b)
+                    self.assertNotIn("priority_score", b)
+                    self.assertNotIn("impact", b)
+                blob_tree = f"{tree}".lower()
+                for tok in banned_tokens:
+                    self.assertNotIn(tok, blob_tree, msg=f"Forbidden '{tok}' leaked in tree ({q_sample})")
+
+                for role in ("ceo", "lead"):
+                    plan = generate_persona_action_plan(df_sample, persona=role, user_query=q_sample, is_en=lang_flag)
+                    blob_plan = f"{plan}".lower()
+                    for tok in banned_tokens:
+                        self.assertNotIn(tok, blob_plan, msg=f"Forbidden '{tok}' leaked in {role} plan ({q_sample})")
+
+        comp_src = (PROJECT_ROOT / "src" / "ui" / "components.py").read_text(encoding="utf-8")
+        self.assertNotIn("Loại trừ", comp_src)
+        self.assertNotIn("Ưu tiên: {prio_score}/100", comp_src)
+        self.assertNotIn("Độ chính xác", comp_src)
+        self.assertNotIn("3 giả thuyết đối chứng", comp_src)
+
+    def test_sidebar_and_saved_templates_ui_hygiene(self) -> None:
+        sidebar_src = (PROJECT_ROOT / "src" / "ui" / "sidebar.py").read_text(encoding="utf-8")
+        onboarding_src = (PROJECT_ROOT / "src" / "ui" / "onboarding.py").read_text(encoding="utf-8")
+        evo_src = (PROJECT_ROOT / "src" / "ui" / "evolution_dashboard.py").read_text(encoding="utf-8")
+        i18n_src = (PROJECT_ROOT / "src" / "i18n.py").read_text(encoding="utf-8")
+
+        # 1) Sidebar must NOT show Vòng Lặp Tiến Hóa button
+        self.assertNotIn("sidebar_btn_toggle_evo", sidebar_src)
+        self.assertNotIn("sidebar_btn_evolution", sidebar_src)
+
+        # 2) Settings must expose Mẫu truy vấn đã lưu button
+        self.assertIn("btn_onboarding_open_templates", onboarding_src)
+        self.assertIn("Mẫu truy vấn đã lưu", onboarding_src)
+
+        # 3) No internal dev/ML jargon in saved templates UI & i18n
+        for jargon in (
+            "Tier 2 Online Learning",
+            "Two-Tier Feedback Loop",
+            "Dynamic Few-Shot",
+            "APIGen",
+            "SELF-EVOLVING ACTIVE",
+            "Vòng Lặp Tiến Hóa",
+            "SELF-EVOLUTION LOOP",
+        ):
+            self.assertNotIn(jargon, evo_src, msg=f"Jargon '{jargon}' still in evolution_dashboard.py")
+            self.assertNotIn(jargon, i18n_src, msg=f"Jargon '{jargon}' still in i18n.py")
+
+    def test_multiturn_followup_anti_repeat_and_diversity(self) -> None:
+        from datamate.agent import (
+            check_out_of_scope_or_irrelevant,
+            check_preflight_unanswerable,
+            classify_expected_type,
+        )
+        from datamate.sql_executor import norm_vn
+        from src.database.business_upload import build_datamate_workspace_engine
+        from src.llm.datamate_bridge import build_datamate_suggested_questions
+
+        for db_dir, starter_q, init_df in (
+            (
+                "nha_thuoc_an_tam",
+                "Top 5 loại thuốc có Doanh Thu bán ra cao nhất trong tháng 10/2026?",
+                pd.DataFrame(
+                    [
+                        {"ten_thuoc": "Panadol Extra", "doanh_thu": 540000},
+                        {"ten_thuoc": "Vitamin C 500mg", "doanh_thu": 475000},
+                        {"ten_thuoc": "Men tiêu hóa Enterogermina", "doanh_thu": 115000},
+                    ]
+                ),
+            ),
+            (
+                "cafe_pho_viet",
+                "Top 5 món có Doanh Thu cao nhất trong tháng 10/2026?",
+                pd.DataFrame(
+                    [
+                        {"ten_mon": "Trà đào cam sả", "doanh_thu": 495000},
+                        {"ten_mon": "Cà phê sữa đá", "doanh_thu": 315000},
+                        {"ten_mon": "Bạc xỉu", "doanh_thu": 195000},
+                    ]
+                ),
+            ),
+        ):
+            eng, know = build_datamate_workspace_engine(PROJECT_ROOT / "data" / "demo_businesses" / db_dir)
+            try:
+                asked = [starter_q]
+                seen_fup_norms = {norm_vn(starter_q)}
+                all_generated: list[str] = []
+                cur_q = starter_q
+                cur_df = init_df
+                for turn_idx in range(6):
+                    fups = build_datamate_suggested_questions(
+                        know,
+                        lang="vi",
+                        user_query=cur_q,
+                        df=cur_df if turn_idx == 0 else None,
+                        asked_queries=asked,
+                    )
+                    self.assertGreaterEqual(len(fups), 2, msg=f"{db_dir} turn {turn_idx}: {fups}")
+                    self.assertLessEqual(len(fups), 3)
+                    for q_s in fups:
+                        self.assertIsNone(check_out_of_scope_or_irrelevant(q_s, know), msg=q_s)
+                        self.assertIsNone(
+                            check_preflight_unanswerable(
+                                q_s,
+                                know.data_max_date or "2026-10-06",
+                                know,
+                                classify_expected_type(q_s),
+                            ),
+                            msg=q_s,
+                        )
+                        self.assertNotIn(
+                            norm_vn(q_s),
+                            {norm_vn(a) for a in asked},
+                            msg=f"{db_dir} turn {turn_idx} repeated already-asked question: {q_s}",
+                        )
+                    all_generated.extend(fups)
+                    # Simulate user clicking the first suggestion next turn
+                    next_pick = fups[0]
+                    self.assertNotIn(norm_vn(next_pick), seen_fup_norms)
+                    seen_fup_norms.add(norm_vn(next_pick))
+                    asked.append(next_pick)
+                    cur_q = next_pick
+
+                # Across 6 turns, suggestions must span multiple distinct business angles (not repetitive)
+                unique_norm_count = len({norm_vn(x) for x in all_generated})
+                self.assertGreaterEqual(
+                    unique_norm_count,
+                    8,
+                    msg=f"Expected high question diversity across 6 turns on {db_dir}, got {unique_norm_count}: {all_generated}",
+                )
+            finally:
+                eng.dispose()
+
+    def test_daily_trend_zero_fill_kpi_label_and_vnd_line_chart(self) -> None:
+        from unittest.mock import patch
+
+        from src.analytics.heuristics import ensure_continuous_daily_series
+        from src.database.business_upload import build_datamate_workspace_engine
+        from src.llm.datamate_bridge import run_datamate_enhanced_turn
+        from src.visualization.charts import render_smart_chart
+
+        eng_cf, know_cf = build_datamate_workspace_engine(
+            PROJECT_ROOT / "data" / "demo_businesses" / "cafe_pho_viet"
+        )
+        try:
+            q_daily = "Xu hướng Doanh Thu của Cà phê sữa đá theo từng ngày trong tháng 10/2026?"
+            sql_daily = (
+                "SELECT ngay_ban, ROUND_HALF_UP(SUM(thanh_tien), 0) AS doanh_thu "
+                "FROM donhang "
+                "WHERE NORM_VN(ten_mon) = NORM_VN('Cà phê sữa đá') "
+                "AND trang_thai = 'Hoàn thành' "
+                "AND ngay_ban BETWEEN '2026-10-01' AND '2026-10-31' "
+                "GROUP BY ngay_ban ORDER BY ngay_ban ASC;"
+            )
+            with patch(
+                "src.llm.datamate_bridge.VeraxusClientLLMBackend.generate",
+                return_value=f'{{"status": "ok", "sql": "{sql_daily}"}}',
+            ):
+                res_daily = run_datamate_enhanced_turn(
+                    user_query=q_daily,
+                    client=object(),
+                    provider="Ollama (Local AI Offline)",
+                    model_name="qwen2.5-coder:3b",
+                    knowledge=know_cf,
+                    lang="vi",
+                )
+
+            df_daily = res_daily.get("df")
+            self.assertIsNotNone(df_daily)
+            # All 6 continuous days in active operating window (2026-10-01..2026-10-06), NOT just 3 rows or 31 future days
+            self.assertEqual(
+                df_daily["ngay_ban"].tolist(),
+                [
+                    "2026-10-01",
+                    "2026-10-02",
+                    "2026-10-03",
+                    "2026-10-04",
+                    "2026-10-05",
+                    "2026-10-06",
+                ],
+            )
+            self.assertEqual(
+                [int(round(v)) for v in df_daily["doanh_thu"].tolist()],
+                [105000, 0, 175000, 0, 0, 210000],
+            )
+            exp = res_daily.get("explanation", "")
+            for zero_day in ("2026-10-02", "2026-10-04", "2026-10-05"):
+                self.assertIn(zero_day, exp)
+
+            # Peak-day query must NOT be padded with 0-revenue days
+            df_peak = pd.DataFrame([{"ngay_ban": "2026-10-06", "doanh_thu": 210000}])
+            self.assertEqual(
+                len(
+                    ensure_continuous_daily_series(
+                        df_peak,
+                        user_query="Ngày nào có Doanh Thu cao nhất trong tháng 10/2026?",
+                        min_date="2026-10-01",
+                        max_date="2026-10-06",
+                    )
+                ),
+                1,
+            )
+
+            # UI KPI label check: must NOT default time-series dimension to "Department" / "Số phòng ban"
+            comp_src = (PROJECT_ROOT / "src" / "ui" / "components.py").read_text(encoding="utf-8")
+            self.assertNotIn('_dim_col = label_cols[0] if label_cols else "Department"', comp_src)
+            self.assertIn('"Số ngày"', comp_src)
+
+            # Line chart currency check: must format VND ("đ"), NOT "$", and avoid inf% on 0->positive jump
+            captured_figs = []
+            with patch("src.visualization.charts.st.plotly_chart", side_effect=lambda fig, **kw: captured_figs.append(fig)), \
+                 patch("src.visualization.charts.st.caption"):
+                render_smart_chart(df_daily, "Tự động", "test_daily_vnd", user_query=q_daily)
+            self.assertTrue(captured_figs, "Expected render_smart_chart to produce a Plotly figure")
+            fig = captured_figs[0]
+            yaxis_prefix = getattr(fig.layout.yaxis, "tickprefix", "") or ""
+            yaxis_suffix = getattr(fig.layout.yaxis, "ticksuffix", "") or ""
+            self.assertNotEqual(yaxis_prefix, "$")
+            self.assertIn("đ", yaxis_suffix)
+            hover_blob = " ".join(str(x) for x in (getattr(fig.data[0], "text", None) or []))
+            self.assertNotIn("$", hover_blob)
+            self.assertNotIn("inf%", hover_blob.lower())
+            self.assertIn("đ", hover_blob)
+        finally:
+            eng_cf.dispose()
 
 
 if __name__ == "__main__":

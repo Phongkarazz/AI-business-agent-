@@ -4,6 +4,7 @@ multi-series color grouping for line/area charts, multi-metric benchmark compari
 full category display (no skipped months), and straight horizontal ticks.
 """
 
+import math
 import re
 import pandas as pd
 import streamlit as st
@@ -25,6 +26,7 @@ from src.analytics.heuristics import (
     unify_year_month_columns,
     ensure_full_twelve_months,
     ensure_full_four_quarters,
+    ensure_continuous_daily_series,
     is_vnd_context_dataframe,
 )
 
@@ -1602,6 +1604,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
     df = clean_dataframe_for_visualization(df)
     df = ensure_full_twelve_months(df, user_query)
     df = ensure_full_four_quarters(df, user_query)
+    df = ensure_continuous_daily_series(df, user_query)
     df = unify_year_month_columns(df)
 
     measure_cols, raw_label_cols, time_col = get_axis_columns(df)
@@ -2481,20 +2484,41 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                         marker=dict(size=8, color="#0068FF")
                     )
 
-                    # Tính toán % tăng trưởng YoY (Year-over-Year) và Hover text chuyên sâu nếu là chuỗi thời gian 1 chỉ số
+                    # Tính toán % tăng trưởng và Hover text chuyên sâu nếu là chuỗi thời gian 1 chỉ số
                     if pd.api.types.is_numeric_dtype(sorted_df[measure_cols[0]]):
                         m_c = measure_cols[0]
                         yoy_series = sorted_df[m_c].pct_change() * 100.0
                         m_low = str(m_c).lower()
                         is_curr = any(k in m_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
-                        is_monthly = any(k in str(time_col).lower() for k in ["month", "tháng"]) or any(re.match(r"^\d{4}-\d{2}$", str(x)) for x in sorted_df[time_col].dropna().head(3))
-                        growth_label = "MoM" if is_monthly else "YoY"
+                        is_vnd_line = is_curr and is_vnd_context_dataframe(sorted_df, str(m_c))
+                        is_daily = any(k in str(time_col).lower() for k in ["ngay", "ngày", "day", "date"]) or any(
+                            re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}$", str(x).strip())
+                            for x in sorted_df[time_col].dropna().head(3)
+                        )
+                        is_monthly = (not is_daily) and (
+                            any(k in str(time_col).lower() for k in ["month", "tháng", "thang"])
+                            or any(re.match(r"^\d{4}-\d{2}$", str(x)) for x in sorted_df[time_col].dropna().head(3))
+                        )
+                        growth_label = "DoD" if is_daily else ("MoM" if is_monthly else "YoY")
                         hover_texts = []
                         for idx, (_, row) in enumerate(sorted_df.iterrows()):
                             val = float(row[m_c])
                             yoy_val = yoy_series.iloc[idx]
-                            yoy_str = f" ({yoy_val:+.1f}% {growth_label})" if pd.notna(yoy_val) else " (Khởi đầu)"
-                            if is_curr:
+                            if pd.notna(yoy_val) and math.isfinite(float(yoy_val)):
+                                yoy_str = f" ({yoy_val:+.1f}% {growth_label})"
+                            elif idx > 0 and pd.notna(yoy_val):
+                                yoy_str = " (Tăng từ 0)"
+                            else:
+                                yoy_str = " (Khởi đầu)"
+                            if is_vnd_line:
+                                if abs(val) >= 1_000_000_000:
+                                    fmt_compact = f"{val / 1e9:,.2f} Tỷ đ"
+                                elif abs(val) >= 1_000_000:
+                                    fmt_compact = f"{val / 1e6:,.2f} Tr đ"
+                                else:
+                                    fmt_compact = f"{val:,.0f} đ"
+                                val_detail = f" ({val:,.0f} đ)" if abs(val) >= 1_000_000 else ""
+                            elif is_curr:
                                 if abs(val) >= 1_000_000_000:
                                     fmt_compact = f"${val / 1e9:,.2f} Tỷ"
                                 elif abs(val) >= 1_000_000:
@@ -2520,6 +2544,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     m2_low = str(m2).lower()
                     is_curr1 = any(k in m1_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
                     is_curr2 = any(k in m2_low for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                    is_vnd1 = is_curr1 and is_vnd_context_dataframe(sorted_df, str(m1))
+                    is_vnd2 = is_curr2 and is_vnd_context_dataframe(sorted_df, str(m2))
                     is_pct1 = any(k in m1_low for k in ["margin", "tỷ suất", "tỉ suất", "%", "pct", "percent", "rate", "ratio"])
                     is_pct2 = any(k in m2_low for k in ["margin", "tỷ suất", "tỉ suất", "%", "pct", "percent", "rate", "ratio"])
 
@@ -2532,6 +2558,8 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     if diff_unit_or_scale:
                         chart_title = f"Xu hướng {clean_m1} & {clean_m2} qua từng {clean_time}{time_range_str}"
                         fig = make_subplots(specs=[[{"secondary_y": True}]])
+                        ht1 = "%{y:,.0f} đ" if is_vnd1 else ("$%{y:,.2f}" if is_curr1 else ("%{y:.1f}%" if is_pct1 else "%{y:,.0f}"))
+                        ht2 = "%{y:,.0f} đ" if is_vnd2 else ("$%{y:,.2f}" if is_curr2 else ("%{y:.1f}%" if is_pct2 else "%{y:,.0f}"))
                         fig.add_trace(
                             go.Scatter(
                                 x=sorted_df[time_col],
@@ -2540,7 +2568,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 mode="lines+markers",
                                 line=dict(width=3, color="#0068FF"),
                                 marker=dict(size=8, color="#0068FF"),
-                                hovertemplate=f"<b>{clean_time} %{{x}}</b><br>{clean_m1}: " + ("$%{y:,.2f}" if is_curr1 else ("%{y:.1f}%" if is_pct1 else "%{y:,.0f}")) + "<extra></extra>"
+                                hovertemplate=f"<b>{clean_time} %{{x}}</b><br>{clean_m1}: {ht1}<extra></extra>"
                             ),
                             secondary_y=False
                         )
@@ -2552,7 +2580,7 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                                 mode="lines+markers",
                                 line=dict(width=3, color="#FF7A00"),
                                 marker=dict(size=8, color="#FF7A00"),
-                                hovertemplate=f"<b>{clean_time} %{{x}}</b><br>{clean_m2}: " + ("$%{y:,.2f}" if is_curr2 else ("%{y:.1f}%" if is_pct2 else "%{y:,.0f}")) + "<extra></extra>"
+                                hovertemplate=f"<b>{clean_time} %{{x}}</b><br>{clean_m2}: {ht2}<extra></extra>"
                             ),
                             secondary_y=True
                         )
@@ -2561,14 +2589,14 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                             template="plotly_white",
                             yaxis=dict(
                                 title=clean_m1,
-                                tickprefix="$" if is_curr1 else "",
-                                ticksuffix="%" if is_pct1 else "",
+                                tickprefix="" if is_vnd1 else ("$" if is_curr1 else ""),
+                                ticksuffix=" đ" if is_vnd1 else ("%" if is_pct1 else ""),
                                 showgrid=True
                             ),
                             yaxis2=dict(
                                 title=clean_m2,
-                                tickprefix="$" if is_curr2 else "",
-                                ticksuffix="%" if is_pct2 else "",
+                                tickprefix="" if is_vnd2 else ("$" if is_curr2 else ""),
+                                ticksuffix=" đ" if is_vnd2 else ("%" if is_pct2 else ""),
                                 showgrid=False
                             ),
                             legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="right", x=1),
@@ -2869,9 +2897,13 @@ def render_smart_chart(df: pd.DataFrame, chart_override: str, turn_id: str, user
                     m_title = clean_m if (len(measure_cols) == 1 or time_color_col) else None
                 
                 is_curr_m = any(k in str(curr_metric_name).lower() for k in ["salary", "budget", "lương", "quỹ", "tiền", "sales", "amount", "revenue", "doanh", "cost", "profit", "$", "spent", "payment"])
+                is_vnd_m_line = is_curr_m and is_vnd_context_dataframe(sorted_df, str(curr_metric_name))
+                if is_vnd_m_line and m_title and "($)" in str(m_title):
+                    m_title = str(m_title).replace("($)", "(đ)")
                 yaxis_cfg = dict(
                     title=m_title,
-                    tickprefix="$" if is_curr_m else "",
+                    tickprefix="" if is_vnd_m_line else ("$" if is_curr_m else ""),
+                    ticksuffix=" đ" if is_vnd_m_line else "",
                     automargin=True
                 )
                 if y_range is not None:

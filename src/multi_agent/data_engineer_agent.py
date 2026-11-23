@@ -25,6 +25,7 @@ from src.llm.prompts import (
 from src.analytics.heuristics import (
     ensure_full_twelve_months,
     ensure_full_four_quarters,
+    ensure_continuous_daily_series,
     ensure_ratio_column_if_requested,
     ensure_efficiency_columns_if_requested,
 )
@@ -154,6 +155,7 @@ class DataEngineerAgent(BaseAgent):
         if df is not None and not df.empty:
             df = ensure_full_twelve_months(df, state.user_query)
             df = ensure_full_four_quarters(df, state.user_query)
+            df = ensure_continuous_daily_series(df, state.user_query)
             df = ensure_ratio_column_if_requested(df, state.user_query)
             df = ensure_efficiency_columns_if_requested(df, state.user_query)
 
