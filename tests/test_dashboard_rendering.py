@@ -500,6 +500,119 @@ class TestDashboardRendering(unittest.TestCase):
         self.assertIn("740,000 đ", exp_pay)
         self.assertFalse(any("Cross-Selling" in r.get("title", "") or "tồn kho" in r.get("title", "") for r in recs_pay))
 
+    def test_kpi_cards_option1_color_hierarchy_and_zoom_button_layout(self) -> None:
+        from unittest.mock import patch
+        from src.ui.crm_dashboard import _render_diagnostic_kpi_card
+
+        crm_src = (ROOT_DIR / "src" / "ui" / "crm_dashboard.py").read_text(encoding="utf-8")
+        modal_src = (ROOT_DIR / "src" / "visualization" / "chart_modal.py").read_text(encoding="utf-8")
+
+        # 1. Option 1 distinct per-class 3px top accents + zero #00F0FF neon
+        for expected_accent in (
+            "border-top: 3px solid #38BDF8",
+            "border-top: 3px solid #A855F7",
+            "border-top: 3px solid #10B981",
+            "border-top: 3px solid #F59E0B",
+            ".kpi-delta-up",
+            ".kpi-delta-down",
+            ".kpi-delta-warn",
+            ".kpi-accent-dot",
+            'st-key-btn_zoom_',
+        ):
+            self.assertIn(expected_accent, crm_src)
+        self.assertNotIn("#00F0FF", crm_src.upper())
+
+        # 2. Zoom button uses non-truncating layout & auto-width pill
+        self.assertIn("st.columns([2.7, 1.5], vertical_alignment=\"center\")", modal_src)
+        self.assertIn("use_container_width=False", modal_src)
+
+        # 3. _render_diagnostic_kpi_card renders semantic delta & benchmark colors accurately
+        captured: list[str] = []
+        with patch("src.ui.crm_dashboard.st.markdown", side_effect=lambda body, **kw: captured.append(str(body))):
+            _render_diagnostic_kpi_card(
+                color_class="kpi-card-cyan",
+                title="Tổng Doanh Thu",
+                value_html="<span>$22,694,950</span><span class='kpi-delta-tag'>▲ +5.4%</span>",
+                bench_label="Mục tiêu $20.8M",
+                bench_pct=109.1,
+                sub_text="TB $0.95M/tháng",
+            )
+            _render_diagnostic_kpi_card(
+                color_class="kpi-card-purple",
+                title="Số Hộp Bán",
+                value_html="<span>399,376</span><span class='kpi-delta-tag'>▼ -3.2%</span>",
+                bench_label="Định mức 420k",
+                bench_pct=81.0,
+                sub_text="Dưới chỉ tiêu",
+            )
+            _render_diagnostic_kpi_card(
+                color_class="kpi-card-emerald",
+                title="Tổng Lượt Khách",
+                val_html="85,371",
+                delta_str="100% CORE",
+                delta_dir="flat",
+                bench_label="Chuẩn 90k",
+                bench_pct=94.8,
+                status_level="warn",
+                sub_text="Sát mục tiêu",
+            )
+            _render_diagnostic_kpi_card(
+                color_class="kpi-card-amber",
+                title="Tỷ trọng Top 1",
+                val_html="Panadol Extra",
+                delta_str="30.3% Share",
+                delta_dir="up",
+                bench_label="Tỷ trọng đóng góp",
+                bench_pct=30.3,
+                status_level="good",
+                fill_color="linear-gradient(90deg, #F59E0B, #FBBF24)",
+                sub_text="540,000 đ",
+            )
+
+        self.assertEqual(len(captured), 4)
+        # Positive Sales card: accent dot + green delta + green benchmark pct + no kpi-top-row
+        self.assertIn("kpi-accent-dot", captured[0])
+        self.assertIn("kpi-delta-tag kpi-delta-up", captured[0])
+        self.assertIn("color: #34D399;", captured[0])
+        self.assertNotIn("kpi-top-row", captured[0])
+
+        # Negative / below-target card: red delta + red benchmark pct
+        self.assertIn("kpi-delta-tag kpi-delta-down", captured[1])
+        self.assertIn("color: #F87171;", captured[1])
+
+        # Warning card: warn delta + amber benchmark pct
+        self.assertIn("kpi-delta-tag kpi-delta-warn", captured[2])
+        self.assertIn("color: #FBBF24;", captured[2])
+
+        # Share card with explicit status_level="good" + fill_color: stays amber accent, not falsely red!
+        self.assertIn("kpi-delta-tag kpi-delta-up", captured[3])
+        self.assertIn("color: #FBBF24;", captured[3])
+        self.assertNotIn("#F87171", captured[3])
+
+    def test_loading_stale_guard_and_surface_isolation_prevents_dashboard_ghosts(self) -> None:
+        from src.ui.components import render_loading_stale_guard_css
+
+        guard_css = render_loading_stale_guard_css()
+        self.assertIn('data-vx-loading-guard="1"', guard_css)
+        self.assertIn('[data-testid="stElementContainer"][data-stale="true"]', guard_css)
+        self.assertIn('section[data-testid="stMain"]', guard_css)
+        self.assertIn('display: none !important;', guard_css)
+        # Must strictly scope to main viewport and never hide sidebar elements
+        self.assertNotIn('stSidebar', guard_css)
+
+        app_src = (ROOT_DIR / "app.py").read_text(encoding="utf-8")
+        # Non-chat surfaces must be isolated inside st.container() at main[1] so chatMessage replaces them atomically
+        self.assertIn("if view_mode == \"dashboard\" and not prompt_to_run:\n        with st.container():\n            render_crm_dashboard()", app_src)
+        self.assertIn("elif view_mode == \"evolution\" and not prompt_to_run:\n        with st.container():", app_src)
+        self.assertIn("if not history and focused_turn_idx is None and not prompt_to_run and view_mode == \"chat\":\n        with st.container():", app_src)
+        # Focused turn reset must occur BEFORE routing when prompt_to_run is active
+        reset_pos = app_src.index("if prompt_to_run:\n        focused_turn_idx = None")
+        route_pos = app_src.index('if view_mode == "dashboard" and not prompt_to_run:')
+        self.assertLess(reset_pos, route_pos)
+        # Scoped loading guard must be mounted before run_agent and cleaned up in finally
+        self.assertIn("loading_guard_placeholder.markdown(render_loading_stale_guard_css(), unsafe_allow_html=True)", app_src)
+        self.assertIn("loading_guard_placeholder.empty()", app_src)
+
 
 if __name__ == "__main__":
     unittest.main()

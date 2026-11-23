@@ -81,10 +81,11 @@ def _render_diagnostic_kpi_card(
     delta_str: str = "",
     delta_dir: str = "up",
     status_text: str = "",
-    status_level: str = "good",
+    status_level: str = "",
     fill_color: str = ""
 ):
-    """Render thẻ KPI chẩn đoán hiệu suất động với bố cục 5 tầng thông thoáng, hiển thị đầy đủ 100% chữ & số không bị cắt cụt."""
+    """Render thẻ KPI chẩn đoán hiệu suất động theo chuẩn Enterprise Dark-Mode (Phương án 1):
+    viền nhấn & ánh nhẹ phân màu theo nhóm chỉ số, huy hiệu delta & thanh chuẩn mang ngữ nghĩa."""
     import re
     resolved_class = color_class or card_class or "kpi-card-cyan"
     resolved_val = value_html or val_html or ""
@@ -105,18 +106,63 @@ def _render_diagnostic_kpi_card(
     clean_bench_lbl = re.sub(r"^[\s🎯]+", "", str(bench_label or "")).strip()
 
     fill_w = min(100.0, max(8.0, float(bench_pct)))
-    if bench_pct >= 98.0 or status_level == "good":
-        bar_bg = fill_color or "#10B981"
-    elif bench_pct >= 85.0 or status_level == "warn":
-        bar_bg = fill_color or "#F59E0B"
-    else:
-        bar_bg = fill_color or "#EF4444"
+    norm_status = str(status_level or "").strip().lower()
 
-    delta_badge_html = f"<span class='kpi-delta-tag'>{extracted_delta}</span>" if extracted_delta else ""
+    # Palette theo nhóm thẻ khi caller truyền fill_color tường minh (Universal/SME)
+    _accent_palette = {
+        "kpi-card-cyan": ("#38BDF8", "rgba(56, 189, 248, 0.38)"),
+        "kpi-card-purple": ("#C084FC", "rgba(168, 85, 247, 0.38)"),
+        "kpi-card-emerald": ("#34D399", "rgba(16, 185, 129, 0.38)"),
+        "kpi-card-amber": ("#FBBF24", "rgba(245, 158, 11, 0.38)"),
+    }
+    accent_pct, accent_glow = _accent_palette.get(resolved_class, ("#34D399", "rgba(16, 185, 129, 0.38)"))
+
+    if norm_status in ("bad", "danger", "alert") or (not norm_status and float(bench_pct) < 85.0):
+        default_bar_bg = "linear-gradient(90deg, #DC2626, #F87171)"
+        pct_color = "#F87171"
+        bar_glow = "rgba(239, 68, 68, 0.40)"
+    elif norm_status == "warn" or (not norm_status and float(bench_pct) < 98.0):
+        default_bar_bg = "linear-gradient(90deg, #D97706, #FBBF24)"
+        pct_color = "#FBBF24"
+        bar_glow = "rgba(245, 158, 11, 0.40)"
+    else:
+        default_bar_bg = "linear-gradient(90deg, #059669, #34D399)"
+        pct_color = accent_pct if fill_color else "#34D399"
+        bar_glow = accent_glow if fill_color else "rgba(16, 185, 129, 0.38)"
+
+    bar_bg = fill_color or default_bar_bg
+
+    # Phân loại ngữ nghĩa màu sắc cho huy hiệu delta (tăng=xanh, giảm=đỏ, cảnh báo=vàng, trung tính=theo màu thẻ)
+    delta_badge_html = ""
+    if extracted_delta:
+        d_strip = extracted_delta.strip()
+        d_upper = d_strip.upper()
+        if (
+            "▼" in d_strip
+            or "🔴" in d_strip
+            or delta_dir == "down"
+            or norm_status in ("bad", "danger", "alert")
+            or bool(re.match(r"^-\d", d_strip))
+        ):
+            delta_cls = "kpi-delta-tag kpi-delta-down"
+        elif "🟡" in d_strip or "⚠" in d_strip or norm_status == "warn":
+            delta_cls = "kpi-delta-tag kpi-delta-warn"
+        elif (
+            "▲" in d_strip
+            or "🟢" in d_strip
+            or "+" in d_strip
+            or "ACTIVE" in d_upper
+            or "OPTIMAL" in d_upper
+        ):
+            delta_cls = "kpi-delta-tag kpi-delta-up"
+        else:
+            delta_cls = "kpi-delta-tag kpi-delta-neutral"
+        delta_badge_html = f"<span class='{delta_cls}'>{extracted_delta}</span>"
 
     st.markdown(f"""
     <div class="{resolved_class}" style="{extra_style}">
         <div class="kpi-title" title="{title}">
+            <span class="kpi-accent-dot"></span>
             <span class="kpi-title-text">{title}</span>
         </div>
         <div class="kpi-val">{resolved_val}</div>
@@ -127,10 +173,10 @@ def _render_diagnostic_kpi_card(
         <div class="kpi-bench-wrap">
             <div class="kpi-bench-header">
                 <span class="kpi-bench-lbl" title="{clean_bench_lbl}">{clean_bench_lbl}</span>
-                <span class="kpi-bench-pct"><b>{bench_pct:.1f}%</b></span>
+                <span class="kpi-bench-pct" style="color: {pct_color};"><b>{bench_pct:.1f}%</b></span>
             </div>
             <div class="kpi-bench-track">
-                <div class="kpi-bench-fill" style="width: {fill_w:.1f}%; background: {bar_bg};"></div>
+                <div class="kpi-bench-fill" style="width: {fill_w:.1f}%; background: {bar_bg}; box-shadow: 0 0 8px {bar_glow};"></div>
             </div>
         </div>
     </div>
@@ -454,52 +500,111 @@ def render_crm_dashboard():
             -webkit-font-smoothing: antialiased;
         }
         
-        /* Calm Dark Neutral SaaS Metric KPI Cards (Linear / Stripe Dark Aesthetic) */
+        /* Enterprise Dark-Mode SaaS Metric KPI Cards (Option 1: Calm Base + Colored Top Accent & Semantic Signals) */
         .kpi-card-cyan, .kpi-card-purple, .kpi-card-emerald, .kpi-card-amber {
             background: #11141C !important;
             border-radius: 12px !important;
             padding: 14px 16px !important;
             color: #F8FAFC !important;
-            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border: 1px solid rgba(255, 255, 255, 0.10) !important;
             height: auto !important;
-            min-height: 138px !important;
+            min-height: 142px !important;
             box-sizing: border-box !important;
             overflow: hidden !important;
             display: flex !important;
             flex-direction: column !important;
             justify-content: space-between !important;
-            box-shadow: none !important;
-            transition: border-color 0.15s ease, background-color 0.15s ease;
+            transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
         }
-        .kpi-card-cyan:hover, .kpi-card-purple:hover, .kpi-card-emerald:hover, .kpi-card-amber:hover {
-            border-color: rgba(255, 255, 255, 0.16) !important;
-            background: #151924 !important;
-            transform: none !important;
-            box-shadow: none !important;
+        .kpi-card-cyan {
+            background: linear-gradient(180deg, rgba(56, 189, 248, 0.12) 0%, rgba(17, 20, 28, 0.98) 64%, #11141C 100%) !important;
+            border: 1px solid rgba(56, 189, 248, 0.28) !important;
+            border-top: 3px solid #38BDF8 !important;
+            box-shadow: 0 4px 16px -6px rgba(56, 189, 248, 0.18) !important;
+        }
+        .kpi-card-cyan:hover {
+            border-color: rgba(56, 189, 248, 0.52) !important;
+            border-top-color: #7DD3FC !important;
+            background: linear-gradient(180deg, rgba(56, 189, 248, 0.18) 0%, #151924 68%, #131722 100%) !important;
+            box-shadow: 0 8px 22px -6px rgba(56, 189, 248, 0.28) !important;
+        }
+        .kpi-card-purple {
+            background: linear-gradient(180deg, rgba(139, 92, 246, 0.13) 0%, rgba(17, 20, 28, 0.98) 64%, #11141C 100%) !important;
+            border: 1px solid rgba(139, 92, 246, 0.30) !important;
+            border-top: 3px solid #A855F7 !important;
+            box-shadow: 0 4px 16px -6px rgba(139, 92, 246, 0.20) !important;
+        }
+        .kpi-card-purple:hover {
+            border-color: rgba(168, 85, 247, 0.54) !important;
+            border-top-color: #C084FC !important;
+            background: linear-gradient(180deg, rgba(139, 92, 246, 0.20) 0%, #151924 68%, #131722 100%) !important;
+            box-shadow: 0 8px 22px -6px rgba(139, 92, 246, 0.28) !important;
+        }
+        .kpi-card-emerald {
+            background: linear-gradient(180deg, rgba(16, 185, 129, 0.12) 0%, rgba(17, 20, 28, 0.98) 64%, #11141C 100%) !important;
+            border: 1px solid rgba(16, 185, 129, 0.28) !important;
+            border-top: 3px solid #10B981 !important;
+            box-shadow: 0 4px 16px -6px rgba(16, 185, 129, 0.18) !important;
+        }
+        .kpi-card-emerald:hover {
+            border-color: rgba(16, 185, 129, 0.52) !important;
+            border-top-color: #34D399 !important;
+            background: linear-gradient(180deg, rgba(16, 185, 129, 0.18) 0%, #151924 68%, #131722 100%) !important;
+            box-shadow: 0 8px 22px -6px rgba(16, 185, 129, 0.28) !important;
+        }
+        .kpi-card-amber {
+            background: linear-gradient(180deg, rgba(245, 158, 11, 0.12) 0%, rgba(17, 20, 28, 0.98) 64%, #11141C 100%) !important;
+            border: 1px solid rgba(245, 158, 11, 0.28) !important;
+            border-top: 3px solid #F59E0B !important;
+            box-shadow: 0 4px 16px -6px rgba(245, 158, 11, 0.18) !important;
+        }
+        .kpi-card-amber:hover {
+            border-color: rgba(245, 158, 11, 0.52) !important;
+            border-top-color: #FBBF24 !important;
+            background: linear-gradient(180deg, rgba(245, 158, 11, 0.18) 0%, #151924 68%, #131722 100%) !important;
+            box-shadow: 0 8px 22px -6px rgba(245, 158, 11, 0.28) !important;
         }
 
-        .kpi-top-row {
-            display: flex !important;
-            align-items: center !important;
-            justify-content: space-between !important;
-            gap: 6px !important;
-            width: 100% !important;
-            flex-shrink: 0 !important;
-            margin-bottom: 2px !important;
-        }
         .kpi-title {
             font-size: 0.78rem !important;
             font-weight: 600 !important;
             text-transform: none;
             letter-spacing: -0.005em;
-            color: #94A3B8 !important;
+            color: #CBD5E1 !important;
             line-height: 1.28 !important;
             width: 100% !important;
             white-space: normal !important;
             overflow: visible !important;
-            margin: 2px 0 1px 0 !important;
+            margin: 1px 0 2px 0 !important;
             flex-shrink: 0 !important;
             text-shadow: none !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 7px !important;
+        }
+        .kpi-accent-dot {
+            width: 7px !important;
+            height: 7px !important;
+            border-radius: 50% !important;
+            flex-shrink: 0 !important;
+            display: inline-block !important;
+            background: #94A3B8;
+        }
+        .kpi-card-cyan .kpi-accent-dot {
+            background: #38BDF8 !important;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.65) !important;
+        }
+        .kpi-card-purple .kpi-accent-dot {
+            background: #A855F7 !important;
+            box-shadow: 0 0 8px rgba(168, 85, 247, 0.65) !important;
+        }
+        .kpi-card-emerald .kpi-accent-dot {
+            background: #34D399 !important;
+            box-shadow: 0 0 8px rgba(52, 211, 153, 0.65) !important;
+        }
+        .kpi-card-amber .kpi-accent-dot {
+            background: #FBBF24 !important;
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.65) !important;
         }
         .kpi-title-text {
             display: block !important;
@@ -507,6 +612,10 @@ def render_crm_dashboard():
             word-break: break-word !important;
             overflow: visible !important;
         }
+        .kpi-card-cyan .kpi-title-text { color: #BAE6FD !important; }
+        .kpi-card-purple .kpi-title-text { color: #DDD6FE !important; }
+        .kpi-card-emerald .kpi-title-text { color: #A7F3D0 !important; }
+        .kpi-card-amber .kpi-title-text { color: #FDE68A !important; }
         .kpi-status-pill {
             font-size: 0.66rem !important;
             font-weight: 500 !important;
@@ -542,19 +651,54 @@ def render_crm_dashboard():
         .kpi-delta-tag {
             font-size: 0.68rem !important;
             font-weight: 600 !important;
-            padding: 1px 6px !important;
-            border-radius: 5px !important;
-            background: rgba(255, 255, 255, 0.06) !important;
-            color: #CBD5E1 !important;
-            border: none !important;
+            padding: 2px 7px !important;
+            border-radius: 6px !important;
+            background: rgba(255, 255, 255, 0.07);
+            color: #CBD5E1;
+            border: 1px solid rgba(255, 255, 255, 0.12);
             font-variant-numeric: tabular-nums;
             white-space: nowrap !important;
             flex-shrink: 0 !important;
             text-shadow: none !important;
         }
+        .kpi-delta-up {
+            background: rgba(16, 185, 129, 0.16) !important;
+            color: #34D399 !important;
+            border: 1px solid rgba(16, 185, 129, 0.34) !important;
+        }
+        .kpi-delta-down {
+            background: rgba(239, 68, 68, 0.16) !important;
+            color: #F87171 !important;
+            border: 1px solid rgba(239, 68, 68, 0.34) !important;
+        }
+        .kpi-delta-warn {
+            background: rgba(245, 158, 11, 0.16) !important;
+            color: #FBBF24 !important;
+            border: 1px solid rgba(245, 158, 11, 0.34) !important;
+        }
+        .kpi-card-cyan .kpi-delta-neutral {
+            background: rgba(56, 189, 248, 0.14) !important;
+            color: #7DD3FC !important;
+            border: 1px solid rgba(56, 189, 248, 0.30) !important;
+        }
+        .kpi-card-purple .kpi-delta-neutral {
+            background: rgba(139, 92, 246, 0.16) !important;
+            color: #C4B5FD !important;
+            border: 1px solid rgba(139, 92, 246, 0.32) !important;
+        }
+        .kpi-card-emerald .kpi-delta-neutral {
+            background: rgba(16, 185, 129, 0.14) !important;
+            color: #6EE7B7 !important;
+            border: 1px solid rgba(16, 185, 129, 0.30) !important;
+        }
+        .kpi-card-amber .kpi-delta-neutral {
+            background: rgba(245, 158, 11, 0.15) !important;
+            color: #FCD34D !important;
+            border: 1px solid rgba(245, 158, 11, 0.30) !important;
+        }
         .kpi-bench-wrap {
             width: 100% !important;
-            margin-top: 4px !important;
+            margin-top: 5px !important;
             flex-shrink: 0 !important;
         }
         .kpi-bench-header {
@@ -564,8 +708,8 @@ def render_crm_dashboard():
             gap: 6px !important;
             font-size: 0.69rem !important;
             font-weight: 500 !important;
-            color: #64748B !important;
-            margin-bottom: 4px !important;
+            color: #94A3B8 !important;
+            margin-bottom: 5px !important;
             width: 100% !important;
         }
         .kpi-bench-lbl {
@@ -575,7 +719,7 @@ def render_crm_dashboard():
             min-width: 0 !important;
             flex: 1 1 0% !important;
             display: block !important;
-            color: #64748B !important;
+            color: #94A3B8 !important;
             text-shadow: none !important;
         }
         .kpi-bench-pct {
@@ -583,16 +727,16 @@ def render_crm_dashboard():
             flex: 0 0 auto !important;
             text-align: right !important;
             padding-left: 4px !important;
-            font-size: 0.70rem !important;
-            font-weight: 600 !important;
+            font-size: 0.71rem !important;
+            font-weight: 700 !important;
             font-variant-numeric: tabular-nums;
-            color: #94A3B8 !important;
+            color: #94A3B8;
             text-shadow: none !important;
         }
         .kpi-bench-track {
             width: 100% !important;
-            height: 3px !important;
-            background: rgba(255, 255, 255, 0.08) !important;
+            height: 4px !important;
+            background: rgba(255, 255, 255, 0.09) !important;
             border-radius: 999px !important;
             overflow: hidden !important;
             border: none !important;
@@ -600,7 +744,6 @@ def render_crm_dashboard():
         .kpi-bench-fill {
             height: 100% !important;
             border-radius: 999px !important;
-            box-shadow: none !important;
         }
         .kpi-sub {
             font-size: 0.71rem !important;
@@ -739,6 +882,29 @@ def render_crm_dashboard():
             color: #F8FAFC !important;
             box-shadow: none !important;
             transform: none !important;
+        }
+
+        /* Compact right-aligned Zoom buttons inside chart headers so narrow cards never truncate ("Phón...") */
+        div[data-testid="stHorizontalBlock"] [class*="st-key-btn_zoom_"] {
+            display: flex !important;
+            justify-content: flex-end !important;
+            width: 100% !important;
+        }
+        div[data-testid="stHorizontalBlock"] [class*="st-key-btn_zoom_"] .stButton > button,
+        div[data-testid="stHorizontalBlock"] [class*="st-key-btn_zoom_"] button {
+            padding: 5px 10px !important;
+            min-height: 32px !important;
+            font-size: 0.76rem !important;
+            font-weight: 500 !important;
+            white-space: nowrap !important;
+            width: auto !important;
+            min-width: max-content !important;
+        }
+        div[data-testid="stHorizontalBlock"] [class*="st-key-btn_zoom_"] button p {
+            font-size: 0.76rem !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
         }
 
         .layer-breadcrumb {

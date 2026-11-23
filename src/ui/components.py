@@ -7601,5 +7601,41 @@ def render_veraxus_loading_html(text: str, is_en: Optional[bool] = None) -> str:
     )
 
 
+def render_loading_stale_guard_css() -> str:
+    """Scoped CSS guard mounted strictly while Veraxus is computing a query.
+
+    Hides any stale ghost elements (`data-stale="true"`) and pure-stale layout wrappers
+    left behind in the main viewport from a previous view (e.g., Dashboard charts/sliders,
+    Welcome cards, or a focused turn) without ever affecting the Sidebar or fresh elements.
+    """
+    return """<style data-vx-loading-guard="1">
+    section[data-testid="stMain"] [data-testid="stElementContainer"][data-stale="true"],
+    section[data-testid="stMain"] .element-container[data-stale="true"],
+    [data-testid="stMainBlockContainer"] [data-testid="stElementContainer"][data-stale="true"],
+    [data-testid="stMainBlockContainer"] .element-container[data-stale="true"] {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+    }
+    section[data-testid="stMain"] [data-testid="stLayoutWrapper"]:has([data-stale="true"]):not(:has([data-stale="false"])),
+    section[data-testid="stMain"] [data-testid="stHorizontalBlock"]:has([data-stale="true"]):not(:has([data-stale="false"])),
+    section[data-testid="stMain"] [data-testid="stVerticalBlockBorderWrapper"]:has([data-stale="true"]):not(:has([data-stale="false"])),
+    section[data-testid="stMain"] [data-testid="stChatMessage"]:has([data-stale="true"]):not(:has([data-stale="false"])) {
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        border: none !important;
+    }
+    </style>"""
+
+
 
 

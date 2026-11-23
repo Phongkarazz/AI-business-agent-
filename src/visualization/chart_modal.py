@@ -2318,14 +2318,14 @@ def render_zoomable_chart_card(
     zoom_label = "Zoom ↗" if is_en else "Phóng to ↗"
     zoom_help = "Zoom chart & view anomaly analysis" if is_en else "Phóng to biểu đồ & xem phân tích điểm bất thường"
 
-    # Header bar of chart card
-    c_head1, c_head2 = st.columns([4.8, 1.4], vertical_alignment="center")
+    # Header bar of chart card (wider right share + auto-fit button prevents "Phón..." truncation in narrow Donut columns)
+    c_head1, c_head2 = st.columns([2.7, 1.5], vertical_alignment="center")
     with c_head1:
         st.markdown(f"""<div style="padding: 4px 0;">
 <span style="font-size: 0.94rem; font-weight: 600; color: #F8FAFC; letter-spacing: -0.01em;">{title}</span>
 </div>""", unsafe_allow_html=True)
     with c_head2:
-        zoom_clicked = st.button(zoom_label, key=f"btn_zoom_{key}", use_container_width=True, help=zoom_help)
+        zoom_clicked = st.button(zoom_label, key=f"btn_zoom_{key}", use_container_width=False, help=zoom_help)
 
     # Render Plotly chart
     if height:
