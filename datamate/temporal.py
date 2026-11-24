@@ -23,11 +23,23 @@ _VI_MONTH_DATE_RE = re.compile(
     r"^\s*(?:ng[aà]y\s*)?(\d{1,2})\s*(?:thg|th[aá]ng|/|-|\.)\s*(\d{1,2})(?:\s*(?:(?:n[aă]m\b|[/\-.])\s*|\s+)(\d{2,4}))?\s*$",
     re.IGNORECASE,
 )
+_T_MONTH_DAY_RE = re.compile(
+    r"^\s*t(\d{1,2})\s*[/\-.]\s*(\d{1,2})(?:[/\-.](\d{2,4}))?\s*$",
+    re.IGNORECASE,
+)
 _DMY_RE = re.compile(
     r"^\s*(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?\s*$"
 )
 _YMD_RE = re.compile(
     r"^\s*(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})(?:[T\s](\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?))?\s*$"
+)
+_BARE_LUNAR_DATE_RE = re.compile(
+    r"^\s*(?:m[uù]ng\s*)?(\d{1,2})\s*(?:[/\-.]|thg|th[aá]ng)\s*(\d{1,2})"
+    r"(?:\s*(?:[/\-.]|n[aă]m\b)\s*(\d{2,4}))?"
+    r"\s*(?:\(?\s*(nhu[aậ]n)\s*\)?\s*)?"
+    r"\(?\s*(?:âm\s*lịch|am\s*lich|âm\s*l|am\s*l|âl|al)\s*\)?"
+    r"(?:\s*\(?\s*(nhu[aậ]n)\s*\)?)?\s*$",
+    re.IGNORECASE,
 )
 _SERIAL_RE = re.compile(r"^\s*(\d{5}(?:\.\d+)?)\s*$")
 
@@ -51,10 +63,20 @@ def _add_months(year: int, month: int, delta: int) -> Tuple[int, int]:
     return new_year, new_month_zero + 1
 
 
+_VN_TZ = dt.timezone(dt.timedelta(hours=7))
+_UNIX_SEC_MIN = 1_262_304_000      # 2010-01-01 UTC
+_UNIX_SEC_MAX = 2_208_988_800      # 2040-01-01 UTC
+_UNIX_MS_MIN = _UNIX_SEC_MIN * 1000
+_UNIX_MS_MAX = _UNIX_SEC_MAX * 1000
+
+
 def parse_date_value(
     value: Any,
     default_year: Optional[int] = None,
     day_first: bool = True,
+    allow_unix_ts: bool = False,
+    lunar_cal: Optional["SolarLunarCalendar"] = None,
+    anchor_date: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Parse messy Vietnamese spreadsheet date/datetime cell into ISO strings.
@@ -65,11 +87,13 @@ def parse_date_value(
 
     Supports:
     - ``datetime.datetime`` / ``datetime.date`` objects
-    - Excel serial numbers (integers/numeric strings roughly in 20000..70000)
+    - Excel serial numbers (integers/numeric strings roughly in 20000..80000)
+    - Optional Unix epoch seconds/ms in Vietnam UTC+7 (when ``allow_unix_ts=True``)
     - ISO ``YYYY-MM-DD[ HH:MM[:SS]]``
     - ``DD/MM/YYYY[ HH:MM[:SS]]``, ``DD-MM-YYYY``, ``DD.MM.YYYY``
-    - ``1 thg 6 2025``, ``ngày 1 tháng 6 năm 2025``
+    - ``1 thg 6 2025``, ``ngày 1 tháng 6 năm 2025``, ``T1/25``
     - Yearless dates ``DD/MM`` when ``default_year`` is known (Rulebook §8)
+    - Bare lunar dates such as ``17/2 ÂL`` or ``15/4/2025 âm lịch`` when ``lunar_cal`` is supplied
     """
     if value is None:
         return None, None
@@ -90,10 +114,85 @@ def parse_date_value(
                 t_obj = (dt.datetime.combine(d, dt.time.min) + dt.timedelta(seconds=secs)).time()
                 return d.isoformat(), t_obj.strftime("%H:%M:%S")
             return d.isoformat(), None
+        if allow_unix_ts:
+            epoch_s: Optional[float] = None
+            if _UNIX_SEC_MIN <= value <= _UNIX_SEC_MAX:
+                epoch_s = float(value)
+            elif _UNIX_MS_MIN <= value <= _UNIX_MS_MAX:
+                epoch_s = float(value) / 1000.0
+            if epoch_s is not None:
+                dt_vn = dt.datetime.fromtimestamp(epoch_s, tz=_VN_TZ)
+                t_str = dt_vn.strftime("%H:%M:%S")
+                return dt_vn.date().isoformat(), (None if t_str == "00:00:00" else t_str)
         return None, None
 
     s = normalize_nfc(str(value))
     if not s or s.lower() in {"nan", "nat", "none", "null", "n/a", "-"}:
+        return None, None
+
+    # Resolve bare lunar date cells (e.g. "17/2 ÂL", "15/4/2025 âm lịch") BEFORE stripping parenthetical notes
+    m_lunar = _BARE_LUNAR_DATE_RE.match(s)
+    if m_lunar:
+        if lunar_cal is None:
+            return None, None
+        l_day = int(m_lunar.group(1))
+        l_month = int(m_lunar.group(2))
+        y_raw = m_lunar.group(3)
+        is_leap = bool(m_lunar.group(4) or m_lunar.group(5))
+        if y_raw is not None:
+            l_year = int(y_raw) + (2000 if int(y_raw) < 100 else 0)
+            solar_iso = lunar_cal.find_solar_from_lunar(l_year, l_month, l_day, is_leap)
+            if solar_iso is None and is_leap:
+                solar_iso = lunar_cal.find_solar_from_lunar(l_year, l_month, l_day, False)
+            return (solar_iso, None) if solar_iso else (None, None)
+
+        anchor_d: Optional[dt.date] = None
+        if anchor_date and re.match(r"^\d{4}-\d{2}-\d{2}", str(anchor_date)):
+            try:
+                anchor_d = dt.date.fromisoformat(str(anchor_date)[:10])
+            except ValueError:
+                anchor_d = None
+        base_y = anchor_d.year if anchor_d is not None else default_year
+        if base_y is None:
+            return None, None
+        cands: List[Tuple[int, str]] = []
+        for ly in (base_y - 1, base_y, base_y + 1):
+            c_iso = lunar_cal.find_solar_from_lunar(ly, l_month, l_day, is_leap)
+            if c_iso is None and is_leap:
+                c_iso = lunar_cal.find_solar_from_lunar(ly, l_month, l_day, False)
+            if c_iso:
+                cands.append((ly, c_iso))
+        if not cands:
+            return None, None
+        if anchor_d is not None:
+            best_iso = min(
+                cands,
+                key=lambda item: (
+                    abs((dt.date.fromisoformat(item[1]) - anchor_d).days),
+                    0 if dt.date.fromisoformat(item[1]) >= anchor_d else 1,
+                ),
+            )[1]
+            return best_iso, None
+        exact_year_cands = [iso for ly, iso in cands if ly == base_y]
+        return (exact_year_cands[0] if exact_year_cands else cands[0][1]), None
+
+    # Strip trailing parenthetical lunar annotation, e.g. "12/05/2025 (15/4 âm)"
+    s = re.sub(
+        r"\s*\([^)]*(?:[aâ]m(?:\s*l[iị]ch)?|al)\)\s*$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Strip leading Vietnamese weekday prefix followed by whitespace, e.g. "Thứ hai, 02/06/2025", "T6 02/01"
+    s = re.sub(
+        r"^(?:th[uứ]\s*(?:hai|ba|t[uư]|n[aă]m|s[aá]u|b[aả]y|[2-7])|ch[uủ]\s*nh[aậ]t|t[2-7]|cn)\s*[,.\-]?\s+",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    if not s:
         return None, None
 
     m_serial = _SERIAL_RE.match(s)
@@ -101,6 +200,26 @@ def parse_date_value(
         serial_val = float(m_serial.group(1))
         if 20000 <= serial_val <= 80000:
             return parse_date_value(serial_val, default_year=default_year, day_first=day_first)
+
+    if allow_unix_ts and re.match(r"^\d{10,13}(?:\.\d+)?$", s):
+        return parse_date_value(float(s), default_year=default_year, day_first=day_first, allow_unix_ts=True)
+
+    m_t_md = _T_MONTH_DAY_RE.match(s)
+    if m_t_md:
+        m_val, d_val = int(m_t_md.group(1)), int(m_t_md.group(2))
+        y_raw = m_t_md.group(3)
+        if y_raw is None:
+            if default_year is None:
+                return None, None
+            y_val = int(default_year)
+        else:
+            y_val = int(y_raw)
+            if y_val < 100:
+                y_val += 2000
+        try:
+            return dt.date(y_val, m_val, d_val).isoformat(), None
+        except ValueError:
+            return None, None
 
     m_ymd = _YMD_RE.match(s)
     if m_ymd:

@@ -134,15 +134,26 @@ def extract_json_object(raw: str) -> Optional[Dict[str, Any]]:
     if not text:
         return None
 
+    def _loads_dict_lenient(s: str) -> Optional[Dict[str, Any]]:
+        try:
+            obj = json.loads(s)
+            return obj if isinstance(obj, dict) else None
+        except json.JSONDecodeError:
+            if "\\'" not in s:
+                return None
+            # Small LLMs frequently escape single quotes as \' inside JSON strings; unescape cleanly
+            try:
+                obj = json.loads(re.sub(r"(?<!\\)\\'", "'", s))
+                return obj if isinstance(obj, dict) else None
+            except json.JSONDecodeError:
+                return None
+
     m = _CODE_FENCE_RE.search(text)
     candidates = [m.group(1).strip(), text] if m else [text]
     for cand in candidates:
-        try:
-            obj = json.loads(cand)
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            pass
+        obj = _loads_dict_lenient(cand)
+        if obj is not None:
+            return obj
 
     # Balanced brace scan fallback for prose-wrapped JSON
     start = text.find("{")
@@ -169,12 +180,10 @@ def extract_json_object(raw: str) -> Optional[Dict[str, Any]]:
                 depth -= 1
                 if depth == 0:
                     snippet = text[start : idx + 1]
-                    try:
-                        obj = json.loads(snippet)
-                        if isinstance(obj, dict):
-                            return obj
-                    except json.JSONDecodeError:
-                        break
+                    obj = _loads_dict_lenient(snippet)
+                    if obj is not None:
+                        return obj
+                    break
         start = text.find("{", start + 1)
     return None
 
@@ -280,6 +289,7 @@ class MultiProviderLLMBackend:
         json_mode: bool = False,
     ) -> str:
         temp = self.config.temperature if temperature is None else temperature
+        effective_json_mode = json_mode
         messages: List[Dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -318,19 +328,19 @@ class MultiProviderLLMBackend:
                         "temperature": temp,
                         "max_tokens": max_tokens,
                     }
-                    if json_mode:
+                    if effective_json_mode:
                         create_kwargs["response_format"] = {"type": "json_object"}
                     try:
                         comp = self._client.chat.completions.create(**create_kwargs)
                     except Exception as sdk_exc:
-                        if json_mode and "response_format" in str(sdk_exc).lower():
+                        if effective_json_mode and "response_format" in str(sdk_exc).lower():
                             create_kwargs.pop("response_format", None)
                             comp = self._client.chat.completions.create(**create_kwargs)
                         else:
                             raise
                     return strip_thinking(comp.choices[0].message.content or "")
 
-                return strip_thinking(self._http_openai_chat(messages, temp, max_tokens, json_mode=json_mode))
+                return strip_thinking(self._http_openai_chat(messages, temp, max_tokens, json_mode=effective_json_mode))
 
             except (urllib.error.URLError, TimeoutError, Exception) as exc:
                 last_err = exc

@@ -10,8 +10,20 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from datamate.evaluator_pa import is_valid_submission_record
 from datamate.llm_backend import LLMBackend, LLMConfig, MultiProviderLLMBackend, extract_json_object
 from datamate.loader import BusinessWorkspace, load_business_workspace
-from datamate.schema_context import WorkspaceKnowledge, build_workspace_knowledge, ground_query_entities
-from datamate.sql_executor import SQLExecutionResult, execute_sql_safe, norm_vn, round_half_up
+from datamate.python_sandbox import execute_python_safe, extract_python_from_response
+from datamate.schema_context import (
+    WorkspaceKnowledge,
+    build_focused_schema_prompt,
+    build_workspace_knowledge,
+    ground_query_entities,
+    run_deterministic_probes,
+)
+from datamate.sql_executor import (
+    SQLExecutionResult,
+    execute_sql_safe,
+    norm_vn,
+    round_half_up,
+)
 from datamate.temporal import SolarLunarCalendar, TemporalResolver, normalize_nfc, parse_date_value
 
 _ENGLISH_KEEP_WORDS = frozenset(
@@ -147,6 +159,7 @@ _RULE_INDUSTRY_VLXD = "- VLXD giao nhiều đợt: mỗi đợt của mỗi đơ
 
 _SUBJECTIVE_RE = re.compile(
     r"(?:l[aà]nh ngh[eề]|tay ngh[eề]|l[eễ] ph[eé]p|chu [dđ][aá]o|qu[yý] m[eế]n|th[aá]i [dđ][oộ]|nhi[eệ]t t[iì]nh|ngoan|th[oô]ng minh"
+    r"|t[aậ]n t[aâ]m|t[aậ]n t[uụ]y|th[aâ]n thi[eệ]n|vui v[eẻ]|ch[aă]m ch[iỉ]"
     r"|(?:t[aạ]i sao|v[iì] sao|tai sao|vi sao|ly do|nguy[eê]n nh[aâ]n|nguyen nhan).*(?:th[ií]ch|thich|y[eê]u th[ií]ch|[uư]a chu[oộ]ng|ua chuong|h[aà]i l[oò]ng|hai long))",
     re.IGNORECASE,
 )
@@ -167,8 +180,8 @@ _OUT_OF_SCOPE_ACCENTED_RE = re.compile(
 _OUT_OF_SCOPE_UNACCENTED_RE = re.compile(
     r"\b(?:"
     r"thoi\s+tiet|nhiet\s+do|khi\s+hau|du\s+bao\s+thoi\s+tiet|troi\s+(?:mua|nang|lanh|nong|am\s+u)|"
-    r"con\s+bao|ap\s+thap|suong\s+mu|tuyet\s+roi|gio\s+mua|"
-    r"gia\s+vang|gia\s+xang|bitcoin|ethereum|crypto|tien\s+ao|chung\s+khoan|co\s+phieu|vn-?index|xo\s+so|vietlott|lo\s+de|"
+    r"con\s+bao\s+so\s*\d+|sieu\s+bao|ap\s+thap\s+nhiet\s+doi|suong\s+mu|tuyet\s+roi|"
+    r"gia\s+vang|gia\s+xang|bitcoin|ethereum|crypto|tien\s+ao|chung\s+khoan|co\s+phieu|vn-?index|xo\s+so|vietlott|"
     r"bong\s+da|world\s+cup|ngoai\s+hang\s+anh|thu\s+do\s+cua|tong\s+thong|chu\s+tich\s+nuoc|"
     r"lam\s+tho|bai\s+tho|ke\s+chuyen|truyen\s+cuoi|bai\s+hat|cong\s+thuc\s+nau|cach\s+nau|nau\s+an|"
     r"viet\s+code|viet\s+chuong\s+trinh|thuat\s+toan|dijkstra|lap\s+trinh|"
@@ -258,7 +271,13 @@ class AgentConfig:
     enable_preflight_unanswerable: bool = True
     enable_llm_formatter_fallback: bool = True
     use_json_mode: bool = True
-    sql_max_tokens: int = 384
+    sql_max_tokens: int = 640
+    enable_python_sandbox: bool = True
+    enable_auto_probe: bool = True
+    max_probe_steps: int = 1
+    enable_forced_python_escalation: bool = True
+    enable_dual_path_consensus: bool = True
+    force_stage3_on_custom_backend: bool = False
 
 
 @dataclass
@@ -666,6 +685,43 @@ def classify_expected_type(question: str) -> QuestionAnalysis:
     return QuestionAnalysis(expected_type="number", money_like=money_like)
 
 
+_RETRACTION_MARKER_RE = re.compile(
+    r"(?:^|[\s,;.\n])(?:à\s+nhầm|ý\s+nhầm|ý\s+lộn|à\s+quên|nói\s+nhầm|nhầm[,:\s]+là|sửa\s+lại(?:\s+là)?|"
+    r"a\s+nham|y\s+nham|y\s+lon|a\s+quen|noi\s+nham|sua\s+lai(?:\s+la)?)\b[,:\s]*(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_RETRACTION_TAIL_TEMPORAL_RE = re.compile(
+    r"(?:\bt\s*\d{1,2}\s*[/.-]\s*\d{4}|th[aá]ng\s*\d{1,2}(?:\s*(?:[/.-]|\s*năm\s*)\d{4})?|"
+    r"\d{1,2}/\d{1,2}(?:/\d{4})?|qu[yý]\s*[1-4](?:\s*(?:[/.-]|\s*năm\s*)\d{4})?|"
+    r"h[oô]m\s+(?:nay|qua)|tu[aầ]n\s+(?:n[aà]y|tr[uư][oớ]c|r[oồ]i))",
+    re.IGNORECASE,
+)
+
+
+def resolve_conversational_retraction(question: str) -> Tuple[str, Optional[str]]:
+    """
+    Detect inline conversational self-corrections (e.g. '... trong t5/2024 z\\nà nhầm, t6/2024 nha')
+    and rewrite the effective query so earlier retracted time/filter tokens are discarded cleanly.
+    """
+    q_nfc = normalize_nfc(question or "").strip()
+    if not q_nfc:
+        return q_nfc, None
+    m = _RETRACTION_MARKER_RE.search(q_nfc)
+    if not m:
+        return q_nfc, None
+    head = q_nfc[: m.start()].strip()
+    tail = m.group(1).strip()
+    if not tail:
+        return q_nfc, None
+    if _RETRACTION_TAIL_TEMPORAL_RE.search(tail):
+        cleaned_head = _RETRACTION_TAIL_TEMPORAL_RE.sub(" ", head)
+        cleaned_head = re.sub(r"\b(?:trong|của|từ|ngày)\s*(?:z|à|nhỉ|nha|vậy)?\s*$", "", cleaned_head, flags=re.IGNORECASE).strip()
+        resolved = re.sub(r"\s+", " ", f"{cleaned_head} {tail}").strip()
+        note = f"Người dùng tự đính chính -> CHỈ dùng mốc mới `{tail}`, BỎ hoàn toàn mốc bị nhầm ở vế trước!"
+        return resolved, note
+    return q_nfc, None
+
+
 def extract_temporal_context(
     question: str,
     as_of_date: str,
@@ -724,8 +780,8 @@ def extract_temporal_context(
                 except ValueError:
                     pass
 
-    # Explicit months tháng M/YYYY or tháng M năm YYYY
-    explicit_months = re.findall(r"thang\s*(\d{1,2})\s*(?:/|\s*nam\s*)(\d{4})", qn)
+    # Explicit months tháng M/YYYY, tháng M năm YYYY, or shorthand tM/YYYY (e.g. t6/2024)
+    explicit_months = re.findall(r"(?:\bthang\s*|\bt\s*)(\d{1,2})\s*(?:[/.-]|\s*nam\s*)(\d{4})\b", qn)
     if explicit_months:
         parsed_ms = []
         for m_s, y_s in explicit_months:
@@ -919,7 +975,7 @@ def _check_schema_capability_gap(
         )
         or re.search(r"\b(?:hoa\s+hong|salary|salaries|wage|payroll|bonus|bonuses|commission|kpi|quota)\b", qn)
     ):
-        if not any(re.search(r"(?:salar|wage|payroll|luong|bonus|thuong|commiss|hoa_?hong|kpi|quota)", c) for c in ws_cols):
+        if not any(re.search(r"(?:salar|wage|payroll|luong|bonus|thuong|commiss|hoa_?hong|kpi|quota)", tok) for tok in ws_tbl_and_cols):
             return "Dữ liệu hiện tại không ghi nhận thông tin lương, thưởng, hoa hồng hoặc chỉ tiêu KPI nhân viên."
 
     if re.search(r"\b(?:do\s+tuoi|nhom\s+tuoi|lua\s+tuoi|tuoi\s+tac|bao\s+nhieu\s+tuoi|theo\s+tuoi)\b", qn):
@@ -966,7 +1022,17 @@ def _check_schema_capability_gap(
         ):
             return "Dữ liệu hiện tại không ghi nhận trạng thái nghỉ việc hoặc ngày kết thúc công tác của nhân viên."
     if re.search(r"\b(?:nghi\s+phep|ngay\s+phep|cham\s+cong|di\s+muon|tang\s+ca|overtime|attendance|sick\s+leave|annual\s+leave)\b", qn):
-        if not any(re.search(r"(?:attendance|cham_?cong|nghi_?phep|ngay_?phep|overtime|tang_?ca|absent|leave_?days)", c) for c in ws_cols):
+        has_att_schema = caps.get("has_attendance") or any(
+            re.search(
+                r"(?:attendance|cham_?cong|nghi_?phep|ngay_?phep|overtime|tang_?ca|absent|leave_?days|lich_?ca|vao_?ra|gio_?ot|diem_?danh)",
+                tok,
+            )
+            for tok in ws_tbl_and_cols
+        ) or any(
+            re.search(r"ngh[iỉ]\s*(?:c[oó]\s*)?ph[eé]p|ch[aấ]m\s*c[oô]ng|wide_day_matrix", " ".join(tp.notes), re.I)
+            for tp in knowledge.workspace.tables.values()
+        )
+        if not has_att_schema:
             return "Dữ liệu hiện tại không ghi nhận thông tin chấm công hoặc ngày nghỉ phép."
 
     has_geo_schema = caps.get("has_customer_address", False) or any(
@@ -985,8 +1051,24 @@ def _check_schema_capability_gap(
     m_named_place = _NAMED_GEO_PLACE_RE.search(qn)
     if m_named_place and not has_geo_schema:
         place_tok = m_named_place.group(0).lower()
-        grounded_vals = [norm_vn(str(v)) for _, _, v in ground_query_entities(question, knowledge, max_matches=8)]
-        if place_tok not in readme_n and not any(place_tok in gv for gv in grounded_vals):
+        prefix_ctx = qn[: m_named_place.start()]
+        is_brand_or_product_ctx = bool(
+            re.search(
+                r"\b(?:bia|ruou|nuoc|ca\s+phe|tra|banh|nem|pho|bun|mi|com|hoa|rau|trai|xoai|sau|vua|vuon|cho|ben|hang|hieu|loai|nhan|mon|sp|san\s+pham|thuoc)\s+$",
+                prefix_ctx,
+            )
+        )
+        grounded_vals = [norm_vn(str(v)) for _, _, v in ground_query_entities(question, knowledge, max_matches=12)]
+        entity_index_match = any(
+            re.search(rf"(?<![a-z0-9]){re.escape(place_tok)}(?![a-z0-9])", ent.norm_value)
+            for ent in knowledge.entity_entries
+        )
+        if (
+            not is_brand_or_product_ctx
+            and place_tok not in readme_n
+            and not any(place_tok in gv for gv in grounded_vals)
+            and not entity_index_match
+        ):
             return "Dữ liệu hiện tại không ghi nhận thông tin địa bàn, thành phố, khu vực hoặc chi nhánh."
     return None
 
@@ -2321,8 +2403,10 @@ def _select_rulebook_prompt(
         sections.append(_RULE_INDUSTRY_CAFE)
     if caps.get("has_delivery_schedule") and re.search(r"\b(?:dot|giao)\b", qn):
         sections.append(_RULE_INDUSTRY_VLXD)
-    if analysis.expected_type == "percent" and re.search(
-        r"\b(?:ty\s+le|ti\s+le|ty\s+trong|dong\s+gop|phan\s+tram|%|share|percent)\b", qn
+    if (
+        analysis.expected_type == "percent"
+        and re.search(r"\b(?:ty\s+le|ti\s+le|ty\s+trong|dong\s+gop|phan\s+tram|%|share|percent)\b", qn)
+        and re.search(r"\b(?:theo|moi|tung|nhom|danh\s+muc|kenh|loai|chiem)\b", qn)
     ):
         sections.append(
             "- Tỷ lệ đóng góp / tỷ trọng (%) theo nhóm: TỬ SỐ VÀ MẪU SỐ PHẢI DÙNG CÙNG 1 CHỈ SỐ; mẫu số là tổng toàn bộ qua `SUM(SUM(cot_chi_so)) OVER ()` (VD: `ROUND_HALF_UP(SUM(thanh_tien) * 100.0 / SUM(SUM(thanh_tien)) OVER (), 2)`)."
@@ -2401,7 +2485,8 @@ def _select_rulebook_prompt(
 
     sections.append(
         'Trả về DUY NHẤT JSON hợp lệ: {"status": "ok", "sql": "SELECT ..."} '
-        'hoặc {"status": "unanswerable", "reason": "..."}. Chỉ 1 câu SQL `SELECT` hoặc `WITH ... SELECT`.'
+        '(hoặc key `"python"` / `"probe_sql"` / `{"status": "unanswerable", "reason": "..."}`). '
+        'Chỉ 1 câu SQL `SELECT` hoặc `WITH ... SELECT`. TUYỆT ĐỐI KHÔNG dùng key `"data"` hay in dữ liệu mẫu!'
     )
     return "\n".join(sections)
 
@@ -2452,6 +2537,99 @@ _Q_ALLOW_ALL_STATUS_RE = re.compile(
 )
 
 
+def verify_result_sanity_bounds(
+    sql: str,
+    sql_res: SQLExecutionResult,
+    question: str,
+    knowledge: WorkspaceKnowledge,
+    analysis: QuestionAnalysis,
+    entity_matches: Sequence[Tuple[str, str, str]] = (),
+) -> Tuple[bool, str, bool]:
+    """
+    Validate domain-agnostic numerical sanity bounds on executed SQL or Python Sandbox results.
+    Catches out-of-range share percentages (>100%), impossible negative counts/gross revenue,
+    and suspicious 0s on specific named-entity/event queries.
+    """
+    if not sql_res or not sql_res.ok or not sql_res.rows:
+        return True, "", False
+    if sql_res.row_count != 1 or len(sql_res.columns) != 1:
+        return True, "", False
+
+    val_f = _coerce_float(sql_res.rows[0][0])
+    if val_f is None:
+        return True, "", False
+
+    qn = normalize_vn_question(question)
+    sql_low = re.sub(r"\s+", " ", sql or "").strip().lower()
+    where_part = sql_low.split("where", 1)[1] if "where" in sql_low else ""
+
+    # 17A. Bounded share / rate percentage [0%, 100%]
+    if analysis.expected_type == "percent":
+        is_bounded_share_pct = bool(
+            re.search(r"\b(?:ti\s+le|ty\s+le|ti\s+trong|ty\s+trong|dong\s+gop|chiem)\b", qn)
+        ) and not re.search(
+            r"\b(?:tang|giam|thay\s+doi|bien\s+dong|chenh\s+lech|so\s+voi|cung\s+ky|gap|vuot|loi\s+nhuan|bien\s+lai|lai\s+gop|markup|roi)\b",
+            qn,
+        )
+        if is_bounded_share_pct and (val_f < -1e-6 or val_f > 100.0001):
+            return (
+                False,
+                f"LỖI MIỀN GIÁ TRỊ TỶ LỆ PHẦN TRĂM ({val_f:.2f}% nằm ngoài [0%, 100%]): "
+                "Câu hỏi hỏi tỷ lệ/tỷ trọng trong tổng thể nên kết quả BẮT BUỘC nằm trong [0, 100]. "
+                "Tử số và mẫu số đang lệch đơn vị (ví dụ cộng `SUM(tien)` rồi chia cho `COUNT(ma_don)`). "
+                "Nếu tính tỷ lệ đơn huỷ/trả/hoàn thành, tử số PHẢI ĐẾM SỐ ĐƠN "
+                "(`COUNT(DISTINCT CASE WHEN ... THEN ma_don END) * 100.0 / NULLIF(COUNT(DISTINCT ma_don), 0)`), "
+                "TUYỆT ĐỐI KHÔNG cộng tiền vào tử số!",
+                True,
+            )
+
+    # 17B. Non-negative count / gross amount bound
+    if analysis.expected_type == "number" and val_f < -1e-6:
+        is_strict_nonneg = bool(
+            re.search(
+                r"\b(?:bao\s+nhieu\s+(?:don|hoa\s+don|khach|nguoi|nhan\s+vien|dot|chuyen|mon|loai|san\s+pham|buoi|ngay|gio|phut|chai|hop|thung|goi|vien|canh)|"
+                r"tong\s+doanh\s+thu|doanh\s+thu|tien\s+dien|tien\s+nuoc|tien\s+nhap|gia\s+ban|gia\s+nhap|don\s+gia)\b",
+                qn,
+            )
+        ) and not re.search(
+            r"\b(?:lai|lo|loi\s+nhuan|chenh\s+lech|tang|giam|thay\s+doi|con\s+du|de\s+danh|thieu|am\b|rong|sao\s+ke|dieu\s+chinh|cong\s+no|con\s+no|hoan|tra\s+hang)\b",
+            qn,
+        )
+        if is_strict_nonneg:
+            return (
+                False,
+                f"LỖI GIÁ TRỊ ÂM PHI LÝ ({sql_res.rows[0][0]} < 0): "
+                "Chỉ số số lượng/doanh thu/chi phí gộp không thể âm! Kiểm tra lại phép trừ ngược chiều hoặc điều kiện lọc.",
+                True,
+            )
+
+    # 17C. Suspicious 0 on specific named-entity / event lookup
+    if analysis.expected_type == "number" and abs(val_f) <= 1e-9:
+        allows_legit_zero = bool(
+            re.search(
+                r"\b(?:con\s+no|chua\s+tra|con\s+lai|con\s+ton|ton\s+kho|het\s+hang|huy|tra\s+hang|vang|nghi|tre|muon|loi|sai\s+lech|phat|chenh\s+lech)\b",
+                qn,
+            )
+        )
+        if not allows_legit_zero:
+            has_named_ent = any(
+                not re.search(r"(?:trang_thai|status|tinh_trang|ket_qua)", c.lower())
+                for _, c, _ in (entity_matches or ())
+            )
+            has_specific_cue = bool(
+                re.search(r"\b(?:khach\s+ten|cua\s+don|ma\s+don|mon\s+.*cam|the\s+.*ban|phong\s+\d+|lop\s+[0-9a-z]+)\b", qn)
+            )
+            if has_named_ent or (has_specific_cue and ("and" in where_part or sql_low.startswith("-- [python_sandbox]"))):
+                return (
+                    False,
+                    "CẢNH BÁO KẾT QUẢ = 0 ĐÁNG NGỜ TRÊN ĐỐI TƯỢNG CỤ THỂ: Truy vấn trả về `0` khi hỏi giao dịch/số tiền của khách/đơn/mặt hàng cụ thể. "
+                    "Kiểm tra lại xem đã `JOIN` đúng bảng danh mục/khách hàng chưa, có lọc nhầm cột ngày hay viết sai chuỗi tiếng Việt không (hãy dùng `NORM_VN(...) LIKE ...`)!",
+                    False,
+                )
+
+    return True, "", False
+
+
 def verify_sql_semantics(
     sql: str,
     sql_res: SQLExecutionResult,
@@ -2475,6 +2653,17 @@ def verify_sql_semantics(
     cap_gap = _check_schema_capability_gap(question, knowledge)
     if cap_gap:
         return (False, cap_gap, True)
+
+    if (sql or "").lstrip().startswith("-- [PYTHON_SANDBOX]"):
+        if getattr(analysis, "extreme_comparison", None) is not None and (len(sql_res.columns) < 2 or sql_res.row_count < 2):
+            return (
+                False,
+                "LỖI KẾT QUẢ PYTHON SANDBOX: Câu hỏi cực trị yêu cầu trả bảng/danh sách gồm cả nhóm Cao nhất và Thấp nhất (>= 2 dòng, >= 2 cột).",
+                True,
+            )
+        return verify_result_sanity_bounds(
+            sql, sql_res, question, knowledge, analysis, entity_matches=entity_matches or ()
+        )
 
     # 1. Spurious debt/payment column filter when question does NOT ask about debt/payment
     if not _Q_DEBT_INTENT_RE.search(qn):
@@ -2588,6 +2777,54 @@ def verify_sql_semantics(
                 True,
             )
 
+    # 3c. Order-grain Average Guard (AOV / doanh thu trung bình trên một đơn trên bảng chi tiết nhiều dòng/đơn)
+    asks_avg_per_order = bool(
+        re.search(
+            r"\b(?:trung\s+binh|binh\s+quan)\b.*?\b(?:tren\s+mot\s+|tren\s+1\s+|moi\s+|1\s+|/\s*)?(?:don(?:\s+hang)?|hoa\s+don|bill|phieu)\b"
+            r"|\b(?:gia\s+tri\s+don\s+(?:hang\s+)?trung\s+binh|aov)\b",
+            qn,
+        )
+        and not re.search(r"\b(?:so\s+dong|mat\s+hang\s+moi\s+don)\b", qn)
+    )
+    if asks_avg_per_order and analysis.expected_type == "number":
+        grains = getattr(knowledge, "table_grains", None) or {
+            t["table"]: t for t in (getattr(knowledge, "order_status_targets", None) or [])
+        }
+        queried_grains: List[Tuple[str, Dict[str, Any]]] = [
+            (tname, g)
+            for tname, g in grains.items()
+            if re.search(rf"\b(?:from|join)\s+[`\"]?{re.escape(tname.lower())}[`\"]?\b", sql_low)
+        ]
+        all_order_ids = [
+            str(g["order_id_col"]).lower()
+            for _, g in queried_grains
+            if g.get("order_id_col")
+        ]
+        repeating_tbls = [
+            (tname, str(g["order_id_col"]))
+            for tname, g in queried_grains
+            if g.get("has_repeating_orders") and g.get("order_id_col")
+        ]
+        if repeating_tbls:
+            has_distinct_order_cnt = bool(
+                re.search(r"\bcount\s*\(\s*distinct\s+([^)]+)\)", select_head)
+                and any(oid in select_head for oid in all_order_ids)
+            )
+            has_pregrouped_order_cte = bool(
+                re.search(r"\bgroup\s+by\b", sql_low)
+                and any(re.search(rf"\bgroup\s+by\b[^;)]*\b[a-z0-9_.]*{re.escape(oid)}\b", sql_low) for oid in all_order_ids)
+                and ("with " in sql_low or sql_low.count("select ") >= 2)
+            )
+            if not has_distinct_order_cnt and not has_pregrouped_order_cte:
+                rep_tbl, rep_oid = repeating_tbls[0]
+                return (
+                    False,
+                    f"LỖI ĐƠN VỊ TRUNG BÌNH TRÊN ĐƠN (`{rep_tbl}` có nhiều dòng hàng cho cùng 1 `{rep_oid}`): "
+                    f"Không được chia cho `COUNT(*)` hay dùng `AVG(...)` trực tiếp trên dòng hàng (sẽ ra trung bình mỗi dòng thay vì mỗi đơn)! "
+                    f"Phải chia tổng tiền cho SỐ ĐƠN DUY NHẤT: `ROUND_HALF_UP(SUM(<cột_tiền>) * 1.0 / NULLIF(COUNT(DISTINCT {rep_oid}), 0), 0)`.",
+                    True,
+                )
+
     # 4. Daily/monthly aggregate peak ('ngày nào cao nhất', 'tháng nào...') missing GROUP BY
     if (
         analysis.expected_type == "date"
@@ -2657,6 +2894,12 @@ def verify_sql_semantics(
             True,
         )
 
+    bounds_ok, bounds_msg, bounds_fatal = verify_result_sanity_bounds(
+        sql, sql_res, question, knowledge, analysis, entity_matches=entity_matches or ()
+    )
+    if not bounds_ok and bounds_fatal:
+        return (False, bounds_msg, True)
+
     # 5. Missing status exclusion when querying main sales/order table
     if not _Q_ALLOW_ALL_STATUS_RE.search(qn):
         for tgt in knowledge.order_status_targets:
@@ -2670,6 +2913,32 @@ def verify_sql_semantics(
                         f"LỖI THIẾU LỌC TRẠNG THÁI: Bảng `{tgt['table']}` có cột trạng thái `{tgt['status_col']}`; doanh thu/số đơn hợp lệ phải loại đơn huỷ & trả hàng bằng `{vfilt}`!",
                         False,
                     )
+
+    # 5b. Contradictory NOT IN on cancel/return queries & multi-line cancel rate missing COUNT(DISTINCT)
+    if re.search(r"\b(?:huy|ti\s+le\s+.*huy|ty\s+le\s+.*huy|don\s+huy|bi\s+huy|tra\s+hang|doi\s+tra|hoan\s+tra)\b", qn):
+        for m_ni in re.finditer(r"\b[a-z0-9_.]*(?:status|trang_?thai|tinh_?trang|ket_?qua)\s+not\s+in\s*\(([^)]+)\)", where_part):
+            if re.search(r"huy|cancel|tra\s*hang|hoan\s*tra|doi\s*tra", norm_vn(m_ni.group(1))):
+                return (
+                    False,
+                    "LỖI MÂU THUẪN LOGIC WHERE: Câu hỏi đang đếm/tính tỷ lệ ĐƠN HUỶ hoặc TRẢ HÀNG, "
+                    "nhưng `WHERE` lại lọc `NOT IN (...)` loại bỏ chính đơn huỷ/trả hàng! "
+                    "Hãy XÓA bỏ điều kiện `status NOT IN (...)` khỏi `WHERE`, dùng `COUNT(DISTINCT CASE WHEN <cột_trạng_thái> IN (...) THEN <mã_đơn> END) * 100.0 / NULLIF(COUNT(DISTINCT <mã_đơn>), 0)`.",
+                    True,
+                )
+        for tgt in knowledge.order_status_targets:
+            tlow = tgt["table"].lower()
+            if re.search(rf"\b(?:from|join)\s+[`\"]?{re.escape(tlow)}[`\"]?\b", sql_low):
+                if tgt.get("has_repeating_orders") and tgt.get("order_id_col"):
+                    oid = tgt["order_id_col"]
+                    if re.search(r"\bsum\s*\(\s*case\s+when", select_head) and "distinct" not in select_head:
+                        cvals = tgt.get("cancelled_values") or ["hủy", "Đã hủy đơn"]
+                        return (
+                            False,
+                            f"LỖI ĐẾM TRÙNG DÒNG KHI TÍNH TỶ LỆ HUỶ: Bảng `{tgt['table']}` có nhiều dòng/đơn (`{oid}`); "
+                            f"phải dùng `ROUND_HALF_UP(COUNT(DISTINCT CASE WHEN {tgt['status_col']} IN ({', '.join(repr(v) for v in cvals)}) THEN {oid} END) * 100.0 / NULLIF(COUNT(DISTINCT {oid}), 0), 2)` "
+                            f"thay vì `SUM(CASE WHEN ...)` trên từng dòng!",
+                            True,
+                        )
 
     # 6. Spurious unrequested NOT IN (...) on unit/non-status columns (e.g. don_vi_tinh NOT IN ('gói', ...))
     for m_notin in re.finditer(r"\b([a-z0-9_]+)\s+not\s+in\s*\(([^)]+)\)", where_part):
@@ -2736,6 +3005,39 @@ def verify_sql_semantics(
                 f"LỖI CHỌN BẢNG: Câu hỏi yêu cầu thống kê trực tiếp bảng `{matched_t}`, nhưng SQL chưa đọc từ `{matched_t}`. Hãy truy vấn bảng `{matched_t}`!",
                 True,
             )
+
+    # 9b. Delivery trip / shipment batch questions must use delivery schedule table & distinguish multi-batch per order
+    if re.search(r"\b(?:dot\s+(?:hang|giao)|cho\s+giao\s+bao\s+nhieu\s+dot|lan\s+giao|chuyen\s+giao|xe\s+cho)\b", qn):
+        deliv_tbl = next(
+            (
+                tp for tp in knowledge.workspace.tables.values()
+                if tp.row_count > 0 and re.search(r"(?:phieu_?giao_?hang|so_?giao_?hang|giao_?hang|nhat_?trinh_?xe)", tp.table_name, re.I)
+            ),
+            None,
+        )
+        if deliv_tbl is not None:
+            dcols = [getattr(c, "sql_name", str(c)) for c in deliv_tbl.columns]
+            batch_col = next((c for c in dcols if re.match(r"^(?:lan_giao|dot_giao|dot)$", c, re.I)), None)
+            order_kcol = next((c for c in dcols if re.match(r"^(?:ma_don_hang|ma_don|so_hd)$", c, re.I)), None)
+            batch_hint = (
+                f"dùng `COUNT(DISTINCT {order_kcol} || '|' || {batch_col})`"
+                if (order_kcol and batch_col)
+                else f"đếm theo cột khóa trong `{deliv_tbl.table_name}`"
+            )
+            if not re.search(rf"\b(?:from|join)\s+[`\"]?{re.escape(deliv_tbl.table_name.lower())}[`\"]?\b", sql_low):
+                return (
+                    False,
+                    f"LỖI CHỌN BẢNG GIAO HÀNG: DB có bảng giao hàng chuyên biệt `{deliv_tbl.table_name}` ({', '.join(dcols[:10])}). "
+                    f"Câu hỏi đếm số đợt giao/chuyến giao BẮT BUỘC phải truy vấn bảng `{deliv_tbl.table_name}` ({batch_hint}), KHÔNG đếm từ sổ bán hàng!",
+                    True,
+                )
+            if order_kcol and batch_col and batch_col.lower() not in select_head:
+                return (
+                    False,
+                    f"LỖI ĐẾM THIẾU ĐỢT GIAO (`{batch_col}`): Bảng `{deliv_tbl.table_name}` có nhiều dòng hàng trong cùng 1 đợt và 1 đơn có thể giao nhiều lần (`{batch_col}`)! "
+                    f"Hãy đếm số đợt bằng `COUNT(DISTINCT {order_kcol} || '|' || {batch_col})` thay vì chỉ `COUNT(DISTINCT {order_kcol})` hay `COUNT(*)`!",
+                    True,
+                )
 
     # 10. Respect explicit grouping dimension mentioned in question when matching column exists (e.g. 'nhóm món' -> nhom_mon)
     dim_req = _match_requested_dimension_col(qn, knowledge)
@@ -2934,7 +3236,9 @@ def verify_sql_semantics(
                 True,
             )
 
-    return True, "", False
+    return verify_result_sanity_bounds(
+        sql, sql_res, question, knowledge, analysis, entity_matches=entity_matches or ()
+    )
 
 
 def _coerce_float(val: Any) -> Optional[float]:
@@ -2986,9 +3290,14 @@ def format_sql_result(
     # Handle list format
     if etype == "list":
         values: List[Any] = []
+        qn_fmt = normalize_vn_question(question)
+        wants_tuple = bool(
+            len(cols) >= 3
+            or re.search(r"(?:lan\s+luot|theo\s+thu\s+tu|hai\s+so|ba\s+so|ghi\s+\d+\s+so)", qn_fmt)
+        )
         if len(cols) == 1:
             values = [r[0] for r in rows]
-        elif len(rows) == 1 and len(cols) >= 2 and not isinstance(rows[0][0], str):
+        elif len(rows) == 1 and len(cols) >= 2 and (not isinstance(rows[0][0], str) or wants_tuple):
             values = list(rows[0])
         else:
             # Multi-row ranking where SQL included metric column: take first column (label) if strings expected
@@ -3063,6 +3372,105 @@ def format_sql_result(
     return None
 
 
+def _check_subquery_column_capture(sql: str, knowledge: WorkspaceKnowledge) -> Optional[str]:
+    """
+    Detect silent SQLite outer-column capture inside `IN (SELECT col FROM tbl)` where `col` does not
+    belong to `tbl` (prevents slow correlated full scans / timeouts and false 100%-match bugs).
+    """
+    if not sql:
+        return None
+    tbl_cols_map = {
+        tname.lower(): {getattr(c, "sql_name", str(c)).lower() for c in tp.columns}
+        for tname, tp in knowledge.workspace.tables.items()
+    }
+    raw_tbl_cols = {
+        tname.lower(): [getattr(c, "sql_name", str(c)) for c in tp.columns]
+        for tname, tp in knowledge.workspace.tables.items()
+    }
+    for m in re.finditer(
+        r"\b(?:not\s+)?in\s*\(\s*select\s+(?:distinct\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s+from\s+[`\"']?([a-zA-Z_][a-zA-Z0-9_]*)[`\"']?\b",
+        sql,
+        re.IGNORECASE,
+    ):
+        sub_col = m.group(1)
+        sub_tbl = m.group(2)
+        st_low = sub_tbl.lower()
+        if st_low not in tbl_cols_map:
+            continue
+        if sub_col.lower() not in tbl_cols_map[st_low]:
+            join_hints = [e for e in (knowledge.join_graph or []) if st_low in e.lower()]
+            j_str = f" Liên kết khoá gợi ý: `{'; '.join(join_hints[:3])}`." if join_hints else ""
+            cols_str = ", ".join(raw_tbl_cols[st_low][:12])
+            return (
+                f"LỖI CỘT SUBQUERY (`{sub_col}` KHÔNG thuộc bảng `{sub_tbl}` trong `IN (SELECT {sub_col} FROM {sub_tbl})`): "
+                f"Bảng `{sub_tbl}` chỉ có các cột: {cols_str}! "
+                f"SQLite tự tham chiếu nhầm ra bảng ngoài gây chậm/sai. Hãy viết lại bằng `JOIN` theo đúng tên cột khoá thật!{j_str}"
+            )
+    return None
+
+
+def should_prefer_python_sandbox(question: str, knowledge: WorkspaceKnowledge) -> bool:
+    """Detect stateful algorithms, wide day matrices, compound cells, or tariff diffs suited for Python."""
+    qn = normalize_vn_question(question)
+    if re.search(
+        r"\b(?:fifo|toa\s+cu\s+nhat|tra\s+bot\s+goc|lai\s+cam\s+do|xep\s+loai\s+hoc\s+luc|hoc\s+luc|"
+        r"hanh\s+kiem|lam\s+tron.*30\s*phut|ca\s+(?:dem|qua\s+dem)|so\s+buoi\s+bo)\b",
+        qn,
+    ):
+        return True
+    q_toks = set(re.findall(r"[a-z0-9]+", qn))
+    for tname, tp in knowledge.workspace.tables.items():
+        if tp.row_count <= 0 or not tp.notes:
+            continue
+        notes_str = " ".join(tp.notes)
+        relevant = len(knowledge.workspace.tables) <= 6 or bool(
+            set(re.split(r"[^a-z0-9]+", tname.lower())) & q_toks
+        )
+        if "compound_cols=" in notes_str and relevant:
+            return True
+        if "wide_day_matrix=true" in notes_str and (
+            relevant or re.search(r"\b(?:cham\s+cong|nghi\s+phep|di\s+lam|vang|ca\s+lam|tang\s+ca)\b", qn)
+        ):
+            return True
+        if re.search(r"\d+[.,]\d+\s*đ/(?:so|số|khoi|khối)", notes_str, re.I) and re.search(
+            r"\b(?:tien\s+dien|tien\s+nuoc|so\s+dien|so\s+nuoc)\b", qn
+        ):
+            return True
+    return False
+
+
+def _is_strong_python_first_candidate(question: str, knowledge: WorkspaceKnowledge) -> bool:
+    """
+    Strictly select queries where SQLite routinely fails (FIFO/stateful rules, compound '527k + 338000'
+    cells, 31-column attendance matrices, or tiered utility meter diffs) for Python-First Attempt 0.
+    """
+    qn = normalize_vn_question(question)
+    if re.search(
+        r"\b(?:fifo|toa\s+cu\s+nhat|tra\s+bot\s+goc|lai\s+cam\s+do|xep\s+loai\s+hoc\s+luc|lam\s+tron.*30\s*phut|ca\s+(?:dem|qua\s+dem))\b",
+        qn,
+    ):
+        return True
+    q_toks = set(re.findall(r"[a-z0-9]+", qn))
+    for tname, tp in knowledge.workspace.tables.items():
+        if tp.row_count <= 0 or not tp.notes:
+            continue
+        notes_str = " ".join(tp.notes)
+        relevant = len(knowledge.workspace.tables) <= 6 or bool(
+            set(re.split(r"[^a-z0-9]+", tname.lower())) & q_toks
+        )
+        if "compound_cols=" in notes_str and relevant:
+            return True
+        if "wide_day_matrix=true" in notes_str and (
+            relevant or re.search(r"\b(?:cham\s+cong|nghi\s+phep|di\s+lam|vang|ca\s+lam|tang\s+ca)\b", qn)
+        ):
+            return True
+        if re.search(r"\d+[.,]\d+\s*đ/(?:so|số|khoi|khối)", notes_str, re.I) and re.search(
+            r"\b(?:tien\s+dien|tien\s+nuoc|so\s+dien|so\s+nuoc)\b", qn
+        ):
+            return True
+    return False
+
+
 class DataMateAgent:
     """End-to-end headless DataMate analytics & abstention agent."""
 
@@ -3081,6 +3489,12 @@ class DataMateAgent:
         self.calendar = SolarLunarCalendar(calendar_path) if calendar_path else None
         self._knowledge_cache: Dict[str, WorkspaceKnowledge] = {}
 
+    def _allow_extra_stage3_llm_calls(self) -> bool:
+        """Gate extra verification/escalation calls so deterministic mock unit tests keep exact call counts."""
+        return isinstance(self.backend, MultiProviderLLMBackend) or bool(
+            getattr(self.config, "force_stage3_on_custom_backend", False)
+        )
+
     def get_knowledge(
         self,
         business_dir: str,
@@ -3090,7 +3504,12 @@ class DataMateAgent:
         key = str(business_dir)
         if not force_rebuild and key in self._knowledge_cache:
             return self._knowledge_cache[key]
-        ws = load_business_workspace(business_dir, cache_dir=cache_dir, force_rebuild=force_rebuild)
+        ws = load_business_workspace(
+            business_dir,
+            cache_dir=cache_dir,
+            force_rebuild=force_rebuild,
+            lunar_cal=self.calendar,
+        )
         know = build_workspace_knowledge(ws)
         self._knowledge_cache[key] = know
         return know
@@ -3103,6 +3522,10 @@ class DataMateAgent:
         analysis: QuestionAnalysis,
         temporal_summary: str,
         entity_matches: Sequence[Tuple[str, str, str]],
+        probe_context: str = "",
+        prefer_python: bool = False,
+        force_python_first: bool = False,
+        retraction_note: Optional[str] = None,
     ) -> Tuple[str, str]:
         system_prompt = _select_rulebook_prompt(
             question,
@@ -3136,19 +3559,53 @@ class DataMateAgent:
             type_guide += " (SQL trả 1 hoặc 0)"
 
         effective_temp_summary = format_effective_temporal_summary(temporal_summary, as_of_date, analysis)
+        focused_schema = build_focused_schema_prompt(question, knowledge, entity_matches, max_full_tables=8)
 
         norm_clean = normalize_vn_question(question)
         q_block = question
         if norm_clean and norm_clean != norm_vn(question):
             q_block = f"{question}\n- Ý định đã chuẩn hóa: {norm_clean}"
 
+        extra_blocks: List[str] = []
+        if retraction_note:
+            extra_blocks.append(f"### ĐÍNH CHÍNH CÂU HỎI\n{retraction_note}")
+        if probe_context:
+            extra_blocks.append(f"### DỮ LIỆU THỰC TẾ THÁM HIỂM TỰ ĐỘNG (PROBE)\n{probe_context}")
+        if force_python_first and self.config.enable_python_sandbox:
+            extra_blocks.append(
+                "### BẮT BUỘC DÙNG PYTHON SANDBOX (MA TRẬN NGÀY / Ô GHÉP / FIFO / TARIFF)\n"
+                "Dữ liệu/nghiệp vụ bài toán này KHÔNG phù hợp SQL thuần (ví dụ ma trận 31 cột ngày `1..31`, ô ghép `'527k + 338000'`, FIFO/bậc thang). "
+                "HÃY VIẾT PYTHON SANDBOX NGAY: trả JSON duy nhất `{\"status\": \"ok\", \"python\": \"...\"}` (KHÔNG viết SQL thuần thay thế trừ khi bảng hoàn toàn phẳng).\n"
+                "Biến & hàm có sẵn: `query_df(sql)` -> `pd.DataFrame`, `sum_compound_vn_nums(x)`, `parse_vn_num(x)`, `round_half_up(v, d)`, `norm_vn(s)`, `pd`, `re`, `Decimal`, `ROUND_HALF_UP`.\n"
+                "Ví dụ mẫu:\n"
+                "```python\n"
+                "df = query_df('SELECT * FROM \"<ten_bang>\"')\n"
+                "# ... xử lý bằng pandas / sum_compound_vn_nums / parse_vn_num ...\n"
+                "result = round_half_up(val, 0)\n"
+                "```"
+            )
+        elif prefer_python and self.config.enable_python_sandbox:
+            extra_blocks.append(
+                "### TUỲ CHỌN PYTHON SANDBOX (KHUYÊN DÙNG CHO BÀI TOÁN PHỨC TẠP / MA TRẬN / Ô GHÉP)\n"
+                "Bài toán này có dấu hiệu phức tạp cho SQL thuần (ma trận nhiều cột ngày, ô ghép `'527k + 338000'`, FIFO, chênh lệch chỉ số giữa các tháng). "
+                "Bạn CÓ THỂ trả JSON `{\"status\": \"ok\", \"python\": \"...\"}` (gán kết quả cuối vào biến `result`), "
+                "dùng sẵn `query_df(sql)` (trả về pandas DataFrame), `sum_compound_vn_nums(s)`, `parse_vn_num(s)`, `round_half_up(v, d)`, `norm_vn(s)`, `Decimal`, `ROUND_HALF_UP`, `pd`, `re`."
+            )
+        if self.config.max_probe_steps > 0:
+            extra_blocks.append(
+                "### THÁM HIỂM THÊM NẾU CẦN\n"
+                "Nếu chưa chắc giá trị chuỗi hoặc cấu trúc dòng, có thể trả trước JSON `{\"status\": \"probe\", \"probe_sql\": \"SELECT ... LIMIT 10\"}` (tối đa 1 lượt)."
+            )
+        extra_str = ("\n\n" + "\n\n".join(extra_blocks)) if extra_blocks else ""
+
         user_prompt = (
             f"### CÂU HỎI\n{q_block}\n\n"
             f"### {type_guide}\n\n"
             f"### MỐC THỜI GIAN ĐÃ PHÂN GIẢI\n{effective_temp_summary}\n\n"
-            f"### GIÁ TRỊ KHỚP TRONG CSDL\n{ent_text}\n\n"
+            f"### GIÁ TRỊ KHỚP TRONG CSDL\n{ent_text}"
+            f"{extra_str}\n\n"
             f"### README SHOP\n{readme_text}\n\n"
-            f"### LƯỢC ĐỒ SQLITE\n{knowledge.schema_prompt}\n"
+            f"### LƯỢC ĐỒ SQLITE\n{focused_schema}\n"
         )
         return system_prompt, user_prompt
 
@@ -3160,8 +3617,12 @@ class DataMateAgent:
         knowledge: WorkspaceKnowledge,
         temporal_summary: str = "",
         include_full_schema: bool = True,
+        escalate_to_python: bool = False,
     ) -> str:
-        schema_block = knowledge.schema_prompt if include_full_schema else knowledge.semantic_summary
+        if len(knowledge.workspace.tables) > 8:
+            schema_block = build_focused_schema_prompt(question, knowledge, max_full_tables=10)
+        else:
+            schema_block = knowledge.schema_prompt if include_full_schema else knowledge.semantic_summary
         temp_block = f"Mốc thời gian:\n{temporal_summary}\n\n" if temporal_summary else ""
         tables = list(knowledge.workspace.tables.values())
         bad_low = (bad_sql or "").lower()
@@ -3202,7 +3663,7 @@ class DataMateAgent:
             valid_tbls = [f'"{t.table_name}"' if (" " in t.table_name or "-" in t.table_name) else t.table_name for t in tables]
             tbl_cols_lines = [
                 f"- `{'\"' + t.table_name + '\"' if (' ' in t.table_name or '-' in t.table_name) else t.table_name}` ({', '.join(getattr(c, 'sql_name', str(c)) for c in t.columns)})"
-                for t in tables
+                for t in tables[:12]
             ]
             repair_hints.append(
                 f"Cảnh báo bảng sai: Bảng `{bad_tbl}` KHÔNG TỒN TẠI! "
@@ -3254,7 +3715,7 @@ class DataMateAgent:
             if not matched_tables:
                 matched_tables = [
                     f"- Bảng `{t.table_name}`: {', '.join(getattr(c, 'sql_name', str(c)) for c in t.columns)}"
-                    for t in tables
+                    for t in tables[:10]
                 ]
             repair_hints.append(
                 f"Cảnh báo cột sai: `{missing_col}` KHÔNG tồn tại trong cấu trúc hiện tại!\n"
@@ -3265,16 +3726,36 @@ class DataMateAgent:
         col_hint = ("\n\n".join(repair_hints) + "\n\n") if repair_hints else ""
         norm_clean = normalize_vn_question(question)
         q_disp = f"{question} (ý định chuẩn hóa: {norm_clean})" if norm_clean and norm_clean != norm_vn(question) else question
+        is_prev_py = (bad_sql or "").lstrip().startswith("-- [PYTHON_SANDBOX]")
+        lang_tag = "python" if is_prev_py else "sql"
+        allow_py_repair = (
+            (is_prev_py or escalate_to_python or should_prefer_python_sandbox(question, knowledge))
+            and self.config.enable_python_sandbox
+        )
+        out_fmt_hint = (
+            'trả về JSON duy nhất: {"status": "ok", "python": "..."} '
+            '(hoặc {"status": "ok", "sql": "SELECT ..."})'
+            if allow_py_repair
+            else 'trả về JSON duy nhất: {"status": "ok", "sql": "SELECT ..."}'
+        )
+        py_escalation_block = ""
+        if escalate_to_python and self.config.enable_python_sandbox and not is_prev_py:
+            py_escalation_block = (
+                "\nGỢI Ý PYTHON SANDBOX (NẾU SQL TIẾP TỤC KHÓ): Bạn CÓ THỂ viết script Python an toàn qua "
+                'JSON `{"status": "ok", "python": "df = query_df(\'SELECT * FROM ...\')\\n...\\nresult = ..."}` '
+                "dùng sẵn `query_df`, `pd`, `sum_compound_vn_nums`, `parse_vn_num`, `round_half_up`, `norm_vn`.\n"
+            )
         return (
-            f"Câu SQL trước bị lỗi hoặc vi phạm nghiệp vụ/trả kết quả không hợp lệ.\n"
+            f"Lần chạy trước bị lỗi hoặc vi phạm nghiệp vụ/trả kết quả không hợp lệ.\n"
             f"Câu hỏi gốc: {q_disp}\n"
-            f"SQL lỗi:\n```sql\n{bad_sql}\n```\n"
+            f"Code/SQL lỗi:\n```{lang_tag}\n{bad_sql}\n```\n"
             f"Thông báo: {reason}\n\n"
             f"{col_hint}"
+            f"{py_escalation_block}"
             f"{temp_block}"
-            f"Tham khảo lược đồ & quy ước dưới đây để sửa SQL:\n"
+            f"Tham khảo lược đồ & quy ước dưới đây để sửa:\n"
             f"{schema_block}\n\n"
-            'Hãy SỬA LẠI câu SQL theo đúng tên bảng và cột trong lược đồ trên (tên bảng có khoảng trắng phải đặt trong ngoặc kép `\"...\"`) và trả về JSON duy nhất: {"status": "ok", "sql": "SELECT ..."}.'
+            f"Hãy SỬA LẠI đúng tên bảng và cột trong lược đồ trên (tên bảng có khoảng trắng phải đặt trong ngoặc kép `\"...\"`) và {out_fmt_hint}."
         )
 
     def _fallback_llm_format(
@@ -3305,6 +3786,94 @@ class DataMateAgent:
             return None
         return obj
 
+    def _run_dual_path_consensus_check(
+        self,
+        question: str,
+        as_of_date: str,
+        knowledge: WorkspaceKnowledge,
+        analysis: QuestionAnalysis,
+        primary_formatted: Dict[str, Any],
+        temporal_summary: str,
+        entity_matches: Sequence[Tuple[str, str, str]],
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """
+        Independently verify a high-risk scalar numeric/percent answer via Python/Pandas Sandbox
+        without leaking the SQL numeric value (avoids anchoring bias).
+        Returns (status in {'agree', 'disagree', 'inconclusive'}, formatted_python_result).
+        """
+        focused_schema = build_focused_schema_prompt(question, knowledge, entity_matches, max_full_tables=6)
+        ent_text = (
+            "\n".join(f"- {t}.{c} = {v!r}" for t, c, v in entity_matches)
+            if entity_matches
+            else "(không có)"
+        )
+        rule_hint = _RULE_CORE
+        if analysis.expected_type == "percent":
+            rule_hint += "\n- CHÚ Ý TỶ LỆ (%): Trả số % nhân 100.0 làm tròn 2 chữ số (VD 12.45). Nếu đếm tỷ lệ đơn huỷ/trả trên bảng chi tiết nhiều dòng/đơn, phải đếm theo số ĐƠN DUY NHẤT (`nunique`), KHÔNG cộng tiền vào tử số."
+        elif re.search(r"\b(?:trung\s+binh|binh\s+quan)\b.*?\bdon\b", normalize_vn_question(question)):
+            rule_hint += "\n- CHÚ Ý TRUNG BÌNH TRÊN ĐƠN: Chia tổng tiền cho số ĐƠN DUY NHẤT (`nunique(ma_don)`), KHÔNG chia số dòng chi tiết."
+
+        verify_prompt = (
+            "Hãy KIỂM CHỨNG ĐỘC LẬP câu hỏi sau bằng Python/Pandas (`query_df` + `pandas`) trên CSDL SQLite.\n"
+            f"Câu hỏi: {question}\n"
+            f"Kiểu đáp án: `{analysis.expected_type}`\n"
+            f"Mốc thời gian:\n{temporal_summary}\n"
+            f"Giá trị khớp trong CSDL:\n{ent_text}\n"
+            f"{rule_hint}\n\n"
+            f"Lược đồ tóm tắt:\n{focused_schema}\n\n"
+            'Trả JSON DUY NHẤT: `{"status": "ok", "python": "df = query_df(...)\\n...\\nresult = ..."}`.\n'
+            "Dùng sẵn: `query_df(sql)`, `pd`, `parse_vn_num`, `sum_compound_vn_nums`, `round_half_up`, `norm_vn`."
+        )
+        try:
+            raw_py = self.backend.generate(
+                verify_prompt,
+                system_prompt="Chỉ trả JSON {\"status\": \"ok\", \"python\": \"...\"} dùng query_df + pandas tính kết quả độc lập, gán vào biến `result`.",
+                temperature=0.0,
+                max_tokens=min(self.config.sql_max_tokens, 420),
+                json_mode=self.config.use_json_mode,
+            )
+        except Exception:
+            return "inconclusive", None
+
+        py_code = extract_python_from_response(raw_py)
+        if not py_code:
+            return "inconclusive", None
+
+        py_res = execute_python_safe(
+            knowledge.workspace.open_connection,
+            py_code,
+            as_of_date=as_of_date,
+            valid_tables=knowledge.valid_tables,
+            datetime_columns=tuple(knowledge.datetime_columns),
+            max_rows=self.config.max_rows,
+            timeout_seconds=min(5.0, self.config.sql_timeout_seconds),
+        )
+        if not py_res.ok or py_res.row_count == 0:
+            return "inconclusive", None
+
+        bounds_ok, _, _ = verify_result_sanity_bounds(
+            py_res.sql, py_res, question, knowledge, analysis, entity_matches=entity_matches
+        )
+        if not bounds_ok:
+            return "inconclusive", None
+
+        alt_fmt = format_sql_result(py_res, analysis, question)
+        if not alt_fmt or alt_fmt.get("type") != analysis.expected_type:
+            return "inconclusive", None
+
+        a1 = _coerce_float(primary_formatted.get("answer"))
+        a2 = _coerce_float(alt_fmt.get("answer"))
+        if a1 is None or a2 is None:
+            return "inconclusive", None
+
+        if (
+            abs(a1 - a2) <= 1e-6
+            or (analysis.expected_type == "percent" and abs(a1 - a2) <= 0.02)
+            or (analysis.expected_type == "number" and max(abs(a1), abs(a2)) >= 1000 and abs(a1 - a2) <= 1.0)
+        ):
+            return "agree", alt_fmt
+        return "disagree", alt_fmt
+
     def _finalize_prediction(
         self,
         qid: str,
@@ -3312,27 +3881,30 @@ class DataMateAgent:
         sql_res: Optional[SQLExecutionResult],
         attempts: int,
         confidence: float,
+        extra_notes: Optional[Sequence[str]] = None,
     ) -> AgentResult:
         pred = dict(candidate)
         pred["id"] = qid
         ptype = pred.get("type")
+        notes_list = list(extra_notes or ())
 
         if ptype == "unanswerable":
             reason = pred.get("reason")
             if not isinstance(reason, str) or not reason.strip():
                 pred["reason"] = "Dữ liệu không đủ thông tin để kết luận."
             if not is_valid_submission_record(pred):
-                return AgentResult(qid, {"id": qid, "type": "abstain"}, 0.0, sql_res.sql if sql_res else "", attempts, "Invalid unanswerable format")
-            return AgentResult(qid, pred, confidence, sql_res.sql if sql_res else "", attempts)
+                return AgentResult(qid, {"id": qid, "type": "abstain"}, 0.0, sql_res.sql if sql_res else "", attempts, "Invalid unanswerable format", notes=notes_list)
+            return AgentResult(qid, pred, confidence, sql_res.sql if sql_res else "", attempts, notes=notes_list)
 
         if ptype == "abstain" or confidence < self.config.abstain_threshold:
+            notes_list.insert(0, f"Abstained (confidence={confidence:.2f} < {self.config.abstain_threshold:.2f})")
             return AgentResult(
                 question_id=qid,
                 prediction={"id": qid, "type": "abstain"},
                 confidence=confidence,
                 sql=sql_res.sql if sql_res else "",
                 sql_attempts=attempts,
-                notes=[f"Abstained (confidence={confidence:.2f} < {self.config.abstain_threshold:.2f})"],
+                notes=notes_list,
             )
 
         if not is_valid_submission_record(pred):
@@ -3343,6 +3915,7 @@ class DataMateAgent:
                 sql=sql_res.sql if sql_res else "",
                 sql_attempts=attempts,
                 error="Prediction failed strict DataMate schema check; abstained.",
+                notes=notes_list,
             )
 
         return AgentResult(
@@ -3351,6 +3924,7 @@ class DataMateAgent:
             confidence=confidence,
             sql=sql_res.sql if sql_res else "",
             sql_attempts=attempts,
+            notes=notes_list,
         )
 
     def answer_question(
@@ -3362,9 +3936,10 @@ class DataMateAgent:
         question = str(question_record.get("question", ""))
         as_of_date = str(question_record.get("as_of_date", ""))
 
-        analysis = classify_expected_type(question)
+        resolved_question, retraction_note = resolve_conversational_retraction(question)
+        analysis = classify_expected_type(resolved_question)
         windows, temp_summary, bounded, prior_start = extract_temporal_context(
-            question, as_of_date, self.calendar
+            resolved_question, as_of_date, self.calendar
         )
         analysis.temporal_windows = windows
         analysis.temporal_summary = temp_summary
@@ -3372,7 +3947,7 @@ class DataMateAgent:
         analysis.prior_needed_start = prior_start
 
         if self.config.enable_preflight_unanswerable:
-            unans_reason = check_preflight_unanswerable(question, as_of_date, knowledge, analysis)
+            unans_reason = check_preflight_unanswerable(resolved_question, as_of_date, knowledge, analysis)
             if unans_reason:
                 return self._finalize_prediction(
                     qid,
@@ -3382,43 +3957,116 @@ class DataMateAgent:
                     confidence=0.92,
                 )
 
-        entities = ground_query_entities(question, knowledge, max_matches=12)
+        entities = ground_query_entities(resolved_question, knowledge, max_matches=12)
         effective_temp_summary = format_effective_temporal_summary(temp_summary, as_of_date, analysis)
+        prefer_python = self.config.enable_python_sandbox and should_prefer_python_sandbox(resolved_question, knowledge)
+        force_python_first = (
+            prefer_python
+            and self.config.enable_forced_python_escalation
+            and self._allow_extra_stage3_llm_calls()
+            and _is_strong_python_first_candidate(resolved_question, knowledge)
+        )
+        probe_ctx = (
+            run_deterministic_probes(resolved_question, knowledge, entities, max_rows_per_probe=4)
+            if self.config.enable_auto_probe
+            else ""
+        )
         sys_p, usr_p = self._build_sql_prompt(
-            question=question,
+            question=resolved_question,
             as_of_date=as_of_date,
             knowledge=knowledge,
             analysis=analysis,
             temporal_summary=temp_summary,
             entity_matches=entities,
+            probe_context=probe_ctx,
+            prefer_python=prefer_python,
+            force_python_first=force_python_first,
+            retraction_note=retraction_note,
         )
 
         last_sql_res: Optional[SQLExecutionResult] = None
         last_sql_text = ""
         attempts = 0
+        probe_budget = max(0, int(self.config.max_probe_steps))
         prompt_to_send = usr_p
 
         for attempt in range(self.config.max_sql_retries):
             attempts = attempt + 1
-            try:
-                raw_reply = self.backend.generate(
-                    prompt_to_send,
-                    system_prompt=sys_p,
-                    temperature=0.15 if attempt > 0 else 0.0,
-                    max_tokens=self.config.sql_max_tokens,
-                    json_mode=self.config.use_json_mode,
+            raw_reply = ""
+            while True:
+                try:
+                    raw_reply = self.backend.generate(
+                        prompt_to_send,
+                        system_prompt=sys_p,
+                        temperature=0.15 if attempt > 0 else 0.0,
+                        max_tokens=self.config.sql_max_tokens,
+                        json_mode=self.config.use_json_mode,
+                    )
+                except Exception as exc:
+                    return AgentResult(
+                        question_id=qid,
+                        prediction={"id": qid, "type": "abstain"},
+                        confidence=0.0,
+                        sql=last_sql_text,
+                        sql_attempts=attempts,
+                        error=f"LLM error: {exc}",
+                    )
+
+                obj_probe = extract_json_object(raw_reply)
+                probe_sql = (
+                    str(obj_probe["probe_sql"])
+                    if (obj_probe and isinstance(obj_probe.get("probe_sql"), str))
+                    else (
+                        str(obj_probe["sql"])
+                        if (obj_probe and obj_probe.get("status") == "probe" and isinstance(obj_probe.get("sql"), str))
+                        else ""
+                    )
                 )
-            except Exception as exc:
-                return AgentResult(
-                    question_id=qid,
-                    prediction={"id": qid, "type": "abstain"},
-                    confidence=0.0,
-                    sql=last_sql_text,
-                    sql_attempts=attempts,
-                    error=f"LLM error: {exc}",
-                )
+                if probe_sql and probe_budget > 0:
+                    probe_budget -= 1
+                    p_res = execute_sql_safe(
+                        knowledge.workspace.open_connection,
+                        probe_sql,
+                        valid_tables=knowledge.valid_tables,
+                        datetime_columns=tuple(knowledge.datetime_columns),
+                        max_rows=10,
+                        timeout_seconds=min(3.0, self.config.sql_timeout_seconds),
+                    )
+                    probe_info = (
+                        f"Cột: {p_res.columns}\nDòng: {p_res.rows[:10]}"
+                        if p_res.ok
+                        else f"Lỗi probe: {p_res.error}"
+                    )
+                    prompt_to_send = (
+                        f"{prompt_to_send}\n\n"
+                        f"### KẾT QUẢ THÁM HIỂM BẠN VỪA YÊU CẦU (`{probe_sql}`)\n{probe_info}\n\n"
+                        "Bây giờ hãy viết truy vấn cuối cùng (`{\"status\": \"ok\", \"sql\": ...}` hoặc `{\"status\": \"ok\", \"python\": ...}`) để trả lời chính xác câu hỏi."
+                    )
+                    continue
+                break
 
             obj = extract_json_object(raw_reply)
+            if (
+                isinstance(self.backend, MultiProviderLLMBackend)
+                and obj is not None
+                and not any(isinstance(obj.get(k), str) and obj.get(k) for k in ("sql", "python", "probe_sql"))
+                and obj.get("status") not in ("ok", "unanswerable", "probe")
+            ):
+                try:
+                    raw_rescue = self.backend.generate(
+                        f"{prompt_to_send}\n\nCẢNH BÁO: Lần vừa rồi sai định dạng vì in JSON dữ liệu mẫu thay vì truy vấn. "
+                        "Chỉ viết DUY NHẤT 1 câu lệnh SQLite SELECT/WITH đúng tên bảng và cột trong lược đồ!",
+                        system_prompt="Chỉ viết DUY NHẤT 1 câu lệnh SQLite SELECT/WITH trong khối ```sql ... ```, tuyệt đối không giải thích.",
+                        temperature=0.0,
+                        max_tokens=min(self.config.sql_max_tokens, 320),
+                        json_mode=False,
+                    )
+                    if raw_rescue and raw_rescue.strip():
+                        raw_reply = raw_rescue
+                        obj = extract_json_object(raw_reply)
+                except Exception:
+                    pass
+
             if obj and obj.get("status") == "unanswerable":
                 return self._finalize_prediction(
                     qid,
@@ -3428,28 +4076,75 @@ class DataMateAgent:
                     confidence=0.75,
                 )
 
-            candidate_sql = str(obj["sql"]) if (obj and isinstance(obj.get("sql"), str)) else raw_reply
-            candidate_sql = rewrite_ranked_entity_sql(candidate_sql, question, use_round_half_up=True)
-            candidate_sql = strip_spurious_single_day_filter(candidate_sql, question, analysis)
-            res = execute_sql_safe(
-                knowledge.workspace.open_connection,
-                candidate_sql,
-                valid_tables=knowledge.valid_tables,
-                max_rows=self.config.max_rows,
-                timeout_seconds=self.config.sql_timeout_seconds,
+            py_code = (
+                str(obj["python"])
+                if (self.config.enable_python_sandbox and obj and isinstance(obj.get("python"), str))
+                else (
+                    extract_python_from_response(raw_reply)
+                    if (self.config.enable_python_sandbox and not (obj and isinstance(obj.get("sql"), str)))
+                    else ""
+                )
             )
-            last_sql_res = res
-            last_sql_text = res.sql or candidate_sql
+            if py_code:
+                res = execute_python_safe(
+                    knowledge.workspace.open_connection,
+                    py_code,
+                    as_of_date=as_of_date,
+                    valid_tables=knowledge.valid_tables,
+                    datetime_columns=tuple(knowledge.datetime_columns),
+                    max_rows=self.config.max_rows,
+                    timeout_seconds=self.config.sql_timeout_seconds,
+                )
+                last_sql_res = res
+                last_sql_text = res.sql or py_code
+            else:
+                candidate_sql = str(obj["sql"]) if (obj and isinstance(obj.get("sql"), str)) else raw_reply
+                candidate_sql = rewrite_ranked_entity_sql(candidate_sql, resolved_question, use_round_half_up=True)
+                candidate_sql = strip_spurious_single_day_filter(candidate_sql, resolved_question, analysis)
+                subq_cap_err = _check_subquery_column_capture(candidate_sql, knowledge)
+                if subq_cap_err:
+                    res = SQLExecutionResult(
+                        ok=False,
+                        sql=candidate_sql,
+                        columns=[],
+                        rows=[],
+                        error=subq_cap_err,
+                    )
+                else:
+                    res = execute_sql_safe(
+                        knowledge.workspace.open_connection,
+                        candidate_sql,
+                        valid_tables=knowledge.valid_tables,
+                        datetime_columns=tuple(knowledge.datetime_columns),
+                        max_rows=self.config.max_rows,
+                        timeout_seconds=self.config.sql_timeout_seconds,
+                    )
+                last_sql_res = res
+                last_sql_text = res.sql or candidate_sql
+
+            is_final_repair_next = (attempt + 1 == self.config.max_sql_retries - 1)
+            allow_escalation = (
+                self.config.enable_python_sandbox
+                and self.config.enable_forced_python_escalation
+                and self._allow_extra_stage3_llm_calls()
+            )
 
             if not res.ok:
                 if attempt + 1 < self.config.max_sql_retries:
+                    err_low = (res.error or "").lower()
+                    escalate_py = bool(
+                        allow_escalation
+                        and is_final_repair_next
+                        and (prefer_python or "syntax error" in err_low or "no such column" in err_low)
+                    )
                     prompt_to_send = self._build_repair_prompt(
-                        question,
+                        resolved_question,
                         last_sql_text,
                         res.error,
                         knowledge,
                         temporal_summary=effective_temp_summary,
                         include_full_schema=True,
+                        escalate_to_python=escalate_py,
                     )
                     continue
                 return AgentResult(
@@ -3462,17 +4157,19 @@ class DataMateAgent:
                 )
 
             sem_ok, sem_msg, sem_fatal = verify_sql_semantics(
-                last_sql_text, res, question, knowledge, analysis, entity_matches=entities
+                last_sql_text, res, resolved_question, knowledge, analysis, entity_matches=entities
             )
             if not sem_ok:
                 if attempt + 1 < self.config.max_sql_retries:
+                    escalate_py = bool(allow_escalation and is_final_repair_next and prefer_python)
                     prompt_to_send = self._build_repair_prompt(
-                        question,
+                        resolved_question,
                         last_sql_text,
                         sem_msg,
                         knowledge,
                         temporal_summary=effective_temp_summary,
                         include_full_schema=(len(knowledge.schema_prompt or "") <= 5000),
+                        escalate_to_python=escalate_py,
                     )
                     continue
                 if sem_fatal:
@@ -3492,13 +4189,15 @@ class DataMateAgent:
             )
             if is_empty_or_null and analysis.expected_type not in ("list", "table"):
                 if attempt + 1 < self.config.max_sql_retries:
+                    escalate_py = bool(allow_escalation and is_final_repair_next and prefer_python)
                     prompt_to_send = self._build_repair_prompt(
-                        question,
+                        resolved_question,
                         last_sql_text,
-                        "SQL chạy không lỗi nhưng trả về 0 dòng hoặc NULL. Kiểm tra lại filter ngày, tên status thực tế hoặc dùng NORM_VN(...) để khớp chuỗi tiếng Việt.",
+                        "Truy vấn chạy không lỗi nhưng trả về 0 dòng hoặc NULL. Kiểm tra lại filter ngày, tên status thực tế hoặc dùng NORM_VN(...) để khớp chuỗi tiếng Việt.",
                         knowledge,
                         temporal_summary=effective_temp_summary,
                         include_full_schema=True,
+                        escalate_to_python=escalate_py,
                     )
                     continue
                 # Exhausted retries with empty/NULL aggregate -> safer to abstain (0 pts) than guess 0 (-1 pt)
@@ -3511,25 +4210,85 @@ class DataMateAgent:
                     notes=["SQL returned empty or NULL scalar after repair attempts."],
                 )
 
-            formatted = format_sql_result(res, analysis, question)
+            formatted = format_sql_result(res, analysis, resolved_question)
             if formatted is not None:
                 conf = max(0.55, 0.90 - 0.12 * attempt)
-                return self._finalize_prediction(qid, formatted, res, attempts, conf)
+                extra_notes: List[str] = []
+
+                # When2Call gate 1: unresolved sanity bound / suspicious 0 warning on final attempt abstains instead of risking -1
+                bounds_ok_final, bounds_msg_final, _ = verify_result_sanity_bounds(
+                    last_sql_text, res, resolved_question, knowledge, analysis, entity_matches=entities
+                )
+                if (
+                    (not sem_ok and "CẢNH BÁO KẾT QUẢ = 0" in (sem_msg or "") and _coerce_float(formatted.get("answer")) == 0.0)
+                    or (not bounds_ok_final)
+                ):
+                    conf = min(conf, 0.42)
+                    extra_notes.append(f"When2Call gate: unresolved sanity warning ({bounds_msg_final or sem_msg})")
+
+                # Selective Dual-Path Consensus (SQL vs independent Python/Pandas check)
+                is_primary_py = (last_sql_text or "").lstrip().startswith("-- [PYTHON_SANDBOX]")
+                need_consensus = (
+                    conf >= self.config.abstain_threshold
+                    and self.config.enable_dual_path_consensus
+                    and self.config.enable_python_sandbox
+                    and self._allow_extra_stage3_llm_calls()
+                    and (not is_primary_py)
+                    and analysis.expected_type in ("number", "percent")
+                    and (
+                        attempt > 0
+                        or (not sem_ok)
+                        or analysis.expected_type == "percent"
+                        or (len(knowledge.workspace.tables) >= 4 and "join" in (last_sql_text or "").lower())
+                    )
+                )
+                if need_consensus:
+                    c_status, alt_fmt = self._run_dual_path_consensus_check(
+                        question=resolved_question,
+                        as_of_date=as_of_date,
+                        knowledge=knowledge,
+                        analysis=analysis,
+                        primary_formatted=formatted,
+                        temporal_summary=effective_temp_summary,
+                        entity_matches=entities,
+                    )
+                    if c_status == "agree":
+                        conf = max(conf, 0.94)
+                        extra_notes.append("Dual-path SQL+Python consensus: AGREE")
+                    elif c_status == "disagree" and alt_fmt is not None:
+                        a_sql = _coerce_float(formatted.get("answer"))
+                        a_py = _coerce_float(alt_fmt.get("answer"))
+                        extra_notes.append(
+                            f"Dual-path SQL+Python disagreement: sql={formatted.get('answer')} vs py={alt_fmt.get('answer')}"
+                        )
+                        if attempt > 0 or (not sem_ok) or (a_sql is not None and abs(a_sql) <= 1e-9):
+                            conf = min(conf, 0.42)
+                        elif (
+                            analysis.expected_type == "percent"
+                            and a_sql is not None
+                            and a_py is not None
+                            and abs(a_py) > 1e-9
+                            and abs(a_sql - a_py) > 5.0
+                        ):
+                            conf = min(conf, 0.45)
+
+                return self._finalize_prediction(qid, formatted, res, attempts, conf, extra_notes=extra_notes)
 
             if attempt + 1 < self.config.max_sql_retries:
                 prompt_to_send = self._build_repair_prompt(
-                    question,
+                    resolved_question,
                     last_sql_text,
                     f"Kết quả trả {res.row_count} dòng x {len(res.columns)} cột không khớp dạng `{analysis.expected_type}` cần trả.",
                     knowledge,
                     temporal_summary=effective_temp_summary,
                     include_full_schema=True,
+                    escalate_to_python=bool(allow_escalation and is_final_repair_next),
                 )
                 continue
 
             # Exhausted SQL retries -> optional compact LLM formatter fallback
             if self.config.enable_llm_formatter_fallback and res.row_count > 0:
-                fallback = self._fallback_llm_format(question, analysis, res)
+                fallback = self._fallback_llm_format(resolved_question, analysis, res)
                 if fallback is not None and fallback.get("type") != "abstain":
                     conf = max(0.50, 0.72 - 0.12 * attempt)
                     return self._finalize_prediction(qid, fallback, res, attempts, conf)

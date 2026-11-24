@@ -103,6 +103,28 @@ def extract_sql_from_response(raw: str) -> str:
     if m_kw and m_kw.start() > 0:
         candidate = candidate[m_kw.start() :].strip()
 
+    # Heal unclosed trailing backtick or double-quote identifier left by truncated small-LLM output
+    def _has_odd_quote_outside_sq(sql_txt: str, quote_ch: str) -> bool:
+        in_sq = False
+        cnt = 0
+        idx = 0
+        while idx < len(sql_txt):
+            c = sql_txt[idx]
+            if c == "'":
+                if in_sq and idx + 1 < len(sql_txt) and sql_txt[idx + 1] == "'":
+                    idx += 2
+                    continue
+                in_sq = not in_sq
+            elif c == quote_ch and not in_sq:
+                cnt += 1
+            idx += 1
+        return (cnt % 2) == 1
+
+    if _has_odd_quote_outside_sq(candidate, "`"):
+        candidate = candidate.rstrip() + "`"
+    if _has_odd_quote_outside_sq(candidate, '"'):
+        candidate = candidate.rstrip() + '"'
+
     # Keep only first SQL statement cleanly
     stmts = _split_top_level_semicolons(candidate)
     if stmts:
@@ -185,7 +207,49 @@ def adapt_sql_to_sqlite(sql: str) -> str:
     )
     s = re.sub(r"\bTRUE\b", "1", s, flags=re.IGNORECASE)
     s = re.sub(r"\bFALSE\b", "0", s, flags=re.IGNORECASE)
+    # Collapse accidental double '* 100.0' around division in percentage formulas
+    s = re.sub(
+        r"(\*\s*100(?:\.0)?\s*/\s*(?:[a-zA-Z_][a-zA-Z0-9_]*\((?:[^()]|\([^()]*\))*\)|[a-zA-Z0-9_.\"`]+))\s*\*\s*100(?:\.0)?(?![0-9])",
+        r"\1",
+        s,
+        flags=re.IGNORECASE,
+    )
     return s
+
+
+def heal_datetime_comparisons(sql: str, datetime_columns: Sequence[str] = ()) -> str:
+    """
+    Expand bare 'YYYY-MM-DD' upper bounds on datetime ('YYYY-MM-DD HH:MM:SS') columns
+    so BETWEEN / <= / = comparisons never drop rows after 00:00:00.
+    """
+    if not sql or not datetime_columns:
+        return sql
+    out = sql
+    for col in sorted({c.strip() for c in datetime_columns if c and c.strip()}, key=len, reverse=True):
+        col_pat = rf'(?<![a-zA-Z0-9_])(?:[a-zA-Z0-9_`"]+\.)?["`]?{re.escape(col)}["`]?(?![a-zA-Z0-9_])'
+        out = re.sub(
+            rf"({col_pat})\s+BETWEEN\s+'(\d{{4}}-\d{{2}}-\d{{2}})'\s+AND\s+'(\d{{4}}-\d{{2}}-\d{{2}})'",
+            r"\1 BETWEEN '\2' AND '\3 23:59:59'",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            rf"({col_pat})\s*([<>]=?)\s*'(\d{{4}}-\d{{2}}-\d{{2}})'",
+            lambda m: (
+                f"{m.group(1)} {m.group(2)} '{m.group(3)} 23:59:59'"
+                if m.group(2) in ("<=", ">")
+                else m.group(0)
+            ),
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            rf"({col_pat})\s*=\s*'(\d{{4}}-\d{{2}}-\d{{2}})'",
+            r"(\1 >= '\2' AND \1 <= '\2 23:59:59')",
+            out,
+            flags=re.IGNORECASE,
+        )
+    return out
 
 
 def register_sqlite_udfs(conn: sqlite3.Connection) -> None:
@@ -226,6 +290,7 @@ def execute_sql_safe(
     conn_factory,
     raw_sql: str,
     valid_tables: Sequence[str] = (),
+    datetime_columns: Sequence[str] = (),
     max_rows: int = 1000,
     timeout_seconds: float = 8.0,
 ) -> SQLExecutionResult:
@@ -234,6 +299,8 @@ def execute_sql_safe(
     sql = adapt_sql_to_sqlite(sql)
     if valid_tables:
         sql = heal_table_names(sql, valid_tables)
+    if datetime_columns:
+        sql = heal_datetime_comparisons(sql, datetime_columns)
 
     err = validate_readonly_sql(sql)
     if err:
