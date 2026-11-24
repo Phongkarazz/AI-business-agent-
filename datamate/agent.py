@@ -1901,12 +1901,13 @@ def build_catalog_listing_sql_spec(
 
     has_metric_or_tx_ask = bool(
         re.search(
-            r"(?:\b(?:doanh\s+thu|doanh\s+so|thanh\s+tien|ban\s+duoc|ban\s+chay|da\s+ban|so\s+don|hoa\s+don|"
-            r"so\s+luong(?:\s+ban)?|tien\s+nhap|nhap\s+kho|ton\s+kho|cong\s+no|con\s+no|no|lai|chi\s+phi|"
+            r"(?:\b(?:doanh\s+thu|doanh\s+so|thanh\s+tien|ban\s+duoc|ban\s+chay|da\s+ban|"
+            r"mua|da\s+mua|dat\s+mua|dat\s+thue|da\s+dat|da\s+lam|da\s+su\s+dung|"
+            r"so\s+don|hoa\s+don|so\s+luong(?:\s+ban)?|tien\s+nhap|nhap\s+kho|ton\s+kho|cong\s+no|con\s+no|no|lai|chi\s+phi|"
             r"top\s*\d+|cao\s+nhat|thap\s+nhat|trung\s+binh|vuot|bao\s+nhieu|may|"
             r"ty\s+le|ti\s+le|ty\s+trong|phan\s+tram|xu\s+huong|huy|tra\s+hang|"
             r"ngay|thang|nam|hom\s+nay|hom\s+qua|cao\s+thu|thap\s+thu|dung\s+thu|xep\s+thu|"
-            r"tong\s+(?:so|tien|doanh|luong))\b|%)",
+            r"tong\s+(?:so|tien|doanh|luong)|cua\s+khach|khach\s+hang\s+\S+)\b|%)",
             qn,
         )
     )
@@ -1930,6 +1931,15 @@ def build_catalog_listing_sql_spec(
         return None
 
     cat_by_name = {tp.table_name: tp for tp in catalog_tables}
+
+    # Bail out if entity_matches grounded an entity (e.g. a customer or tx row) whose table is NOT a catalog table
+    for ent_tbl, _ent_col, ent_val in entity_matches or ():
+        val_norm = norm_vn(str(ent_val or ""))
+        if len(val_norm) >= 2 and re.search(rf"(?<![a-z0-9]){re.escape(val_norm)}(?![a-z0-9])", qn):
+            if ent_tbl in tx_tables or ent_tbl in tables_with_dates:
+                return None
+            if ent_tbl in cat_by_name and re.search(r"khach|benh_?nhan|hoc_?vien|nhan_?vien", ent_tbl, re.I) and not re.search(r"\b(?:danh\s+sach|liet\s+ke)\s+(?:tat\s+ca\s+|toan\s+bo\s+)?khach", qn):
+                return None
 
     # Prefer grounded entities whose table is a catalog table and value appears as an exact token in question
     matched_candidates: List[Tuple[int, str, str, str]] = []
@@ -2353,9 +2363,9 @@ def _select_rulebook_prompt(
         for t in tables
         for c in t.columns
     }
-    has_vn_shop_schema = any(
+    has_vn_shop_schema = bool(knowledge.order_status_targets) or any(
         k in all_cols_low
-        for k in ("trang_thai", "thanh_tien", "chua_tra", "da_tra", "ma_don", "ngay_dat", "ngay_gd", "gia_von")
+        for k in ("trang_thai", "tinh_trang", "thanh_tien", "tien_hang", "chua_tra", "da_tra", "con_no", "ma_don", "ma_chung_tu", "ngay_dat", "ngay_gd", "gia_von")
     )
     spaced_tables = [t.table_name for t in tables if " " in t.table_name or "-" in t.table_name]
 
@@ -2385,6 +2395,17 @@ def _select_rulebook_prompt(
 
     if re.search(r"\b(?:khach|ai|top|nhom)\b", qn) and caps.get("has_customers") and has_vn_shop_schema:
         sections.append(_RULE_CUSTOMERS)
+    if any(re.search(r"(?:left\s+join|danh_?ba|danh_?sach)", e, re.I) for e in (knowledge.join_graph or [])):
+        sections.append(
+            "- Liên kết danh bạ/nhân sự tuỳ chọn: khi nối bảng giao dịch/lịch hẹn sang danh bạ (`danh_ba`, `danhbakhach`, `khach_hang`), "
+            "HÃY dùng `LEFT JOIN` và `COALESCE(danh_ba.ho_ten, lich.ten_khach)` để KHÔNG làm rớt khách vãng lai chưa lưu trong danh bạ."
+        )
+    if knowledge.order_status_targets and not _Q_ALLOW_ALL_STATUS_RE.search(qn):
+        st_filters = [f"`{t['table']}.{t['valid_filter']}`" for t in knowledge.order_status_targets if t.get("valid_filter")]
+        if st_filters:
+            sections.append(
+                f"- Lọc trạng thái đơn hợp lệ: khi tính doanh thu, số đơn hoặc sản phẩm khách đã mua từ bảng đơn hàng, BẮT BUỘC giữ {', '.join(st_filters)}."
+            )
     if caps.get("has_debt_or_payments") and has_vn_shop_schema and re.search(
         r"\b(?:no|chua tra|da tra|da thu|con thieu|phai thu|tuoi no|ghi no|tra no|thu hoi|thu no|so quy|tien mat|chuyen khoan|cod|pttt)\b",
         qn,
@@ -2408,9 +2429,22 @@ def _select_rulebook_prompt(
         and re.search(r"\b(?:ty\s+le|ti\s+le|ty\s+trong|dong\s+gop|phan\s+tram|%|share|percent)\b", qn)
         and re.search(r"\b(?:theo|moi|tung|nhom|danh\s+muc|kenh|loai|chiem)\b", qn)
     ):
-        sections.append(
-            "- Tỷ lệ đóng góp / tỷ trọng (%) theo nhóm: TỬ SỐ VÀ MẪU SỐ PHẢI DÙNG CÙNG 1 CHỈ SỐ; mẫu số là tổng toàn bộ qua `SUM(SUM(cot_chi_so)) OVER ()` (VD: `ROUND_HALF_UP(SUM(thanh_tien) * 100.0 / SUM(SUM(thanh_tien)) OVER (), 2)`)."
+        has_single_target = bool(
+            re.search(r"\bchiem\s+(?:bao\s+nhieu|may)\b", qn)
+            and not re.search(r"\b(?:theo\s+(?:tung|moi|cac)|moi\s+nhom|tung\s+nhom|tat\s+ca\s+cac)\b", qn)
         )
+        if has_single_target:
+            sections.append(
+                "- Tỷ trọng (%) của MỘT nhóm/danh mục cụ thể (VD: 'nhóm X chiếm bao nhiêu % doanh thu'): "
+                "TUYỆT ĐỐI KHÔNG lọc `WHERE <cột_nhóm> = '...'` ở truy vấn ngoài (sẽ loại mất phần còn lại hoặc trả NULL khi khác hoa/thường)! "
+                "PHẢI tính cả tử số và mẫu số trong CÙNG 1 truy vấn (không `GROUP BY`): "
+                "`ROUND_HALF_UP(SUM(CASE WHEN NORM_VN(<cột_nhóm>) = NORM_VN('<giá_trị>') THEN <cột_tiền> ELSE 0 END) * 100.0 / NULLIF(SUM(<cột_tiền>), 0), 2)` "
+                "(dùng `NORM_VN(...)` để so sánh không phân biệt chữ hoa/thường tiếng Việt)."
+            )
+        else:
+            sections.append(
+                "- Tỷ lệ đóng góp / tỷ trọng (%) theo nhóm: TỬ SỐ VÀ MẪU SỐ PHẢI DÙNG CÙNG 1 CHỈ SỐ; mẫu số là tổng toàn bộ qua `SUM(SUM(cot_chi_so)) OVER ()` (VD: `ROUND_HALF_UP(SUM(thanh_tien) * 100.0 / SUM(SUM(thanh_tien)) OVER (), 2)`)."
+            )
     dim_req = _match_requested_dimension_col(qn, knowledge)
     if dim_req:
         q_phrase, t_hit, c_hit = dim_req
@@ -2893,6 +2927,29 @@ def verify_sql_semantics(
             "LỖI THIẾU HÀM TỔNG HỢP (SUM/COUNT): Khi `GROUP BY` theo sản phẩm/khách hàng/nhóm để xếp hạng doanh thu hoặc số lượng, BẮT BUỘC phải dùng `SUM(thanh_tien)` hoặc `SUM(so_luong)` trong cả `SELECT` và `ORDER BY`, KHÔNG dùng cột đơn lẻ chưa cộng gộp!",
             True,
         )
+
+    # 4d. Multi-period history anti-collapse guard ('lịch sử ... qua các kỳ/tháng')
+    if (
+        re.search(r"\b(?:lich\s+su|dien\s+bien|chi\s+tiet|liet\s+ke)\b.*\b(?:qua\s+cac\s+(?:ky|thang|nam)|tung\s+(?:ky|thang))\b", qn)
+        and (sql_res.row_count == 1 or len(sql_res.rows or ()) == 1)
+        and re.search(r"\b(?:sum|avg|total)\s*\(", select_head)
+    ):
+        multi_sheet_tbls = [
+            tp.table_name
+            for tp in knowledge.workspace.tables.values()
+            if re.search(rf"\b(?:from|join)\s+[`\"]?{re.escape(tp.table_name.lower())}[`\"]?\b", sql_low)
+            and any(
+                getattr(c, "sql_name", "").lower() == "source_sheet" and getattr(c, "distinct_count", 0) >= 2
+                for c in tp.columns
+            )
+        ]
+        if multi_sheet_tbls and "source_sheet" not in sql_low:
+            return (
+                False,
+                f"LỖI GỘP MẤT KỲ LỊCH SỬ: Bảng `{multi_sheet_tbls[0]}` có cột `source_sheet` lưu từng kỳ/tháng nhưng SQL đang `SUM/AVG` gộp toàn bộ thành 1 dòng duy nhất! "
+                "Hãy `SELECT` chi tiết kèm cột `source_sheet` (KHÔNG `SUM` gộp mất kỳ và KHÔNG JOIN nhân đôi với bảng danh mục nếu không cần).",
+                True,
+            )
 
     bounds_ok, bounds_msg, bounds_fatal = verify_result_sanity_bounds(
         sql, sql_res, question, knowledge, analysis, entity_matches=entity_matches or ()
@@ -3618,6 +3675,7 @@ class DataMateAgent:
         temporal_summary: str = "",
         include_full_schema: bool = True,
         escalate_to_python: bool = False,
+        entity_matches: Sequence[Tuple[str, str, str]] = (),
     ) -> str:
         if len(knowledge.workspace.tables) > 8:
             schema_block = build_focused_schema_prompt(question, knowledge, max_full_tables=10)
@@ -3629,6 +3687,23 @@ class DataMateAgent:
         referenced_tables = [
             t for t in tables if re.search(rf"\b{re.escape(t.table_name.lower())}\b", bad_low)
         ]
+        tbl_by_low = {t.table_name.lower(): t for t in tables}
+        alias_to_table: Dict[str, str] = {}
+        _sql_kw_skip = {"on", "where", "left", "right", "inner", "outer", "cross", "join", "group", "order", "limit", "having", "union", "set", "as"}
+        for m_al in re.finditer(
+            r"\b(?:from|join)\s+(?:\"([^\"]+)\"|`([^`]+)`|([a-zA-Z0-9_]+))(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?",
+            bad_sql or "",
+            re.IGNORECASE,
+        ):
+            t_raw = (m_al.group(1) or m_al.group(2) or m_al.group(3) or "").strip()
+            al = (m_al.group(4) or "").strip()
+            if t_raw.lower() in tbl_by_low:
+                real_name = tbl_by_low[t_raw.lower()].table_name
+                alias_to_table[t_raw.lower()] = real_name
+                if al and al.lower() not in _sql_kw_skip:
+                    alias_to_table[al.lower()] = real_name
+
+        joined_table_names = {v.lower() for v in alias_to_table.values()}
 
         def _suggest_join_sql(target_tbl_name: str) -> str:
             tgt = next((t for t in tables if t.table_name.lower() == target_tbl_name.lower()), None)
@@ -3636,7 +3711,9 @@ class DataMateAgent:
                 return ""
             tgt_cols = [getattr(c, "sql_name", str(c)) for c in tgt.columns]
             tgt_set = set(tgt_cols)
-            src_candidates = [t for t in referenced_tables if t.table_name.lower() != tgt.table_name.lower()]
+            src_candidates = [t for t in tables if t.table_name.lower() in joined_table_names and t.table_name.lower() != tgt.table_name.lower()]
+            if not src_candidates:
+                src_candidates = [t for t in referenced_tables if t.table_name.lower() != tgt.table_name.lower()]
             if not src_candidates:
                 src_candidates = [t for t in tables if t.table_name.lower() != tgt.table_name.lower()]
             suggestions = []
@@ -3652,6 +3729,12 @@ class DataMateAgent:
                 t_ref = f'"{tgt.table_name}"' if (" " in tgt.table_name or "-" in tgt.table_name) else tgt.table_name
                 s_ref = f'"{src.table_name}"' if (" " in src.table_name or "-" in src.table_name) else src.table_name
                 suggestions.append(f"JOIN {t_ref} ON {s_ref}.{key} = {t_ref}.{key}")
+            if not suggestions and knowledge.join_graph:
+                tgt_l = tgt.table_name.lower()
+                for edge in knowledge.join_graph:
+                    if tgt_l in edge.lower():
+                        suggestions.append(edge)
+                        break
             if not suggestions:
                 return ""
             return "Gợi ý JOIN tự động: `" + suggestions[0] + "`\n"
@@ -3683,15 +3766,37 @@ class DataMateAgent:
         if m_missing:
             missing_col = m_missing.group(1)
             join_hint = ""
+            resolved_prefix_tbl = None
             if "." in missing_col:
-                tbl_prefix = missing_col.split(".", 1)[0].strip()
-                if any(t.table_name.lower() == tbl_prefix.lower() for t in tables):
-                    auto_join = _suggest_join_sql(tbl_prefix)
-                    join_hint = (
-                        f"CHÚ Ý: Bảng `{tbl_prefix}` CÓ tồn tại trong CSDL nhưng CHƯA ĐƯỢC `JOIN` trong `FROM`! "
-                        f"Hãy thêm `JOIN` và GIỮ NGUYÊN điều kiện lọc thay vì xóa điều kiện lọc.\n"
-                        + auto_join
-                    )
+                tbl_prefix, bare_col = missing_col.split(".", 1)
+                tbl_prefix = tbl_prefix.strip()
+                bare_col = bare_col.strip()
+                resolved_prefix_tbl = alias_to_table.get(tbl_prefix.lower(), tbl_prefix)
+                owner_cols = [
+                    t for t in tables
+                    if any(getattr(c, "sql_name", str(c)).lower() == bare_col.lower() for c in t.columns)
+                ]
+                if any(t.table_name.lower() == resolved_prefix_tbl.lower() for t in tables):
+                    if resolved_prefix_tbl.lower() not in joined_table_names:
+                        auto_join = _suggest_join_sql(resolved_prefix_tbl)
+                        join_hint = (
+                            f"CHÚ Ý: Bảng `{resolved_prefix_tbl}` CÓ tồn tại trong CSDL nhưng CHƯA ĐƯỢC `JOIN` trong `FROM`! "
+                            f"Hãy thêm `JOIN` và GIỮ NGUYÊN điều kiện lọc thay vì xóa điều kiện lọc.\n"
+                            + auto_join
+                        )
+                    else:
+                        owner_names = [ot.table_name for ot in owner_cols]
+                        join_hint = (
+                            f"CHÚ Ý: Alias `{tbl_prefix}` trỏ tới bảng `{resolved_prefix_tbl}`, nhưng bảng `{resolved_prefix_tbl}` KHÔNG CÓ cột `{bare_col}`!\n"
+                        )
+                        if owner_names:
+                            join_hint += f"-> Cột `{bare_col}` thực chất nằm ở bảng: {', '.join(f'`{n}`' for n in owner_names)}.\n"
+                        rel_edges = [
+                            e for e in (knowledge.join_graph or [])
+                            if resolved_prefix_tbl.lower() in e.lower() or any(on.lower() in e.lower() for on in owner_names)
+                        ]
+                        if rel_edges:
+                            join_hint += "Liên kết khoá đúng giữa các bảng: " + "; ".join(f"`{e}`" for e in rel_edges[:4]) + "\n"
             else:
                 owner_tables = [
                     t for t in tables
@@ -3705,11 +3810,12 @@ class DataMateAgent:
                             f"CHÚ Ý: Cột `{missing_col}` nằm ở bảng `{ot.table_name}` chưa được `JOIN`!\n"
                             + auto_join
                         )
+            target_prefix_low = (resolved_prefix_tbl or "").lower()
             matched_tables = [
                 f"- Bảng `{t.table_name}` CHỈ CÓ các cột: {', '.join(getattr(c, 'sql_name', str(c)) for c in t.columns)}"
                 for t in tables
                 if t in referenced_tables or (
-                    "." in missing_col and t.table_name.lower() == missing_col.split(".", 1)[0].lower()
+                    "." in missing_col and t.table_name.lower() == target_prefix_low
                 )
             ]
             if not matched_tables:
@@ -3724,6 +3830,14 @@ class DataMateAgent:
                 + "\nNếu bảng chỉ có cột số lượng và đơn giá (`so_luong*` * `gia*`), hãy tự nhân 2 cột đó thay vì gọi cột không tồn tại."
             )
         col_hint = ("\n\n".join(repair_hints) + "\n\n") if repair_hints else ""
+        if entity_matches and re.search(r"0\s+dòng|NULL|rỗng", reason or "", re.IGNORECASE):
+            ent_lines = ", ".join(f"`{t}.{c} = {v!r}`" for t, c, v in entity_matches[:5])
+            col_hint += f"Gợi ý giá trị khớp thực tế trong CSDL (ưu tiên `NORM_VN(...)` khi so sánh chuỗi): {ent_lines}\n"
+            if knowledge.join_graph:
+                opt_edges = [e for e in knowledge.join_graph if "LEFT JOIN" in e]
+                if opt_edges:
+                    col_hint += "Lưu ý JOIN danh bạ: " + "; ".join(opt_edges[:3]) + "\n"
+            col_hint += "\n"
         norm_clean = normalize_vn_question(question)
         q_disp = f"{question} (ý định chuẩn hóa: {norm_clean})" if norm_clean and norm_clean != norm_vn(question) else question
         is_prev_py = (bad_sql or "").lstrip().startswith("-- [PYTHON_SANDBOX]")

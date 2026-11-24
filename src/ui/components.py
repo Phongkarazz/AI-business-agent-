@@ -5822,16 +5822,31 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
             cnt_title = format_col_title(str(cnt_col)) if cnt_col else "Quy Mô"
 
             # 3. Cột tổng tiền / doanh thu chính (Total Amount / Sales / Revenue)
-            tot_cols = [c for c in measure_cols if any(k in str(c).lower() for k in ["totalsales", "totalrevenue", "totalamount", "amountdue", "doanh thu", "doanh_thu", "sales", "revenue", "salary", "lương"]) and not any(k in str(c).lower() for k in ["avg", "mean", "trung bình", "surplus", "deficit"])]
+            _meter_or_cnt_excl = ("avg", "mean", "trung bình", "surplus", "deficit", "dien", "điện", "nuoc", "nước", "chi_so", "chỉ số", "so_luong", "số lượng", "count")
+            _curr_kw = ("totalsales", "totalrevenue", "totalamount", "amountdue", "doanh thu", "doanh_thu", "sales", "revenue", "salary", "lương", "tien", "tiền", "thanh_tien", "thành tiền", "con_no", "cong_no", "công nợ", "tong_no", "du_no", "gia_tri", "giá trị", "gia_thue", "giá thuê", "chi_phi", "chi phí", "da_thu", "đã thu")
+            tot_cols = [
+                c for c in measure_cols
+                if any(k in str(c).lower() for k in _curr_kw)
+                and not any(k in str(c).lower() for k in _meter_or_cnt_excl)
+            ]
             tot_col = tot_cols[0] if tot_cols else measure_cols[0]
             tot_val = float(pd.to_numeric(df[tot_col].iloc[0], errors="coerce") or 0.0)
             tot_title = format_col_title(str(tot_col))
             is_tot_vnd = is_vnd_context_dataframe(df, str(tot_col), sql=_sql_ctx_1row)
+            is_tot_curr = bool(tot_cols) or is_tot_vnd
             if is_tot_vnd:
                 tot_title = tot_title.replace(" ($)", "").strip()
                 tot_fmt = f"{tot_val:,.0f} đ" if (abs(tot_val) >= 100 or tot_val.is_integer()) else f"{tot_val:,.2f} đ"
+                tot_icon = "💰"
+                tot_delta = "Giá trị ghi nhận" if not is_en else "Recorded Amount"
+            elif is_tot_curr:
+                tot_fmt = f"${tot_val:,.0f}" if abs(tot_val) >= 100 else f"${tot_val:,.2f}"
+                tot_icon = "💰"
+                tot_delta = "Doanh số ghi nhận" if not is_en else "Recorded Revenue"
             else:
-                tot_fmt = f"${tot_val:,.0f}" if tot_val >= 100 else f"${tot_val:,.2f}"
+                tot_fmt = f"{tot_val:,.0f}" if tot_val.is_integer() else f"{tot_val:,.2f}"
+                tot_icon = "📊"
+                tot_delta = "Giá trị ghi nhận" if not is_en else "Recorded Value"
 
             # 4. Cột hiệu quả / trung bình / chênh lệch (Avg / Surplus / Benchmark)
             eff_cols = [c for c in measure_cols if c not in [tot_col, cnt_col] and any(k in str(c).lower() for k in ["avg", "trung bình", "surplus", "vượt", "difference", "chênh lệch", "rate", "ratio"])]
@@ -5849,16 +5864,18 @@ def _render_executive_kpi_cards_impl(df: pd.DataFrame, is_en: bool = False, user
                 else:
                     st.metric("📋 " + ("Số Lượng Bản Ghi" if not is_en else "Record Count"), "1")
             with k3:
-                st.metric(f"💰 {tot_title}", tot_fmt, delta="Doanh số ghi nhận" if not is_en else "Recorded Revenue")
+                st.metric(f"{tot_icon} {tot_title}", tot_fmt, delta=tot_delta)
             with k4:
                 if eff_val is not None and eff_title:
                     eff_low = (eff_title + " " + str(eff_col)).lower()
-                    is_eff_curr = any(k in eff_low for k in ["$", "lương", "salary", "doanh thu", "doanh_thu", "revenue", "sales", "amount", "cost", "tiền", "surplus", "vượt"])
+                    is_eff_curr = any(k in eff_low for k in ["$", "lương", "salary", "doanh thu", "doanh_thu", "revenue", "sales", "amount", "cost", "tiền", "tien_", "con_no", "cong_no", "da_thu", "surplus", "vượt"]) and not any(k in eff_low for k in ["dien", "điện", "nuoc", "nước", "chi_so", "chỉ số"])
                     if is_eff_curr and eff_col and is_vnd_context_dataframe(df, str(eff_col), sql=_sql_ctx_1row):
                         eff_title = eff_title.replace(" ($)", "").strip()
                         fmt_eff = f"{eff_val:,.0f} đ" if (abs(eff_val) >= 100 or eff_val.is_integer()) else f"{eff_val:,.2f} đ"
+                    elif is_eff_curr:
+                        fmt_eff = f"${eff_val:,.2f}" if abs(eff_val) < 100 else f"${eff_val:,.0f}"
                     else:
-                        fmt_eff = (f"${eff_val:,.2f}" if eff_val < 100 else f"${eff_val:,.0f}") if is_eff_curr else f"{eff_val:.2f}"
+                        fmt_eff = f"{eff_val:,.0f}" if eff_val.is_integer() else f"{eff_val:,.2f}"
                     st.metric(f"📈 {eff_title}", fmt_eff, delta="Chỉ số hiệu quả" if not is_en else "Performance Metric")
                 else:
                     st.metric("⭐ " + ("Độ Tin Cậy" if not is_en else "Confidence"), "100%", delta="Dữ liệu toàn vẹn" if not is_en else "Data verified")

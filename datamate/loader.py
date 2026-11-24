@@ -145,6 +145,27 @@ _ID_TEXT_COL_RE = re.compile(
     r")(?:[\s_.]|$)",
     re.IGNORECASE,
 )
+_PHONE_COL_RE = re.compile(
+    r"(?:^|[\s_.])(?:s[dđ]t|[dđ]i[eệ]n[\s_]*tho[aạ]i|di[\s_]*[dđ][oộ]ng|phone|tel|mobile|s[oố][\s_]*(?:[dđ]t|[dđ]i[eệ]n[\s_]*tho[aạ]i))(?:[\s_.]|$)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_phone_cell(v: Any) -> Any:
+    """Restore Excel-stripped leading '0' on 9-digit Vietnamese mobile numbers in phone columns."""
+    if v is None or isinstance(v, bool):
+        return None if v is None else str(v)
+    if isinstance(v, float) and v.is_integer():
+        s = str(int(v))
+    elif isinstance(v, int):
+        s = str(v)
+    else:
+        s = normalize_nfc(str(v)).strip()
+        s = re.sub(r"\.0+$", "", s)
+    compact = re.sub(r"[\s.\-]+", "", s)
+    if re.fullmatch(r"[35789]\d{8}", compact):
+        return "0" + compact
+    return s
 
 _TR_RE = re.compile(r"^\s*([+-]?\d+(?:[.,]\d+)?)\s*tr\s*(\d*)\s*$", re.IGNORECASE)
 _K_RE = re.compile(r"^\s*([+-]?\d+(?:[.,]\d+)?)\s*k(?:\s*[dđ₫])?\s*$", re.IGNORECASE)
@@ -1212,10 +1233,13 @@ def _normalize_column_values(
         return row_anchor_dates[i] if (row_anchor_dates and i < len(row_anchor_dates)) else None
 
     # Preserve phone/ID/code text columns strictly as trimmed NFC text
-    if _ID_TEXT_COL_RE.search(col_name):
+    if _ID_TEXT_COL_RE.search(col_name) or _PHONE_COL_RE.search(col_name):
+        is_phone_col = bool(_PHONE_COL_RE.search(col_name))
         out: List[Any] = [None] * len(raw_values)
         for idx, v in non_blank:
-            if isinstance(v, bool):
+            if is_phone_col:
+                out[idx] = _normalize_phone_cell(v)
+            elif isinstance(v, bool):
                 out[idx] = str(v)
             elif isinstance(v, float) and v.is_integer():
                 out[idx] = str(int(v))
@@ -1682,7 +1706,7 @@ def _try_parse_embedded_kv_grid_sheet(
     return ordered_keys, body, [sheet_year] * len(body), 0, 0, {}, []
 
 
-def _parse_raw_sheet(
+def _parse_raw_sheet_v2(
     raw_rows: List[List[Any]],
     sheet_year: Optional[int],
     merges: Optional[List[Tuple[int, int, int, int]]] = None,
@@ -1727,6 +1751,18 @@ def _parse_raw_sheet(
     body, ffilled = _forward_fill_order_groups(headers, body)
     row_years = [effective_year] * len(body)
     return headers, body, row_years, dropped_summary, ffilled, kv_meta, banner_notes
+
+
+def _parse_raw_sheet(
+    raw_rows: List[List[Any]],
+    sheet_year: Optional[int],
+    merges: Optional[List[Tuple[int, int, int, int]]] = None,
+) -> Optional[Tuple[List[str], List[List[Any]], List[Optional[int]], int, int]]:
+    """Backward-compatible 5-tuple wrapper preventing hot-reload split-brain on live servers."""
+    parsed = _parse_raw_sheet_v2(raw_rows, sheet_year=sheet_year, merges=merges)
+    if parsed is None:
+        return None
+    return parsed[:5]
 
 
 def _strip_split_stem(stem: str) -> str:
@@ -2055,15 +2091,16 @@ def _ingest_sqlite_normalized(
                 is_declared_real = any(k in decl for k in ("REAL", "FLOA", "DOUB", "NUM", "DEC"))
                 is_declared_bool = "BOOL" in decl
                 is_date_hdr = bool(_DATE_COL_RE.search(col_name))
+                is_id_text_hdr = bool(_ID_TEXT_COL_RE.search(col_name) or _PHONE_COL_RE.search(col_name))
                 has_str = any(isinstance(v, str) for v in col_vals[:300] if v is not None)
 
                 if is_declared_bool and not has_str:
                     col_types.append("boolean")
                     norm_cols.append([None if v is None else (1 if v else 0) for v in col_vals])
-                elif is_declared_int and not has_str and not is_date_hdr:
+                elif is_declared_int and not has_str and not is_date_hdr and not is_id_text_hdr:
                     col_types.append("integer")
                     norm_cols.append(col_vals)
-                elif is_declared_real and not has_str and not is_date_hdr:
+                elif is_declared_real and not has_str and not is_date_hdr and not is_id_text_hdr:
                     col_types.append("real")
                     norm_cols.append(col_vals)
                 else:
@@ -2126,7 +2163,7 @@ def _compute_workspace_fingerprint(
             items.append([normalize_nfc(fpath.name), int(st.st_size), int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))])
         except OSError:
             items.append([normalize_nfc(fpath.name), -1, -1])
-    payload = json.dumps({"v": 5, "readme": readme_text, "files": items}, ensure_ascii=False, sort_keys=True)
+    payload = json.dumps({"v": 6, "readme": readme_text, "files": items}, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -2387,7 +2424,7 @@ def load_business_workspace(
         if fpath.suffix.lower() == ".csv":
             raw_rows = read_csv_rows(fpath)
             for reg_title, reg_rows, reg_merges in _split_horizontal_regions(raw_rows, []):
-                parsed = _parse_raw_sheet(reg_rows, sheet_year=file_year, merges=reg_merges)
+                parsed = _parse_raw_sheet_v2(reg_rows, sheet_year=file_year, merges=reg_merges)
                 if not parsed:
                     continue
                 headers, body, row_years, dropped_sum, ffilled, kv_meta, banner_notes = parsed
@@ -2420,7 +2457,7 @@ def load_business_workspace(
             for sname, (raw_rows, merges) in sheets_with_merges.items():
                 syear = _extract_year_hint(sname) or file_year
                 for reg_title, reg_rows, reg_merges in _split_horizontal_regions(raw_rows, merges):
-                    parsed = _parse_raw_sheet(reg_rows, sheet_year=syear, merges=reg_merges)
+                    parsed = _parse_raw_sheet_v2(reg_rows, sheet_year=syear, merges=reg_merges)
                     if parsed is None:
                         continue
                     headers, body, row_years, dropped_sum, ffilled, kv_meta, banner_notes = parsed

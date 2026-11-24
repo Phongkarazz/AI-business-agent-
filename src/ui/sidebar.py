@@ -6,7 +6,7 @@ Allows clicking on any historical question to view its result directly.
 import textwrap
 import time
 import streamlit as st
-from src.database.business_upload import compose_connection_schema, resolve_database_connection
+import src.database.business_upload as _biz_upload
 from src.database.schema import (
     auto_extract_schema,
     clear_schema_caches,
@@ -37,7 +37,7 @@ def perform_connection(
 ) -> tuple[bool, str]:
     """Thực hiện kết nối tới Database và AI Provider, trích xuất schema và cập nhật session state."""
     try:
-        engine, knowledge, dialect, _db_desc, resolved_is_demo = resolve_database_connection(
+        engine, knowledge, dialect, _db_desc, resolved_is_demo = _biz_upload.resolve_database_connection(
             use_demo=use_demo,
             db_host=db_host,
             db_port=db_port,
@@ -57,7 +57,7 @@ def perform_connection(
         except Exception:
             pass
         extracted_schema = auto_extract_schema(engine, force_refresh=True)
-        final_schema = compose_connection_schema(
+        final_schema = _biz_upload.compose_connection_schema(
             extracted_schema, schema_context_input, knowledge
         )
 

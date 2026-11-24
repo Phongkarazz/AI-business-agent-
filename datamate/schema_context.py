@@ -517,11 +517,22 @@ def _build_order_semantics(
             f"- Bảng danh mục/tra cứu `{tname}` ({cols_csv}): dùng trực tiếp khi hỏi danh sách/thuộc tính/đơn giá mà không hỏi doanh thu hay giao dịch."
         )
 
+    for tname, tp in ws.tables.items():
+        if tp.row_count <= 0:
+            continue
+        sheet_cp = next((c for c in _active_columns(tp) if c.sql_name.lower() == "source_sheet"), None)
+        if sheet_cp is not None and sheet_cp.distinct_count >= 2:
+            samples = ", ".join(repr(v) for v, _ in sheet_cp.top_values[:4])
+            hint_lines.append(
+                f"- Bảng `{tname}` gộp dữ liệu từ nhiều kỳ/sheet trong cột `source_sheet` (VD: {samples}) "
+                f"-> Khi câu hỏi hỏi lịch sử/diễn biến qua các kỳ hoặc từng tháng, BẮT BUỘC `SELECT source_sheet, ...` (TUYỆT ĐỐI KHÔNG `SUM` gộp mất `source_sheet` thành 1 dòng!)."
+            )
+
     return targets, grains, "\n".join(hint_lines)
 
 
 _JOIN_KEY_RE = re.compile(
-    r"^(?:ma_[a-z0-9_]+|so_bn|so_hd|so_ct|so_phieu|phieu|phong|sdt|sku|barcode|khach|ten_khach|ma_nv|ma_hs|[a-z0-9_]+_id|[a-z0-9_]+_code)$",
+    r"^(?:ma_[a-z0-9_]+|so_bn|so_hd|so_ct|so_phieu|phieu|phong|sdt|dien_?thoai|di_?dong|phone|sku|barcode|khach|ten_khach|ma_nv|ma_hs|tho|tho_chinh|ma_do|dich_vu|[a-z0-9_]+_id|[a-z0-9_]+_code)$",
     re.IGNORECASE,
 )
 _DICT_TABLE_RE = re.compile(
@@ -531,9 +542,44 @@ _DICT_TABLE_RE = re.compile(
 
 
 _OVERLAP_FK_COL_RE = re.compile(
-    r"^(?:ma_[a-z0-9_]+|so_[a-z0-9_]+|id$|customer_id|phieu|phong|khach)|(?:_id|_code|_ban|_tu|_ct)$",
+    r"^(?:ma|ma_[a-z0-9_]+|so_[a-z0-9_]+|id$|customer_id|phieu|phong|khach|ten_khach|khach_hang|ho_ten|ten_goi|hay_goi|biet_danh|tho|tho_chinh|tho_phu|hen_tho|nhan_vien|dich_vu|ten_sp|ten_mon|ten_hang|ma_do|m_hoa|sdt|dien_thoai|di_dong)|(?:_id|_code|_ban|_tu|_ct)$",
     re.IGNORECASE,
 )
+_DIRECTORY_TABLE_RE = re.compile(
+    r"^(?:danh_?ba|danh_?sach|khach_?hang|dm_|nhan_?vien|tho|banggia|bang_?gia|san_?pham|hang_?hoa)",
+    re.IGNORECASE,
+)
+
+
+def _annotate_optional_directory_edge(
+    conn: Optional[sqlite3.Connection],
+    t1: str,
+    c1: str,
+    t2: str,
+    c2: str,
+) -> str:
+    """Append a LEFT JOIN + COALESCE note when transaction rows exist without a directory match."""
+    edge = f"{t1}.{c1} = {t2}.{c2}"
+    if conn is None:
+        return edge
+    is_d1 = bool(_DIRECTORY_TABLE_RE.search(t1))
+    is_d2 = bool(_DIRECTORY_TABLE_RE.search(t2))
+    if is_d1 == is_d2:
+        return edge
+    t_dir, c_dir, t_tx, c_tx = (t1, c1, t2, c2) if is_d1 else (t2, c2, t1, c1)
+    try:
+        unmatched = conn.execute(
+            f'SELECT EXISTS('
+            f'SELECT 1 FROM "{t_tx}" t '
+            f'WHERE t."{c_tx}" IS NOT NULL AND trim(CAST(t."{c_tx}" AS TEXT)) != \'\' '
+            f'AND NOT EXISTS (SELECT 1 FROM "{t_dir}" d WHERE CAST(d."{c_dir}" AS TEXT) = CAST(t."{c_tx}" AS TEXT))'
+            f')'
+        ).fetchone()
+        if unmatched and unmatched[0]:
+            return f"{edge} (dùng LEFT JOIN {t_dir} + COALESCE vì có dòng ở {t_tx} chưa có trong {t_dir})"
+    except sqlite3.Error:
+        pass
+    return edge
 
 
 def _extract_join_graph(
@@ -574,23 +620,25 @@ def _extract_join_graph(
                     continue
                 seen_pairs.add(pair_k)
                 seen_tbl_pairs.add((min(t1, t2), max(t1, t2)))
-                edges.append((prio, f"{t1}.{key_low} = {t2}.{key_low}"))
+                edges.append((prio, _annotate_optional_directory_edge(conn, t1, key_low, t2, key_low)))
 
-    # Value-overlap discovery for differently named foreign keys (e.g. ma_don_hang = ma_chung_tu, ma_mat_hang = ma_san_pham_ban)
+    # Value-overlap discovery for differently named foreign keys (e.g. ma_don_hang = ma_chung_tu, sothu.tho = danhsachtho.ten_goi)
     if conn is not None and len(cand_overlap_cols) >= 2:
         col_vals: Dict[Tuple[str, str], Set[str]] = {}
-        for tname, cname in cand_overlap_cols[:36]:
+        for tname, cname in cand_overlap_cols[:60]:
             try:
                 rows = conn.execute(
-                    f'SELECT DISTINCT CAST("{cname}" AS TEXT) FROM "{tname}" '
-                    f'WHERE "{cname}" IS NOT NULL AND length(trim(CAST("{cname}" AS TEXT))) >= 2 LIMIT 40'
+                    f'SELECT DISTINCT trim(CAST("{cname}" AS TEXT)) FROM "{tname}" '
+                    f'WHERE "{cname}" IS NOT NULL AND length(trim(CAST("{cname}" AS TEXT))) >= 1 LIMIT 150'
                 ).fetchall()
             except sqlite3.Error:
                 continue
             vals = {
                 str(r[0]).strip()
                 for r in rows
-                if r and r[0] is not None and not re.match(r"^\d{4}-\d{2}-\d{2}", str(r[0]).strip())
+                if r and r[0] is not None
+                and not re.match(r"^\d{4}-\d{2}-\d{2}", str(r[0]).strip())
+                and (len(str(r[0]).strip()) >= 2 or not str(r[0]).strip().isdigit())
             }
             # Guard against plain small integer sequences ('1', '2', ...) colliding across unrelated tables
             if len(vals) >= 2 and not all(v.isdigit() and len(v) < 3 for v in vals):
@@ -608,14 +656,25 @@ def _extract_join_graph(
                     continue
                 v2 = col_vals[(t2, c2)]
                 ov = v1 & v2
+                ci_only = False
                 if len(ov) < 2:
-                    continue
+                    v1_low = {v.lower() for v in v1 if not v.isdigit()}
+                    v2_low = {v.lower() for v in v2 if not v.isdigit()}
+                    ov_low = v1_low & v2_low
+                    if len(ov_low) >= 2 and (len(ov_low) / max(1, min(len(v1_low), len(v2_low)))) >= 0.35:
+                        ov = ov_low
+                        ci_only = True
+                    else:
+                        continue
                 if all(x.isdigit() and len(x) < 3 for x in ov) and len(ov) < 4:
                     continue
                 ratio = len(ov) / max(1, min(len(v1), len(v2)))
                 if ratio >= 0.2:
                     seen_tbl_pairs.add((min(t1, t2), max(t1, t2)))
-                    edges.append((0, f"{t1}.{c1} = {t2}.{c2}"))
+                    edge_str = _annotate_optional_directory_edge(conn, t1, c1, t2, c2)
+                    if ci_only and " (" not in edge_str:
+                        edge_str += " (dùng NORM_VN(...) để khớp không phân biệt hoa/thường)"
+                    edges.append((0, edge_str))
 
     edges.sort(key=lambda x: (x[0], x[1]))
     return [e for _, e in edges[:max_edges]]
@@ -822,8 +881,11 @@ def build_focused_schema_prompt(
     # 1-hop join neighbor boost from top scored tables
     top_initial = {t for t, _ in sorted(scores.items(), key=lambda x: -x[1])[:4]}
     for edge in knowledge.join_graph:
-        left, right = edge.split(" = ", 1)
-        t1, t2 = left.split(".", 1)[0], right.split(".", 1)[0]
+        edge_clean = edge.split(" (", 1)[0]
+        if " = " not in edge_clean:
+            continue
+        left, right = edge_clean.split(" = ", 1)
+        t1, t2 = left.strip().split(".", 1)[0], right.strip().split(".", 1)[0]
         if t1 in top_initial and t2 in scores:
             scores[t2] += 18.0
         if t2 in top_initial and t1 in scores:

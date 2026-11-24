@@ -190,9 +190,29 @@ def detect_query_language(query: str) -> str:
 def is_id_like(col_name: str) -> bool:
     """True nếu tên cột trông giống định danh (emp_no, GeoID, SupplierID, ProductCode...)."""
     s = str(col_name).strip()
+    s_low = s.lower()
+    if re.search(
+        r"(?:^|_)(?:con_?no|cong_?no|tong_?no|du_?no|tien_?no|no_?cu|no_?moi|no_?dau|no_?cuoi|phai_thu|phai_tra)$|^no$|^no_",
+        s_low,
+    ):
+        return False
     if ID_LIKE_REGEX.search(s):
         return True
-    return bool(re.search(r'[a-z0-9](?:ID|Id|Code|Key|No)$', s))
+    if re.search(r"[a-z0-9](?:ID|Id|Code|Key)$", s):
+        return True
+    return bool(re.search(r"(?:Emp|Dept|Order|Invoice|Account|Serial|Part|Flight|Ticket|Room)No$", s))
+
+
+def _is_debt_metric_context(val_col: str = "", user_query: str = "") -> bool:
+    """True when the analyzed metric represents outstanding debt / receivables rather than revenue."""
+    col_low = str(val_col or "").strip().lower()
+    q_low = str(user_query or "").strip().lower()
+    if re.search(
+        r"(?:^|_|\b)(?:con_?no|cong_?no|tong_?no|du_?no|tien_?no|còn\s*nợ|công\s*nợ|dư\s*nợ|tiền\s*nợ|phải\s*thu|phai_thu|receivable|debt)(?:$|_|\b)",
+        col_low,
+    ):
+        return True
+    return bool("nợ" in col_low and ("nợ" in q_low or not q_low))
 
 
 def find_time_column(df: pd.DataFrame):
@@ -2544,7 +2564,9 @@ _VND_CURRENCY_COL_MARKERS = (
     "tien_nhap", "tiennhap", "gia_nhap", "gianhap", "giá nhập",
     "gia_ban", "giaban", "giá bán", "gia_von", "giavon", "giá vốn",
     "don_gia", "dongia", "đơn giá",
-    "cong_no", "congno", "công nợ", "da_thanh_toan", "con_thieu", "chua_tra", "da_tra",
+    "cong_no", "congno", "công nợ", "con_no", "còn nợ", "tong_no", "tổng nợ", "du_no", "dư nợ", "tien_no", "tiền nợ",
+    "da_thanh_toan", "con_thieu", "chua_tra", "da_tra", "da_thu", "đã thu",
+    "tien_phong", "tiền phòng", "tien_thue", "tiền thuê", "gia_thue", "giá thuê", "tien_coc", "tiền cọc", "tien_cam", "tien_den", "đền",
     "chi_phi", "chiphi", "chi phí",
     "loi_nhuan", "loinhuan", "lợi nhuận",
     "so_tien", "sotien", "tien_hang", "tiền",
@@ -2564,7 +2586,8 @@ _VN_SCHEMA_COL_MARKERS = (
     "ngay_gd", "ngay_ban", "ngay_nhap", "ngay_tao", "ngay_lap",
     "so_luong", "don_gia", "thanh_tien", "doanh_thu", "doanh_so",
     "tong_tien", "tien_nhap", "gia_nhap", "gia_ban", "gia_von",
-    "cong_no", "chi_phi", "loi_nhuan",
+    "cong_no", "con_no", "tong_no", "du_no", "tien_no", "da_thu", "tien_phong", "tien_thue", "gia_thue",
+    "chi_phi", "loi_nhuan", "khach_hang_ten",
 )
 
 _ENGLISH_USD_SCHEMA_COLS = frozenset({
@@ -2578,7 +2601,7 @@ _ENGLISH_USD_SCHEMA_COLS = frozenset({
 
 _VN_SQL_TABLE_RE = re.compile(
     r"\b(?:hoa_don_ban|hoa_don|nhap_hang|phieu_nhap|phieu_xuat|donhang|don_hang|"
-    r"danhmucmon|danh_muc_mon|chi_tiet_hoa_don|vat_lieu|nha_thuoc|khach_hang|nha_cung_cap)\b",
+    r"danhmucmon|danh_muc_mon|chi_tiet_hoa_don|vat_lieu|nha_thuoc|khach_hang|nha_cung_cap|sothu|lich_thue|ds_phong|dien_nuoc)\b",
     re.IGNORECASE,
 )
 
@@ -2586,6 +2609,7 @@ _GENERIC_MONEY_COL_MARKERS = (
     "revenue", "sales", "amount", "cost", "profit", "price", "spend", "budget",
     "payroll", "salary", "payment", "aov", "ordervalue", "doanh", "tiền",
     "chi_phi", "chi phí", "loi_nhuan", "lợi nhuận", "cong_no", "công nợ",
+    "con_no", "còn nợ", "tong_no", "du_no", "tien_no", "tien_phong", "tien_thue", "gia_thue", "da_thu", "đã thu",
     "thanh_tien", "thành tiền", "lương",
 )
 
@@ -2593,14 +2617,15 @@ _NON_MONEY_COL_MARKERS = (
     "margin", "pct", "percent", "tỷ lệ", "tỉ lệ", "ty_le", "ti_le", "tỷ trọng",
     "ty_trong", "share", "ratio", "so_luong", "soluong", "số lượng", "count",
     "headcount", "boxes", "so_don", "số đơn", "years", "tenure", "thâm niên",
-    "tham_nien",
+    "tham_nien", "dien_moi", "dien_cu", "điện mới", "điện cũ", "so_dien", "số điện",
+    "nuoc_moi", "nuoc_cu", "nước mới", "nước cũ", "so_nuoc", "số nước", "chi_so", "chỉ số",
 )
 
 
 def _is_vnd_money_col(col_name: str = "") -> bool:
     """Return True if column represents a Vietnamese VND currency metric rather than a USD, count, or percentage metric."""
     c_low = str(col_name or "").lower()
-    if "$" in c_low or any(
+    if "$" in c_low or any(k in c_low for k in _NON_MONEY_COL_MARKERS) or any(
         k in c_low
         for k in (
             "salary", "amount", "sales", "revenue", "cost", "budget", "payroll", "perbox", "per_box",
@@ -2831,16 +2856,53 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
     if is_time_col or (is_time_query and not any(k in cols_str for k in ["team", "đội ngũ", "product", "sản phẩm", "employee", "nhân viên", "salesperson", "geo", "country", "quốc gia", "thị trường", "dept", "phòng", "fullname", "họ và tên"])):
         return "time_series"
 
-    # 2. Nhận diện Phòng ban (Department)
-    is_dept_col = any(k in ncol_low for k in ["department", "dept_name", "dept_no", "dept", "phòng ban", "phòng", "bộ phận"])
-    known_depts = ["customer service", "development", "finance", "human resources", "marketing", "production", "quality management", "research", "sales", "tiếp thị", "nhân sự", "kỹ thuật", "tài chính", "sản xuất", "kinh doanh", "cskh"]
-    is_dept_values = False
+    # 1b. Nhận diện Phòng thuê / Phòng trọ / Phòng khách sạn (Room — tách biệt khỏi Phòng ban HR)
+    sample_vals_ent = []
     if df is not None and not df.empty and name_col and name_col in df.columns:
-        sample_vals = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
-        if any(v in known_depts for v in sample_vals):
-            is_dept_values = True
+        sample_vals_ent = [str(v).strip().lower() for v in df[name_col].dropna().head(10)]
+    is_room_col = (
+        ncol_low in ("phong", "phòng", "ma_phong", "so_phong", "ten_phong")
+        or (
+            ("phong" in ncol_low or "phòng" in ncol_low)
+            and "ban" not in ncol_low
+            and (
+                any(k in cols_str for k in ["dien", "điện", "nuoc", "nước", "tien_phong", "tiền phòng", "gia_thue", "giá thuê", "tien_thue", "khach_thue", "dat_coc", "source_sheet"])
+                or any(re.match(r"^(?:p\.?\s*\d+|phòng\s*\d+)", v) for v in sample_vals_ent)
+            )
+        )
+    )
+    if is_room_col:
+        return "room"
+
+    # 2. Nhận diện Phòng ban (Department)
+    is_dept_col = any(k in ncol_low for k in ["department", "dept_name", "dept_no", "dept", "phòng ban", "phong_ban", "bộ phận", "bo_phan"])
+    known_depts = ["customer service", "development", "finance", "human resources", "marketing", "production", "quality management", "research", "sales", "tiếp thị", "nhân sự", "kỹ thuật", "tài chính", "sản xuất", "kinh doanh", "cskh"]
+    is_dept_values = any(v in known_depts for v in sample_vals_ent)
     if is_dept_col or is_dept_values:
         return "department"
+
+    # 2b. Nhận diện Khách hàng (Customer / Client / Tenant / Patient)
+    is_cust_col = any(
+        k in ncol_low
+        for k in [
+            "khach_hang", "khách hàng", "ten_khach", "tên khách", "khach_thue", "khách thuê",
+            "khach", "khách", "customer", "client", "nguoi_mua", "người mua", "nguoi_thue", "người thuê",
+            "benh_nhan", "bệnh nhân", "hoc_vien", "học viên", "ben_mua",
+        ]
+    ) or (
+        ncol_low in ("ho_ten", "họ tên", "ho_va_ten", "họ và tên", "ten", "tên")
+        and any(k in (q_low + " " + cols_str) for k in ["khách", "khach", "công nợ", "cong_no", "con_no", "còn nợ", "đặt thuê", "mua hàng"])
+    )
+    if is_cust_col:
+        return "customer"
+
+    # 2c. Nhận diện Nhà cung cấp / Đối tác (Supplier / Vendor)
+    is_sup_col = any(
+        k in ncol_low
+        for k in ["nha_cung_cap", "nhà cung cấp", "ten_ncc", "ncc", "supplier", "vendor", "doi_tac", "đối tác"]
+    )
+    if is_sup_col:
+        return "supplier"
 
     # 3. Nhận diện Chức danh (Job Title)
     is_title_col = any(k in ncol_low for k in ["title", "chức danh", "vị trí", "chức vụ", "job"])
@@ -2918,9 +2980,11 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
     is_emp_col = (not is_non_emp_col) and (
         any(k in ncol_low for k in [
             "fullname", "full_name", "họ và tên", "employeename", "emp_name", "salesperson", "sales_person",
-            "sales person", "salesrep", "sales_rep", "nhân viên", "nhân sự", "người bán", "emp_no",
-            "first_name", "last_name", "spid", "managername", "tên quản lý", "tên nhân viên", "doctor", "bác sĩ", "giảng viên"
+            "sales person", "salesrep", "sales_rep", "nhân viên", "nhan_vien", "ten_nv", "nhân sự", "nhan_su", "người bán", "emp_no",
+            "first_name", "last_name", "spid", "managername", "tên quản lý", "tên nhân viên", "doctor", "bác sĩ", "giảng viên",
+            "tho_chinh", "thợ chính", "tho_phu", "hen_tho", "ten_goi", "thu_ngan", "ky_thuat_vien", "tai_xe",
         ])
+        or bool(re.search(r"(?:^|_)(?:tho|thợ)(?:$|_)", ncol_low))
         or (ncol_low in ("name", "tên", "rep") and not any(k in cols_str for k in non_emp_entity_keywords))
     )
 
@@ -2939,9 +3003,9 @@ def detect_analysis_entity_type(df: pd.DataFrame = None, user_query: str = "", n
         if any(v in known_salespeople for v in sample_vals):
             is_emp_values = True
 
-    is_emp_query = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "salesrep", "người bán", "ai là", "top 5 nhân sự", "top nhân sự", "top nhân viên"])
+    is_emp_query = any(k in q_low for k in ["nhân viên", "nhân sự", "salesperson", "sales person", "salesrep", "người bán", "ai là", "top 5 nhân sự", "top nhân sự", "top nhân viên", "thợ chính", "thợ phụ", "kỹ thuật viên"])
 
-    if is_emp_col or is_emp_values or (is_emp_query and not is_non_emp_col and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "team", "đội ngũ", "dept", "department", "phòng"])):
+    if is_emp_col or is_emp_values or (is_emp_query and not is_non_emp_col and not any(k in ncol_low for k in ["product", "sản phẩm", "sku", "geo", "country", "quốc gia", "team", "đội ngũ", "dept", "department", "phòng", "khach", "khách"])):
         return "employee"
 
     # Fallback cho CSDL thương mại: nếu có Boxes / Product và không phải cột Khách hàng / Nhà cung cấp
@@ -3806,8 +3870,18 @@ def generate_data_grounded_hypotheses(df: pd.DataFrame, user_query: str = "", is
                 ent_pfx_en = "Year" if is_yr else ("Month" if is_mo else ("Quarter" if is_qt else "Period"))
                 ent_pfx_vi = "Năm" if is_yr else ("Tháng" if is_mo else ("Quý" if is_qt else "Giai đoạn"))
             else:
-                ent_pfx_en = "Sales representative" if detected_ent == "employee" else ("Product" if detected_ent == "product" else ("Market" if detected_ent == "geo" else ("Team" if detected_ent == "team" else "Unit")))
-                ent_pfx_vi = "Nhân sự" if detected_ent == "employee" else ("Sản phẩm" if detected_ent == "product" else ("Thị trường" if detected_ent == "geo" else ("Đội ngũ" if detected_ent == "team" else "Đơn vị")))
+                _pfx_map = {
+                    "employee": ("Nhân sự", "Sales representative"),
+                    "customer": ("Khách hàng", "Customer"),
+                    "supplier": ("Nhà cung cấp", "Supplier"),
+                    "room": ("Phòng", "Room"),
+                    "product": ("Sản phẩm", "Product"),
+                    "geo": ("Thị trường", "Market"),
+                    "team": ("Đội ngũ", "Team"),
+                    "department": ("Phòng ban", "Department"),
+                    "title": ("Chức danh", "Job Title"),
+                }
+                ent_pfx_vi, ent_pfx_en = _pfx_map.get(detected_ent, ("Đơn vị", "Unit"))
 
             top_disp_en = f"{ent_pfx_en} **{top_name}**" if not str(top_name).lower().startswith(ent_pfx_en.lower()) else f"**{top_name}**"
             top_disp_vi = f"{ent_pfx_vi} **{top_name}**" if not str(top_name).lower().startswith(ent_pfx_vi.lower()) else f"**{top_name}**"
@@ -5293,12 +5367,21 @@ def generate_data_grounded_anomaly(df: pd.DataFrame, user_query: str = "", is_en
                         elif detected_ent == "product":
                             ent_pfx_vi = "Sản phẩm"
                             ent_pfx_en = "Product"
+                        elif detected_ent == "customer":
+                            ent_pfx_vi = "Khách hàng"
+                            ent_pfx_en = "Customer"
+                        elif detected_ent == "supplier":
+                            ent_pfx_vi = "Nhà cung cấp"
+                            ent_pfx_en = "Supplier"
+                        elif detected_ent == "room":
+                            ent_pfx_vi = "Phòng"
+                            ent_pfx_en = "Room"
                         elif detected_ent == "employee":
-                            ent_pfx_vi = "Nhân sự"
+                            ent_pfx_vi = "Thợ" if re.search(r"(?:^|_)(?:tho|thợ)", str(name_col).lower()) else "Nhân sự"
                             ent_pfx_en = "Personnel"
                         else:
-                            ent_pfx_vi = "Nhóm"
-                            ent_pfx_en = "Group"
+                            ent_pfx_vi = "Đơn vị"
+                            ent_pfx_en = "Unit"
 
                         top_disp_vi = f"{ent_pfx_vi} **{top_name}**" if not str(top_name).lower().startswith(ent_pfx_vi.lower()) else f"**{top_name}**"
                         top_disp_en = f"{ent_pfx_en} **{top_name}**" if not str(top_name).lower().startswith(ent_pfx_en.lower()) else f"**{top_name}**"
@@ -5357,8 +5440,9 @@ def generate_data_grounded_anomaly(df: pd.DataFrame, user_query: str = "", is_en
                                 else:
                                     spread_line = f"• **Biên độ Phân hóa**: {bot_disp_vi} ở mức {_format_insight_currency(bot_val, val_col)} (thấp hơn {gap_vs_top:.1f}% so với {lead_ref_vi}).\n\n"
                                 
-                                lead_title = "Đạt Đỉnh Toàn Chu kỳ" if is_time_e else "Dẫn đầu Toàn diện"
-                                role_desc = "thiết lập mức kỷ lục toàn chu kỳ." if is_time_e else "giữ vai trò đóng góp chủ lực."
+                                is_debt_ctx = _is_debt_metric_context(str(val_col), user_query)
+                                lead_title = "Đạt Đỉnh Toàn Chu kỳ" if is_time_e else ("Dư nợ Cao nhất" if is_debt_ctx else "Dẫn đầu Toàn diện")
+                                role_desc = "thiết lập mức kỷ lục toàn chu kỳ." if is_time_e else ("chiếm dư nợ phải thu lớn nhất." if is_debt_ctx else "giữ vai trò đóng góp chủ lực.")
                                 return (
                                     f"• **{lead_title}**: {top_disp_vi} đạt mức cao nhất ({_format_insight_currency(top_val, val_col)}), {role_desc}\n\n"
                                     f"{spread_line}"
@@ -5996,12 +6080,44 @@ def _get_diagnostic_entity_nouns(
             "leader_en": "Leading market",
         }
     if entity_type == "employee":
+        if re.search(r"(?:^|_)(?:tho|thợ)", str(label_col or "").lower()):
+            return {
+                "leader_vi": "Thợ đứng đầu",
+                "leader_short_vi": "thợ đứng đầu",
+                "bot_vi": "thợ xếp cuối bảng",
+                "plural_vi": "các thợ",
+                "leader_en": "Top technician",
+            }
         return {
             "leader_vi": "Nhân sự đứng đầu",
             "leader_short_vi": "nhân sự dẫn đầu",
             "bot_vi": "nhân sự xếp cuối bảng",
             "plural_vi": "các nhân sự",
             "leader_en": "Top performer",
+        }
+    if entity_type == "room":
+        return {
+            "leader_vi": "Phòng đứng đầu",
+            "leader_short_vi": "phòng dẫn đầu",
+            "bot_vi": "phòng xếp cuối bảng",
+            "plural_vi": "các phòng",
+            "leader_en": "Leading room",
+        }
+    if entity_type == "customer":
+        return {
+            "leader_vi": "Khách hàng đứng đầu",
+            "leader_short_vi": "khách hàng đứng đầu",
+            "bot_vi": "khách hàng xếp cuối bảng",
+            "plural_vi": "các khách hàng",
+            "leader_en": "Top customer",
+        }
+    if entity_type == "supplier":
+        return {
+            "leader_vi": "Nhà cung cấp đứng đầu",
+            "leader_short_vi": "nhà cung cấp đứng đầu",
+            "bot_vi": "nhà cung cấp xếp cuối bảng",
+            "plural_vi": "các nhà cung cấp",
+            "leader_en": "Leading supplier",
         }
     if entity_type == "department":
         return {
@@ -6181,6 +6297,9 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             "geo": ("Thị trường", "Market"),
             "product": ("Sản phẩm", "Product"),
             "employee": ("Nhân sự", "Salesperson"),
+            "customer": ("Khách hàng", "Customer"),
+            "supplier": ("Nhà cung cấp", "Supplier"),
+            "room": ("Phòng", "Room"),
             "department": ("Phòng ban", "Department"),
             "title": ("Chức danh", "Title"),
         }
@@ -6196,9 +6315,11 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             top_entity = f"{t_name} ({top_p_str})"
             bot_entity = f"{b_name} ({bot_p_str})"
 
+    is_debt_metric = _is_debt_metric_context(str(primary_col or ""), user_query)
     is_commercial = (
-        entity_type in ["product", "geo", "team", "employee"]
-        or any(k in " ".join(cols_low) + " " + q_low for k in ["box", "boxes", "hộp", "thùng", "chocolate", "sản phẩm", "sku", "bán hàng", "salesperson", "sales_person", "salesrep"])
+        entity_type in ["product", "geo", "team", "employee", "customer", "supplier", "room"]
+        or is_debt_metric
+        or any(k in " ".join(cols_low) + " " + q_low for k in ["box", "boxes", "hộp", "thùng", "chocolate", "sản phẩm", "sku", "bán hàng", "salesperson", "sales_person", "salesrep", "khách hàng", "công nợ", "con_no"])
     ) and not any(k in " ".join(cols_low) for k in ["salary", "lương", "payroll", "dept_no", "hire_date", "from_date", "to_date"])
 
     is_gender = not is_time_series and (entity_type == "gender" or any(k in str(label_col).lower() for k in ["gender", "giới tính", "sex"]))
@@ -6209,7 +6330,7 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             is_gender
             or entity_type in ["department", "title"]
             or any(k in " ".join(cols_low) for k in ["salary", "lương", "payroll", "quỹ lương", "emp_no", "dept", "phòng ban", "title", "chức danh", "hire", "tuyển", "thâm niên", "tenure", "headcount"])
-            or (entity_type not in ["product", "geo", "team", "employee"] and any(k in q_low for k in ["lương", "salary", "quỹ lương", "phòng ban", "chức danh", "định biên", "headcount"]))
+            or (entity_type not in ["product", "geo", "team", "employee", "customer", "supplier", "room"] and any(k in q_low for k in ["lương", "salary", "quỹ lương", "phòng ban", "chức danh", "định biên", "headcount"]))
         )
     )
     is_headcount_metric = (
@@ -6499,15 +6620,21 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 "team": "các đội ngũ kinh doanh",
                 "geo": "các thị trường",
                 "product": "các dòng sản phẩm",
-                "employee": "các nhân sự kinh doanh",
+                "employee": "các nhân sự",
+                "customer": "các khách hàng",
+                "supplier": "các nhà cung cấp",
+                "room": "các phòng",
                 "department": "các phòng ban",
                 "title": "các chức danh",
-            }.get(entity_type, "các nhóm thực thể")
+            }.get(entity_type, "các đơn vị")
             ent_plural_en = {
                 "team": "teams",
                 "geo": "markets",
                 "product": "products",
                 "employee": "sales representatives",
+                "customer": "customers",
+                "supplier": "suppliers",
+                "room": "rooms",
                 "department": "departments",
                 "title": "job titles",
             }.get(entity_type, "operating units")
@@ -6746,7 +6873,28 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             ev_comm_h1_vi = f"Kiểm định định lượng: Riêng '{top_entity}' chiếm {top_share:,.1f}% tổng quy mô khảo sát ({_fmt(max_val)} / {_fmt(total_val)}). {top3_clause_vi}gấp {gap_ratio_fmt} lần so với '{bot_entity}' ({_fmt(min_val)})."
             ev_comm_h1_en = f"Quantitative test: '{top_entity}' alone accounts for {top_share:,.1f}% ({_fmt(max_val)} / {_fmt(total_val)}). {top3_clause_en}standing {gap_ratio_fmt}x above '{bot_entity}' ({_fmt(min_val)})."
 
-        if entity_type == "product":
+        is_tied_vals = abs(max_val - min_val) < 1e-9 or str(top_entity).strip() == str(bot_entity).strip()
+        if is_debt_metric:
+            h1_title_vi = "Giả thuyết 1: Dư nợ phải thu tập trung vào một số khách hàng / đối tác có khoản ghi nợ hoặc trả chậm lớn"
+            h1_title_en = "Hypothesis 1: Receivables concentration — Deferred balances cluster in top accounts"
+            h2_title_vi = "Giả thuyết 2: Khác biệt về hạn mức cho nợ, tiến độ thanh toán và lịch nhắc đối soát công nợ"
+            h2_title_en = "Hypothesis 2: Variance in credit limits, settlement terms, and follow-up cadence across accounts"
+        elif entity_type == "customer":
+            h1_title_vi = "Giả thuyết 1: Giá trị giao dịch tập trung vào nhóm khách hàng thân thiết mua lặp lại hoặc đặt đơn lớn"
+            h1_title_en = "Hypothesis 1: Revenue concentrates in loyal repeat customers and high-ticket accounts"
+            h2_title_vi = "Giả thuyết 2: Chênh lệch tần suất quay lại và chính sách ưu đãi giữa khách hàng trọng điểm và khách lẻ"
+            h2_title_en = "Hypothesis 2: Variance in repeat visit cadence and loyalty incentives across customer tiers"
+        elif entity_type == "supplier":
+            h1_title_vi = "Giả thuyết 1: Nguồn nhập hoặc giá trị giao dịch tập trung vào một vài nhà cung cấp đầu mối"
+            h1_title_en = "Hypothesis 1: Spend concentrates in anchor suppliers handling core volume"
+            h2_title_vi = "Giả thuyết 2: Khác biệt về đơn giá chiết khấu, danh mục hàng cung ứng và điều khoản thanh toán giữa các NCC"
+            h2_title_en = "Hypothesis 2: Variance in volume rebates, assortment breadth, and payment terms across vendors"
+        elif entity_type == "room":
+            h1_title_vi = "Giả thuyết 1: Chênh lệch quy mô phòng, đơn giá thuê hoặc mức tiêu thụ điện/nước thực tế giữa các phòng"
+            h1_title_en = "Hypothesis 1: Variance driven by room tier, rental rate, or utility consumption differences"
+            h2_title_vi = "Giả thuyết 2: Tỷ lệ lấp đầy và chu kỳ thu phí khác nhau giữa các phòng qua từng kỳ"
+            h2_title_en = "Hypothesis 2: Differences in occupancy rates and billing cycles across rooms"
+        elif entity_type == "product":
             h1_title_vi = "Giả thuyết 1: Sức mua tập trung vào nhóm mặt hàng chủ lực — sản phẩm bán chạy kéo lượng đơn lặp lại"
             h1_title_en = "Hypothesis 1: Pareto demand concentration — Hero SKU driving repeat order velocity"
             h2_title_vi = "Giả thuyết 2: Khác biệt về vị trí trưng bày, cách ghép gói bán kèm và mức giá giữa các mặt hàng"
@@ -6757,20 +6905,20 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
             h2_title_vi = "Giả thuyết 2: Khác biệt về độ phủ điểm bán, thời gian giao hàng và mức độ phù hợp thị hiếu khu vực"
             h2_title_en = "Hypothesis 2: Variance in retail channel penetration, supply chain lead-times, and local market fit"
         elif entity_type == "employee":
-            h1_title_vi = "Giả thuyết 1: Doanh số tập trung vào nhân sự khai thác tốt nhóm khách hàng lớn và đơn hàng giá trị cao"
-            h1_title_en = "Hypothesis 1: Pareto revenue concentration — Top performers excel at high-yield Key Accounts"
-            h2_title_vi = "Giả thuyết 2: Chênh lệch kỹ năng chốt đơn và danh mục sản phẩm tư vấn giữa các nhân sự bán hàng"
-            h2_title_en = "Hypothesis 2: Variance in closing skills and product mix consultation across sales reps"
+            h1_title_vi = "Giả thuyết 1: Kết quả tập trung vào nhân sự có tay nghề cao, tiếp nhận nhiều ca hoặc chăm sóc tốt khách quen"
+            h1_title_en = "Hypothesis 1: Performance concentrates in top staff handling loyal clients and high-value tickets"
+            h2_title_vi = "Giả thuyết 2: Chênh lệch lịch phân ca, kỹ năng tư vấn và tỷ lệ giữ khách giữa các nhân sự"
+            h2_title_en = "Hypothesis 2: Variance in shift allocation, consultation skills, and client retention across personnel"
         elif entity_type == "team":
             h1_title_vi = "Giả thuyết 1: Nhóm / kênh bán dẫn đầu nắm giữ tệp khách hàng hoặc địa bàn có sức mua lớn"
             h1_title_en = "Hypothesis 1: Pareto concentration — Top squads control high-yield accounts/territories"
             h2_title_vi = "Giả thuyết 2: Chênh lệch quy trình phục vụ và tỷ lệ chốt đơn giữa các nhóm / kênh bán"
             h2_title_en = "Hypothesis 2: Operational execution variance & conversion rate gap across sales squads"
         else:
-            h1_title_vi = "Giả thuyết 1: Nhóm dẫn đầu đang nắm giữ tệp khách hàng / mặt hàng có sức mua chủ lực"
-            h1_title_en = "Hypothesis 1: Pareto concentration — Top performers control high-yield accounts/categories"
-            h2_title_vi = "Giả thuyết 2: Chênh lệch hiệu quả vận hành và tỷ lệ chuyển đổi đơn hàng giữa các nhóm"
-            h2_title_en = "Hypothesis 2: Operational execution variance & conversion rate gap across sales units/reps"
+            h1_title_vi = "Giả thuyết 1: Nhóm dẫn đầu đang nắm giữ tỷ trọng đóng góp lớn hơn mặt bằng chung"
+            h1_title_en = "Hypothesis 1: Pareto concentration — Top performers hold a larger share than portfolio average"
+            h2_title_vi = "Giả thuyết 2: Chênh lệch hiệu quả vận hành và mức độ tập trung giao dịch giữa các đơn vị"
+            h2_title_en = "Hypothesis 2: Operational execution variance across analyzed units"
 
         branches = [
             {
@@ -6785,7 +6933,7 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 "id": "H2",
                 "title": h2_title_vi if not is_en else h2_title_en,
                 "evidence": (
-                    f"Giá trị trung bình tập khảo sát đạt {_fmt(mean_val)} với hệ số biến thiên (CV) là {cv_pct:,.1f}%, phản ánh sự phân hóa rõ rệt giữa nhóm đầu bảng ('{top_entity}') và nhóm cuối bảng ('{bot_entity}')."
+                    f"Giá trị trung bình tập khảo sát đạt {_fmt(mean_val)} với hệ số biến thiên (CV) là {cv_pct:,.1f}%, phản ánh sự phân hóa rõ rệt giữa {nouns_comm['leader_short_vi']} ('{top_entity}') và {nouns_comm['bot_vi']} ('{bot_entity}')."
                     if not is_en else
                     f"Analyzed mean is {_fmt(mean_val)} with a Coefficient of Variation (CV) of {cv_pct:,.1f}%, confirming dispersion between '{top_entity}' and '{bot_entity}'."
                 ),
@@ -6794,16 +6942,72 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
                 "rank": 2,
             },
         ]
-        conclusion = (
-            f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) cho thấy sức mua tập trung mạnh vào nhóm đầu bảng và độ phân hóa rõ rệt giữa các mặt hàng (CV = {cv_pct:,.1f}%)."
-            if not is_en else
-            f"Data Conclusion: The {gap_ratio_fmt}x gap between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) stems from demand concentration in top performers and portfolio dispersion (CV = {cv_pct:,.1f}%)."
-        )
-        summary_takeaway = (
-            f"Kết luận chính: Sức mua đang tập trung mạnh vào {top_entity} ({_fmt(max_val)}, gấp {gap_ratio_fmt} lần {bot_entity}); cần giữ đủ hàng nhóm bán chạy và cải thiện sức bán nhóm cuối bảng."
-            if not is_en else
-            f"Key Takeaway: Demand concentrates in {top_entity} ({_fmt(max_val)}, {gap_ratio_fmt}x above {bot_entity}); protect top-seller stock and lift lower performers."
-        )
+        if is_debt_metric:
+            conclusion = (
+                f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) cho thấy dư nợ đang dồn mạnh ở các khoản đầu bảng (CV = {cv_pct:,.1f}%), cần ưu tiên đối soát và thu hồi công nợ đúng hạn."
+                if not is_en else
+                f"Data Conclusion: The {gap_ratio_fmt}x spread in outstanding receivables between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) calls for prioritized collection and credit-limit monitoring."
+            )
+            summary_takeaway = (
+                f"Kết luận chính: Công nợ đang tập trung cao nhất ở {nouns_comm['leader_short_vi']} {top_entity} ({_fmt(max_val)}, gấp {gap_ratio_fmt} lần {bot_entity}); cần ưu tiên đối chiếu và nhắc lịch thu hồi nợ đúng hạn."
+                if not is_en else
+                f"Key Takeaway: Outstanding debt concentrates in {top_entity} ({_fmt(max_val)}, {gap_ratio_fmt}x above {bot_entity}); prioritize settlement follow-up and credit limits."
+            )
+        elif is_tied_vals:
+            conclusion = (
+                f"Kết luận từ dữ liệu: Các đối tượng khảo sát đang ghi nhận mức tương đương ({_fmt(max_val)}, chênh lệch ~0)."
+                if not is_en else
+                f"Data Conclusion: Analyzed entities show uniform performance at {_fmt(max_val)}."
+            )
+            summary_takeaway = (
+                f"Kết luận chính: Quy mô phân bổ đồng đều giữa {nouns_comm['plural_vi']} ở mức {_fmt(max_val)}."
+                if not is_en else
+                f"Key Takeaway: Performance is evenly balanced across entities at {_fmt(max_val)}."
+            )
+        elif entity_type == "customer":
+            conclusion = (
+                f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa khách hàng '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) cho thấy doanh thu tập trung rõ nét vào tệp khách hàng trọng điểm (CV = {cv_pct:,.1f}%)."
+                if not is_en else
+                f"Data Conclusion: The {gap_ratio_fmt}x spread between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) shows spending concentrates in top accounts (CV = {cv_pct:,.1f}%)."
+            )
+            summary_takeaway = (
+                f"Kết luận chính: Khách hàng {top_entity} đang đóng góp lớn nhất ({_fmt(max_val)}, gấp {gap_ratio_fmt} lần {bot_entity}); cần duy trì chăm sóc khách thân thiết và tăng tần suất quay lại của nhóm khách hàng còn lại."
+                if not is_en else
+                f"Key Takeaway: Customer {top_entity} leads spending ({_fmt(max_val)}, {gap_ratio_fmt}x above {bot_entity}); strengthen retention and repeat purchase programs."
+            )
+        elif entity_type == "employee":
+            conclusion = (
+                f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) phản ánh sự phân hóa hiệu suất rõ rệt giữa các nhân sự (CV = {cv_pct:,.1f}%)."
+                if not is_en else
+                f"Data Conclusion: The {gap_ratio_fmt}x gap between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) reflects clear performance variance across personnel (CV = {cv_pct:,.1f}%)."
+            )
+            summary_takeaway = (
+                f"Kết luận chính: {nouns_comm['leader_vi']} {top_entity} đạt {_fmt(max_val)} (gấp {gap_ratio_fmt} lần {bot_entity}); cần nhân rộng quy trình phục vụ của người dẫn đầu và kèm cặp nhóm hiệu suất thấp hơn."
+                if not is_en else
+                f"Key Takeaway: Top performer {top_entity} reached {_fmt(max_val)} ({gap_ratio_fmt}x above {bot_entity}); replicate winning practices and coach lagging staff."
+            )
+        elif entity_type in ("room", "supplier"):
+            conclusion = (
+                f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) phản ánh chênh lệch phân bổ giữa {nouns_comm['plural_vi']} (CV = {cv_pct:,.1f}%)."
+                if not is_en else
+                f"Data Conclusion: The {gap_ratio_fmt}x gap between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) reflects concentration across analyzed units (CV = {cv_pct:,.1f}%)."
+            )
+            summary_takeaway = (
+                f"Kết luận chính: {nouns_comm['leader_vi']} {top_entity} đạt {_fmt(max_val)} (gấp {gap_ratio_fmt} lần {bot_entity}); cần rà soát kế hoạch vận hành và tối ưu nhóm cuối bảng."
+                if not is_en else
+                f"Key Takeaway: {top_entity} leads at {_fmt(max_val)} ({gap_ratio_fmt}x above {bot_entity}); review operational balance across units."
+            )
+        else:
+            conclusion = (
+                f"Kết luận từ dữ liệu: Khoảng cách {gap_ratio_fmt} lần giữa '{top_entity}' ({_fmt(max_val)}) và '{bot_entity}' ({_fmt(min_val)}) cho thấy sức mua tập trung mạnh vào nhóm đầu bảng và độ phân hóa rõ rệt giữa {nouns_comm['plural_vi']} (CV = {cv_pct:,.1f}%)."
+                if not is_en else
+                f"Data Conclusion: The {gap_ratio_fmt}x gap between '{top_entity}' ({_fmt(max_val)}) and '{bot_entity}' ({_fmt(min_val)}) stems from demand concentration in top performers and portfolio dispersion (CV = {cv_pct:,.1f}%)."
+            )
+            summary_takeaway = (
+                f"Kết luận chính: Sức mua đang tập trung mạnh vào {top_entity} ({_fmt(max_val)}, gấp {gap_ratio_fmt} lần {bot_entity}); cần giữ đủ hàng nhóm bán chạy và cải thiện sức bán nhóm cuối bảng."
+                if not is_en else
+                f"Key Takeaway: Demand concentrates in {top_entity} ({_fmt(max_val)}, {gap_ratio_fmt}x above {bot_entity}); protect top-seller stock and lift lower performers."
+            )
 
     is_positive_subset_query = bool(
         re.search(
@@ -6835,6 +7039,7 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
         "user_query": user_query,
         "is_positive_subset_query": is_positive_subset_query,
         "entity_type": entity_type,
+        "is_debt_metric": is_debt_metric,
         "is_time_series": is_time_series,
         "is_multi_entity_time_series": is_multi_entity_time_series,
         "is_gender": is_gender,
@@ -6945,7 +7150,10 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
         "geo": "Chọn khu vực / thị trường:",
         "team": "Chọn nhóm / kênh bán hàng:",
         "product": "Chọn mặt hàng / sản phẩm:",
-        "employee": "Chọn nhân viên kinh doanh:",
+        "employee": "Chọn nhân sự cụ thể:",
+        "customer": "Chọn khách hàng:",
+        "supplier": "Chọn nhà cung cấp:",
+        "room": "Chọn phòng:",
         "department": "Chọn phòng ban / bộ phận:",
         "title": "Chọn nhóm chức danh:",
         "gender": "Chọn nhóm đối tượng:",
@@ -6956,6 +7164,9 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
         "team": "Select Assigned Sales Squad (Team Lead / Sales Manager):",
         "product": "Select Assigned Category / SKU (Category Manager / KAM):",
         "employee": "Select Sales Rep for 1-on-1 Coaching (Sales Team Lead):",
+        "customer": "Select Customer Account:",
+        "supplier": "Select Supplier Account:",
+        "room": "Select Room:",
         "department": "Select Assigned Department / Division (Department Head / HRBP):",
         "title": "Select Assigned Job Title Cohort (HRBP / C&B Lead):",
         "gender": "Select Workforce Cohort (HRBP / DEI Lead):",
@@ -6973,6 +7184,9 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
         "product": "mặt hàng",
         "geo": "khu vực",
         "team": "nhóm / kênh bán",
+        "customer": "khách hàng",
+        "supplier": "nhà cung cấp",
+        "room": "phòng",
         "department": "phòng ban",
         "title": "nhóm chức danh",
         "gender": "nhóm đối tượng",
@@ -6983,6 +7197,9 @@ def extract_selectable_units(df: pd.DataFrame, user_query: str = "", is_en: bool
         "product": "Products",
         "geo": "Markets",
         "team": "Teams",
+        "customer": "Customers",
+        "supplier": "Suppliers",
+        "room": "Rooms",
         "department": "Departments",
         "title": "Job Titles",
         "gender": "Gender Cohorts",
@@ -8098,8 +8315,10 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
     is_single_row = tree.get("is_single_row", False)
     n_rows = len(df) if df is not None else 0
 
+    is_debt_metric = bool(tree.get("is_debt_metric", False))
+
     # 00. TRƯỜNG HỢP CHỈ SỐ TỔNG HỢP VĨ MÔ / 1 DÒNG (SCALAR / MULTI-KPI SUMMARY) — TUYỆT ĐỐI KHÔNG GỌI CON SỐ LÀ "THỰC THỂ" HAY "VÙNG CẦN NÂNG"
-    if is_scalar_summary or is_single_row or str(top_ent).strip() == str(bot_ent).strip():
+    if is_scalar_summary or is_single_row:
         sec_kpis = tree.get("secondary_kpis", [])
         sec_str = tree.get("secondary_summary_str", "")
         aov_fmt = tree.get("derived_aov_fmt", "")
@@ -8173,8 +8392,8 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
 
     # 0. TRƯỜNG HỢP CHUỖI THỜI GIAN ĐA THỰC THỂ (MULTI-ENTITY TIME SERIES: ĐỘI NGŨ / SẢN PHẨM / THỊ TRƯỜNG THEO QUÝ / NĂM)
     if is_multi_entity_ts:
-        ent_label_vi = {"team": "NHÓM / KÊNH BÁN", "geo": "KHU VỰC", "product": "SẢN PHẨM", "employee": "NHÂN SỰ", "department": "PHÒNG BAN", "title": "CHỨC DANH"}.get(entity_type, "ĐƠN VỊ")
-        ent_label_en = {"team": "TEAMS", "geo": "MARKETS", "product": "PRODUCTS", "employee": "SALESPEOPLE", "department": "DEPARTMENTS", "title": "JOB TITLES"}.get(entity_type, "OPERATING UNITS")
+        ent_label_vi = {"team": "NHÓM / KÊNH BÁN", "geo": "KHU VỰC", "product": "SẢN PHẨM", "employee": "NHÂN SỰ", "customer": "KHÁCH HÀNG", "supplier": "NHÀ CUNG CẤP", "room": "PHÒNG", "department": "PHÒNG BAN", "title": "CHỨC DANH"}.get(entity_type, "ĐƠN VỊ")
+        ent_label_en = {"team": "TEAMS", "geo": "MARKETS", "product": "PRODUCTS", "employee": "SALESPEOPLE", "customer": "CUSTOMERS", "supplier": "SUPPLIERS", "room": "ROOMS", "department": "DEPARTMENTS", "title": "JOB TITLES"}.get(entity_type, "OPERATING UNITS")
         if persona == "ceo":
             if is_en:
                 return {
@@ -8579,6 +8798,70 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
     leader_en_p = nouns_plan["leader_en"]
     is_pos_subset_plan = bool(tree.get("is_positive_subset_query", False))
 
+    # 3A. Chuyên biệt Công nợ / Khoản phải thu (Receivables / Debt Collection Plan)
+    if is_debt_metric:
+        ent_noun_vi = {"customer": "khách hàng", "supplier": "nhà cung cấp", "room": "phòng"}.get(entity_type, "đối tượng")
+        ent_noun_en = {"customer": "customer", "supplier": "supplier", "room": "room"}.get(entity_type, "account")
+        if persona == "ceo":
+            if is_en:
+                return {
+                    "role_title": "C-LEVEL VIEW (CEO / CFO) • ACCOUNTS RECEIVABLE & CASH FLOW GOVERNANCE",
+                    "role_focus": "Focus: Overdue Debt Collection, Credit-Limit Enforcement & Working Capital Recovery",
+                    "kpis": [
+                        f"Total Outstanding Balance ({n_rows} {ent_noun_en}s): {tot_v} (Mean: {mean_v})",
+                        f"Highest Balance ({top_ent}): {top_v} ({top_sh:.1f}% of receivables)",
+                        f"Lowest Balance ({bot_ent}): {bot_v} (Gap Ratio: {gap_ratio_v}x)",
+                    ],
+                    "actions": [
+                        f"**[Priority Settlement for Top Balance]**: Reconcile invoices and schedule immediate collection with **{top_ent}** (**{top_v}**, representing **{top_sh:.1f}%** of outstanding receivables) to unlock working capital.",
+                        f"**[Credit Limit & Deposit Policy]**: Require partial upfront deposits and cap credit exposure near the **{mean_v}** portfolio average before releasing new orders to high-balance {ent_noun_en}s.",
+                        f"**[Clean Up Tail Receivables]**: Send batch payment reminders to clear smaller remaining balances down to **{bot_ent}** (**{bot_v}**) cleanly within this billing cycle.",
+                    ],
+                }
+            return {
+                "role_title": "CHỦ CỬA HÀNG / QUẢN LÝ CHUNG • QUẢN TRỊ CÔNG NỢ & DÒNG TIỀN THU HỒI",
+                "role_focus": "Trọng tâm: Đôn đốc thu hồi khoản nợ lớn, siết hạn mức ghi nợ và bảo vệ vốn lưu động",
+                "kpis": [
+                    f"Tổng dư nợ khảo sát ({n_rows} {ent_noun_vi}): {tot_v} (Trung bình: {mean_v})",
+                    f"Dư nợ cao nhất: {top_ent} ({top_v} • chiếm {top_sh:.1f}%)",
+                    f"Dư nợ thấp nhất: {bot_ent} ({bot_v})",
+                ],
+                "actions": [
+                    f"**[Ưu tiên đối soát & thu hồi công nợ trọng điểm]**: Làm việc trực tiếp với {ent_noun_vi} **{top_ent}** (đang nợ **{top_v}**, chiếm **{top_sh:.1f}%** tổng dư nợ) để chốt lịch thanh toán từng đợt nhằm thu hồi dòng tiền về cửa hàng.",
+                    f"**[Thiết lập hạn mức ghi nợ & yêu cầu đặt cọc]**: Áp dụng trần nợ tối đa quanh mức bình quân **{mean_v}**; với các {ent_noun_vi} có dư nợ cao cần thu tiền trước hoặc đặt cọc tối thiểu cho đơn hàng phát sinh mới.",
+                    f"**[Tất toán dứt điểm nhóm nợ nhỏ]**: Nhắn lịch thanh toán tự động để thu gọn các khoản dư nợ nhỏ hơn từ mức **{bot_ent}** (**{bot_v}**) trở lên, tránh kéo dài sang kỳ sau.",
+                ],
+            }
+        if is_en:
+            return {
+                "role_title": "OPERATIONAL VIEW (BILLING / OPERATIONS LEAD) • COLLECTION & RECONCILIATION",
+                "role_focus": "Focus: Invoice Statement Confirmation, Weekly Payment Reminders & Bad-Debt Prevention",
+                "kpis": [
+                    f"Receivables Mean Baseline: {mean_v}",
+                    f"Top Collection Target: '{top_ent}' ({top_v})",
+                    f"Quick-Win Settlement Floor: '{bot_ent}' ({bot_v})",
+                ],
+                "actions": [
+                    f"**[Send Itemized Statement to '{top_ent}']**: Dispatch full invoice breakdown totaling **{top_v}** to **{top_ent}** this week and lock in an explicit payment promise date.",
+                    f"**[Enforce Aging Checkpoints Above {mean_v}]**: Flag all {ent_noun_en}s exceeding the **{mean_v}** average balance during order intake so cashiers confirm settlement status first.",
+                    f"**[Batch Close Small Balances]**: Follow up with lower-balance accounts including **{bot_ent}** (**{bot_v}**) via consolidated payment links to close out receivables cleanly.",
+                ],
+            }
+        return {
+            "role_title": "QUẢN LÝ VẬN HÀNH / THU NGÂN • ĐỐI SOÁT & NHẮC LỊCH THANH TOÁN",
+            "role_focus": "Trọng tâm: Gửi sao kê chi tiết từng đơn còn nợ, chốt ngày hẹn trả và kiểm soát ghi nợ tại quầy",
+            "kpis": [
+                f"Mức nợ bình quân tham chiếu: {mean_v}",
+                f"Trọng tâm thu hồi #1: {top_ent} ({top_v})",
+                f"Khoản cần tất toán gọn: {bot_ent} ({bot_v})",
+            ],
+            "actions": [
+                f"**[Gửi bảng kê đối chiếu cho {top_ent}]**: Xuất chi tiết các đơn chưa thanh toán đủ của **{top_ent}** (**{top_v}**) để xác nhận công nợ và chốt ngày chuyển khoản cụ thể trong tuần này.",
+                f"**[Cảnh báo khi phát sinh đơn vượt ngưỡng {mean_v}]**: Kiểm tra lịch sử trả nợ tại quầy trước khi cho ghi nợ thêm đối với các {ent_noun_vi} có dư nợ cao hơn mức trung bình **{mean_v}**.",
+                f"**[Đốc thúc tất toán các khoản nợ nhỏ]**: Gửi nhắc thanh toán kèm mã QR cho nhóm dư nợ thấp như **{bot_ent}** (**{bot_v}**) để thu gọn sổ công nợ.",
+            ],
+        }
+
     if is_minmax_pair:
         conc_comm_vi = f"Chênh lệch 2 cực ({top_ent} vs {bot_ent}): Gấp {gap_ratio_v} lần ({net_gap_v})"
         conc_comm_en = f"Extreme Pair Spread ({top_ent} vs {bot_ent}): {gap_ratio_v}x ({net_gap_v})"
@@ -8609,6 +8892,51 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
                     f"**[Portfolio Concentration De-risking]**: {conc_act_en}. Reallocate growth investments toward mid-tier segments near the **{mean_v}** benchmark to reduce single-point dependency.",
                     f"**[Structural ROI & Margin Audit]**: Conduct a profitability and channel-cost audit on **{bot_ent}** (**{bot_v}**) to optimize bundling, pricing, and inventory turnover."
                 ]
+            }
+        if entity_type == "customer":
+            return {
+                "role_title": "CHỦ CỬA HÀNG / QUẢN LÝ CHUNG • QUẢN TRỊ KHÁCH HÀNG & DÒNG TIỀN",
+                "role_focus": "Trọng tâm: Giữ chân khách hàng trọng điểm, kích thích mua lặp lại và tối ưu giá trị đơn",
+                "kpis": [
+                    f"Tổng giá trị khảo sát ({n_rows} khách hàng): {tot_v} (Trung bình: {mean_v})" if not is_minmax_pair else f"Biên độ 2 cực: {top_ent} ({top_v}) vs {bot_ent} ({bot_v})",
+                    conc_comm_vi,
+                    "Mục tiêu: Tăng tần suất quay lại +15% ở nhóm khách hàng phổ thông",
+                ],
+                "actions": [
+                    f"**[Chăm sóc & giữ chân khách hàng trọng điểm]**: Thiết lập chính sách ưu đãi hoặc tích điểm riêng cho khách hàng **{top_ent}** ({top_contrib_vi}) nhằm duy trì nguồn thu bền vững.",
+                    f"**[Giảm rủi ro phụ thuộc tệp khách nhỏ]**: {conc_act_vi}. Chủ động triển khai khuyến mãi mua lặp lại để kéo chi tiêu nhóm khách quanh mức **{mean_v}** đi lên.",
+                    f"**[Kích hoạt lại nhóm khách hàng chi tiêu thấp]**: Rà soát nhu cầu của khách hàng như **{bot_ent}** (hiện đạt **{bot_v}**) để gửi ưu đãi gói trải nghiệm hoặc gợi ý sản phẩm phù hợp.",
+                ],
+            }
+        if entity_type == "employee":
+            return {
+                "role_title": "CHỦ CỬA HÀNG / QUẢN LÝ CHUNG • PHÂN BỔ NHÂN SỰ & HIỆU SUẤT",
+                "role_focus": "Trọng tâm: Tối ưu lịch ca làm việc, nhân rộng tay nghề cao và giữ chân nhân sự chủ chốt",
+                "kpis": [
+                    f"Tổng quy mô khảo sát ({n_rows} nhân sự): {tot_v} (Trung bình: {mean_v})" if not is_minmax_pair else f"Biên độ 2 cực: {top_ent} ({top_v}) vs {bot_ent} ({bot_v})",
+                    conc_comm_vi,
+                    "Mục tiêu: Thu hẹp khoảng cách hiệu suất ít nhất 20%",
+                ],
+                "actions": [
+                    f"**[Thưởng hiệu suất & giữ chân nhân sự nòng cốt]**: Ghi nhận đóng góp của nhân sự dẫn đầu (**{top_ent}** {top_contrib_vi}) bằng cơ chế thưởng hợp lý và giao phụ trách các lượt khách quan trọng.",
+                    f"**[Cân đối phân ca & chia sẻ khách hợp lý]**: {conc_act_vi}. Đánh giá lại cách chia ca và phân bổ lượt phục vụ so với mặt bằng **{mean_v}** để tạo cơ hội đồng đều hơn.",
+                    f"**[Kèm cặp nâng tay nghề cho {bot_ent}]**: Bố trí đào tạo kỹ năng tư vấn, phục vụ giữa **{top_ent}** và **{bot_ent}** (đạt **{bot_v}**) nhằm nâng doanh thu bình quân đầu người.",
+                ],
+            }
+        if entity_type == "room":
+            return {
+                "role_title": "CHỦ CƠ SỞ / QUẢN LÝ PHÒNG • VẬN HÀNH & TỐI ƯU DOANH THU PHÒNG",
+                "role_focus": "Trọng tâm: Duy trì tỷ lệ lấp đầy, kiểm soát chỉ số điện nước và thu phí đúng hạn",
+                "kpis": [
+                    f"Quy mô khảo sát ({n_rows} phòng): {tot_v} (Trung bình: {mean_v})" if not is_minmax_pair else f"Biên độ 2 cực: {top_ent} ({top_v}) vs {bot_ent} ({bot_v})",
+                    conc_comm_vi,
+                    "Mục tiêu: Tối ưu công suất phòng & kiểm soát chi phí vận hành",
+                ],
+                "actions": [
+                    f"**[Theo dõi sát nhóm phòng giá trị cao]**: Kiểm tra định kỳ tình trạng thiết bị và lịch thu phí của **{top_ent}** ({top_contrib_vi}) để duy trì nguồn thu ổn định.",
+                    f"**[Đối chiếu mặt bằng phòng quanh mức {mean_v}]**: {conc_act_vi}. Rà soát lại đơn giá thuê và mức tiêu thụ điện/nước bất thường giữa các phòng.",
+                    f"**[Cải thiện khai thác phòng {bot_ent}]**: Kiểm tra nguyên nhân doanh thu thấp tại **{bot_ent}** (đạt **{bot_v}**) do trống phòng hay thời gian thuê ngắn để có phương án chỉnh giá/quảng bá.",
+                ],
             }
         act3_ceo_vi = (
             f"**[Tối ưu biên lợi nhuận & định mức nhập hàng]**: Đối chiếu giá nhập, tiền lãi thực tế và tốc độ xoay vòng vốn của **{bot_ent}** (**{bot_v}**) cùng nhóm bán chạy để tối ưu chính sách nhập hàng và gói bán kèm."
@@ -8724,35 +9052,159 @@ def _generate_persona_action_plan_core(df: pd.DataFrame, persona: str = "ceo", t
             ]
         }
 
-    # Mặc định cho entity_type == "employee" (Nhân viên Kinh doanh cá nhân)
-    if is_en:
+    if entity_type == "customer":
+        if is_en:
+            return {
+                "role_title": "OPERATIONAL VIEW (CRM / CUSTOMER SUCCESS LEAD) • RETENTION & UPSELL",
+                "role_focus": "Focus: VIP Account Care, Loyalty Incentives & Reactivating Lower-Spend Customers",
+                "kpis": [
+                    f"Customer Spend Mean: {mean_v}",
+                    f"Top Customer Anchor: '{top_ent}' ({top_v})",
+                    f"Growth Opportunity Account: '{bot_ent}' ({bot_v})",
+                ],
+                "actions": [
+                    f"**[VIP Follow-Up for '{top_ent}']**: Lock in dedicated service perks and priority booking for **{top_ent}** (**{top_v}**) to maximize lifetime retention.",
+                    f"**[Lift Mid-Tier Repeat Orders]**: Run bundled membership promotions for accounts near **{mean_v}** to increase visit/order frequency.",
+                    f"**[Targeted Outreach for '{bot_ent}']**: Follow up with lower-spend customers such as **{bot_ent}** (**{bot_v}**) using tailored add-on recommendations.",
+                ],
+            }
         return {
-            "role_title": "OPERATIONAL VIEW (SALES TEAM LEAD / REGIONAL MANAGER) • 1-ON-1 REP COACHING",
-            "role_focus": "Focus: 1-on-1 Rep Coaching, Weekly Pipeline Unblocking & Best-Practice Replication",
+            "role_title": "QUẢN LÝ CHĂM SÓC KHÁCH HÀNG • GIỮ CHÂN & TĂNG TẦN SUẤT MUA",
+            "role_focus": "Trọng tâm: Chăm sóc khách hàng thân thiết, gợi ý mua thêm và kích hoạt khách chi tiêu thấp",
             "kpis": [
-                f"Benchmark to Beat (Rep Mean): {mean_v}",
-                f"Role Model Rep: '{top_ent}' ({top_v})",
-                f"1-on-1 Coaching Focus: '{bot_ent}' ({bot_v})"
+                f"Mức chi tiêu bình quân: {mean_v}",
+                f"Khách hàng trọng điểm #1: {top_ent} ({top_v})",
+                f"Khách hàng cần kích cầu thêm: {bot_ent} ({bot_v})",
             ],
             "actions": [
-                f"**[Immediate Weekly Action — 1-on-1 Coaching & Playbook]**: Conduct a 1-on-1 pipeline review with sales rep **'{bot_ent}'** ({bot_v}) this week and pair them with top performer **'{top_ent}'** ({top_v}) to replicate winning pitch scripts and account handling.",
-                f"**[30-Day Individual Quota & Conversion Fix]**: Set weekly micro-targets for reps below the **{mean_v}** benchmark to close at least 30% of the performance gap within 4 weeks.",
-                f"**[Key Account & High-Velocity SKU Focus]**: Focus daily standups on high-conversion products and priority accounts proven by **'{top_ent}'**."
+                f"**[Chăm sóc đặc biệt khách hàng {top_ent}]**: Ghi nhận lịch sử mua/sử dụng dịch vụ của **{top_ent}** (**{top_v}**) để áp dụng ưu đãi thành viên hoặc lịch nhắc chăm sóc định kỳ.",
+                f"**[Gợi ý combo nâng giá trị đơn quanh mức {mean_v}]**: Thiết kế gói ưu đãi mua kèm hoặc thẻ tích điểm cho khách hàng quanh mức bình quân **{mean_v}**.",
+                f"**[Nhắn ưu đãi quay lại cho {bot_ent}]**: Liên hệ nhóm khách chi tiêu thấp như **{bot_ent}** (**{bot_v}**) bằng mã giảm giá cho lần giao dịch kế tiếp.",
+            ],
+        }
+
+    if entity_type == "room":
+        if is_en:
+            return {
+                "role_title": "OPERATIONAL VIEW (PROPERTY / FACILITY LEAD) • ROOM BILLING & METER AUDIT",
+                "role_focus": "Focus: Meter Reading Verification, Occupancy Management & Timely Rent Collection",
+                "kpis": [
+                    f"Room Benchmark Mean: {mean_v}",
+                    f"Highest Room Figure: '{top_ent}' ({top_v})",
+                    f"Lowest Room Figure: '{bot_ent}' ({bot_v})",
+                ],
+                "actions": [
+                    f"**[Verify Meter & Billing Logs for '{top_ent}']**: Cross-check utility readings and service charges for **{top_ent}** (**{top_v}**) before issuing monthly notices.",
+                    f"**[Audit Maintenance & Occupancy Rate]**: Inspect rooms near the **{mean_v}** baseline and review tenant turnover in **{bot_ent}** (**{bot_v}**).",
+                    f"**[Automate Periodic Payment Reminders]**: Standardize cutoff dates for electric/water index recording across all rooms.",
+                ],
+            }
+        return {
+            "role_title": "QUẢN LÝ PHÒNG & VẬN HÀNH • ĐỐI SOÁT CHỈ SỐ & LẤP ĐẦY PHÒNG",
+            "role_focus": "Trọng tâm: Đối chiếu điện/nước định kỳ, bảo trì phòng trống và thu tiền đúng hạn",
+            "kpis": [
+                f"Mức bình quân mỗi phòng: {mean_v}",
+                f"Phòng dẫn đầu: {top_ent} ({top_v})",
+                f"Phòng mức thấp / cần rà soát: {bot_ent} ({bot_v})",
+            ],
+            "actions": [
+                f"**[Đối chiếu hóa đơn & chỉ số phòng {top_ent}]**: Kiểm tra chốt chỉ số điện, nước và phí dịch vụ của **{top_ent}** (**{top_v}**) trước khi gửi thông báo thu tiền.",
+                f"**[Rà soát nguyên nhân chênh lệch tại {bot_ent}]**: Kiểm tra lịch sử trống phòng hoặc ngày dọn vào của **{bot_ent}** (**{bot_v}**) so với mức bình quân **{mean_v}**.",
+                f"**[Chuẩn hóa lịch chốt sổ từng kỳ]**: Ghi nhận đầy đủ chỉ số đầu kỳ/cuối kỳ và trạng thái đã thu tiền cho tất cả các phòng.",
+            ],
+        }
+
+    if entity_type == "supplier":
+        if is_en:
+            return {
+                "role_title": "OPERATIONAL VIEW (PROCUREMENT / SUPPLY LEAD) • VENDOR MANAGEMENT",
+                "role_focus": "Focus: Volume Rebates, Delivery SLA & Secondary Supplier Backup",
+                "kpis": [
+                    f"Vendor Spend Mean: {mean_v}",
+                    f"Primary Vendor: '{top_ent}' ({top_v})",
+                    f"Secondary Vendor: '{bot_ent}' ({bot_v})",
+                ],
+                "actions": [
+                    f"**[Negotiate Volume Rebates with '{top_ent}']**: Leverage **{top_v}** volume with **{top_ent}** to request better payment terms or tier discounts.",
+                    f"**[Benchmark Unit Cost Near {mean_v}]**: Compare unit pricing and defect rates across suppliers around **{mean_v}**.",
+                    f"**[Diversify Supply Risk Beyond '{bot_ent}']**: Qualify backup supply capacity from **{bot_ent}** (**{bot_v}**) to avoid single-vendor bottlenecks.",
+                ],
+            }
+        return {
+            "role_title": "QUẢN LÝ NHẬP HÀNG / CUNG ỨNG • ĐỐI SOÁT NHÀ CUNG CẤP",
+            "role_focus": "Trọng tâm: Đàm phán chiết khấu theo sản lượng, kiểm tra công nợ nhập và nguồn hàng dự phòng",
+            "kpis": [
+                f"Mức nhập bình quân mỗi NCC: {mean_v}",
+                f"Nhà cung cấp chính: {top_ent} ({top_v})",
+                f"Nhà cung cấp quy mô nhỏ: {bot_ent} ({bot_v})",
+            ],
+            "actions": [
+                f"**[Đàm phán chiết khấu với {top_ent}]**: Dựa trên quy mô giao dịch **{top_v}** với **{top_ent}** để thương lượng thêm chiết khấu hoặc giãn hạn thanh toán.",
+                f"**[So sánh đơn giá nhập quanh mốc {mean_v}]**: Đối chiếu giá nhập cùng mặt hàng giữa các nhà cung cấp để tối ưu giá vốn.",
+                f"**[Duy trì nguồn dự phòng từ {bot_ent}]**: Giữ kết nối ổn định với **{bot_ent}** (**{bot_v}**) để chủ động thay thế khi nguồn chính thiếu hàng.",
+            ],
+        }
+
+    if entity_type == "employee":
+        if is_en:
+            return {
+                "role_title": "OPERATIONAL VIEW (SALES TEAM LEAD / REGIONAL MANAGER) • 1-ON-1 REP COACHING",
+                "role_focus": "Focus: 1-on-1 Rep Coaching, Weekly Pipeline Unblocking & Best-Practice Replication",
+                "kpis": [
+                    f"Benchmark to Beat (Rep Mean): {mean_v}",
+                    f"Role Model Rep: '{top_ent}' ({top_v})",
+                    f"1-on-1 Coaching Focus: '{bot_ent}' ({bot_v})"
+                ],
+                "actions": [
+                    f"**[Immediate Weekly Action — 1-on-1 Coaching & Playbook]**: Conduct a 1-on-1 pipeline review with sales rep **'{bot_ent}'** ({bot_v}) this week and pair them with top performer **'{top_ent}'** ({top_v}) to replicate winning pitch scripts and account handling.",
+                    f"**[30-Day Individual Quota & Conversion Fix]**: Set weekly micro-targets for reps below the **{mean_v}** benchmark to close at least 30% of the performance gap within 4 weeks.",
+                    f"**[Key Account & High-Velocity SKU Focus]**: Focus daily standups on high-conversion products and priority accounts proven by **'{top_ent}'**."
+                ]
+            }
+        return {
+            "role_title": "QUẢN LÝ TRỰC TIẾP • HỖ TRỢ & KÈM CẶP NHÂN VIÊN",
+            "role_focus": "Trọng tâm: Trao đổi 1-1 cùng nhân viên, tháo gỡ đơn khó trong tuần và chia sẻ cách tư vấn tốt",
+            "kpis": [
+                f"Mức trung bình cần vượt: {mean_v}",
+                f"Nhân sự làm mẫu tốt nhất: {top_ent} ({top_v})",
+                f"Nhân sự cần kèm cặp 1-1: {bot_ent} ({bot_v})"
+            ],
+            "actions": [
+                f"**[Trao đổi 1-1 & hướng dẫn cách tư vấn tốt]**: Quản lý ngồi làm việc 1-1 cùng **{bot_ent}** (hiện đạt **{bot_v}**) để rà soát đơn hàng chậm và học hỏi cách giới thiệu sản phẩm hiệu quả của **{top_ent}** (**{top_v}**).",
+                f"**[Mục tiêu 30 ngày — Kéo kết quả lên mức trung bình]**: Chia nhỏ mục tiêu theo tuần cho nhân sự dưới mức **{mean_v}** và hỗ trợ chốt các khách quan trọng để thu hẹp 30% khoảng cách.",
+                f"**[Tối ưu giỏ hàng & chăm sóc khách quen]**: Theo dõi tỷ lệ chốt đơn và tập trung giới thiệu các mặt hàng có sức mua cao nhất."
             ]
         }
+
+    # Mặc định an toàn cho entity_type == "general" (không gắn nhãn sai thành nhân viên hoặc mặt hàng)
+    if is_en:
+        return {
+            "role_title": "OPERATIONAL VIEW (OPERATIONS LEAD) • BENCHMARK & EXECUTION",
+            "role_focus": "Focus: Replicating Top-Unit Practices, Closing Gaps & Periodic Monitoring",
+            "kpis": [
+                f"Portfolio Mean Baseline: {mean_v}",
+                f"Top Unit Benchmark: '{top_ent}' ({top_v})",
+                f"Priority Improvement Unit: '{bot_ent}' ({bot_v})",
+            ],
+            "actions": [
+                f"**[Replicate Best Practices from '{top_ent}']**: Audit drivers behind **{top_ent}** (**{top_v}**) and adapt proven workflows for lower-performing units.",
+                f"**[Target Lift Toward {mean_v}]**: Set weekly tracking milestones for **{bot_ent}** (**{bot_v}**) to narrow the gap toward the **{mean_v}** baseline.",
+                f"**[Standardize Weekly Breakdown Checks]**: Monitor performance consistency across all units in upcoming cycles.",
+            ],
+        }
     return {
-        "role_title": "QUẢN LÝ TRỰC TIẾP • HỖ TRỢ & KÈM CẶP NHÂN VIÊN",
-        "role_focus": "Trọng tâm: Trao đổi 1-1 cùng nhân viên, tháo gỡ đơn khó trong tuần và chia sẻ cách tư vấn tốt",
+        "role_title": "QUẢN LÝ VẬN HÀNH • TỐI ƯU HIỆU SUẤT THEO ĐƠN VỊ",
+        "role_focus": "Trọng tâm: Nhân rộng cách làm hiệu quả từ nhóm đầu bảng và nâng nhóm dưới chuẩn",
         "kpis": [
-            f"Mức trung bình cần vượt: {mean_v}",
-            f"Nhân sự làm mẫu tốt nhất: {top_ent} ({top_v})",
-            f"Nhân sự cần kèm cặp 1-1: {bot_ent} ({bot_v})"
+            f"Mức bình quân tham chiếu: {mean_v}",
+            f"Đơn vị dẫn đầu: {top_ent} ({top_v})",
+            f"Đơn vị cần cải thiện: {bot_ent} ({bot_v})",
         ],
         "actions": [
-            f"**[Trao đổi 1-1 & hướng dẫn cách tư vấn tốt]**: Quản lý ngồi làm việc 1-1 cùng **{bot_ent}** (hiện đạt **{bot_v}**) để rà soát đơn hàng chậm và học hỏi cách giới thiệu sản phẩm hiệu quả của **{top_ent}** (**{top_v}**).",
-            f"**[Mục tiêu 30 ngày — Kéo kết quả lên mức trung bình]**: Chia nhỏ mục tiêu theo tuần cho nhân sự dưới mức **{mean_v}** và hỗ trợ chốt các khách quan trọng để thu hẹp 30% khoảng cách.",
-            f"**[Tối ưu giỏ hàng & chăm sóc khách quen]**: Theo dõi tỷ lệ chốt đơn và tập trung giới thiệu các mặt hàng có sức mua cao nhất."
-        ]
+            f"**[Nhân rộng quy trình tốt từ {top_ent}]**: Đối chiếu yếu tố giúp **{top_ent}** đạt **{top_v}** để áp dụng sang các nhóm có mức đóng góp thấp hơn.",
+            f"**[Thu hẹp khoảng cách về mốc {mean_v}]**: Đặt mục tiêu cải thiện theo tuần cho **{bot_ent}** (hiện đạt **{bot_v}**) để tiến gần mức trung bình **{mean_v}**.",
+            f"**[Theo dõi phân hóa định kỳ]**: Rà soát dữ liệu chi tiết theo từng đơn vị mỗi kỳ để điều phối nguồn lực hợp lý.",
+        ],
     }
 
 

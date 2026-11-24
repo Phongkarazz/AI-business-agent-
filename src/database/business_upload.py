@@ -12,14 +12,18 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 
-from datamate.loader import (
-    BusinessWorkspace,
-    _profile_existing_sqlite,
-    load_business_workspace,
-    normalize_nfc,
-)
-from datamate.schema_context import WorkspaceKnowledge, build_workspace_knowledge
-from datamate.sql_executor import norm_vn, round_half_up
+import datamate.loader as _dm_loader
+import datamate.schema_context as _dm_schema
+import datamate.sql_executor as _dm_sql
+
+BusinessWorkspace = _dm_loader.BusinessWorkspace
+WorkspaceKnowledge = _dm_schema.WorkspaceKnowledge
+load_business_workspace = _dm_loader.load_business_workspace
+build_workspace_knowledge = _dm_schema.build_workspace_knowledge
+normalize_nfc = _dm_loader.normalize_nfc
+norm_vn = _dm_sql.norm_vn
+round_half_up = _dm_sql.round_half_up
+_profile_existing_sqlite = _dm_loader._profile_existing_sqlite
 
 _PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 UPLOAD_WORKSPACES_ROOT = _PROJECT_ROOT / "data" / "uploaded_workspaces"
@@ -37,9 +41,9 @@ def attach_datamate_sqlite_udfs(engine: Engine) -> Engine:
     @event.listens_for(engine, "connect")
     def _on_connect(dbapi_conn, _conn_record):  # pragma: no cover - verified via query execution
         try:
-            dbapi_conn.create_function("NORM_VN", 1, lambda s: norm_vn(str(s)) if s is not None else "")
-            dbapi_conn.create_function("ROUND_HALF_UP", 1, lambda x: round_half_up(x, 0))
-            dbapi_conn.create_function("ROUND_HALF_UP", 2, round_half_up)
+            dbapi_conn.create_function("NORM_VN", 1, lambda s: _dm_sql.norm_vn(str(s)) if s is not None else "")
+            dbapi_conn.create_function("ROUND_HALF_UP", 1, lambda x: _dm_sql.round_half_up(x, 0))
+            dbapi_conn.create_function("ROUND_HALF_UP", 2, _dm_sql.round_half_up)
         except sqlite3.Error:
             pass
 
@@ -99,11 +103,11 @@ def build_datamate_workspace_engine(
         raise FileNotFoundError(f"Thư mục dữ liệu không tồn tại: {bdir}")
 
     WORKSPACE_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-    ws = load_business_workspace(bdir, cache_dir=WORKSPACE_CACHE_ROOT, force_rebuild=force_rebuild)
+    ws = _dm_loader.load_business_workspace(bdir, cache_dir=WORKSPACE_CACHE_ROOT, force_rebuild=force_rebuild)
     if not ws.tables:
         raise ValueError(f"Không tìm thấy bảng dữ liệu hợp lệ nào trong `{bdir.name}`.")
 
-    knowledge = build_workspace_knowledge(ws)
+    knowledge = _dm_schema.build_workspace_knowledge(ws)
     engine = create_engine(
         f"sqlite:///{ws.db_path}",
         connect_args={"check_same_thread": False},
@@ -121,14 +125,14 @@ def build_knowledge_from_sqlite_path(
     p = pathlib.Path(db_path)
     if not p.exists():
         return None
-    profiles = _profile_existing_sqlite(
+    profiles = _dm_loader._profile_existing_sqlite(
         p,
-        source_files=[normalize_nfc(p.name)],
+        source_files=[_dm_loader.normalize_nfc(p.name)],
         notes=["sqlite_direct"],
     )
     if not profiles:
         return None
-    ws = BusinessWorkspace(
+    ws = _dm_loader.BusinessWorkspace(
         business_id=p.stem,
         business_dir=p.parent,
         db_path=p,
@@ -136,7 +140,7 @@ def build_knowledge_from_sqlite_path(
         tables=profiles,
         source_kind="sqlite_direct",
     )
-    return build_workspace_knowledge(ws)
+    return _dm_schema.build_workspace_knowledge(ws)
 
 
 def describe_database_target(

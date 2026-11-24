@@ -17,6 +17,7 @@ from datamate.agent import (
     AgentConfig,
     DataMateAgent,
     QuestionAnalysis,
+    _check_subquery_column_capture,
     build_benchmark_average_entity_sql_spec,
     build_catalog_listing_sql_spec,
     build_entity_and_metric_listing_sql_spec,
@@ -30,12 +31,15 @@ from datamate.agent import (
     format_effective_temporal_summary,
     format_sql_result,
     normalize_vn_question,
+    resolve_conversational_retraction,
     rewrite_ranked_entity_sql,
+    should_prefer_python_sandbox,
     strip_spurious_single_day_filter,
     verify_sql_semantics,
 )
 from datamate.llm_backend import LLMBackend, extract_json_object
-from datamate.schema_context import WorkspaceKnowledge, ground_query_entities
+from datamate.python_sandbox import execute_python_safe
+from datamate.schema_context import WorkspaceKnowledge, ground_query_entities, run_deterministic_probes
 from datamate.sql_executor import SQLExecutionResult, execute_sql_safe, norm_vn
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.heuristics import (
@@ -203,6 +207,68 @@ def augment_vietnamese_query_with_temporal(user_query: str) -> str:
     return q_raw
 
 
+_VI_SCHEMA_TOKEN_LABELS: Dict[str, str] = {
+    "ds_phong": "danh sách phòng",
+    "danh_sach_phong": "danh sách phòng",
+    "gia_thue": "giá thuê",
+    "tien_phong": "tiền phòng",
+    "tien_thue": "tiền thuê",
+    "dien_moi": "chỉ số điện mới",
+    "dien_cu": "chỉ số điện cũ",
+    "nuoc_moi": "chỉ số nước mới",
+    "nuoc_cu": "chỉ số nước cũ",
+    "da_thu": "tiền đã thu",
+    "da_tra": "tiền đã trả",
+    "con_no": "công nợ",
+    "cong_no": "công nợ",
+    "tong_no": "tổng nợ",
+    "du_no": "dư nợ",
+    "tra_do": "phiếu trả đồ",
+    "lich_thue": "lịch thuê",
+    "danh_ba": "danh bạ khách",
+    "danhbakhach": "danh bạ khách",
+    "danhsachtho": "danh sách thợ",
+    "banggia": "bảng giá",
+    "bang_gia": "bảng giá",
+    "sothu": "sổ thu",
+    "sothutien": "sổ thu tiền",
+    "dich_vu": "dịch vụ",
+    "phong": "phòng",
+    "phieu": "phiếu",
+    "den": "tiền đền bù",
+    "tien": "số tiền",
+    "gia": "đơn giá",
+    "tho": "thợ",
+    "tho_chinh": "thợ chính",
+    "khach": "khách hàng",
+    "khach_thue": "khách thuê",
+    "khach_hang": "khách hàng",
+    "ho_ten": "họ tên",
+    "hay_goi": "tên thường gọi",
+    "ten_goi": "tên thợ",
+    "so_luong": "số lượng",
+    "thanh_tien": "thành tiền",
+    "doanh_thu": "doanh thu",
+    "chi_phi": "chi phí",
+    "tien_coc": "tiền cọc",
+}
+
+
+def _humanize_vi_schema_label(raw_name: Optional[str], sql_name: str, is_table: bool = False) -> str:
+    """Turn SQL snake_case / messy headers into clean, natural Vietnamese phrases."""
+    s_low = str(sql_name or "").strip().lower()
+    if s_low in _VI_SCHEMA_TOKEN_LABELS:
+        return _VI_SCHEMA_TOKEN_LABELS[s_low]
+    raw_clean = re.sub(r"^(?:TIỀN|NGÀY|SỐ|THÔNG TIN)\s*-\s*", "", str(raw_name or "").strip(), flags=re.IGNORECASE)
+    raw_clean = re.sub(r"\s+", " ", raw_clean).strip()
+    if raw_clean and "_" not in raw_clean and any(ord(ch) > 127 or ch == " " for ch in raw_clean):
+        return raw_clean.lower() if not raw_clean.isupper() else raw_clean
+    parts = [p for p in re.split(r"[_.\s]+", s_low) if p]
+    mapped = [_VI_SCHEMA_TOKEN_LABELS.get(p, p) for p in parts]
+    joined = " ".join(mapped).strip()
+    return ("bảng " + joined if is_table and "bảng" not in joined and not any(joined.startswith(k) for k in ("danh ", "sổ ", "phiếu ", "lịch ", "bảng ")) else joined) or sql_name
+
+
 def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str, Any]:
     """Inspect active non-empty tables, columns, categories, capabilities, and date span."""
     caps = knowledge.capabilities or {}
@@ -212,7 +278,7 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
     valid_tables = list(knowledge.valid_tables or [])
     if not sales_table:
         sales_table = next(
-            (t for t in valid_tables if re.search(r"hoa_?don|don_?hang|ban_?hang|sales|orders|cong_?no", t, re.I)),
+            (t for t in valid_tables if re.search(r"hoa_?don|don_?hang|ban_?hang|sales|orders|cong_?no|sothu|so_?thu|lich_?thue|dien_?nuoc|thu_?chi|sobanhoa|sovua", t, re.I)),
             next(iter(valid_tables), ""),
         )
 
@@ -248,6 +314,10 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         (r"(?:^|_)(?:ten_?thuoc|thuoc)(?:$|_)", "loại thuốc", "medicine", "bán thuốc", "pharmacy sales", "hóa đơn", "invoices", "thuốc", "medicines"),
         (r"(?:^|_)(?:ten_?mon|mon)(?:$|_)", "món", "menu item", "bán hàng", "cafe sales", "đơn hàng", "orders", "nguyên liệu", "inventory"),
         (r"(?:^|_)(?:vat_?lieu|ten_?vat_?lieu)(?:$|_)", "vật liệu", "material", "bán vật liệu", "material sales", "đơn hàng", "orders", "vật liệu", "materials"),
+        (r"(?:^|_)(?:dich_?vu|service)(?:$|_)", "dịch vụ", "service", "dịch vụ", "service sales", "lượt làm", "visits", "dịch vụ", "services"),
+        (r"(?:^|_)(?:ten_?hoa|m_?hoa|hoa)(?:$|_)", "loại hoa", "flower item", "bán hoa", "flower sales", "đơn hàng", "orders", "hoa", "flowers"),
+        (r"(?:^|_)(?:ten_?bo|ma_?do|bo_?do)(?:$|_)", "mẫu đồ thuê", "rental item", "cho thuê", "rental sales", "phiếu thuê", "rentals", "mẫu đồ", "items"),
+        (r"(?:^|_)(?:phong|so_?phong|ten_?phong)(?:$|_)", "phòng", "room", "thu tiền phòng", "room billing", "hóa đơn phòng", "room bills", "phòng", "rooms"),
         (r"(?:^|_)(?:ten_?san_?pham|san_?pham|ten_?hang|hang_?hoa|product(?:_?name)?|mat_?hang)(?:$|_)", "sản phẩm", "product", "bán hàng", "sales", "đơn hàng", "orders", "hàng", "goods"),
     ):
         found = next((c for _, c in active_cols if re.search(pat, c, re.I)), None)
@@ -341,12 +411,12 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         None,
     )
     customer_col = next(
-        (c for _, c in active_cols if re.search(r"(?:^|_)(?:ten_?khach(?:_?hang)?|khach_?hang|customer(?:_?name)?|ben_?mua|doi_?tac)(?:$|_)", c, re.I)),
+        (c for _, c in active_cols if re.search(r"(?:^|_)(?:ten_?khach(?:_?hang)?|khach_?hang(?:_?ten)?|khach|khach_?thue|customer(?:_?name)?|ben_?mua|doi_?tac|hay_?goi)(?:$|_)", c, re.I)),
         None,
     )
     has_qty = any(re.search(r"(?:^|_)(?:so_?luong|sl|qty|quantity|so_?hop|boxes)(?:$|_)", c) for c in sales_cols)
     has_revenue = any(
-        re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|thanh_?tien|tong_?tien|tien_?hang|revenue|sales|total_?amount|amount)(?:$|_)", c)
+        re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|thanh_?tien|tong_?tien|tien_?hang|tien_?thue|tien_?phong|t_?tien|da_?thu|tien_?cam|tien|gia_?thue|revenue|sales|total_?amount|amount)(?:$|_)", c)
         for c in sales_cols
     )
     has_item_in_import = any(
@@ -372,19 +442,24 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
     # Generic fallback table info when schema does not match POS sales conventions
     fallback_table = sales_table or (valid_tables[0] if valid_tables else "data")
     tp_fb = knowledge.workspace.tables.get(fallback_table)
+    fallback_table_disp = _humanize_vi_schema_label(getattr(tp_fb, "raw_name", fallback_table), fallback_table, is_table=True)
     fb_text_col = None
+    fb_text_disp = None
     fb_num_col = None
+    fb_num_disp = None
     if tp_fb is not None:
         for cp in tp_fb.columns:
             if cp.distinct_count <= 0 or cp.null_count >= tp_fb.row_count:
                 continue
             c_low = str(cp.sql_name).lower()
             if fb_text_col is None and cp.inferred_type == "text" and 2 <= cp.distinct_count <= max(50, tp_fb.row_count):
-                if not re.search(r"^(?:ma_|id\b)", c_low):
+                if not re.search(r"^(?:ma_|id\b|sdt|dien_?thoai|ngay)", c_low):
                     fb_text_col = cp.sql_name
+                    fb_text_disp = _humanize_vi_schema_label(getattr(cp, "raw_name", cp.sql_name), cp.sql_name)
             elif fb_num_col is None and cp.inferred_type in ("integer", "real", "numeric"):
-                if not re.search(r"(?:^|_)(?:id|ma_)", c_low):
+                if not re.search(r"(?:^|_)(?:id|ma_|stt)(?:$|_)", c_low):
                     fb_num_col = cp.sql_name
+                    fb_num_disp = _humanize_vi_schema_label(getattr(cp, "raw_name", cp.sql_name), cp.sql_name)
 
     return {
         "caps": caps,
@@ -427,8 +502,11 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         "ym_phrase_en": ym_phrase_en,
         "has_multi_day_sales": has_multi_day_sales,
         "fallback_table": fallback_table,
+        "fallback_table_disp": fallback_table_disp,
         "fb_text_col": fb_text_col,
+        "fb_text_disp": fb_text_disp or fb_text_col,
         "fb_num_col": fb_num_col,
+        "fb_num_disp": fb_num_disp or fb_num_col,
         "all_col_lows": all_col_lows,
     }
 
@@ -936,28 +1014,30 @@ def build_datamate_suggested_questions(
             )
 
     # Non-POS / generic database fallback (e.g. arbitrary Excel sheets without revenue/status)
-    t_fb = prof["fallback_table"]
+    t_fb_disp = prof.get("fallback_table_disp") or prof["fallback_table"]
+    fb_txt_disp = prof.get("fb_text_disp") or prof["fb_text_col"]
+    fb_num_disp = prof.get("fb_num_disp") or prof["fb_num_col"]
     if prof["fb_text_col"] and prof["fb_num_col"]:
         _add(
             "generic",
-            f"Top 5 {prof['fb_text_col']} theo tổng {prof['fb_num_col']} trong bảng {t_fb}?",
-            f"Top 5 {prof['fb_text_col']} by total {prof['fb_num_col']} in `{t_fb}`?",
+            f"Top 5 {fb_txt_disp} theo tổng {fb_num_disp} trong {t_fb_disp}?",
+            f"Top 5 {fb_txt_disp} by total {fb_num_disp} in {t_fb_disp}?",
         )
         _add(
             "generic",
-            f"{prof['fb_text_col']} nào có {prof['fb_num_col']} cao nhất và thấp nhất trong bảng {t_fb}?",
-            f"Highest and lowest {prof['fb_text_col']} by {prof['fb_num_col']} in `{t_fb}`?",
+            f"{str(fb_txt_disp).capitalize()} nào có {fb_num_disp} cao nhất và thấp nhất?",
+            f"Highest and lowest {fb_txt_disp} by {fb_num_disp}?",
         )
     elif prof["fb_text_col"]:
         _add(
             "generic",
-            f"Thống kê số lượng bản ghi theo từng {prof['fb_text_col']} trong bảng {t_fb}?",
-            f"Record count by {prof['fb_text_col']} in `{t_fb}`?",
+            f"Thống kê số lượng bản ghi theo từng {fb_txt_disp} trong {t_fb_disp}?",
+            f"Record count by {fb_txt_disp} in {t_fb_disp}?",
         )
     _add(
         "generic",
-        f"Thống kê tổng quan các chỉ số chính của bảng {t_fb}",
-        f"Show summary metrics of table `{t_fb}`",
+        f"Thống kê tổng quan các chỉ số chính của {t_fb_disp}",
+        f"Show summary metrics of {t_fb_disp}",
     )
 
     # --- 3. Strict DB-groundedness, history anti-repetition & cross-dimension diversity ---
@@ -1351,8 +1431,12 @@ def run_datamate_enhanced_turn(
         },
     }
 
-    analysis = classify_expected_type(user_query)
-    windows, temp_summary, bounded, prior_start = extract_temporal_context(user_query, as_of, None)
+    effective_query, retraction_note = resolve_conversational_retraction(user_query)
+    if retraction_note:
+        result["logs"].append(f"✂️ [Retraction] {retraction_note}")
+
+    analysis = classify_expected_type(effective_query)
+    windows, temp_summary, bounded, prior_start = extract_temporal_context(effective_query, as_of, None)
     analysis.temporal_windows = windows
     analysis.temporal_summary = temp_summary
     analysis.bounded_period = bounded
@@ -1370,7 +1454,7 @@ def run_datamate_enhanced_turn(
     if status_callback:
         status_callback("🛡️ [DataMate Guard] Kiểm tra khả năng trả lời trên lược đồ & khoảng ngày dữ liệu...")
 
-    preflight_reason = check_preflight_unanswerable(user_query, as_of, knowledge, analysis)
+    preflight_reason = check_preflight_unanswerable(effective_query, as_of, knowledge, analysis)
     if preflight_reason:
         result["logs"].append(f"🛡️ [Preflight Blocked] {preflight_reason}")
         result["explanation"] = _governance_notice(
@@ -1390,10 +1474,14 @@ def run_datamate_enhanced_turn(
         result["agent_trace"]["evaluator"] = result["evaluator"]
         return result
 
-    # 2. Ground entities & build DataMate SQL prompt
-    entities = ground_query_entities(user_query, knowledge, max_matches=12)
+    # 2. Ground entities, deterministic micro-probes & build DataMate SQL/Python prompt
+    entities = ground_query_entities(effective_query, knowledge, max_matches=12)
     if entities:
         result["logs"].append("🎯 [Entity Grounding] " + ", ".join(f"{t}.{c}={v!r}" for t, c, v in entities[:6]))
+
+    dt_cols = tuple(getattr(knowledge, "datetime_columns", ()) or ())
+    probe_ctx = run_deterministic_probes(effective_query, knowledge, entities)
+    prefer_py = should_prefer_python_sandbox(effective_query, knowledge)
 
     backend = VeraxusClientLLMBackend(client=client, provider=provider, model_name=model_name)
     max_retries = 3 if enable_self_check else 1
@@ -1403,19 +1491,23 @@ def run_datamate_enhanced_turn(
             max_sql_retries=max_retries,
             enable_preflight_unanswerable=False,
             enable_llm_formatter_fallback=False,
+            enable_python_sandbox=True,
             use_json_mode=True,
-            sql_max_tokens=384,
+            sql_max_tokens=640,
         ),
     )
 
     effective_temp_summary = format_effective_temporal_summary(temp_summary, as_of, analysis)
     sys_p, usr_p = dm_agent._build_sql_prompt(
-        question=user_query,
+        question=effective_query,
         as_of_date=as_of,
         knowledge=knowledge,
         analysis=analysis,
         temporal_summary=temp_summary,
         entity_matches=entities,
+        probe_context=probe_ctx,
+        prefer_python=prefer_py,
+        retraction_note=retraction_note,
     )
 
     prompt_to_send = usr_p
@@ -1427,16 +1519,16 @@ def run_datamate_enhanced_turn(
         spec: Optional[Dict[str, Any]] = None
         fb_tag = "Extreme Comparison Fallback"
         if getattr(analysis, "extreme_comparison", None) is not None:
-            spec = build_extreme_comparison_sql_spec(user_query, knowledge, analysis)
-        elif extract_benchmark_average_entity_intent(user_query) is not None:
-            spec = build_benchmark_average_entity_sql_spec(user_query, knowledge, analysis)
+            spec = build_extreme_comparison_sql_spec(effective_query, knowledge, analysis)
+        elif extract_benchmark_average_entity_intent(effective_query) is not None:
+            spec = build_benchmark_average_entity_sql_spec(effective_query, knowledge, analysis)
             fb_tag = "Benchmark Average Entity Fallback"
         else:
-            spec = build_entity_and_metric_listing_sql_spec(user_query, knowledge, analysis, entities)
+            spec = build_entity_and_metric_listing_sql_spec(effective_query, knowledge, analysis, entities)
             if spec is not None:
                 fb_tag = "Entity + Metric Fallback"
             else:
-                spec = build_catalog_listing_sql_spec(user_query, knowledge, analysis, entities)
+                spec = build_catalog_listing_sql_spec(effective_query, knowledge, analysis, entities)
                 if spec is not None:
                     fb_tag = "Catalog Listing Fallback"
         if not spec or not spec.get("suggested_sql"):
@@ -1446,13 +1538,14 @@ def run_datamate_enhanced_turn(
             knowledge.workspace.open_connection,
             fb_sql,
             valid_tables=knowledge.valid_tables,
+            datetime_columns=dt_cols,
             max_rows=500,
             timeout_seconds=8.0,
         )
         if not fb_res.ok or fb_res.row_count < 1:
             return None
         fb_ok, fb_msg, _ = verify_sql_semantics(
-            fb_res.sql or fb_sql, fb_res, user_query, knowledge, analysis, entity_matches=entities
+            fb_res.sql or fb_sql, fb_res, effective_query, knowledge, analysis, entity_matches=entities
         )
         if not fb_ok:
             return None
@@ -1485,12 +1578,13 @@ def run_datamate_enhanced_turn(
             if attempt > 0 and last_res is not None and not last_res.ok and (attempt + 1 < max_retries):
                 result["logs"].append("⚠️ Model trả unanswerable khi đang sửa lỗi SQL — thử sửa lại với lược đồ rút gọn.")
                 prompt_to_send = dm_agent._build_repair_prompt(
-                    user_query,
+                    effective_query,
                     last_sql_text,
                     last_res.error,
                     knowledge,
                     temporal_summary=effective_temp_summary,
                     include_full_schema=False,
+                    entity_matches=entities,
                 )
                 continue
             fb_out = _try_extreme_fallback(f"Model trả unanswerable ({obj.get('reason') or ''})")
@@ -1518,19 +1612,37 @@ def run_datamate_enhanced_turn(
                 return result
 
         if not resolved_fb:
-            candidate_sql = str(obj["sql"]) if (obj and isinstance(obj.get("sql"), str)) else raw_reply
-            candidate_sql = rewrite_ranked_entity_sql(candidate_sql, user_query, use_round_half_up=True)
-            _before_strip = candidate_sql
-            candidate_sql = strip_spurious_single_day_filter(candidate_sql, user_query, analysis)
-            if candidate_sql != _before_strip:
-                result["logs"].append("🧹 [Date Guard] Tự động loại bỏ điều kiện lọc 1 ngày không được yêu cầu.")
-            res = execute_sql_safe(
-                knowledge.workspace.open_connection,
-                candidate_sql,
-                valid_tables=knowledge.valid_tables,
-                max_rows=500,
-                timeout_seconds=8.0,
-            )
+            py_code = str(obj["python"]) if (obj and isinstance(obj.get("python"), str)) else None
+            if py_code:
+                res = execute_python_safe(
+                    knowledge.workspace.open_connection,
+                    py_code,
+                    as_of_date=as_of,
+                    valid_tables=knowledge.valid_tables,
+                    datetime_columns=dt_cols,
+                    max_rows=500,
+                    timeout_seconds=8.0,
+                )
+                candidate_sql = res.sql or f"-- [PYTHON_SANDBOX]\n{py_code}"
+            else:
+                candidate_sql = str(obj["sql"]) if (obj and isinstance(obj.get("sql"), str)) else raw_reply
+                candidate_sql = rewrite_ranked_entity_sql(candidate_sql, effective_query, use_round_half_up=True)
+                _before_strip = candidate_sql
+                candidate_sql = strip_spurious_single_day_filter(candidate_sql, effective_query, analysis)
+                if candidate_sql != _before_strip:
+                    result["logs"].append("🧹 [Date Guard] Tự động loại bỏ điều kiện lọc 1 ngày không được yêu cầu.")
+                sub_err = _check_subquery_column_capture(candidate_sql, knowledge)
+                if sub_err:
+                    res = SQLExecutionResult(ok=False, sql=candidate_sql, columns=[], rows=[], error=sub_err)
+                else:
+                    res = execute_sql_safe(
+                        knowledge.workspace.open_connection,
+                        candidate_sql,
+                        valid_tables=knowledge.valid_tables,
+                        datetime_columns=dt_cols,
+                        max_rows=500,
+                        timeout_seconds=8.0,
+                    )
             last_res = res
             last_sql_text = res.sql or candidate_sql
             result["logs"].append(f"[Lần {attempt + 1}] SQL: {last_sql_text}")
@@ -1540,12 +1652,14 @@ def run_datamate_enhanced_turn(
                 result["logs"].append(f"⚠️ Lỗi thực thi SQLite: {res.error}")
                 if attempt + 1 < max_retries:
                     prompt_to_send = dm_agent._build_repair_prompt(
-                        user_query,
+                        effective_query,
                         last_sql_text,
                         res.error,
                         knowledge,
                         temporal_summary=effective_temp_summary,
                         include_full_schema=(len(knowledge.schema_prompt or "") <= 5000),
+                        escalate_to_python=prefer_py,
+                        entity_matches=entities,
                     )
                     continue
                 fb_out = _try_extreme_fallback(f"SQL lỗi ({res.error})")
@@ -1565,19 +1679,21 @@ def run_datamate_enhanced_turn(
                     return result
             else:
                 sem_ok, sem_msg, sem_fatal = verify_sql_semantics(
-                    last_sql_text, res, user_query, knowledge, analysis, entity_matches=entities
+                    last_sql_text, res, effective_query, knowledge, analysis, entity_matches=entities
                 )
                 if not sem_ok:
                     last_sem_msg = sem_msg
                     result["logs"].append(f"🛡️ [Semantic Guard] {sem_msg}")
                     if attempt + 1 < max_retries:
                         prompt_to_send = dm_agent._build_repair_prompt(
-                            user_query,
+                            effective_query,
                             last_sql_text,
                             sem_msg,
                             knowledge,
                             temporal_summary=effective_temp_summary,
                             include_full_schema=(len(knowledge.schema_prompt or "") <= 5000),
+                            escalate_to_python=prefer_py,
+                            entity_matches=entities,
                         )
                         continue
                     if sem_fatal:
@@ -1608,12 +1724,14 @@ def run_datamate_enhanced_turn(
                 result["logs"].append(f"⚠️ [Empty/NULL Guard] {msg}")
                 if attempt + 1 < max_retries:
                     prompt_to_send = dm_agent._build_repair_prompt(
-                        user_query,
+                        effective_query,
                         last_sql_text,
                         msg,
                         knowledge,
                         temporal_summary=effective_temp_summary,
                         include_full_schema=True,
+                        escalate_to_python=prefer_py,
+                        entity_matches=entities,
                     )
                     continue
                 fb_out = _try_extreme_fallback(msg)

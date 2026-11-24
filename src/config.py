@@ -27,12 +27,13 @@ FORBIDDEN_KEYWORDS = [
 # ---------------------------------------------------------
 # Column Classification Keywords and Regex
 # ---------------------------------------------------------
-TIME_KEYWORDS = ["date", "month", "thang", "tháng", "quy", "quý", "quarter", "nam", "năm", "year", "ngày", "ngay", "thời gian", "thoi gian"]
-BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "tháng", "quy", "quý", "quarter"]
+TIME_KEYWORDS = ["date", "month", "thang", "tháng", "quy", "quý", "quarter", "nam", "năm", "year", "ngày", "ngay", "ky", "kỳ", "source_sheet", "thời gian", "thoi gian"]
+BOUNDED_PERIOD_KEYWORDS = ["month", "thang", "tháng", "quy", "quý", "quarter", "ky", "kỳ", "source_sheet"]
 
 # ID-like column pattern (excluded from statistical Y-axes and forecasting)
+# Note: bare 'no' is EXCLUDED because in Vietnamese schemas 'no' / 'con_no' / 'cong_no' means debt!
 ID_LIKE_REGEX = re.compile(
-    r'(?:^|_)(?:id|no|code|key|num|sn)$|(?:supplier|product|customer|order|employee|category|shipper|region|territory|geo|dept|department|user|account|transaction|invoice|ticket|patient|flight|hospital|store|branch|item|sku|postal|zip|tax|phone|fax|emp|cust|prod|ord|sup|cat|mgr|manager|role|status|type|group|org|company|vendor|client|member|student|course|doctor|airline|airport)_?(?:id|code|no|key)$',
+    r'(?:^|_)(?:id|code|key|num|sn)$|(?:emp|dept|department|order|ord|invoice|account|serial|part|flight|ticket|room|doc|ref|voucher|receipt|contract|card|member|student|patient|supplier|product|customer|employee|category|shipper|region|territory|geo|user|transaction|hospital|store|branch|item|sku|postal|zip|tax|phone|fax|cust|prod|sup|cat|mgr|manager|role|status|type|group|org|company|vendor|client|course|doctor|airline|airport)_?(?:id|code|no|key)$',
     re.IGNORECASE
 )
 

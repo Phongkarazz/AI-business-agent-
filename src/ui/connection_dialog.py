@@ -4,11 +4,7 @@ Connection progress and loading modal/view manager with cancellation and retry h
 
 import time
 import streamlit as st
-from src.database.business_upload import (
-    compose_connection_schema,
-    describe_database_target,
-    resolve_database_connection,
-)
+import src.database.business_upload as _biz_upload
 from src.database.schema import auto_extract_schema, clear_schema_caches
 from src.database.query_runner import sanitize_error
 from src.llm.client import get_llm_client, normalize_model_for_openrouter
@@ -75,7 +71,7 @@ def show_connecting_dialog(
         client = get_llm_client(effective_provider, clean_api_key, custom_base_url)
 
         # Bước 2: Database Engine
-        db_desc = describe_database_target(
+        db_desc = _biz_upload.describe_database_target(
             use_demo=use_demo,
             db_host=db_host,
             db_port=db_port,
@@ -83,7 +79,7 @@ def show_connecting_dialog(
             custom_workspace_dir=custom_workspace_dir,
         )
         progress_bar.progress(70, text=f"2/3: Đang kết nối Cơ sở dữ liệu: {db_desc}...")
-        engine, knowledge, dialect, _desc, resolved_is_demo = resolve_database_connection(
+        engine, knowledge, dialect, _desc, resolved_is_demo = _biz_upload.resolve_database_connection(
             use_demo=use_demo,
             db_host=db_host,
             db_port=db_port,
@@ -104,7 +100,7 @@ def show_connecting_dialog(
         except Exception:
             pass
         extracted_schema = auto_extract_schema(engine, force_refresh=True)
-        final_schema = compose_connection_schema(
+        final_schema = _biz_upload.compose_connection_schema(
             extracted_schema, schema_context_input, knowledge
         )
 
