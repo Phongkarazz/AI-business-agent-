@@ -2028,6 +2028,60 @@ def build_catalog_listing_sql_spec(
     }
 
 
+def _resolve_fact_dim_join(
+    fact_tp: Any,
+    dim_tp: Any,
+    join_graph: Sequence[str] = (),
+    preferred_fact_col_rx: Optional[str] = None,
+) -> Optional[Tuple[str, str, bool]]:
+    """Resolve (fact_col, dim_col, use_norm_vn) from same-name keys or heterogeneous join_graph edges."""
+    if fact_tp is None or dim_tp is None:
+        return None
+    f_name = fact_tp.table_name
+    d_name = dim_tp.table_name
+    f_cols = [getattr(c, "sql_name", str(c)) for c in getattr(fact_tp, "columns", [])]
+
+    edge_pairs: List[Tuple[str, str]] = []
+    for edge in join_graph or ():
+        m_edge = re.match(
+            r"^\s*([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*=\s*([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)",
+            str(edge or ""),
+        )
+        if not m_edge:
+            continue
+        t1, c1, t2, c2 = m_edge.group(1), m_edge.group(2), m_edge.group(3), m_edge.group(4)
+        if t1.lower() == f_name.lower() and t2.lower() == d_name.lower():
+            edge_pairs.append((c1, c2))
+        elif t2.lower() == f_name.lower() and t1.lower() == d_name.lower():
+            edge_pairs.append((c2, c1))
+
+    if preferred_fact_col_rx:
+        pref_rx = re.compile(preferred_fact_col_rx, re.IGNORECASE)
+        for fc, dc in edge_pairs:
+            if pref_rx.search(fc):
+                use_norm = bool(re.search(r"(?:ten_?goi|biet_?danh|hay_?goi|tho|khach|ten)", f"{fc}_{dc}", re.I))
+                return fc, dc, use_norm
+        jk_same = _find_join_key(fact_tp, dim_tp)
+        if jk_same and pref_rx.search(jk_same):
+            return jk_same, jk_same, False
+        # e.g. 'tho_phu' on fact matching 'ten_goi' on danhsachtho when join_graph mapped 'tho = ten_goi'
+        for fc in f_cols:
+            if pref_rx.search(fc):
+                for _, dc in edge_pairs:
+                    if re.search(r"(?:ten_?goi|biet_?danh|hay_?goi)", dc, re.I):
+                        return fc, dc, True
+        return None
+
+    jk_same = _find_join_key(fact_tp, dim_tp)
+    if jk_same:
+        return jk_same, jk_same, False
+    if edge_pairs:
+        fc, dc = edge_pairs[0]
+        use_norm = bool(re.search(r"(?:ten_?goi|biet_?danh|hay_?goi|tho|khach|ten)", f"{fc}_{dc}", re.I))
+        return fc, dc, use_norm
+    return None
+
+
 def build_entity_and_metric_listing_sql_spec(
     question: str,
     knowledge: WorkspaceKnowledge,
@@ -2035,9 +2089,9 @@ def build_entity_and_metric_listing_sql_spec(
     entity_matches: Sequence[Tuple[str, str, str]] = (),
 ) -> Optional[Dict[str, Any]]:
     """
-    Build deterministic SQL + metadata for two-part queries asking for BOTH a list of entities
-    AND an aggregated metric (e.g. 'Nhà cung cấp Sanofi VN đã nhập những loại thuốc nào và tổng tiền nhập là bao nhiêu?').
-    Ensures the SQL always selects the entity name column, primary metric column (first numeric col), and optional qty col.
+    Build deterministic SQL + metadata for two-part queries asking for BOTH a list/Top-K of entities
+    AND an aggregated metric (e.g. 'Nhà cung cấp Sanofi VN đã nhập những loại thuốc nào và tổng tiền nhập là bao nhiêu?'
+    or 'Top 5 thợ chính đem về tổng tiền dịch vụ cao nhất kèm doanh thu từng người?').
     """
     if not knowledge or not getattr(knowledge, "workspace", None):
         return None
@@ -2054,16 +2108,26 @@ def build_entity_and_metric_listing_sql_spec(
     if not qn:
         return None
 
+    top_m = re.search(r"\btop\s*(\d+)\b", qn)
+    limit_k = int(top_m.group(1)) if top_m else None
+
+    _ent_noun_alt = (
+        r"(?:thuoc|vat\s+lieu|mat\s+hang|san\s+pham|mon|dich\s+vu|hang\s+hoa|"
+        r"khach(?:\s+hang)?|nha\s+cung\s+cap|ncc|kenh(?:\s+ban)?|nhom(?:\s+mon|\s+hang|\s+thuoc)?|"
+        r"nhan\s+vien|tho(?:\s+chinh|\s+phu)?|ky\s+thuat\s+vien|ktv|phong)"
+    )
     has_entity_list_ask = bool(
         re.search(
-            r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|nhom\s+|ma\s+)?(?:thuoc|vat\s+lieu|mat\s+hang|san\s+pham|mon|hang\s+hoa|khach(?:\s+hang)?|nha\s+cung\s+cap|ncc|kenh(?:\s+ban)?|nhom(?:\s+mon|\s+hang|\s+thuoc)?|nhan\s+vien)\s+nao\b|"
-            r"\b(?:danh\s+sach|liet\s+ke)\b[^?]{0,80}\b(?:thuoc|vat\s+lieu|mat\s+hang|san\s+pham|mon|hang\s+hoa|khach(?:\s+hang)?|nha\s+cung\s+cap|ncc|kenh(?:\s+ban)?|nhom|nhan\s+vien)\b)",
+            rf"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|nhom\s+|ma\s+)?{_ent_noun_alt}\s+nao\b|"
+            rf"\b(?:danh\s+sach|liet\s+ke)\b[^?]{{0,80}}\b{_ent_noun_alt}\b|"
+            rf"\btop\s*\d+\s+(?:ten\s+|loai\s+|nhom\s+|ma\s+)?{_ent_noun_alt}\b)",
             qn,
         )
     )
     has_agg_metric_ask = bool(
         re.search(
-            r"(?:\bva\b|,|\bkem\b)\s*(?:tong\s+)?(?:tien\s+nhap|gia\s+tri\s+nhap|doanh\s+thu|doanh\s+so|thanh\s+tien|so\s+luong(?:\s+nhap|\s+ban)?|cong\s+no|con\s+no|tong\s+tien|so\s+tien|chi\s+tieu|chi\s+phi)\b",
+            r"(?:(?:\bva\b|,|\bkem\b)\s*(?:tong\s+)?(?:tien\s+nhap|gia\s+tri\s+nhap|tien\s+dich\s+vu|tien\s+hang|doanh\s+thu|doanh\s+so|thanh\s+tien|so\s+luong(?:\s+nhap|\s+ban)?|cong\s+no|con\s+no|tong\s+tien|so\s+tien|chi\s+tieu|chi\s+phi)\b|"
+            r"\b(?:dem\s+ve|mang\s+lai)\s+(?:tong\s+)?(?:tien(?:\s+dich\s+vu|\s+hang)?|doanh\s+thu|doanh\s+so|gia\s+tri)\b)",
             qn,
         )
     )
@@ -2075,7 +2139,7 @@ def build_entity_and_metric_listing_sql_spec(
     wants_qty = bool(re.search(r"\b(?:so\s+luong|sl\b|so\s+hop|so\s+chai|so\s+goi|so\s+vien)\b", qn))
     wants_money = bool(
         re.search(
-            r"\b(?:tien\s+nhap|gia\s+tri\s+nhap|doanh\s+thu|doanh\s+so|thanh\s+tien|tong\s+tien|so\s+tien|chi\s+tieu|chi\s+phi|cong\s+no|con\s+no)\b",
+            r"\b(?:tien\s+nhap|gia\s+tri\s+nhap|tien\s+dich\s+vu|tien\s+hang|doanh\s+thu|doanh\s+so|thanh\s+tien|tong\s+tien|so\s+tien|chi\s+tieu|chi\s+phi|cong\s+no|con\s+no|gia\s+tri)\b",
             qn,
         )
     )
@@ -2107,25 +2171,38 @@ def build_entity_and_metric_listing_sql_spec(
         "tien_hang", "tienhang", "tong_doanh_thu", "revenue", "total_revenue",
         "sales", "total_sales", "amount", "total_amount", "gia_tri", "profit",
         "loi_nhuan", "salary", "chi_phi",
+        "tien_dich_vu", "t_tien", "tong_bill", "tien", "tong", "da_thu",
     )
     qty_priority = ("so_luong_nhap", "so_luong", "soluong", "sl", "qty", "quantity", "so_hop", "boxes")
     debt_priority = ("con_no", "cong_no", "chua_tra", "con_thieu", "debt")
 
     best_fact = None
-    best_fact_score = -1
+    best_fact_score = -10**9
     for tp in tables_list:
         tlow = tp.table_name.lower()
         cols_l = {getattr(c, "sql_name", str(c)).lower() for c in tp.columns}
+        has_date_col = any(
+            getattr(c, "inferred_type", "") in ("date", "datetime")
+            or re.search(r"(?:^|_)(?:ngay|thoi_?gian|date)", getattr(c, "sql_name", str(c)).lower())
+            for c in tp.columns
+        )
+        has_money_col = any(m in cols_l for m in money_priority)
         sc = 0
+        if not wants_import and re.search(r"^(?:danh_?(?:sach|ba|muc)|dm_|bang_?gia|quy_?doi|ton_?kho)", tlow):
+            sc -= 50
         if wants_import and (re.search(r"(?:phieu_?nhap|nhap_?hang)", tlow) or ("gia_nhap" in cols_l and "nha_cung_cap" in cols_l)):
             sc += 120
         elif wants_debt and (any(d in cols_l for d in debt_priority) or "da_thanh_toan" in cols_l or "da_tra" in cols_l):
             sc += 110
         elif not wants_import and not wants_debt and tlow in tx_names_low:
             sc += 100
+        elif not wants_import and not wants_debt and has_date_col and has_money_col:
+            sc += 75
+            if re.search(r"(?:so_?thu|ban_?hang|phieu_?dv|soban)", tlow):
+                sc += 15
         if any(f_tbl == tp.table_name for f_tbl, _, _ in matched_filters):
             sc += 60
-        if any(m in cols_l for m in money_priority) or ("gia_nhap" in cols_l and any(q in cols_l for q in qty_priority)):
+        if has_money_col or ("gia_nhap" in cols_l and any(q in cols_l for q in qty_priority)):
             sc += 30
         if re.search(r"(?:don_?hang|hoa_?don|chi_?tiet)", tlow):
             sc += 10
@@ -2193,39 +2270,60 @@ def build_entity_and_metric_listing_sql_spec(
     if not metric_expr or not metric_alias:
         return None
 
-    # 3. Pick requested entity column (excluding columns actively used as WHERE filters)
-    candidate_tables: List[Tuple[Any, Optional[str]]] = [(best_fact, None)]
+    # 3. Pick requested entity column (prefer linked directory full names for staff/customers!)
+    asks_staff_sub = bool(re.search(r"\btho\s+phu\b", qn))
+    asks_staff = bool(re.search(r"\b(?:tho(?:\s+chinh|\s+phu)?|ky\s+thuat\s+vien|ktv|nhan\s+vien)\b", qn))
+    asks_customer = bool(re.search(r"\bkhach(?:\s+hang)?\b", qn))
+    pref_fact_rx = (
+        r"^tho_?phu$"
+        if asks_staff_sub
+        else (r"^(?:tho_?chinh|tho|ktv|nhan_?vien|ma_?nv)$" if asks_staff else None)
+    )
+
+    dir_candidates: List[Tuple[Any, Optional[Tuple[str, str, bool]]]] = []
+    fact_candidate: List[Tuple[Any, Optional[Tuple[str, str, bool]]]] = [(best_fact, None)]
     for tp in tables_list:
         if tp.table_name == best_fact.table_name:
             continue
-        jk = _find_join_key(best_fact, tp)
-        if jk:
-            candidate_tables.append((tp, jk))
+        tlow = tp.table_name.lower()
+        if asks_staff and re.search(r"(?:khach|danh_?ba)", tlow):
+            continue
+        if asks_customer and not asks_staff and re.search(r"(?:tho|nhan_?vien|ktv)", tlow):
+            continue
+        j_info = _resolve_fact_dim_join(
+            best_fact, tp, knowledge.join_graph or (), preferred_fact_col_rx=pref_fact_rx
+        )
+        if j_info is not None:
+            dir_candidates.append((tp, j_info))
+
+    candidate_tables = (dir_candidates + fact_candidate) if (asks_staff or asks_customer) else (fact_candidate + dir_candidates)
 
     filtered_cols_on_tbl = {(ftbl, fcol.lower()) for ftbl, fcol, _ in matched_filters}
-    # If question asks about a filter entity phrase like 'nha cung cap Sanofi VN', do not group by nha_cung_cap
     entity_noun_rules = (
-        (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?thuoc\b|danh\s+sach[^?]*thuoc\b)", r"^(?:ten_?thuoc|thuoc)$"),
-        (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?mon\b|danh\s+sach[^?]*mon\b)", r"^(?:ten_?mon|mon)$"),
+        (r"\btho\s+phu\b", r"^(?:ho_?ten|ho_?va_?ten|ten_?tho|tho_?phu)$"),
+        (r"\b(?:tho(?:\s+chinh)?|ky\s+thuat\s+vien|ktv|nhan\s+vien)\b", r"^(?:ho_?ten|ho_?va_?ten|ten_?nv|ten_?tho|nhan_?vien|tho_?chinh|tho)$"),
+        (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?thuoc\b|danh\s+sach[^?]*thuoc\b|\btop\s*\d+[^?]*thuoc\b)", r"^(?:ten_?thuoc|thuoc)$"),
+        (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?mon\b|danh\s+sach[^?]*mon\b|\btop\s*\d+[^?]*mon\b)", r"^(?:ten_?mon|mon)$"),
         (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?vat\s+lieu\b|danh\s+sach[^?]*vat\s+lieu\b)", r"^(?:ten_?vl|ten_?vat_?lieu|vat_?lieu)$"),
-        (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?(?:san\s+pham|mat\s+hang|hang\s+hoa)\b|danh\s+sach[^?]*(?:san\s+pham|mat\s+hang)\b)", r"^(?:ten_?san_?pham|ten_?hang|ten_?sp|ten_?thuoc|ten_?mon|ten_?vl|san_?pham|productname|product)$"),
-        (r"(?:(?:nhung|cac)\s+(?:ten\s+)?khach(?:\s+hang)?\s+nao\b|danh\s+sach[^?]*khach(?:\s+hang)?\b)", r"^(?:ten_?khach_?hang|khach_?hang|ten_?kh|customer|companyname)$"),
-        (r"(?:(?:nhung|cac)\s+(?:ten\s+)?(?:nha\s+cung\s+cap|ncc)\s+nao\b|danh\s+sach[^?]*(?:nha\s+cung\s+cap|ncc)\b)", r"^(?:nha_?cung_?cap|ten_?ncc|supplier|companyname)$"),
+        (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?dich\s+vu\b|danh\s+sach[^?]*dich\s+vu\b|\btop\s*\d+[^?]*dich\s+vu\b)", r"^(?:ten_?dich_?vu|dich_?vu)$"),
+        (r"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|ma\s+)?(?:san\s+pham|mat\s+hang|hang\s+hoa)\b|danh\s+sach[^?]*(?:san\s+pham|mat\s+hang)\b|\btop\s*\d+[^?]*(?:san\s+pham|mat\s+hang|hang\s+hoa)\b)", r"^(?:ten_?san_?pham|ten_?hang|ten_?sp|ten_?thuoc|ten_?mon|ten_?vl|san_?pham|productname|product)$"),
+        (r"(?:(?:nhung|cac)\s+(?:ten\s+)?khach(?:\s+hang)?\s+nao\b|danh\s+sach[^?]*khach(?:\s+hang)?\b|\btop\s*\d+[^?]*khach(?:\s+hang)?\b)", r"^(?:ten_?khach_?hang|khach_?hang|ten_?kh|ho_?ten|customer|companyname)$"),
+        (r"(?:(?:nhung|cac)\s+(?:ten\s+)?(?:nha\s+cung\s+cap|ncc)\s+nao\b|danh\s+sach[^?]*(?:nha\s+cung\s+cap|ncc)\b|\btop\s*\d+[^?]*(?:nha\s+cung\s+cap|ncc)\b)", r"^(?:nha_?cung_?cap|ten_?ncc|supplier|companyname)$"),
         (r"(?:(?:nhung|cac)\s+(?:ten\s+)?kenh(?:\s+ban)?\s+nao\b|danh\s+sach[^?]*kenh\b)", r"^(?:kenh_?ban|kenh|channel)$"),
         (r"(?:(?:nhung|cac)\s+(?:ten\s+)?nhom(?:\s+mon|\s+hang|\s+thuoc)?\s+nao\b)", r"^(?:nhom_?mon|nhom_?hang|nhom_?thuoc|danh_?muc|category|categoryname)$"),
     )
 
-    dim_pick: Optional[Tuple[Any, str, Optional[str]]] = None
+    dim_pick: Optional[Tuple[Any, str, Optional[Tuple[str, str, bool]]]] = None
     for q_pat, c_pat in entity_noun_rules:
         if re.search(q_pat, qn):
             rx = re.compile(c_pat, re.IGNORECASE)
-            for tp, jk in candidate_tables:
+            for tp, j_info in candidate_tables:
                 for col in tp.columns:
                     cname = getattr(col, "sql_name", str(col))
                     if (tp.table_name, cname.lower()) in filtered_cols_on_tbl:
                         continue
                     if rx.search(cname.lower()):
-                        dim_pick = (tp, cname, jk)
+                        dim_pick = (tp, cname, j_info)
                         break
                 if dim_pick is not None:
                     break
@@ -2234,16 +2332,16 @@ def build_entity_and_metric_listing_sql_spec(
 
     if dim_pick is None:
         fallback_item_rx = re.compile(
-            r"^(?:ten_?thuoc|ten_?mon|ten_?san_?pham|ten_?hang|ten_?sp|ten_?vl|vat_?lieu|ten_?khach_?hang|khach_?hang|nha_?cung_?cap|kenh_?ban|nhom_?mon|nhom_?hang)$",
+            r"^(?:ten_?thuoc|ten_?mon|ten_?san_?pham|ten_?hang|ten_?sp|ten_?vl|vat_?lieu|ten_?khach_?hang|khach_?hang|nha_?cung_?cap|kenh_?ban|nhom_?mon|nhom_?hang|dich_?vu|tho)$",
             re.IGNORECASE,
         )
-        for tp, jk in candidate_tables:
+        for tp, j_info in candidate_tables:
             for col in tp.columns:
                 cname = getattr(col, "sql_name", str(col))
                 if (tp.table_name, cname.lower()) in filtered_cols_on_tbl:
                     continue
                 if fallback_item_rx.search(cname.lower()):
-                    dim_pick = (tp, cname, jk)
+                    dim_pick = (tp, cname, j_info)
                     break
             if dim_pick is not None:
                 break
@@ -2251,12 +2349,21 @@ def build_entity_and_metric_listing_sql_spec(
     if dim_pick is None:
         return None
 
-    dim_tbl, dim_col, dim_jk = dim_pick
-    joined_tables: Dict[str, Tuple[str, str]] = {}  # tbl_name -> (alias, join_key)
+    dim_tbl, dim_col, dim_j_info = dim_pick
+    # t_name -> (alias, f_col, d_col, use_left_join, use_norm)
+    joined_tables: Dict[str, Tuple[str, str, str, bool, bool]] = {}
     dim_expr = f"f.{_quote_sqlite_ident(dim_col)}"
-    if dim_tbl.table_name != best_fact.table_name and dim_jk:
-        joined_tables[dim_tbl.table_name] = ("d1", dim_jk)
-        dim_expr = f"d1.{_quote_sqlite_ident(dim_col)}"
+    dim_filter_expr = dim_expr
+    if dim_tbl.table_name != best_fact.table_name and dim_j_info is not None:
+        f_jk, d_jk, use_norm = dim_j_info
+        is_opt_dir = bool(re.search(r"danh_?(?:sach|ba)|khach|tho|nhan_?vien|ktv", dim_tbl.table_name.lower())) or use_norm
+        joined_tables[dim_tbl.table_name] = ("d1", f_jk, d_jk, is_opt_dir, use_norm)
+        if f_jk.lower() != dim_col.lower():
+            dim_expr = f"COALESCE(d1.{_quote_sqlite_ident(dim_col)}, f.{_quote_sqlite_ident(f_jk)})"
+            dim_filter_expr = f"f.{_quote_sqlite_ident(f_jk)}"
+        else:
+            dim_expr = f"d1.{_quote_sqlite_ident(dim_col)}"
+            dim_filter_expr = dim_expr
 
     # Attach matched filters whose table is either best_fact or reachable via join key
     where_conds: List[str] = []
@@ -2271,12 +2378,12 @@ def build_entity_and_metric_listing_sql_spec(
                 t_alias = joined_tables[f_tbl][0]
             else:
                 f_tp = tables_dict.get(f_tbl)
-                f_jk = _find_join_key(best_fact, f_tp) if f_tp is not None else None
-                if not f_jk:
+                f_j_info = _resolve_fact_dim_join(best_fact, f_tp, knowledge.join_graph or ()) if f_tp is not None else None
+                if not f_j_info:
                     continue
                 t_alias = f"d{next_alias_idx}"
                 next_alias_idx += 1
-                joined_tables[f_tbl] = (t_alias, f_jk)
+                joined_tables[f_tbl] = (t_alias, f_j_info[0], f_j_info[1], False, f_j_info[2])
             f_expr = f"{t_alias}.{_quote_sqlite_ident(f_col)}"
             where_conds.append(f"NORM_VN({f_expr}) = NORM_VN('{esc_val}')")
 
@@ -2299,27 +2406,33 @@ def build_entity_and_metric_listing_sql_spec(
             w_start, w_end = analysis.bounded_period
             where_conds.append(f"f.{_quote_sqlite_ident(dcol)} BETWEEN '{w_start}' AND '{w_end}'")
 
-    where_conds.append(f"{dim_expr} IS NOT NULL")
-    where_conds.append(f"TRIM(CAST({dim_expr} AS TEXT)) != ''")
+    where_conds.append(f"{dim_filter_expr} IS NOT NULL")
+    where_conds.append(f"TRIM(CAST({dim_filter_expr} AS TEXT)) != ''")
 
-    join_clauses = "".join(
-        f"\nJOIN {_quote_sqlite_ident(t_name)} {t_alias} ON f.{_quote_sqlite_ident(t_jk)} = {t_alias}.{_quote_sqlite_ident(t_jk)}"
-        for t_name, (t_alias, t_jk) in joined_tables.items()
-    )
+    join_clauses = ""
+    for t_name, (t_alias, f_jk, d_jk, use_left, use_norm) in joined_tables.items():
+        jkw = "LEFT JOIN" if use_left else "JOIN"
+        on_expr = (
+            f"NORM_VN(f.{_quote_sqlite_ident(f_jk)}) = NORM_VN({t_alias}.{_quote_sqlite_ident(d_jk)})"
+            if use_norm
+            else f"f.{_quote_sqlite_ident(f_jk)} = {t_alias}.{_quote_sqlite_ident(d_jk)}"
+        )
+        join_clauses += f"\n{jkw} {_quote_sqlite_ident(t_name)} {t_alias} ON {on_expr}"
+
     where_sql = f"\nWHERE {' AND '.join(where_conds)}"
 
-    # Keep primary metric immediately after entity column; optionally include qty column as 3rd column when money was primary
     extra_qty_sel = ""
-    if is_money_metric and qty_col and qty_col in fact_cols:
+    if is_money_metric and qty_col and qty_col in fact_cols and (wants_qty or (analysis.expected_type != "table" and limit_k is None)):
         qty_alias = "tong_so_luong_nhap" if wants_import and qty_col == "so_luong_nhap" else "tong_so_luong"
         extra_qty_sel = f", SUM(f.{_quote_sqlite_ident(qty_col)}) AS {qty_alias}"
 
+    limit_sql = f"\nLIMIT {limit_k}" if limit_k and limit_k > 0 else ""
     fact_ref = _quote_sqlite_ident(best_fact.table_name)
     suggested_sql = (
         f"SELECT {dim_expr} AS {dim_col}, {metric_expr} AS {metric_alias}{extra_qty_sel}\n"
         f"FROM {fact_ref} f{join_clauses}{where_sql}\n"
         f"GROUP BY {dim_expr}\n"
-        f"ORDER BY {metric_alias} DESC, {dim_expr} ASC;"
+        f"ORDER BY {metric_alias} DESC, {dim_expr} ASC{limit_sql};"
     )
     return {
         "fact_table": best_fact.table_name,
@@ -3528,6 +3641,63 @@ def _is_strong_python_first_candidate(question: str, knowledge: WorkspaceKnowled
     return False
 
 
+def is_false_llm_unanswerable(
+    question: str,
+    reason: str,
+    knowledge: WorkspaceKnowledge,
+    had_sql_attempt: bool = False,
+) -> Optional[str]:
+    """Detect when an LLM wrongly returns status='unanswerable' despite answerable tables/columns/joins."""
+    if not knowledge or not getattr(knowledge, "workspace", None):
+        return None
+    if check_out_of_scope_or_irrelevant(question, knowledge) is not None:
+        return None
+
+    tables_dict = getattr(knowledge.workspace, "tables", None) or {}
+    col_owners: Dict[str, List[str]] = {}
+    for tname, tp in tables_dict.items():
+        if int(getattr(tp, "row_count", 0) or 0) <= 0:
+            continue
+        for c in getattr(tp, "columns", []) or []:
+            cn = getattr(c, "sql_name", str(c))
+            col_owners.setdefault(cn.lower(), []).append(f"{tname}.{cn}")
+
+    r_text = reason or ""
+    mentioned_cols = re.findall(
+        r"(?:cột|cot|trường|truong|field)\s+[`'\"«]?([a-zA-Z_][a-zA-Z0-9_]*)[`'\"»]?",
+        r_text,
+        re.IGNORECASE,
+    )
+    found_locations: List[str] = []
+    for mc in mentioned_cols:
+        owners = col_owners.get(mc.lower())
+        if owners:
+            found_locations.append(f"`{mc}` CÓ tại {', '.join(f'`{o}`' for o in owners[:3])}")
+
+    an = classify_expected_type(question)
+    em_spec = build_entity_and_metric_listing_sql_spec(question, knowledge, an)
+    looks_schema_excuse = bool(
+        re.search(r"không\s+có\s+cột|không\s+tồn\s+tại|không\s+đủ|missing\s+column", r_text, re.IGNORECASE)
+    )
+    if not (had_sql_attempt or found_locations or (em_spec is not None and looks_schema_excuse)):
+        return None
+
+    hints: List[str] = []
+    if found_locations:
+        hints.append("; ".join(found_locations))
+    if knowledge.join_graph:
+        hints.append("Liên kết JOIN có sẵn: " + "; ".join(f"`{e}`" for e in knowledge.join_graph[:5]))
+    if em_spec and em_spec.get("suggested_sql"):
+        hints.append("Mẫu SQL tham chiếu:\n```sql\n" + em_spec["suggested_sql"] + "\n```")
+    if not hints:
+        hints.append("Kiểm tra kỹ danh sách cột của tất cả bảng liên kết trong lược đồ SQLite.")
+    return (
+        "CẢNH BÁO TỪ CHỐI NHẦM (`unanswerable` sai): Câu hỏi này CÓ THỂ trả lời từ CSDL hiện tại! "
+        + " | ".join(hints)
+        + '\nHãy `LEFT JOIN` / `JOIN` các bảng trên và trả về `{"status": "ok", "sql": "SELECT ..."}`.'
+    )
+
+
 class DataMateAgent:
     """End-to-end headless DataMate analytics & abstention agent."""
 
@@ -3730,9 +3900,22 @@ class DataMateAgent:
                 s_ref = f'"{src.table_name}"' if (" " in src.table_name or "-" in src.table_name) else src.table_name
                 suggestions.append(f"JOIN {t_ref} ON {s_ref}.{key} = {t_ref}.{key}")
             if not suggestions and knowledge.join_graph:
+                src_names = {s.table_name.lower() for s in src_candidates}
                 tgt_l = tgt.table_name.lower()
                 for edge in knowledge.join_graph:
-                    if tgt_l in edge.lower():
+                    m_e = re.match(
+                        r"^\s*([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*=\s*([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)",
+                        edge,
+                    )
+                    if m_e:
+                        t1, c1, t2, c2 = m_e.group(1), m_e.group(2), m_e.group(3), m_e.group(4)
+                        if t1.lower() == tgt_l and (not src_names or t2.lower() in src_names):
+                            suggestions.append(f"LEFT JOIN {t1} ON NORM_VN({t2}.{c2}) = NORM_VN({t1}.{c1})")
+                            break
+                        if t2.lower() == tgt_l and (not src_names or t1.lower() in src_names):
+                            suggestions.append(f"LEFT JOIN {t2} ON NORM_VN({t1}.{c1}) = NORM_VN({t2}.{c2})")
+                            break
+                    elif tgt_l in edge.lower():
                         suggestions.append(edge)
                         break
             if not suggestions:
@@ -3869,7 +4052,9 @@ class DataMateAgent:
             f"{temp_block}"
             f"Tham khảo lược đồ & quy ước dưới đây để sửa:\n"
             f"{schema_block}\n\n"
-            f"Hãy SỬA LẠI đúng tên bảng và cột trong lược đồ trên (tên bảng có khoảng trắng phải đặt trong ngoặc kép `\"...\"`) và {out_fmt_hint}."
+            f"Hãy SỬA LẠI đúng tên bảng và cột trong lược đồ trên (tên bảng có khoảng trắng phải đặt trong ngoặc kép `\"...\"`) và {out_fmt_hint}.\n"
+            f'LƯU Ý BẮT BUỘC: CSDL ĐÃ CÓ ĐỦ DỮ LIỆU CHO CÂU HỎI NÀY — TUYỆT ĐỐI KHÔNG đổi sang `{{"status": "unanswerable"}}` khi đang sửa lỗi SQL! '
+            f'Hãy `JOIN` / `LEFT JOIN` đúng bảng liên kết và xuất `{{"status": "ok", "sql": "SELECT ..."}}`.'
         )
 
     def _fallback_llm_format(
@@ -4182,9 +4367,71 @@ class DataMateAgent:
                     pass
 
             if obj and obj.get("status") == "unanswerable":
+                unans_reason = str(obj.get("reason") or "Dữ liệu không đủ để trả lời.")
+                false_hint = is_false_llm_unanswerable(
+                    resolved_question,
+                    unans_reason,
+                    knowledge,
+                    had_sql_attempt=bool(last_sql_text),
+                )
+                if false_hint:
+                    if attempt + 1 < self.config.max_sql_retries:
+                        if last_sql_res is not None and not last_sql_res.ok:
+                            prompt_to_send = (
+                                self._build_repair_prompt(
+                                    resolved_question,
+                                    last_sql_text,
+                                    last_sql_res.error,
+                                    knowledge,
+                                    temporal_summary=effective_temp_summary,
+                                    include_full_schema=True,
+                                    entity_matches=entities,
+                                )
+                                + f"\n\n{false_hint}"
+                            )
+                        else:
+                            prompt_to_send = f"{prompt_to_send}\n\n{false_hint}"
+                        continue
+                    for spec_fn in (
+                        lambda: build_extreme_comparison_sql_spec(resolved_question, knowledge, analysis) if analysis.extreme_comparison else None,
+                        lambda: build_benchmark_average_entity_sql_spec(resolved_question, knowledge, analysis),
+                        lambda: build_entity_and_metric_listing_sql_spec(resolved_question, knowledge, analysis, entities),
+                        lambda: build_catalog_listing_sql_spec(resolved_question, knowledge, analysis, entities),
+                    ):
+                        sp = spec_fn()
+                        if not sp or not sp.get("suggested_sql"):
+                            continue
+                        fb_res = execute_sql_safe(
+                            knowledge.workspace.open_connection,
+                            sp["suggested_sql"],
+                            valid_tables=knowledge.valid_tables,
+                            datetime_columns=tuple(knowledge.datetime_columns),
+                            max_rows=self.config.max_rows,
+                            timeout_seconds=self.config.sql_timeout_seconds,
+                        )
+                        if fb_res.ok and fb_res.row_count > 0:
+                            sem_ok_fb, _, _ = verify_sql_semantics(
+                                fb_res.sql or sp["suggested_sql"],
+                                fb_res,
+                                resolved_question,
+                                knowledge,
+                                analysis,
+                                entity_matches=entities,
+                            )
+                            if sem_ok_fb:
+                                pred_fb = format_sql_result(fb_res, analysis, resolved_question)
+                                if pred_fb:
+                                    return self._finalize_prediction(
+                                        qid,
+                                        pred_fb,
+                                        sql_res=fb_res,
+                                        attempts=attempts,
+                                        confidence=0.85,
+                                        extra_notes=["Recovered from false LLM unanswerable via deterministic join spec."],
+                                    )
                 return self._finalize_prediction(
                     qid,
-                    {"type": "unanswerable", "reason": str(obj.get("reason") or "Dữ liệu không đủ để trả lời.")},
+                    {"type": "unanswerable", "reason": unans_reason},
                     sql_res=last_sql_res,
                     attempts=attempts,
                     confidence=0.75,

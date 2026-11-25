@@ -30,6 +30,7 @@ from datamate.agent import (
     extract_temporal_context,
     format_effective_temporal_summary,
     format_sql_result,
+    is_false_llm_unanswerable,
     normalize_vn_question,
     resolve_conversational_retraction,
     rewrite_ranked_entity_sql,
@@ -1574,20 +1575,32 @@ def run_datamate_enhanced_turn(
         resolved_fb = False
         obj = extract_json_object(raw_reply)
         if obj and obj.get("status") == "unanswerable":
-            # Do not abort early if we are actively repairing a SQL syntax/table typo and still have retries left
-            if attempt > 0 and last_res is not None and not last_res.ok and (attempt + 1 < max_retries):
-                result["logs"].append("⚠️ Model trả unanswerable khi đang sửa lỗi SQL — thử sửa lại với lược đồ rút gọn.")
-                prompt_to_send = dm_agent._build_repair_prompt(
-                    effective_query,
-                    last_sql_text,
-                    last_res.error,
-                    knowledge,
-                    temporal_summary=effective_temp_summary,
-                    include_full_schema=False,
-                    entity_matches=entities,
-                )
+            reason_raw = str(obj.get("reason") or "")
+            false_hint = is_false_llm_unanswerable(
+                effective_query,
+                reason_raw,
+                knowledge,
+                had_sql_attempt=(last_res is not None),
+            )
+            # Do not abort early if the unanswerable claim contradicts existing columns/joins or retries remain
+            if (false_hint or (attempt > 0 and last_res is not None and not last_res.ok)) and (attempt + 1 < max_retries):
+                result["logs"].append("⚠️ Model từ chối nhầm (`unanswerable`) khi đang suy luận nối bảng — tự động hướng dẫn sửa lại.")
+                if last_res is not None and not last_res.ok:
+                    prompt_to_send = dm_agent._build_repair_prompt(
+                        effective_query,
+                        last_sql_text,
+                        last_res.error,
+                        knowledge,
+                        temporal_summary=effective_temp_summary,
+                        include_full_schema=True,
+                        entity_matches=entities,
+                    )
+                    if false_hint:
+                        prompt_to_send = f"{prompt_to_send}\n\n{false_hint}"
+                else:
+                    prompt_to_send = f"{prompt_to_send}\n\n{false_hint or ''}"
                 continue
-            fb_out = _try_extreme_fallback(f"Model trả unanswerable ({obj.get('reason') or ''})")
+            fb_out = _try_extreme_fallback(f"Model trả unanswerable ({reason_raw})")
             if fb_out is not None:
                 res, last_sql_text, sem_ok, last_sem_msg = fb_out
                 resolved_fb = True
