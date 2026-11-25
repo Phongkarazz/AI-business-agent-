@@ -1,9 +1,9 @@
 """
-Official Penalized Accuracy (PA) evaluator for Zalo AI Challenge 2026 - DataMate.
+Veraxus Penalized Accuracy (PA) benchmark evaluator.
 
 Implements exact scoring, format validation, Unicode NFC string normalization,
 alias acceptance, list order matching, set-based table matching, and per-type
-diagnostics from ``Datamate_regulations.pdf`` (pages 2-4) and ``rulebook.md``.
+diagnostics per the Veraxus evaluation specification.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}(?:-\d{2})?$")
 
 def normalize_datamate_string(value: Any) -> str:
     """
-    Normalize a string according to DataMate regulation (page 3):
+    Normalize a string according to the Veraxus evaluation specification:
     1. Unicode NFC;
     2. Lowercase;
     3. Every character that is not a letter, a digit, or whitespace -> space;

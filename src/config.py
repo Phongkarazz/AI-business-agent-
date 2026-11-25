@@ -87,6 +87,8 @@ PROVIDER_CONFIGS = {
     },
     "Ollama (Local AI Offline)": {
         "models": [
+            "veraxus-coder:3b",
+            "veraxus-coder:7b",
             "qwen2.5-coder:3b",
             "qwen2.5-coder:1.5b",
             "qwen2.5-coder:7b",

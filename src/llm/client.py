@@ -248,8 +248,19 @@ def _call_openai_compatible_impl(
     try:
         completion = client.chat.completions.create(**create_kwargs)
     except Exception as exc:
-        if use_ollama_opts and ("extra_body" in str(exc) or "options" in str(exc) or isinstance(exc, TypeError)):
+        err_low = str(exc).lower()
+        if use_ollama_opts and ("extra_body" in err_low or "options" in err_low or isinstance(exc, TypeError)):
             create_kwargs.pop("extra_body", None)
+            try:
+                completion = client.chat.completions.create(**create_kwargs)
+            except Exception as exc2:
+                if model_name.startswith("veraxus-coder:") and ("not found" in str(exc2).lower() or "404" in str(exc2).lower()):
+                    create_kwargs["model"] = "qwen2.5-coder:3b"
+                    completion = client.chat.completions.create(**create_kwargs)
+                else:
+                    raise
+        elif use_ollama_opts and model_name.startswith("veraxus-coder:") and ("not found" in err_low or "404" in err_low):
+            create_kwargs["model"] = "qwen2.5-coder:3b"
             completion = client.chat.completions.create(**create_kwargs)
         else:
             raise

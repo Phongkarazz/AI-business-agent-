@@ -7,12 +7,12 @@ import pathlib
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 VAL_BUSINESS_IDS: Tuple[str, ...] = (
-    "biz_105",  # multi-table cafe .xlsx + unit conversions + subtotals/dupes + unanswerable
-    "biz_109",  # multi-table retail .xlsx + table + boolean + unanswerable
-    "biz_110",  # single-table .csv + daily subtotals
-    "biz_118",  # building materials .xlsx + delivery schedules + aging debt + unanswerable
-    "biz_123",  # POS .sqlite database (17 tables, dirty NgayLap) + table + boolean + unanswerable
-    "biz_127",  # multi-file .csv + deduped orders + table
+    "biz_105",
+    "biz_109",
+    "biz_110",
+    "biz_118",
+    "biz_123",
+    "biz_127",
 )
 
 VAL_BUSINESS_SET = frozenset(VAL_BUSINESS_IDS)

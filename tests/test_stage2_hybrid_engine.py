@@ -39,7 +39,7 @@ class TestStage2HybridEngine(unittest.TestCase):
             bdir = root / "sme_stage2"
             bdir.mkdir()
 
-            # Table with cham_cong + nghi_phep, product 'Bia Sài Gòn Xanh 330', lich_thue with short 'khach',
+            # Table with cham_cong + nghi_phep, product 'Nước khoáng LaVie 500ml', lich_thue with short 'khach',
             # and sothutien with zero-padded 'P.09 (lầu 2)'
             wb = openpyxl.Workbook()
             sh_att = wb.active
@@ -52,13 +52,13 @@ class TestStage2HybridEngine(unittest.TestCase):
             sh_np.append(["NV01", "P", "2026-03-02"])
             sh_lt = wb.create_sheet("Lịch thuê")
             sh_lt.append(["Phiếu", "Khách", "Mã đồ", "Ngày lấy"])
-            sh_lt.append(["P001", "Lâm Mỹ", "VC22", "2026-03-05"])
+            sh_lt.append(["P001", "Trần Khang", "GD01", "2026-03-05"])
             sh_ban = wb.create_sheet("Sổ bán hàng")
             sh_ban.append(["Mã đơn", "Ngày", "Tên hàng", "Thành tiền", "Trạng thái"])
-            sh_ban.append(["D01", "15/11/2025", "Bia Sài Gòn Xanh 330", "240k", "Hoàn thành"])
+            sh_ban.append(["D01", "15/11/2025", "Nước khoáng LaVie 500ml", "240k", "Hoàn thành"])
             sh_pt = wb.create_sheet("Sổ thu tiền")
             sh_pt.append(["Phòng", "Tên", "Điện mới", "Ngày thu"])
-            sh_pt.append(["P.09 (lầu 2)", "Tuyết Hưng", "7781", "21/10/2025"])
+            sh_pt.append(["P.09 (lầu 2)", "Minh Tâm", "7781", "21/10/2025"])
             wb.save(bdir / "Data.xlsx")
 
             ws = load_business_workspace(bdir, cache_dir=root / "cache", force_rebuild=True)
@@ -69,10 +69,10 @@ class TestStage2HybridEngine(unittest.TestCase):
 
             # All 4 previous false positives must return None (answerable)
             for q_ok, as_of in (
-                ("kho còn bao nhiêu tiền vốn nằm ở hàng lấy từ bên Giang Huệ?", "2026-06-06"),
+                ("kho còn bao nhiêu tiền vốn nằm ở hàng lấy từ bên Minh Phát?", "2026-06-06"),
                 ("hôm cả cty nhiều người nghỉ phép nhất tháng này, có bao nhiêu người đi làm", "2026-03-10"),
-                ("bia sài gòn xanh 330 bán nguyên thùng quý 4/2025 dc bnhiu tiền", "2026-07-31"),
-                ("tiệm có giao bộ VC22 cho khách nào ko, tuần rồi?", "2026-03-11"),
+                ("nước khoáng lavie 500ml bán nguyên thùng quý 4/2025 dc bnhiu tiền", "2026-07-31"),
+                ("tiệm có giao bộ GD01 cho khách nào ko, tuần rồi?", "2026-03-11"),
             ):
                 ana = classify_expected_type(q_ok)
                 self.assertIsNone(
@@ -169,11 +169,11 @@ class TestStage2HybridEngine(unittest.TestCase):
             bdir = root / "pawn_compound"
             bdir.mkdir()
             (bdir / "socamdo.csv").write_text(
-                "so_bn,ngay_cam,mon_cam,tien_cam\nBN0528,23/01/2026,Samsung S21,4200000\n",
+                "so_bn,ngay_cam,mon_cam,tien_cam\nHD0102,23/01/2026,Samsung S21,4200000\n",
                 encoding="utf-8",
             )
             (bdir / "sothuchi.csv").write_text(
-                "ngay,so_bn,noi_dung,so_tien\n18/05/2026,BN0528,thanh lý,3900000\n",
+                "ngay,so_bn,noi_dung,so_tien\n18/05/2026,HD0102,thanh lý,3900000\n",
                 encoding="utf-8",
             )
             (bdir / "sochi.csv").write_text(
@@ -198,7 +198,7 @@ class TestStage2HybridEngine(unittest.TestCase):
             self.assertTrue(py_res.ok, msg=py_res.error)
             self.assertEqual(py_res.rows, [(865000,)])
 
-            # Cross-table deterministic probe fetches BN0528 from both socamdo & sothuchi
+            # Cross-table deterministic probe fetches HD0102 from both socamdo & sothuchi
             ents = ground_query_entities("món Samsung S21 cầm 23/01/2026 lúc thanh lý bán được bao nhiêu", know)
             probe_txt = run_deterministic_probes("món Samsung S21 cầm 23/01/2026 lúc thanh lý bán được bao nhiêu", know, ents)
             self.assertIn("socamdo", probe_txt)
@@ -211,8 +211,8 @@ class TestStage2HybridEngine(unittest.TestCase):
             def mock_hybrid(prompt: str, system_prompt: str) -> str:
                 seen_prompts.append(prompt)
                 if len(seen_prompts) == 1:
-                    return '{"status": "probe", "probe_sql": "SELECT noi_dung, so_tien FROM sothuchi WHERE so_bn = \'BN0528\'"}'
-                return '{"status": "ok", "python": "df = query_df(\\"SELECT so_tien FROM sothuchi WHERE so_bn=\'BN0528\' AND noi_dung=\'thanh lý\'\\")\\nresult = int(df[\'so_tien\'].iloc[0])"}'
+                    return '{"status": "probe", "probe_sql": "SELECT noi_dung, so_tien FROM sothuchi WHERE so_bn = \'HD0102\'"}'
+                return '{"status": "ok", "python": "df = query_df(\\"SELECT so_tien FROM sothuchi WHERE so_bn=\'HD0102\' AND noi_dung=\'thanh lý\'\\")\\nresult = int(df[\'so_tien\'].iloc[0])"}'
 
             agent = DataMateAgent(backend=MockLLMBackend(mock_hybrid), config=AgentConfig(max_sql_retries=2, max_probe_steps=1))
             ans = agent.answer_question(

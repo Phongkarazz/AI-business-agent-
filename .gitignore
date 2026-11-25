@@ -44,3 +44,8 @@ env/
 
 # Scratch / Temp artifacts
 scratch/
+
+# Stage 4 Training Outputs & Uncompressed JSONL (keep *.jsonl.gz tracked)
+training/datasets/*.jsonl
+training/outputs/
+*.gguf

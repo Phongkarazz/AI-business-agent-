@@ -2,6 +2,7 @@
 Unit tests for DataMate Step 1 modules (`datamate.temporal`, `datamate.evaluator_pa`, `datamate.loader`).
 """
 
+import os
 import pathlib
 import sys
 import tempfile
@@ -28,7 +29,7 @@ from datamate.temporal import (
 )
 
 
-TRAIN_DIR = pathlib.Path("/Users/phongha/Downloads/train")
+TRAIN_DIR = pathlib.Path(os.environ.get("VERAXUS_BENCH_DIR", str(pathlib.Path.home() / "Downloads" / "train")))
 
 
 class TestTemporal(unittest.TestCase):

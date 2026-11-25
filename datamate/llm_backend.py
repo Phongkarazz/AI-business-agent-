@@ -266,7 +266,29 @@ class MultiProviderLLMBackend:
             with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            if json_mode and exc.code in (400, 422):
+            err_body = ""
+            try:
+                err_body = exc.read().decode("utf-8", errors="ignore").lower()
+            except Exception:
+                pass
+            is_ollama_missing = (
+                "ollama" in self.config.provider.lower()
+                and self.config.model_name.startswith("veraxus-coder:")
+                and (exc.code == 404 or "not found" in err_body)
+            )
+            if is_ollama_missing:
+                payload["model"] = "qwen2.5-coder:3b"
+                if json_mode:
+                    payload.pop("response_format", None)
+                req_fb = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                with urllib.request.urlopen(req_fb, timeout=self.config.timeout) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+            elif json_mode and exc.code in (400, 422):
                 payload.pop("response_format", None)
                 req2 = urllib.request.Request(
                     url,
@@ -333,7 +355,16 @@ class MultiProviderLLMBackend:
                     try:
                         comp = self._client.chat.completions.create(**create_kwargs)
                     except Exception as sdk_exc:
-                        if effective_json_mode and "response_format" in str(sdk_exc).lower():
+                        sdk_low = str(sdk_exc).lower()
+                        is_ollama_missing = (
+                            "ollama" in self.config.provider.lower()
+                            and self.config.model_name.startswith("veraxus-coder:")
+                            and ("not found" in sdk_low or "404" in sdk_low)
+                        )
+                        if is_ollama_missing:
+                            create_kwargs["model"] = "qwen2.5-coder:3b"
+                            comp = self._client.chat.completions.create(**create_kwargs)
+                        elif effective_json_mode and "response_format" in sdk_low:
                             create_kwargs.pop("response_format", None)
                             comp = self._client.chat.completions.create(**create_kwargs)
                         else:

@@ -53,11 +53,11 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
             cache = pathlib.Path(tmp) / "cache"
             bdir.mkdir()
             (bdir / "danh_ba.csv").write_text(
-                "ho_ten,sdt\nLưu Kim Huệ,328604752\nNguyễn Văn A,0912345678\n",
+                "ho_ten,sdt\nHoàng Minh Châu,368112233\nNguyễn Văn A,0912345678\n",
                 encoding="utf-8",
             )
             (bdir / "lich_thue.csv").write_text(
-                "ma_do,sdt,ngay_nhan\nVC22,0328604752,2026-03-04\nVC22,0987654321,2026-03-05\n",
+                "ma_do,sdt,ngay_nhan\nGD01,0368112233,2026-03-04\nGD01,0987654321,2026-03-05\n",
                 encoding="utf-8",
             )
             ws = load_business_workspace(bdir, cache_dir=cache, force_rebuild=True)
@@ -73,7 +73,7 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
                 ).fetchall()
             finally:
                 conn.close()
-            self.assertEqual(rows[0][1], "Lưu Kim Huệ")
+            self.assertEqual(rows[0][1], "Hoàng Minh Châu")
             self.assertEqual(rows[1][1], "Khách: 0987654321")
 
             # Also verify SQLite INTEGER phone normalization
@@ -82,7 +82,7 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
             src_db = bdir_sql / "raw.sqlite"
             sc = sqlite3.connect(src_db)
             sc.execute("CREATE TABLE danhbakhach (ho_ten TEXT, hay_goi TEXT, dien_thoai INTEGER)")
-            sc.execute("INSERT INTO danhbakhach VALUES ('Nguyễn Tuyết', 'Tuyết nhà sách', 837052906)")
+            sc.execute("INSERT INTO danhbakhach VALUES ('Lê Thu Thảo', 'Thảo tiệm hoa', 839112244)")
             sc.execute("INSERT INTO danhbakhach VALUES ('Trần Mai', 'Mai', 912345678)")
             sc.commit()
             sc.close()
@@ -93,7 +93,7 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
                 phones = [r[0] for r in c2.execute("SELECT dien_thoai FROM danhbakhach ORDER BY ho_ten").fetchall()]
             finally:
                 c2.close()
-            self.assertEqual(phones, ["0837052906", "0912345678"])
+            self.assertEqual(phones, ["0839112244", "0912345678"])
 
     def test_nickname_fk_discovery_and_alias_repair(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -105,11 +105,11 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (bdir / "danhbakhach.csv").write_text(
-                "ho_ten,hay_goi,dien_thoai\nNguyễn Tuyết,Tuyết nhà sách,837052906\nPhạm Lan,Lan tiệm vàng,912000111\n",
+                "ho_ten,hay_goi,dien_thoai\nLê Thu Thảo,Thảo tiệm hoa,839112244\nPhạm Lan,Lan tiệm vàng,912000111\n",
                 encoding="utf-8",
             )
             (bdir / "sothu.csv").write_text(
-                "ngay,tho,khach,tien\n2026-03-01,Tí,Tuyết nhà sách,500000\n2026-03-02,Ý,Lan tiệm vàng,300000\n2026-03-03,Tí,Khách vãng lai,200000\n",
+                "ngay,tho,khach,tien\n2026-03-01,Tí,Thảo tiệm hoa,500000\n2026-03-02,Ý,Lan tiệm vàng,300000\n2026-03-03,Tí,Khách vãng lai,200000\n",
                 encoding="utf-8",
             )
             ws = load_business_workspace(bdir, cache_dir=cache, force_rebuild=True)
@@ -143,7 +143,7 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
             cache = pathlib.Path(tmp) / "cache"
             bdir.mkdir()
             (bdir / "khach_hang.csv").write_text(
-                "ma_kh,ten_kh\nKH01,Diệp Trang An\nKH02,Vũ Linh Linh\n",
+                "ma_kh,ten_kh\nKH01,Phan Thanh Trúc\nKH02,Đặng Quốc Huy\n",
                 encoding="utf-8",
             )
             (bdir / "san_pham.csv").write_text(
@@ -160,7 +160,7 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
             )
             ws = load_business_workspace(bdir, cache_dir=cache, force_rebuild=True)
             know = build_workspace_knowledge(ws)
-            q_cust = "Chi tiết các sản phẩm mà khách hàng Diệp Trang An đã mua là gì?"
+            q_cust = "Chi tiết các sản phẩm mà khách hàng Phan Thanh Trúc đã mua là gì?"
             an = classify_expected_type(q_cust)
             ents = ground_query_entities(q_cust, know)
             self.assertIsNone(build_catalog_listing_sql_spec(q_cust, know, an, ents))
@@ -230,11 +230,11 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
         df_debt = pd.DataFrame(
             {
                 "khach_hang_ten": [
-                    "Diệp Trang An",
+                    "Phan Thanh Trúc",
                     "Trần Minh Khôi",
                     "Lê Ngọc Hân",
                     "Phạm Quốc Bảo",
-                    "Vũ Linh Linh",
+                    "Đặng Quốc Huy",
                 ],
                 "con_no": [1946000, 1250000, 820000, 380250, 116000],
             }
@@ -266,14 +266,14 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
                 *lead_plan["actions"],
             ]
         )
-        self.assertIn("Khách hàng **Diệp Trang An**", sections["anomaly"])
+        self.assertIn("Khách hàng **Phan Thanh Trúc**", sections["anomaly"])
         self.assertTrue(any(w in full_text.lower() for w in ("công nợ", "dư nợ")))
         for forbidden in (
-            "Nhóm Diệp Trang An",
-            "Nhóm Vũ Linh Linh",
+            "Nhóm Phan Thanh Trúc",
+            "Nhóm Đặng Quốc Huy",
             "1 bản ghi",
             "1.1 bản ghi",
-            "gấp 1.00 lần Diệp Trang An",
+            "gấp 1.00 lần Phan Thanh Trúc",
             "giữ đủ hàng nhóm bán chạy",
         ):
             self.assertNotIn(forbidden, full_text)

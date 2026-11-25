@@ -568,14 +568,20 @@ def _annotate_optional_directory_edge(
         return edge
     t_dir, c_dir, t_tx, c_tx = (t1, c1, t2, c2) if is_d1 else (t2, c2, t1, c1)
     try:
-        unmatched = conn.execute(
-            f'SELECT EXISTS('
-            f'SELECT 1 FROM "{t_tx}" t '
-            f'WHERE t."{c_tx}" IS NOT NULL AND trim(CAST(t."{c_tx}" AS TEXT)) != \'\' '
-            f'AND NOT EXISTS (SELECT 1 FROM "{t_dir}" d WHERE CAST(d."{c_dir}" AS TEXT) = CAST(t."{c_tx}" AS TEXT))'
-            f')'
-        ).fetchone()
-        if unmatched and unmatched[0]:
+        tx_rows = conn.execute(
+            f'SELECT DISTINCT trim(CAST(v AS TEXT)) FROM ('
+            f'SELECT "{c_tx}" AS v FROM "{t_tx}" WHERE "{c_tx}" IS NOT NULL LIMIT 3000'
+            f') WHERE trim(CAST(v AS TEXT)) != \'\' LIMIT 600'
+        ).fetchall()
+        tx_vals = {str(r[0]).strip() for r in tx_rows if r and r[0] is not None and str(r[0]).strip()}
+        if not tx_vals:
+            return edge
+        dir_rows = conn.execute(
+            f'SELECT DISTINCT trim(CAST("{c_dir}" AS TEXT)) FROM "{t_dir}" '
+            f'WHERE "{c_dir}" IS NOT NULL LIMIT 10000'
+        ).fetchall()
+        dir_vals = {str(r[0]).strip() for r in dir_rows if r and r[0] is not None and str(r[0]).strip()}
+        if tx_vals - dir_vals:
             return f"{edge} (dùng LEFT JOIN {t_dir} + COALESCE vì có dòng ở {t_tx} chưa có trong {t_dir})"
     except sqlite3.Error:
         pass
@@ -628,8 +634,9 @@ def _extract_join_graph(
         for tname, cname in cand_overlap_cols[:60]:
             try:
                 rows = conn.execute(
-                    f'SELECT DISTINCT trim(CAST("{cname}" AS TEXT)) FROM "{tname}" '
-                    f'WHERE "{cname}" IS NOT NULL AND length(trim(CAST("{cname}" AS TEXT))) >= 1 LIMIT 150'
+                    f'SELECT DISTINCT trim(CAST(v AS TEXT)) FROM ('
+                    f'SELECT "{cname}" AS v FROM "{tname}" WHERE "{cname}" IS NOT NULL LIMIT 2500'
+                    f') WHERE length(trim(CAST(v AS TEXT))) >= 1 LIMIT 150'
                 ).fetchall()
             except sqlite3.Error:
                 continue

@@ -1,5 +1,6 @@
 """Unit & end-to-end integration tests for DataMate Step 2 (agent, executor, grounding, splits)."""
 
+import os
 import pathlib
 import sqlite3
 import sys
@@ -182,7 +183,7 @@ class TestAgentEndToEndMocked(unittest.TestCase):
             self.assertAlmostEqual(rep.pa, 0.9)
 
     def test_train_val_split_integrity(self):
-        train_dir = pathlib.Path("/Users/phongha/Downloads/train")
+        train_dir = pathlib.Path(os.environ.get("VERAXUS_BENCH_DIR", str(pathlib.Path.home() / "Downloads" / "train")))
         if not train_dir.exists():
             self.skipTest("Local train dataset directory not present")
         tr_qs, ans = load_split_dataset(train_dir, split="train")
