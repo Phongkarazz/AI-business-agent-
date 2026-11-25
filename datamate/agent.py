@@ -3847,8 +3847,14 @@ class DataMateAgent:
         escalate_to_python: bool = False,
         entity_matches: Sequence[Tuple[str, str, str]] = (),
     ) -> str:
-        if len(knowledge.workspace.tables) > 8:
-            schema_block = build_focused_schema_prompt(question, knowledge, max_full_tables=10)
+        if len(knowledge.workspace.tables) > 6 or len(knowledge.schema_prompt or "") > 7500:
+            schema_block = build_focused_schema_prompt(
+                question,
+                knowledge,
+                entity_matches=entity_matches,
+                max_full_tables=6,
+                max_chars=7500,
+            )
         else:
             schema_block = knowledge.schema_prompt if include_full_schema else knowledge.semantic_summary
         temp_block = f"Mốc thời gian:\n{temporal_summary}\n\n" if temporal_summary else ""

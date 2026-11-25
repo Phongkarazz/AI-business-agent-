@@ -375,6 +375,14 @@ class MultiProviderLLMBackend:
 
             except (urllib.error.URLError, TimeoutError, Exception) as exc:
                 last_err = exc
+                err_low = str(exc).lower()
+                if any(k in err_low for k in ("exceeds the available context size", "context_length_exceeded", "maximum context length")):
+                    for m in messages:
+                        if len(m["content"]) > 4500:
+                            m["content"] = re.sub(r";\s*e\.g\.\s*[^)|]+", "", m["content"])
+                    if len(messages[-1]["content"]) > 7000:
+                        messages[-1]["content"] = messages[-1]["content"][:6900].rsplit("\n", 1)[0] + "\n..."
+                    max_tokens = min(max_tokens, 320)
                 if attempt < self.config.max_retries - 1:
                     time.sleep(min(2 ** attempt, 4))
                     continue

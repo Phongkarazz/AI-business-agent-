@@ -742,6 +742,8 @@ def _render_table_block(
     date_ranges: Dict[str, Tuple[str, str]],
     categorical: Dict[str, List[Tuple[str, int]]],
     compact: bool = False,
+    cat_limit: Optional[int] = None,
+    include_samples: bool = True,
 ) -> List[str]:
     """Render one table's schema lines (full or compact 1-line summary)."""
     active_cols: List[str] = []
@@ -760,15 +762,21 @@ def _render_table_block(
             tag = f"{tag}[{dr[0]}..{dr[1]}]"
         cat = categorical.get(f"{tname}.{cp.sql_name}")
         if cat:
-            preview_lim = 25 if _ORDER_STATUS_COL_RE.search(cp.sql_name) else 12
+            if _ORDER_STATUS_COL_RE.search(cp.sql_name):
+                preview_lim = min(25, (cat_limit or 12) + 6) if cat_limit else 25
+            else:
+                preview_lim = cat_limit if cat_limit is not None else 12
             vals_preview = ", ".join(repr(v) for v, _ in cat[:preview_lim])
             col_parts.append(f"{cp.sql_name} ({tag}; values: {vals_preview})")
         else:
-            safe_samps = [
-                pv for v in (cp.sample_values or [])[:4] if (pv := _safe_preview_val(v, max_len=64)) is not None
-            ][:2]
-            samp = ", ".join(repr(v) for v in safe_samps)
-            col_parts.append(f"{cp.sql_name} ({tag}" + (f"; e.g. {samp}" if samp else "") + ")")
+            if include_samples:
+                safe_samps = [
+                    pv for v in (cp.sample_values or [])[:4] if (pv := _safe_preview_val(v, max_len=64)) is not None
+                ][:2]
+                samp = ", ".join(repr(v) for v in safe_samps)
+                col_parts.append(f"{cp.sql_name} ({tag}" + (f"; e.g. {samp}" if samp else "") + ")")
+            else:
+                col_parts.append(f"{cp.sql_name} ({tag})")
 
     if compact:
         cols_preview = ", ".join(active_cols[:24]) + (f" ... (+{len(active_cols) - 24})" if len(active_cols) > 24 else "")
@@ -847,16 +855,22 @@ def build_focused_schema_prompt(
     knowledge: WorkspaceKnowledge,
     entity_matches: Sequence[Tuple[str, str, str]] = (),
     max_full_tables: int = 8,
+    max_chars: int = 8500,
 ) -> str:
     """
-    Focus prompt budget on the top relevant tables (full columns) when workspace has >8 tables,
-    keeping a 1-line column index for remaining tables so small/local LLMs never choke on context.
+    Focus prompt budget on the top relevant tables (full columns) while keeping
+    1-line column indexes for remaining tables and capping total character budget
+    so small/local LLMs never hit context-length 400 errors.
     """
     tables = knowledge.workspace.tables
-    if len(tables) <= max_full_tables:
+    if len(tables) <= max_full_tables and len(knowledge.schema_prompt or "") <= max_chars:
         return knowledge.schema_prompt
 
-    q_tokens = set(re.findall(r"[a-z0-9]+", norm_vn(question)))
+    q_norm = norm_vn(question)
+    q_tokens = set(re.findall(r"[a-z0-9]+", q_norm))
+    q_words = [w for w in q_norm.split() if len(w) >= 2]
+    q_compact = "".join(q_words)
+    q_bigrams = [q_words[i] + q_words[i + 1] for i in range(len(q_words) - 1) if len(q_words[i] + q_words[i + 1]) >= 5]
     matched_tbls = {t for t, _, _ in entity_matches}
     sales_tbls = {t.get("table") for t in knowledge.order_status_targets}
 
@@ -868,8 +882,17 @@ def build_focused_schema_prompt(
         sc = 0.0
         if tname in matched_tbls:
             sc += 50.0
-        t_toks = set(re.split(r"[^a-z0-9]+", tname.lower()))
+        t_low = tname.lower()
+        t_toks = set(re.split(r"[^a-z0-9]+", t_low))
         sc += 18.0 * len(t_toks & q_tokens)
+        t_no_prefix = re.sub(r"^(?:dm|nv|ct|ds)_+", "", t_low)
+        t_compact_raw = re.sub(r"[^a-z0-9]+", "", t_low)
+        t_compact = re.sub(r"[^a-z0-9]+", "", t_no_prefix)
+        if len(t_compact) >= 5 and t_compact in q_compact:
+            sc += 45.0
+        for bg in q_bigrams:
+            if bg in t_compact_raw:
+                sc += 20.0
         col_toks = {
             sub
             for cp in _active_columns(tp)
@@ -899,36 +922,65 @@ def build_focused_schema_prompt(
             scores[t1] += 18.0
 
     ranked = sorted(tables.keys(), key=lambda t: (-scores.get(t, 0.0), t))
-    full_set = set(ranked[:max_full_tables])
 
-    lines: List[str] = []
-    if knowledge.data_min_date and knowledge.data_max_date:
-        lines.append(f"Khoảng ngày dữ liệu giao dịch của shop: {knowledge.data_min_date} đến {knowledge.data_max_date}")
-    if knowledge.semantic_summary:
-        lines.append("Gợi ý kỹ thuật tự động từ lược đồ:")
-        lines.append(knowledge.semantic_summary)
-    if knowledge.join_graph:
-        lines.append("Liên kết khoá giữa các bảng (JOIN gợi ý): " + "; ".join(knowledge.join_graph[:10]))
-    if knowledge.profiler_alerts:
-        lines.append("Cảnh báo cấu trúc đặc biệt:")
-        lines.extend(f"- {a}" for a in knowledge.profiler_alerts)
-    if knowledge.dictionary_summary:
-        lines.append("Bảng từ điển / quy đổi nhanh:")
-        lines.append(knowledge.dictionary_summary)
-    lines.append(f"Danh sách bảng SQLite (chi tiết {len(full_set)} bảng trọng tâm + tóm tắt {len(tables) - len(full_set)} bảng phụ):")
+    def _render_tier(
+        n_full: int,
+        c_lim: int,
+        keep_dict: bool,
+        keep_samples: bool,
+        trim_sem: bool = False,
+    ) -> str:
+        full_set = set(ranked[: max(1, min(n_full, len(ranked)))])
+        lines: List[str] = []
+        if knowledge.data_min_date and knowledge.data_max_date:
+            lines.append(f"Khoảng ngày dữ liệu giao dịch của shop: {knowledge.data_min_date} đến {knowledge.data_max_date}")
+        if knowledge.semantic_summary:
+            sem_lines = knowledge.semantic_summary.splitlines()
+            if trim_sem:
+                kept_sem = [
+                    ln for ln in sem_lines
+                    if any(re.search(rf"\b{re.escape(ft)}\b", ln) for ft in full_set)
+                ][:6]
+                sem_lines = kept_sem or sem_lines[:4]
+            if sem_lines:
+                lines.append("Gợi ý kỹ thuật tự động từ lược đồ:")
+                lines.extend(sem_lines)
+        if knowledge.join_graph:
+            lines.append("Liên kết khoá giữa các bảng (JOIN gợi ý): " + "; ".join(knowledge.join_graph[:10]))
+        if knowledge.profiler_alerts:
+            lines.append("Cảnh báo cấu trúc đặc biệt:")
+            lines.extend(f"- {a}" for a in knowledge.profiler_alerts[:6])
+        if keep_dict and knowledge.dictionary_summary:
+            lines.append("Bảng từ điển / quy đổi nhanh:")
+            lines.append(knowledge.dictionary_summary)
+        lines.append(f"Danh sách bảng SQLite (chi tiết {len(full_set)} bảng trọng tâm + tóm tắt {len(tables) - len(full_set)} bảng phụ):")
 
-    for tname in ranked:
-        tp = tables[tname]
-        lines.extend(
-            _render_table_block(
-                tname,
-                tp,
-                knowledge.table_date_ranges,
-                knowledge.categorical_values,
-                compact=(tname not in full_set),
+        for tname in ranked:
+            tp = tables[tname]
+            lines.extend(
+                _render_table_block(
+                    tname,
+                    tp,
+                    knowledge.table_date_ranges,
+                    knowledge.categorical_values,
+                    compact=(tname not in full_set),
+                    cat_limit=c_lim,
+                    include_samples=keep_samples,
+                )
             )
-        )
-    return "\n".join(lines)
+        return "\n".join(lines)
+
+    tiers = (
+        (min(max_full_tables, 6), 8, True, True, False),
+        (4, 6, False, False, True),
+        (2, 4, False, False, True),
+    )
+    rendered = ""
+    for n_full, c_lim, keep_dict, keep_samples, trim_sem in tiers:
+        rendered = _render_tier(n_full, c_lim, keep_dict, keep_samples, trim_sem=trim_sem)
+        if len(rendered) <= max_chars:
+            return rendered
+    return rendered
 
 
 _PROBE_KEY_COL_RE = re.compile(r"^(?:ma_[a-z0-9_]+|so_bn|so_hd|so_ct|phieu|phong|id)$", re.IGNORECASE)

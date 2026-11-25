@@ -78,6 +78,7 @@ class TestStage4TrainingPipeline(unittest.TestCase):
             text = mf.read_text(encoding="utf-8")
             self.assertIn("FROM ./veraxus-coder-3b-q4_k_m.gguf", text)
             self.assertIn("<|im_start|>assistant", text)
+            self.assertIn("PARAMETER num_ctx 8192", text)
 
             gz_path = tpath / "sample.jsonl.gz"
             with gzip.open(gz_path, "wt", encoding="utf-8") as fh:

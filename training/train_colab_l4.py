@@ -197,7 +197,7 @@ def write_ollama_modelfile(gguf_filename: str, out_path: pathlib.Path) -> None:
         'PARAMETER stop "<|endoftext|>"\n'
         "PARAMETER temperature 0\n"
         "PARAMETER top_p 0.9\n"
-        "PARAMETER num_ctx 4096\n"
+        "PARAMETER num_ctx 8192\n"
     )
     out_path.write_text(content, encoding="utf-8")
 

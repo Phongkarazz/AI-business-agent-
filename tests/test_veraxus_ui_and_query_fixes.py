@@ -20,7 +20,7 @@ from datamate.agent import (
 )
 from datamate.llm_backend import MockLLMBackend
 from datamate.loader import _parse_raw_sheet, _parse_raw_sheet_v2, load_business_workspace
-from datamate.schema_context import build_workspace_knowledge, ground_query_entities
+from datamate.schema_context import build_focused_schema_prompt, build_workspace_knowledge, ground_query_entities
 from datamate.sql_executor import SQLExecutionResult, execute_sql_safe
 from src.analytics.heuristics import (
     detect_analysis_entity_type,
@@ -31,7 +31,11 @@ from src.analytics.heuristics import (
     normalize_diagnostic_dataframe,
     split_insight_sections,
 )
-from src.llm.datamate_bridge import build_datamate_suggested_questions, run_datamate_enhanced_turn
+from src.llm.datamate_bridge import (
+    VeraxusClientLLMBackend,
+    build_datamate_suggested_questions,
+    run_datamate_enhanced_turn,
+)
 
 
 class VeraxusUiAndQueryFixesTests(unittest.TestCase):
@@ -388,6 +392,64 @@ class VeraxusUiAndQueryFixesTests(unittest.TestCase):
             self.assertIsNotNone(turn_out.get("df"))
             self.assertEqual(len(turn_out["df"]), 5)
             self.assertEqual(turn_out["df"].iloc[0, 0], "Nguyễn Văn Tí")
+
+    def test_large_workspace_context_budget_and_overflow_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bdir = pathlib.Path(tmp) / "wide_17_tables"
+            cache = pathlib.Path(tmp) / "cache"
+            bdir.mkdir()
+            (bdir / "dm_hanghoa.csv").write_text(
+                ",".join([f"col_hh_{i}" for i in range(1, 13)] + ["ma_hh", "ten_hang"]) + "\n"
+                + ",".join([f"val_{i}" for i in range(1, 13)] + ["HH01", "Cà phê rang"]) + "\n"
+                + ",".join([f"val_b_{i}" for i in range(1, 13)] + ["HH02", "Trà xanh"]) + "\n",
+                encoding="utf-8",
+            )
+            (bdir / "bangkehoadon.csv").write_text(
+                ",".join([f"hd_col_{i}" for i in range(1, 13)] + ["so_hd", "trang_thai"]) + "\n"
+                + ",".join([f"h_{i}" for i in range(1, 13)] + ["HD01", "Hợp lệ"]) + "\n"
+                + ",".join([f"h2_{i}" for i in range(1, 13)] + ["HD02", "Đã hủy"]) + "\n",
+                encoding="utf-8",
+            )
+            for idx in range(15):
+                (bdir / f"bang_phu_{idx:02d}.csv").write_text(
+                    ",".join([f"c_{idx}_{k}" for k in range(1, 15)] + ["trang_thai_chung"]) + "\n"
+                    + ",".join([f"v_{idx}_{k}" for k in range(1, 15)] + ["Hop le"]) + "\n"
+                    + ",".join([f"v2_{idx}_{k}" for k in range(1, 15)] + ["Huy"]) + "\n",
+                    encoding="utf-8",
+                )
+            ws = load_business_workspace(bdir, cache_dir=cache, force_rebuild=True)
+            know = build_workspace_knowledge(ws)
+            q = "Kho đang có bao nhiêu mặt hàng trong danh mục hàng hóa và bảng kê hóa đơn điện tử có bao nhiêu dòng hợp lệ?"
+            focused = build_focused_schema_prompt(q, know, max_full_tables=8, max_chars=8500)
+            self.assertLessEqual(len(focused), 8500)
+            self.assertIn("- Bảng `dm_hanghoa` (2 dòng):", focused)
+            self.assertIn("- Bảng `bangkehoadon` (2 dòng):", focused)
+
+        from types import SimpleNamespace
+
+        seen_lens = []
+
+        class _OverflowCompletions:
+            def create(self, **kwargs):
+                total_len = sum(len(m["content"]) for m in kwargs["messages"])
+                seen_lens.append(total_len)
+                if len(seen_lens) == 1:
+                    raise RuntimeError(
+                        "Error code: 400 - {'error': {'message': 'request (7645 tokens) exceeds the available context size (4096 tokens), try increasing it', 'type': 'invalid_request_error'}}"
+                    )
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content='{"status":"ok","sql":"SELECT 1;"}'))]
+                )
+
+        fake_cli = SimpleNamespace(chat=SimpleNamespace(completions=_OverflowCompletions()))
+        backend = VeraxusClientLLMBackend(fake_cli, "Ollama (Local AI Offline)", "veraxus-coder:3b")
+        long_prompt = "### LƯỢC ĐỒ SQLITE\n" + "\n".join(
+            f"- col_{i} (text; e.g. 'một đoạn ví dụ rất dài số {i} để test cắt bớt ngữ cảnh tự động')" for i in range(250)
+        )
+        out = backend.generate(long_prompt, system_prompt="Chỉ trả JSON.", temperature=0.0, max_tokens=512, json_mode=True)
+        self.assertEqual(len(seen_lens), 2)
+        self.assertLess(seen_lens[1], seen_lens[0])
+        self.assertIn("SELECT 1", out)
 
 
 if __name__ == "__main__":

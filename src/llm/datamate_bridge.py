@@ -51,6 +51,20 @@ from src.analytics.heuristics import (
 from src.llm.client import normalize_model_for_openrouter
 
 
+def _compact_prompt_on_context_overflow(text: str, max_chars: int = 8500) -> str:
+    """Strip inline examples and verbose value previews when an LLM hits context-length limits."""
+    compact = re.sub(r";\s*e\.g\.\s*[^)|]+", "", text or "")
+
+    def _shrink_vals(match: re.Match[str]) -> str:
+        items = [p.strip() for p in match.group(1).split(",") if p.strip()]
+        return "; values: " + ", ".join(items[:4])
+
+    compact = re.sub(r";\s*values:\s*([^)]+)", _shrink_vals, compact)
+    if len(compact) > max_chars:
+        compact = compact[: max_chars - 64].rsplit("\n", 1)[0] + "\n...[lược bớt ví dụ để vừa ngữ cảnh]..."
+    return compact
+
+
 class VeraxusClientLLMBackend(LLMBackend):
     """Adapter wrapping Veraxus UI's connected LLM client into DataMate's LLMBackend interface."""
 
@@ -161,12 +175,28 @@ class VeraxusClientLLMBackend(LLMBackend):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 comp = self.client.chat.completions.create(**kwargs)
                 return str(comp.choices[0].message.content or "")
             except Exception as exc:
                 err_low = str(exc).lower()
+                is_ctx_overflow = any(
+                    k in err_low
+                    for k in ("exceeds the available context size", "context_length_exceeded", "maximum context length")
+                )
+                if is_ctx_overflow:
+                    if messages:
+                        messages[-1]["content"] = _compact_prompt_on_context_overflow(
+                            messages[-1]["content"], max_chars=7000 if attempt == 0 else 4500
+                        )
+                        if len(messages) >= 2 and len(messages[0]["content"]) > 4000:
+                            messages[0]["content"] = _compact_prompt_on_context_overflow(messages[0]["content"], max_chars=4000)
+                    kwargs["max_tokens"] = min(int(kwargs.get("max_tokens", 512)), 320)
+                    continue
+                if str(kwargs.get("model", "")).startswith("veraxus-coder:") and ("not found" in err_low or "404" in err_low):
+                    kwargs["model"] = "qwen2.5-coder:3b"
+                    continue
                 if json_mode and ("response_format" in err_low or "json_object" in err_low or "400" in err_low):
                     kwargs.pop("response_format", None)
                     json_mode = False
