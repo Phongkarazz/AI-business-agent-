@@ -438,7 +438,7 @@ def _build_order_semantics(
                 date_col = cp.sql_name
             if status_col is None and _ORDER_STATUS_COL_RE.search(cp.sql_name) and not re.search(r"khach|nhap", tname, re.I):
                 status_col = cp.sql_name
-            if re.search(r"(?:^|_)(?:tien_?hang|thanh_?tien|tt_?dong|tong_?tien_?hang|tong_?tien|tong_?bill|tien)(?:$|_)", cp.sql_name, re.I):
+            if re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|tien_?hang|thanh_?tien|tt_?dong|tong_?tien_?hang|tong_?tien|tong_?bill|tien_?thue|tien_?dich_?vu|tien_?phong|gia_?thue|tien)(?:$|_)", cp.sql_name, re.I):
                 rev_cols.append(cp.sql_name)
             if re.search(r"(?:^|_)(?:da_?tra|da_?thu|chua_?tra|con_?no|con_?lai|khach_?da_?tra|khach_?tra)(?:$|_)", cp.sql_name, re.I):
                 debt_cols.append(cp.sql_name)
@@ -453,17 +453,30 @@ def _build_order_semantics(
         }
 
         is_sales_tbl = bool(status_col) and not _MASTER_TABLE_RE.search(tname) and not re.search(r"nhap|khach|chi_?phi|so_?quy|thanh_?toan|giao_?hang", tname, re.I)
-        if not is_sales_tbl:
+        is_tx_without_status = (
+            not status_col
+            and bool(date_col and rev_cols)
+            and not _MASTER_TABLE_RE.search(tname)
+            and not re.search(
+                r"nhap|khach|chi_?phi|so_?quy|thanh_?toan|giao_?hang|the_?lieu_?trinh|thelieutrinh|lich_?hen|lichhen|bang_?gia|banggia",
+                tname,
+                re.I,
+            )
+        )
+        if not (is_sales_tbl or is_tx_without_status):
             continue
 
-        cat_vals = [v for v, _ in categorical.get(f"{tname}.{status_col}", [])]
-        valid, cancelled, returned = _classify_status_values(cat_vals)
-        bad_all = cancelled + returned
-        valid_filter = (
-            f"{status_col} NOT IN ({', '.join(repr(v) for v in bad_all)})"
-            if bad_all
-            else ""
-        )
+        if status_col:
+            cat_vals = [v for v, _ in categorical.get(f"{tname}.{status_col}", [])]
+            valid, cancelled, returned = _classify_status_values(cat_vals)
+            bad_all = cancelled + returned
+            valid_filter = (
+                f"{status_col} NOT IN ({', '.join(repr(v) for v in bad_all)})"
+                if bad_all
+                else ""
+            )
+        else:
+            valid, cancelled, returned, valid_filter = [], [], [], ""
         targets.append(
             {
                 "table": tname,
@@ -485,9 +498,11 @@ def _build_order_semantics(
             if has_rep and order_col
             else "1 dòng = 1 đơn hàng -> đếm số đơn dùng COUNT(*)"
         )
-        line = f"- Bảng bán hàng `{tname}` ({grain_desc}"
+        line = f"- {'Bảng bán hàng' if status_col else 'Bảng giao dịch/bán hàng'} `{tname}` ({grain_desc}"
         if date_col:
-            line += f"; cột ngày = `{date_col}`"
+            line += f"; cột ngày chuẩn ISO = `{date_col}`"
+        if not status_col and rev_cols:
+            line += f"; cột tiền = `{rev_cols[0]}`"
         if valid_filter:
             line += (
                 f"; lọc đơn thành công (CHỈ dùng khi tính doanh thu/số đơn thành công; "
@@ -523,10 +538,17 @@ def _build_order_semantics(
         sheet_cp = next((c for c in _active_columns(tp) if c.sql_name.lower() == "source_sheet"), None)
         if sheet_cp is not None and sheet_cp.distinct_count >= 2:
             samples = ", ".join(repr(v) for v, _ in sheet_cp.top_values[:4])
-            hint_lines.append(
-                f"- Bảng `{tname}` gộp dữ liệu từ nhiều kỳ/sheet trong cột `source_sheet` (VD: {samples}) "
-                f"-> Khi câu hỏi hỏi lịch sử/diễn biến qua các kỳ hoặc từng tháng, BẮT BUỘC `SELECT source_sheet, ...` (TUYỆT ĐỐI KHÔNG `SUM` gộp mất `source_sheet` thành 1 dòng!)."
-            )
+            tbl_date_cols = [c.sql_name for c in _active_columns(tp) if f"{tname}.{c.sql_name}" in date_ranges]
+            if tbl_date_cols:
+                hint_lines.append(
+                    f"- Lưu ý bảng `{tname}`: cột `source_sheet` chỉ lưu tên sheet nguồn (VD: {samples}), KHÔNG phải cột ngày ISO! "
+                    f"Khi lọc hoặc nhóm theo ngày/tháng/năm BẮT BUỘC dùng cột `{tbl_date_cols[0]}`, TUYỆT ĐỐI KHÔNG lọc `source_sheet BETWEEN ...` hay so sánh ngày trên `source_sheet`!"
+                )
+            else:
+                hint_lines.append(
+                    f"- Bảng `{tname}` gộp dữ liệu từ nhiều kỳ/sheet trong cột `source_sheet` (VD: {samples}) "
+                    f"-> Khi câu hỏi hỏi lịch sử/diễn biến qua các kỳ hoặc từng tháng, BẮT BUỘC `SELECT source_sheet, ...` (TUYỆT ĐỐI KHÔNG `SUM` gộp mất `source_sheet` thành 1 dòng!)."
+                )
 
     return targets, grains, "\n".join(hint_lines)
 

@@ -22,6 +22,7 @@ from datamate.agent import (
     build_catalog_listing_sql_spec,
     build_entity_and_metric_listing_sql_spec,
     build_extreme_comparison_sql_spec,
+    build_time_series_or_period_ranking_sql_spec,
     check_out_of_scope_or_irrelevant,
     check_preflight_unanswerable,
     classify_expected_type,
@@ -33,6 +34,7 @@ from datamate.agent import (
     is_false_llm_unanswerable,
     normalize_vn_question,
     resolve_conversational_retraction,
+    rewrite_misused_source_sheet_date_filter,
     rewrite_ranked_entity_sql,
     should_prefer_python_sandbox,
     strip_spurious_single_day_filter,
@@ -455,15 +457,23 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         for c in import_cols
     )
 
-    date_ref = knowledge.data_max_date or ""
-    ym = date_ref[:7] if len(date_ref) >= 7 else ""
-    ym_phrase_vi = f"trong tháng {ym[5:7]}/{ym[:4]}" if ym else ""
-    ym_phrase_en = f"in {ym}" if ym else ""
-
     sales_dcol = str(t0.get("date_col") or "")
     sales_range = None
     if sales_table and sales_dcol:
         sales_range = (knowledge.table_date_ranges or {}).get(f"{sales_table}.{sales_dcol}")
+    if not sales_range and sales_table:
+        for k, span in (knowledge.table_date_ranges or {}).items():
+            if k.lower().startswith(f"{sales_table.lower()}.") and not re.search(
+                r"(?:han_?dung|het_?han|hen_?tra|ngay_?sinh)", k.split(".", 1)[1], re.I
+            ):
+                sales_range = span
+                break
+
+    date_ref = (sales_range[1] if sales_range and len(sales_range) == 2 else None) or knowledge.data_max_date or ""
+    ym = date_ref[:7] if len(date_ref) >= 7 else ""
+    ym_phrase_vi = f"trong tháng {ym[5:7]}/{ym[:4]}" if ym else ""
+    ym_phrase_en = f"in {ym}" if ym else ""
+
     if not sales_range and knowledge.data_min_date and knowledge.data_max_date:
         sales_range = (knowledge.data_min_date, knowledge.data_max_date)
     has_multi_day_sales = bool(sales_range and sales_range[0] != sales_range[1])
@@ -1562,6 +1572,10 @@ def run_datamate_enhanced_turn(
                 spec = build_catalog_listing_sql_spec(effective_query, knowledge, analysis, entities)
                 if spec is not None:
                     fb_tag = "Catalog Listing Fallback"
+                else:
+                    spec = build_time_series_or_period_ranking_sql_spec(effective_query, knowledge, analysis, entities)
+                    if spec is not None:
+                        fb_tag = "Time Series / Peak Period Fallback"
         if not spec or not spec.get("suggested_sql"):
             return None
         fb_sql = spec["suggested_sql"]
@@ -1674,6 +1688,10 @@ def run_datamate_enhanced_turn(
                 candidate_sql = strip_spurious_single_day_filter(candidate_sql, effective_query, analysis)
                 if candidate_sql != _before_strip:
                     result["logs"].append("🧹 [Date Guard] Tự động loại bỏ điều kiện lọc 1 ngày không được yêu cầu.")
+                _before_sheet_fix = candidate_sql
+                candidate_sql = rewrite_misused_source_sheet_date_filter(candidate_sql, knowledge)
+                if candidate_sql != _before_sheet_fix:
+                    result["logs"].append("🧹 [Date Column Guard] Tự động chuyển điều kiện lọc ngày từ `source_sheet` sang cột ngày chuẩn.")
                 sub_err = _check_subquery_column_capture(candidate_sql, knowledge)
                 if sub_err:
                     res = SQLExecutionResult(ok=False, sql=candidate_sql, columns=[], rows=[], error=sub_err)

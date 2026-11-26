@@ -623,6 +623,23 @@ def classify_expected_type(question: str) -> QuestionAnalysis:
     if re.search(r"\b(?:ngay nao|hom nao|bua nao)\b", qn):
         return QuestionAnalysis(expected_type="date", date_granularity="day", money_like=money_like)
 
+    # 4b. Explicit time-series trend table ("xu hướng ... theo từng ngày/tháng/quý/năm")
+    if (
+        re.search(
+            r"(?:\b(?:xu\s+huong|dien\s+bien|bien\s+dong|bieu\s+do)\b[^?]*\btheo\s+(?:tung\s+|moi\s+|cac\s+)?(?:ngay|thang|quy|nam|tuan)\b"
+            r"|\b(?:doanh\s+thu|doanh\s+so|thanh\s+tien|tong\s+tien|tien\s+dich\s+vu|tien\s+thue|so\s+luong|so\s+don|chi\s+phi|loi\s+nhuan)[^?]*\btheo\s+tung\s+(?:ngay|thang|quy|nam|tuan)\b"
+            r"|\b(?:daily|monthly|quarterly|weekly)\s+[^?]*\btrend\b"
+            r"|\btrend\b[^?]*\bby\s+(?:day|date|month|quarter|year)\b)",
+            qn,
+        )
+        and not is_percent
+        and not re.search(
+            r"\b(?:lan\s+luot|theo\s+thu\s+tu|hai\s+so|ba\s+so|ghi\s+\d+\s+so|trung\s+binh\s+moi|binh\s+quan\s+moi|co\s+bao\s+nhieu\s+(?:ngay|thang)|co\s+[^?]*\bkhong)\b",
+            qn,
+        )
+    ):
+        return QuestionAnalysis(expected_type="table", money_like=money_like)
+
     # 5. List variants (carefully exclude 4-digit years & drug packaging sizes!)
     if re.search(r"\b(?:chan|nguyen)\b", qn) and re.search(r"\ble\b", qn) and re.search(r"\b(?:ton|con|duoc|may|bao nhieu)\b", qn):
         return QuestionAnalysis(expected_type="list", is_list_unit_pair=True, expected_list_len=2)
@@ -1529,6 +1546,80 @@ def _quote_sqlite_ident(ident: str) -> str:
     if " " in s or "-" in s or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", s):
         return f'"{s}"'
     return s
+
+
+def rewrite_misused_source_sheet_date_filter(sql: str, knowledge: WorkspaceKnowledge) -> str:
+    """Rewrite ISO date comparisons or functions mistakenly targeting `source_sheet` onto the table's real date column."""
+    if not sql or "source_sheet" not in sql.lower() or not getattr(knowledge, "table_date_ranges", None):
+        return sql
+
+    alias_to_date: Dict[str, str] = {}
+    fallback_dcols: List[str] = []
+    kw_stop = {"where", "group", "order", "limit", "having", "on", "join", "inner", "left", "right", "cross", "union"}
+    for m in re.finditer(
+        r"\b(?:from|join)\s+[`\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`\"]?(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?",
+        sql,
+        flags=re.IGNORECASE,
+    ):
+        tname = m.group(1)
+        alias = m.group(2)
+        if alias and alias.lower() in kw_stop:
+            alias = None
+        dcol = next(
+            (
+                k.split(".", 1)[1]
+                for k in knowledge.table_date_ranges
+                if k.lower().startswith(f"{tname.lower()}.")
+                and not re.search(r"(?:han_?dung|het_?han|hen_?tra|ngay_?sinh)", k.split(".", 1)[1], re.I)
+            ),
+            None,
+        )
+        if not dcol:
+            dcol = next(
+                (k.split(".", 1)[1] for k in knowledge.table_date_ranges if k.lower().startswith(f"{tname.lower()}.")),
+                None,
+            )
+        if dcol:
+            alias_to_date[tname.lower()] = dcol
+            if alias:
+                alias_to_date[alias.lower()] = dcol
+            if dcol not in fallback_dcols:
+                fallback_dcols.append(dcol)
+
+    default_dcol = fallback_dcols[0] if len(fallback_dcols) == 1 else next(iter(alias_to_date.values()), None)
+    if not default_dcol:
+        return sql
+
+    def _resolve_dcol(prefix: str) -> str:
+        p_clean = (prefix or "").rstrip(".").strip("`\"").lower()
+        return alias_to_date.get(p_clean, default_dcol)
+
+    out = sql
+    out = re.sub(
+        r"((?:[a-zA-Z_][a-zA-Z0-9_]*\.)?)source_sheet\s+(BETWEEN\s+'(?:19|20)\d{2}-\d{2}(?:-\d{2})?'\s+AND\s+'(?:19|20)\d{2}-\d{2}(?:-\d{2})?')",
+        lambda m: f"substr({m.group(1)}{_quote_sqlite_ident(_resolve_dcol(m.group(1)))}, 1, 10) {m.group(2)}",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"((?:[a-zA-Z_][a-zA-Z0-9_]*\.)?)source_sheet\s*(=|>=|<=|>|<|LIKE)\s*('(?:19|20)\d{2}-\d{2}[^']*')",
+        lambda m: f"substr({m.group(1)}{_quote_sqlite_ident(_resolve_dcol(m.group(1)))}, 1, 10) {m.group(2)} {m.group(3)}",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"strftime\s*\(\s*('[^']+')\s*,\s*((?:[a-zA-Z_][a-zA-Z0-9_]*\.)?)source_sheet\s*\)",
+        lambda m: f"strftime({m.group(1)}, substr({m.group(2)}{_quote_sqlite_ident(_resolve_dcol(m.group(2)))}, 1, 10))",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"substr\s*\(\s*((?:[a-zA-Z_][a-zA-Z0-9_]*\.)?)source_sheet\s*,\s*1\s*,\s*(7|10)\s*\)",
+        lambda m: f"substr({m.group(1)}{_quote_sqlite_ident(_resolve_dcol(m.group(1)))}, 1, {m.group(2)})",
+        out,
+        flags=re.IGNORECASE,
+    )
+    return out
 
 
 def _find_join_key(fact_tbl: Any, other_tbl: Any) -> Optional[str]:
@@ -2444,6 +2535,266 @@ def build_entity_and_metric_listing_sql_spec(
     }
 
 
+def build_time_series_or_period_ranking_sql_spec(
+    question: str,
+    knowledge: WorkspaceKnowledge,
+    analysis: QuestionAnalysis,
+    entity_matches: Sequence[Tuple[str, str, str]] = (),
+) -> Optional[Dict[str, Any]]:
+    """
+    Build deterministic SQL + metadata for daily/monthly/yearly time-series trend queries
+    and peak/lowest single-day/month queries (avoiding missing aggregates or `source_sheet` date errors).
+    """
+    if not knowledge or not getattr(knowledge, "workspace", None):
+        return None
+    if getattr(analysis, "extreme_comparison", None) is not None:
+        return None
+    tables_dict = getattr(knowledge.workspace, "tables", None) or {}
+    if not tables_dict:
+        return None
+
+    qn = normalize_vn_question(normalize_nfc(question or ""))
+    if not qn:
+        return None
+    if re.search(r"\b(?:so\s+voi|cung\s+ky|tang\s+truong|ty\s+le|ti\s+le|phan\s+tram|trung\s+binh\s+moi|binh\s+quan\s+moi)\b", qn):
+        return None
+
+    m_trend = re.search(
+        r"(?:\b(?:xu\s+huong|dien\s+bien|bien\s+dong|bieu\s+do)\b[^?]*\btheo\s+(?:tung\s+|moi\s+|cac\s+)?(ngay|thang|nam)\b"
+        r"|\btheo\s+tung\s+(ngay|thang|nam)\b)",
+        qn,
+    )
+    m_peak = re.search(
+        r"\b(ngay|hom|bua|thang)\s+nao\b[^?]*\b(cao\s+nhat|lon\s+nhat|nhieu\s+nhat|dat\s+nhat|tot\s+nhat|thap\s+nhat|it\s+nhat|nho\s+nhat|kem\s+nhat|vang\s+nhat)\b",
+        qn,
+    )
+    if analysis.expected_type == "date" and m_peak:
+        mode = "peak_period"
+        gran = "month" if (m_peak.group(1) == "thang" or analysis.date_granularity == "month") else "day"
+        sort_dir = "ASC" if re.search(r"(?:thap|it|nho|kem|vang)", m_peak.group(2)) else "DESC"
+    elif analysis.expected_type == "table" and m_trend:
+        mode = "trend"
+        g_tok = m_trend.group(1) or m_trend.group(2)
+        gran = "month" if g_tok == "thang" else ("year" if g_tok == "nam" else "day")
+        sort_dir = "ASC"
+    else:
+        return None
+
+    wants_import = bool(re.search(r"\b(?:nhap|phieu\s+nhap|gia\s+nhap|tien\s+nhap|gia\s+tri\s+nhap)\b", qn))
+    wants_expense = bool(re.search(r"\b(?:chi\s+phi|tien\s+chi|khoan\s+chi)\b", qn))
+    wants_orders = bool(re.search(r"\b(?:so\s+don|so\s+luot|so\s+hoa\s+don|so\s+phieu|bao\s+nhieu\s+don|may\s+don)\b", qn))
+    wants_qty = bool(re.search(r"\b(?:so\s+luong|sl\b|so\s+hop|so\s+chai|so\s+goi|so\s+vien)\b", qn))
+    wants_money = bool(
+        re.search(
+            r"\b(?:doanh\s+thu|doanh\s+so|thanh\s+tien|tong\s+tien|tien\s+dich\s+vu|tien\s+hang|tien\s+thue|tien\s+nhap|chi\s+phi|gia\s+tri|tien)\b",
+            qn,
+        )
+    )
+
+    matched_filters: List[Tuple[str, str, str]] = []
+    seen_fp: set = set()
+    for ent_tbl, ent_col, ent_val in entity_matches or ():
+        if ent_tbl not in tables_dict:
+            continue
+        val_norm = norm_vn(str(ent_val or ""))
+        if len(val_norm) < 2 or val_norm == norm_vn(ent_col):
+            continue
+        if not re.search(rf"(?<![a-z0-9]){re.escape(val_norm)}(?![a-z0-9])", qn):
+            continue
+        pk = (ent_tbl, ent_col.lower())
+        if pk not in seen_fp:
+            seen_fp.add(pk)
+            matched_filters.append((ent_tbl, ent_col, str(ent_val)))
+
+    tables_list = [tp for tp in tables_dict.values() if int(getattr(tp, "row_count", 0) or 0) > 0]
+    if not tables_list:
+        return None
+
+    date_ranges = getattr(knowledge, "table_date_ranges", None) or {}
+    tx_names_low = {t["table"].lower(): t for t in (getattr(knowledge, "order_status_targets", None) or [])}
+    money_priority = (
+        "doanh_thu", "doanhthu", "thanh_tien", "thanhtien", "tong_tien", "tongtien",
+        "tien_hang", "tienhang", "tong_doanh_thu", "revenue", "total_revenue",
+        "sales", "total_sales", "amount", "total_amount", "gia_tri",
+        "tien_dich_vu", "tien_thue", "tien_phong", "t_tien", "tong_bill", "tien",
+    )
+    qty_priority = ("so_luong_nhap", "so_luong", "soluong", "sl", "qty", "quantity", "so_hop", "boxes")
+
+    def _pick_table_date_col(tp: Any) -> Optional[str]:
+        tname = tp.table_name
+        tgt = tx_names_low.get(tname.lower()) or {}
+        if tgt.get("date_col") and f"{tname}.{tgt['date_col']}" in date_ranges:
+            return str(tgt["date_col"])
+        for k, _ in date_ranges.items():
+            if k.startswith(f"{tname}."):
+                c = k.split(".", 1)[1]
+                if not re.search(r"(?:han_?dung|het_?han|hen_?tra|ngay_?sinh)", c, re.I):
+                    return c
+        for cp in tp.columns:
+            cn = getattr(cp, "sql_name", str(cp))
+            if re.search(r"^(?:ngay_?gd|ngay_?ban|ngay_?dat|ngay_?nhap|ngay|orderdate|date)$", cn.lower()):
+                return cn
+        return None
+
+    best_fact = None
+    best_dcol = None
+    best_score = -10**9
+    for tp in tables_list:
+        dcol = _pick_table_date_col(tp)
+        if not dcol:
+            continue
+        tlow = tp.table_name.lower()
+        cols_l = {getattr(c, "sql_name", str(c)).lower() for c in tp.columns}
+        has_money = any(m in cols_l for m in money_priority) or any("chi" in c and "phi" in c for c in cols_l)
+        sc = 0
+        if not wants_import and re.search(r"^(?:danh_?(?:sach|ba|muc)|dm_|bang_?gia|quy_?doi|ton_?kho|lich_?hen|the_?lieu)", tlow):
+            sc -= 60
+        if wants_import and (re.search(r"(?:phieu_?nhap|nhap_?hang)", tlow) or ("gia_nhap" in cols_l and "nha_cung_cap" in cols_l)):
+            sc += 120
+        elif wants_expense and re.search(r"(?:chi_?phi|so_?chi|sothuchi)", tlow):
+            sc += 120
+        elif not wants_import and not wants_expense and tlow in tx_names_low:
+            sc += 100
+        elif not wants_import and has_money:
+            sc += 75
+        if any(f_tbl == tp.table_name for f_tbl, _, _ in matched_filters):
+            sc += 40
+        if has_money or wants_orders or wants_qty:
+            sc += 25
+        if sc > best_score:
+            best_score = sc
+            best_fact = tp
+            best_dcol = dcol
+
+    if best_fact is None or not best_dcol:
+        return None
+
+    fact_cols = [getattr(c, "sql_name", str(c)) for c in best_fact.columns]
+    fact_cols_low = {c.lower(): c for c in fact_cols}
+    money_col = next((fact_cols_low[k] for k in money_priority if k in fact_cols_low), None)
+    if money_col is None:
+        money_col = next(
+            (
+                c for c in fact_cols
+                if re.search(r"(?:doanh_?thu|thanh_?tien|tong_?tien|tien|chi_?phi|revenue|sales|amount)", c.lower())
+                and not re.search(r"(?:pct|ratio|ty_le|gia_nhap)", c.lower())
+            ),
+            None,
+        )
+    qty_col = next((fact_cols_low[k] for k in qty_priority if k in fact_cols_low), None)
+    price_col = fact_cols_low.get("don_gia") or fact_cols_low.get("gia_ban") or fact_cols_low.get("gia")
+    order_id_col = (tx_names_low.get(best_fact.table_name.lower()) or {}).get("order_id_col")
+
+    raw_metric_expr = None
+    metric_expr = None
+    metric_alias = None
+    if wants_import and "gia_nhap" in fact_cols_low and qty_col and not (wants_qty and not wants_money):
+        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(qty_col)} * f.{_quote_sqlite_ident(fact_cols_low['gia_nhap'])})"
+        metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
+        metric_alias = "tong_tien_nhap"
+    elif wants_orders and not wants_money:
+        raw_metric_expr = (
+            f"COUNT(DISTINCT f.{_quote_sqlite_ident(order_id_col)})"
+            if order_id_col
+            else "COUNT(*)"
+        )
+        metric_expr = raw_metric_expr
+        metric_alias = "so_don"
+    elif wants_qty and not wants_money and qty_col:
+        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(qty_col)})"
+        metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
+        metric_alias = "tong_so_luong"
+    elif money_col:
+        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(money_col)})"
+        metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
+        metric_alias = "tong_chi_phi" if wants_expense else ("tong_tien_nhap" if wants_import else "tong_doanh_thu")
+    elif qty_col and price_col:
+        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(qty_col)} * f.{_quote_sqlite_ident(price_col)})"
+        metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
+        metric_alias = "tong_doanh_thu"
+    elif qty_col:
+        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(qty_col)})"
+        metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
+        metric_alias = "tong_so_luong"
+
+    if not metric_expr or not raw_metric_expr or not metric_alias:
+        return None
+
+    dcol_q = _quote_sqlite_ident(best_dcol)
+    if gran == "month":
+        period_expr, period_alias = f"substr(f.{dcol_q}, 1, 7)", "thang"
+    elif gran == "year":
+        period_expr, period_alias = f"substr(f.{dcol_q}, 1, 4)", "nam"
+    else:
+        period_expr, period_alias = f"substr(f.{dcol_q}, 1, 10)", "ngay"
+
+    where_conds: List[str] = [
+        f"f.{dcol_q} IS NOT NULL",
+        f"TRIM(CAST(f.{dcol_q} AS TEXT)) != ''",
+    ]
+    joined_clauses = ""
+    next_alias_idx = 1
+    joined_tbls: Dict[str, str] = {}
+    for f_tbl, f_col, f_val in matched_filters:
+        esc_val = str(f_val).replace("'", "''")
+        if f_tbl == best_fact.table_name:
+            where_conds.append(f"NORM_VN(f.{_quote_sqlite_ident(f_col)}) = NORM_VN('{esc_val}')")
+        else:
+            f_tp = tables_dict.get(f_tbl)
+            j_info = _resolve_fact_dim_join(best_fact, f_tp, knowledge.join_graph or ()) if f_tp is not None else None
+            if not j_info:
+                continue
+            if f_tbl not in joined_tbls:
+                t_alias = f"d{next_alias_idx}"
+                next_alias_idx += 1
+                joined_tbls[f_tbl] = t_alias
+                f_jk, d_jk, use_norm = j_info
+                on_expr = (
+                    f"NORM_VN(f.{_quote_sqlite_ident(f_jk)}) = NORM_VN({t_alias}.{_quote_sqlite_ident(d_jk)})"
+                    if use_norm
+                    else f"f.{_quote_sqlite_ident(f_jk)} = {t_alias}.{_quote_sqlite_ident(d_jk)}"
+                )
+                joined_clauses += f"\nJOIN {_quote_sqlite_ident(f_tbl)} {t_alias} ON {on_expr}"
+            else:
+                t_alias = joined_tbls[f_tbl]
+            where_conds.append(f"NORM_VN({t_alias}.{_quote_sqlite_ident(f_col)}) = NORM_VN('{esc_val}')")
+
+    if not _Q_ALLOW_ALL_STATUS_RE.search(qn):
+        tgt = tx_names_low.get(best_fact.table_name.lower())
+        if tgt and tgt.get("valid_filter") and tgt.get("status_col"):
+            scol = tgt["status_col"]
+            where_conds.append(re.sub(rf"\b{re.escape(scol)}\b", f"f.{scol}", tgt["valid_filter"], flags=re.IGNORECASE))
+
+    if analysis.bounded_period is not None:
+        w_start, w_end = analysis.bounded_period
+        if w_start and w_start != "0001-01-01":
+            where_conds.append(f"substr(f.{dcol_q}, 1, 10) BETWEEN '{w_start}' AND '{w_end}'")
+        elif w_end:
+            where_conds.append(f"substr(f.{dcol_q}, 1, 10) <= '{w_end}'")
+
+    fact_ref = _quote_sqlite_ident(best_fact.table_name)
+    where_sql = f"\nWHERE {' AND '.join(where_conds)}"
+    if mode == "peak_period":
+        order_sql = f"{raw_metric_expr} {sort_dir}, {period_alias} ASC\nLIMIT 1;"
+    else:
+        order_sql = f"{period_alias} ASC;"
+
+    suggested_sql = (
+        f"SELECT {period_expr} AS {period_alias}, {metric_expr} AS {metric_alias}\n"
+        f"FROM {fact_ref} f{joined_clauses}{where_sql}\n"
+        f"GROUP BY {period_expr}\n"
+        f"ORDER BY {order_sql}"
+    )
+    return {
+        "mode": mode,
+        "fact_table": best_fact.table_name,
+        "date_col": best_dcol,
+        "period_alias": period_alias,
+        "metric_alias": metric_alias,
+        "suggested_sql": suggested_sql,
+    }
+
+
 def format_effective_temporal_summary(
     temporal_summary: str,
     as_of_date: str,
@@ -2595,6 +2946,11 @@ def _select_rulebook_prompt(
         if (ext_spec is None and avg_spec is None and ent_metric_spec is None)
         else None
     )
+    ts_spec = (
+        build_time_series_or_period_ranking_sql_spec(question, knowledge, analysis, entity_matches)
+        if (ext_spec is None and avg_spec is None and ent_metric_spec is None and cat_spec is None)
+        else None
+    )
     ord_rank = extract_ordinal_rank(question)
     if ent_metric_spec is not None:
         sections.append(
@@ -2607,6 +2963,12 @@ def _select_rulebook_prompt(
             f"- Câu hỏi LIỆT KÊ DANH MỤC / ĐỐI TƯỢNG THUẦN TÚY: truy vấn trực tiếp bảng danh mục `{cat_spec['table']}`, "
             f"TUYỆT ĐỐI KHÔNG JOIN bảng giao dịch và KHÔNG lọc theo ngày hay trạng thái đơn! "
             f"Dùng chính xác mẫu SQLite chuẩn sau:\n```sql\n{cat_spec['suggested_sql']}\n```"
+        )
+    elif ts_spec is not None:
+        sections.append(
+            f"- Câu hỏi CHUỖI THỜI GIAN / NGÀY CAO-THẤP NHẤT dùng bảng `{ts_spec['fact_table']}` và cột ngày chuẩn `{ts_spec['date_col']}` "
+            f"(TUYỆT ĐỐI KHÔNG lọc ISO date trên `source_sheet`, VÀ BẮT BUỘC có hàm tổng hợp `SUM`/`COUNT` khi `GROUP BY`!): "
+            f"Dùng chính xác mẫu SQLite chuẩn sau:\n```sql\n{ts_spec['suggested_sql']}\n```"
         )
     elif ext_spec is not None:
         top_n, bottom_n, wants_diff = analysis.extreme_comparison or (1, 1, True)
@@ -3028,16 +3390,23 @@ def verify_sql_semantics(
             True,
         )
 
-    # 4c. Grouped entity ranking missing aggregate function (SUM/COUNT/AVG) in SELECT and ORDER BY
+    # 4c. Grouped ranking/trend missing aggregate function (SUM/COUNT/AVG) in SELECT and ORDER BY
     if (
         "group by" in sql_low
-        and "order by" in sql_low
-        and re.search(r"\b(?:tong|doanh thu|thanh tien|so luong|ban chay|chi tieu|cong no)\b", qn)
+        and re.search(r"\b(?:tong|doanh thu|thanh tien|so luong|ban chay|chi tieu|cong no|xu huong|dien bien|theo tung ngay|theo tung thang)\b", qn)
         and not re.search(r"\b(?:sum|count|avg|min|max|total)\s*\(", sql_low)
     ):
         return (
             False,
-            "LỖI THIẾU HÀM TỔNG HỢP (SUM/COUNT): Khi `GROUP BY` theo sản phẩm/khách hàng/nhóm để xếp hạng doanh thu hoặc số lượng, BẮT BUỘC phải dùng `SUM(thanh_tien)` hoặc `SUM(so_luong)` trong cả `SELECT` và `ORDER BY`, KHÔNG dùng cột đơn lẻ chưa cộng gộp!",
+            "LỖI THIẾU HÀM TỔNG HỢP (SUM/COUNT): Khi `GROUP BY` theo sản phẩm/khách hàng/nhóm/ngày để xếp hạng hoặc vẽ xu hướng doanh thu hay số lượng, BẮT BUỘC phải dùng `SUM(<cột_tiền>)` hoặc `COUNT(*)` trong `SELECT` (và `ORDER BY` nếu xếp hạng), KHÔNG chỉ `SELECT` mỗi cột nhóm/ngày!",
+            True,
+        )
+
+    # 4c-ii. Misused source_sheet column as ISO date filter
+    if re.search(r"source_sheet\s*(?:between|=|>=|<=|>|<|like)\s*'(?:19|20)\d{2}-\d{2}", sql_low):
+        return (
+            False,
+            "LỖI DÙNG SAI CỘT NGÀY: `source_sheet` chỉ là tên sheet nguồn, KHÔNG phải cột ngày ISO! Hãy lọc trên cột ngày thực tế (VD: `substr(ngay, 1, 10) BETWEEN ...`).",
             True,
         )
 
@@ -4403,6 +4772,7 @@ class DataMateAgent:
                         lambda: build_benchmark_average_entity_sql_spec(resolved_question, knowledge, analysis),
                         lambda: build_entity_and_metric_listing_sql_spec(resolved_question, knowledge, analysis, entities),
                         lambda: build_catalog_listing_sql_spec(resolved_question, knowledge, analysis, entities),
+                        lambda: build_time_series_or_period_ranking_sql_spec(resolved_question, knowledge, analysis, entities),
                     ):
                         sp = spec_fn()
                         if not sp or not sp.get("suggested_sql"):
@@ -4468,6 +4838,7 @@ class DataMateAgent:
                 candidate_sql = str(obj["sql"]) if (obj and isinstance(obj.get("sql"), str)) else raw_reply
                 candidate_sql = rewrite_ranked_entity_sql(candidate_sql, resolved_question, use_round_half_up=True)
                 candidate_sql = strip_spurious_single_day_filter(candidate_sql, resolved_question, analysis)
+                candidate_sql = rewrite_misused_source_sheet_date_filter(candidate_sql, knowledge)
                 subq_cap_err = _check_subquery_column_capture(candidate_sql, knowledge)
                 if subq_cap_err:
                     res = SQLExecutionResult(

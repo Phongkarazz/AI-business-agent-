@@ -1238,6 +1238,25 @@ def pick_label_column(df: pd.DataFrame, label_cols: list = None) -> tuple:
         full_name_series = df[f_col].astype(str) + " " + df[l_col].astype(str)
         return "Họ và Tên", full_name_series, [f_col, l_col]
 
+    _non_date_varying = (
+        sorted(
+            [
+                c
+                for c in label_cols
+                if df[c].nunique(dropna=True) >= 2
+                and not re.search(
+                    r"(?:^|[\s_])(?:ngay|ngày|date|han_?tra|hen_?tra|hẹn\s*trả|hạn\s*trả|lay|lấy|đặt)(?:$|[\s_])",
+                    str(c),
+                    flags=re.IGNORECASE,
+                )
+            ],
+            key=lambda c: df[c].nunique(dropna=True),
+            reverse=True,
+        )
+        if len(df) >= 2
+        else []
+    )
+
     # 0.1 Nếu có cột thuộc về thực thể cá nhân (Salesperson, Product, Employee, Customer...)
     # BẮT BUỘC loại trừ các cột thống kê số lượng (EmployeeCount, Số Lượng Nhân Sự...)
     individual_candidates = [
@@ -1246,12 +1265,14 @@ def pick_label_column(df: pd.DataFrame, label_cols: list = None) -> tuple:
     ]
     if individual_candidates:
         chosen_ind = sorted(individual_candidates, key=lambda c: df[c].nunique(dropna=True), reverse=True)[0]
-        return chosen_ind, df[chosen_ind].astype(str), [chosen_ind]
+        if not (_non_date_varying and df[chosen_ind].nunique(dropna=True) <= 1):
+            return chosen_ind, df[chosen_ind].astype(str), [chosen_ind]
 
     # 1. Tìm cột khớp pattern name-like
     best_name = get_best_name_column(df, exclude_cols=[])
     if best_name and best_name in label_cols:
-        return best_name, df[best_name].astype(str), [best_name]
+        if not (_non_date_varying and df[best_name].nunique(dropna=True) <= 1):
+            return best_name, df[best_name].astype(str), [best_name]
 
     # 2. Sắp xếp theo số lượng giá trị duy nhất giảm dần (cột chi tiết hơn làm trục X)
     try:
@@ -5104,8 +5125,8 @@ def generate_data_grounded_anomaly(df: pd.DataFrame, user_query: str = "", is_en
 
             is_yr_peak = (str(peak_t).strip().isdigit() and len(str(peak_t).strip()) == 4 and 1900 <= int(str(peak_t).strip()) <= 2100) or any(k in str(t_col).lower() for k in ["year", "năm"])
             is_yr_min = (str(min_t).strip().isdigit() and len(str(min_t).strip()) == 4 and 1900 <= int(str(min_t).strip()) <= 2100) or any(k in str(t_col).lower() for k in ["year", "năm"])
-            is_qtr_peak = bool(re.search(r'\b(?:19|20)\d{2}-?Q[1-4]\b|(?i)\bQ[1-4]\b', str(peak_t)))
-            is_qtr_min = bool(re.search(r'\b(?:19|20)\d{2}-?Q[1-4]\b|(?i)\bQ[1-4]\b', str(min_t)))
+            is_qtr_peak = bool(re.search(r'\b(?:19|20)\d{2}-?Q[1-4]\b|\bQ[1-4]\b', str(peak_t), flags=re.IGNORECASE))
+            is_qtr_min = bool(re.search(r'\b(?:19|20)\d{2}-?Q[1-4]\b|\bQ[1-4]\b', str(min_t), flags=re.IGNORECASE))
 
             def _fmt_t_str(t_val, ent_val, is_yr, is_qtr, is_english):
                 ent_part = ""
@@ -6281,7 +6302,7 @@ def generate_hypothesis_tree(df: pd.DataFrame, user_query: str = "", is_en: bool
         raw_bot_time = str(df.loc[min_idx, time_col]).strip()
 
         def _fmt_period_str(t_val, is_english):
-            if bool(re.search(r'\b(?:19|20)\d{2}-?Q[1-4]\b|(?i)\bQ[1-4]\b', str(t_val))):
+            if bool(re.search(r'\b(?:19|20)\d{2}-?Q[1-4]\b|\bQ[1-4]\b', str(t_val), flags=re.IGNORECASE)):
                 return f"quarter {t_val}" if is_english else f"quý {t_val}"
             if str(t_val).isdigit() and len(str(t_val)) == 4 and 1900 <= int(str(t_val)) <= 2100:
                 return f"year {t_val}" if is_english else f"năm {t_val}"
