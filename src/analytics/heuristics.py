@@ -1315,6 +1315,8 @@ VI_DIACRITICS_MAP = [
     (r"(?i)\bten\s+thuc\s+the\b", "Tên Thực Thể"),
     (r"(?i)\bten\s+san\s+pham\b", "Tên Sản Phẩm"),
     (r"(?i)\bten\s+khach\s+hang\b", "Tên Khách Hàng"),
+    (r"(?i)\btong\s+so\s+tien\b", "Tổng Số Tiền"),
+    (r"(?i)\bnguoi\s+thuc\s+hien\b", "Người Thực Hiện"),
 
     # Cụm 3 từ
     (r"(?i)\bso\s+don\s+hop\s+le\b", "Số Đơn Hợp Lệ"),
@@ -1399,6 +1401,17 @@ VI_DIACRITICS_MAP = [
     (r"(?i)\bton\s+kho\b", "Tồn Kho"),
     (r"(?i)\btong\s+tien\b", "Tổng Tiền"),
     (r"(?i)\bthanh\s+tien\b", "Thành Tiền"),
+    (r"(?i)\bso\s+tien\b", "Số Tiền"),
+    (r"(?i)\bso\s+du\b", "Số Dư"),
+    (r"(?i)\bsao\s+ke\b", "Sao Kê"),
+    (r"(?i)\bngan\s+hang\b", "Ngân Hàng"),
+    (r"(?i)\bkhoan\s+chi\b", "Khoản Chi"),
+    (r"(?i)\bnguon\s+thu\b", "Nguồn Thu"),
+    (r"(?i)\bnguoi\s+chi\b", "Người Chi"),
+    (r"(?i)\bnguoi\s+dung\b", "Người Dùng"),
+    (r"(?i)\bnguoi\s+mung\b", "Người Mừng"),
+    (r"(?i)\bthanh\s+vien\b", "Thành Viên"),
+    (r"(?i)\bdich\s+vu\b", "Dịch Vụ"),
     (r"(?i)\btien\s+thu\b", "Tiền Thu"),
     (r"(?i)\btien\s+chi\b", "Tiền Chi"),
     (r"(?i)\bty\s+le\b", "Tỷ Lệ"),
@@ -1633,6 +1646,18 @@ def humanize_name_vi(name: str) -> str:
         "nhomthuoc": "Nhóm Thuốc",
         "tenkhachhang": "Tên Khách Hàng",
         "vatlieu": "Vật Liệu",
+        "sotien": "Số Tiền",
+        "tongsotien": "Tổng Số Tiền",
+        "sodu": "Số Dư",
+        "saoke": "Sao Kê",
+        "khoanchi": "Khoản Chi",
+        "nguonthu": "Nguồn Thu",
+        "nguoithuchien": "Người Thực Hiện",
+        "nguoichi": "Người Chi",
+        "nguoidung": "Người Dùng",
+        "nguoimung": "Người Mừng",
+        "thanhvien": "Thành Viên",
+        "dichvu": "Dịch Vụ",
     }
     if norm in vi_terms:
         return vi_terms[norm]
@@ -1744,8 +1769,21 @@ def parse_schema_elements(tables: list[str], schema_context: str = "") -> dict:
     curr_tbl = None
     for line in lines:
         l_str = line.strip()
+        tbl_dm_match = re.match(r"^-\s*Bảng\s*[`'\"]?(\w+)[`'\"]?\s*\(\d+\s*dòng[^:]*\):\s*$", l_str, re.IGNORECASE)
         tbl_match = re.match(r"^-\s*Bảng\s*[`'\"]?(\w+)[`'\"]?:\s*(.*)$", l_str, re.IGNORECASE)
-        if tbl_match:
+        if tbl_dm_match:
+            curr_tbl = tbl_dm_match.group(1)
+            tbl_cols_map.setdefault(curr_tbl, [])
+        elif l_str.startswith("Cột:") and curr_tbl:
+            raw_parts = l_str[len("Cột:"):].split("|")
+            cols = []
+            for c_part in raw_parts:
+                c_clean = c_part.strip().split("(")[0].split()[0].replace("`", "").replace("'", "").replace('"', "").strip()
+                if c_clean:
+                    cols.append(c_clean)
+            if cols:
+                tbl_cols_map[curr_tbl] = cols
+        elif tbl_match:
             t_name = tbl_match.group(1)
             raw_cols = tbl_match.group(2)
             curr_tbl = t_name
@@ -1790,7 +1828,13 @@ def parse_schema_elements(tables: list[str], schema_context: str = "") -> dict:
                 if c not in dim_cols:
                     dim_cols.append(c)
             # Tên thực thể
-            elif any(k in c_low for k in ["name", "title", "salesperson", "fullname", "product", "customer", "employee", "patient", "doctor", "student", "airline", "passenger", "ten_", "ten", "mon", "thuoc", "vat_lieu", "khach", "nha_cung_cap"]):
+            elif any(k in c_low for k in [
+                "name", "title", "salesperson", "fullname", "product", "customer", "employee",
+                "patient", "doctor", "student", "airline", "passenger", "ten_", "ten", "mon",
+                "thuoc", "vat_lieu", "khach", "nha_cung_cap", "nguoi_thuc_hien", "nguoi_chi",
+                "nguoi_dung", "nguoi_nhan", "nguoi_mung", "thanh_vien", "chu_tai_khoan",
+                "khoan_chi", "nguon_thu", "dich_vu", "k_muc", "ma_do",
+            ]) or c_low in {"tho", "tho_chinh"}:
                 if c not in entity_cols:
                     entity_cols.append(c)
             else:
@@ -1866,7 +1910,7 @@ def generate_dynamic_heuristic_prompts(tables: list[str], schema_context: str = 
     sec_metric = metric_cols[1] if len(metric_cols) > 1 else main_metric
     main_dim = dim_cols[0] if dim_cols else (entity_cols[0] if entity_cols else (tbl_list[0] if tbl_list else ("Category" if is_en else "Phân loại")))
     sec_dim = dim_cols[1] if len(dim_cols) > 1 else main_dim
-    main_entity = entity_cols[0] if entity_cols else (tbl_list[0] if tbl_list else ("Entity" if is_en else "Đối tượng"))
+    main_entity = entity_cols[0] if entity_cols else (dim_cols[0] if dim_cols else ("Transaction" if is_en else "Giao dịch"))
     main_table = tbl_list[0] if tbl_list else ("Data" if is_en else "Dữ liệu")
 
     # Nhãn thân thiện

@@ -11,16 +11,24 @@ from types import SimpleNamespace
 import pandas as pd
 
 from datamate.agent import (
+    _allows_negative_net_result,
+    build_entity_and_metric_listing_sql_spec,
     build_time_series_or_period_ranking_sql_spec,
     classify_expected_type,
     rewrite_misused_source_sheet_date_filter,
+    rewrite_signed_cashflow_sql,
     verify_sql_semantics,
 )
 from datamate.loader import load_business_workspace
 from datamate.schema_context import build_workspace_knowledge
 from datamate.sql_executor import SQLExecutionResult
 from src.analytics.anomaly import analyze_data_anomalies
-from src.analytics.heuristics import generate_hypothesis_tree, pick_label_column
+from src.analytics.heuristics import (
+    generate_categorized_starter_prompts,
+    generate_hypothesis_tree,
+    humanize_name_vi,
+    pick_label_column,
+)
 from src.llm.datamate_bridge import build_datamate_suggested_questions, run_datamate_enhanced_turn
 
 
@@ -219,6 +227,108 @@ class TestVeraxusUIAndQueryFixes(unittest.TestCase):
             )
             self.assertIsNotNone(spec_peak)
             self.assertEqual(spec_peak["date_col"], "ngay")
+
+    def test_signed_bank_statement_cashflow_positive_ranking_and_diacritics(self):
+        self.assertEqual(humanize_name_vi("so_tien"), "Số Tiền")
+        self.assertEqual(humanize_name_vi("tong_so_tien"), "Tổng Số Tiền")
+
+        schema_txt = "\n".join(
+            [
+                "- Bảng `nganhanga_saoke`: ngay_giao_dich, mo_ta, danh_muc, so_tien, nguoi_thuc_hien, ghi_chu",
+                "- Bảng `so_chi`: ngay, khoan_chi, nhom, so_tien, nguoi_chi",
+            ]
+        )
+        cats = generate_categorized_starter_prompts(["nganhanga_saoke", "so_chi"], schema_txt, lang="vi")
+        all_prompts = [c["prompt"] for cards in cats.values() for c in cards]
+        self.assertFalse(any("nganhanga saoke" in p.lower() for p in all_prompts), f"Raw table prompt leaked: {all_prompts}")
+        self.assertFalse(any("so tiền" in p.lower() for p in all_prompts), f"Unaccented 'so tiền' in: {all_prompts}")
+
+        with tempfile.TemporaryDirectory() as td:
+            ws_dir = pathlib.Path(td)
+            db_path = ws_dir / "data.sqlite"
+            conn = sqlite3.connect(str(db_path))
+            conn.executescript(
+                """
+                CREATE TABLE nganhanga_saoke (
+                    ngay_giao_dich TEXT, mo_ta TEXT, danh_muc TEXT, so_tien INTEGER, nguoi_thuc_hien TEXT, ghi_chu TEXT
+                );
+                INSERT INTO nganhanga_saoke VALUES
+                    ('2026-08-01', 'Siêu thị Alpha', 'Đi chợ, siêu thị', -83052000, 'Thành viên A', ''),
+                    ('2026-08-02', 'Chuyển khoản vãng lai', NULL, -81300000, 'Thành viên A', ''),
+                    ('2026-08-03', 'Lãi không kỳ hạn', NULL, 318323, 'Ngân hàng', ''),
+                    ('2026-08-04', 'Điện nước', 'Nhà cửa', -26352000, 'Thành viên B', ''),
+                    ('2026-08-05', 'Nhà hàng', 'Ăn uống', -21562000, 'Thành viên A', ''),
+                    ('2026-08-06', 'Rạp chiếu phim', 'Giải trí', -13759000, 'Thành viên B', ''),
+                    ('2026-08-07', 'Khám sức khoẻ', 'Y tế, sức khoẻ', -3918000, 'Thành viên A', '');
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            kw = build_workspace_knowledge(load_business_workspace(ws_dir))
+            self.assertIn("nganhanga_saoke.so_tien", kw.signed_amount_columns)
+            self.assertGreater(kw.signed_amount_columns["nganhanga_saoke.so_tien"]["neg_count"], 4)
+            self.assertIn("SUM(ABS(so_tien))", kw.semantic_summary)
+
+            q_tbl = "Top 10 nganhanga saoke có tổng so tien cao nhất"
+            spec = build_entity_and_metric_listing_sql_spec(
+                q_tbl, kw, classify_expected_type(q_tbl), entity_matches=()
+            )
+            self.assertIsNotNone(spec)
+            self.assertIn("ABS(", spec["suggested_sql"])
+            self.assertIn("so_tien < 0", spec["suggested_sql"])
+
+            # Simulate LLM returning inverted negative SQL without ABS() or IS NOT NULL
+            fake_saoke_client = _FakeLLMClient(
+                [
+                    '{"status":"ok","sql":"SELECT danh_muc AS nganhanga_saoke, ROUND_HALF_UP(SUM(so_tien), 0) AS doanh_thu FROM nganhanga_saoke GROUP BY danh_muc ORDER BY doanh_thu DESC LIMIT 10;"}'
+                ]
+            )
+            out = run_datamate_enhanced_turn(
+                q_tbl,
+                fake_saoke_client,
+                "Ollama (Local AI Offline)",
+                "veraxus-coder:3b",
+                kw,
+                lang="vi",
+            )
+            self.assertIsNotNone(out.get("df"))
+            df_out = out["df"]
+            self.assertEqual(len(df_out), 5)
+            self.assertFalse(df_out.iloc[:, 0].isna().any())
+            self.assertEqual(df_out.iloc[0, 0], "Đi chợ, siêu thị")
+            self.assertEqual(float(df_out.iloc[0, 1]), 83052000.0)
+            self.assertEqual(df_out.iloc[-1, 0], "Y tế, sức khoẻ")
+            self.assertEqual(float(df_out.iloc[-1, 1]), 3918000.0)
+            self.assertTrue((df_out.iloc[:, 1] > 0).all())
+
+            # Semantic guard rejects negative ranking result directly
+            bad_sql = "SELECT danh_muc, ROUND_HALF_UP(SUM(so_tien), 0) AS doanh_thu FROM nganhanga_saoke GROUP BY danh_muc ORDER BY doanh_thu DESC"
+            ok_neg, msg_neg, fatal_neg = verify_sql_semantics(
+                bad_sql,
+                SQLExecutionResult(
+                    ok=True,
+                    sql=bad_sql,
+                    columns=["danh_muc", "doanh_thu"],
+                    rows=[("Y tế, sức khoẻ", -3918000), ("Đi chợ, siêu thị", -83052000)],
+                    row_count=2,
+                ),
+                "Top 10 danh mục có tổng số tiền cao nhất",
+                kw,
+                classify_expected_type("Top 10 danh mục có tổng số tiền cao nhất"),
+            )
+            self.assertFalse(ok_neg)
+            self.assertTrue(fatal_neg)
+            self.assertIn("LỖI DẤU ÂM", msg_neg)
+
+            # Explicit net cashflow question MUST keep signed arithmetic
+            net_q = "Chênh lệch thu chi ròng trong nganhanga_saoke là bao nhiêu?"
+            self.assertTrue(_allows_negative_net_result("chenh lech thu chi rong trong nganhanga_saoke la bao nhieu"))
+            net_sql = "SELECT ROUND_HALF_UP(SUM(so_tien), 0) AS thu_chi_rong FROM nganhanga_saoke;"
+            self.assertEqual(
+                rewrite_signed_cashflow_sql(net_sql, net_q, kw, classify_expected_type(net_q)),
+                net_sql,
+            )
 
 
 if __name__ == "__main__":

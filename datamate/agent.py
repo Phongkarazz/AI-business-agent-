@@ -1622,6 +1622,204 @@ def rewrite_misused_source_sheet_date_filter(sql: str, knowledge: WorkspaceKnowl
     return out
 
 
+_ALLOW_NET_NEGATIVE_RE = re.compile(
+    r"\b(?:rong|net|chenh\s+lech|thu\s+tru\s+chi|chi\s+tru\s+thu|can\s+doi|con\s+du|de\s+danh|"
+    r"lai\s+lo|loi\s+nhuan|lai\s+gop|lai\s+rong|thieu\s+hut|tham\s+hut|tang\s+giam|"
+    r"bien\s+dong\s+rong|thay\s+doi|am\b|duong\s+hay\s+am|du\s+hay\s+thieu)\b",
+    re.IGNORECASE,
+)
+
+
+def _allows_negative_net_result(qn: str) -> bool:
+    """Return True only when the question explicitly asks for a signed net/delta/balance/profit-or-loss metric."""
+    if not qn:
+        return False
+    return bool(
+        _ALLOW_NET_NEGATIVE_RE.search(qn)
+        or re.search(r"\b(?:thu\s+chi|dong\s+tien)\b", qn)
+        or (re.search(r"\blo\b", qn) and re.search(r"\b(?:lai|ban|kinh\s+doanh|doanh\s+thu|thang|nam)\b", qn))
+    )
+
+
+def resolve_signed_metric_sql(
+    table_name: str,
+    col_name: str,
+    prefix: str,
+    qn: str,
+    knowledge: WorkspaceKnowledge,
+    default_alias: str = "tong_doanh_thu",
+) -> Tuple[str, Optional[str], str]:
+    """
+    For signed cashflow columns (e.g. bank statement outflows `< 0`, inflows `> 0`),
+    return `(sum_expr, sign_where_cond_or_None, alias)` so magnitude/spending rankings
+    use `SUM(ABS(col))` and direction filters instead of returning inverted negative totals.
+    """
+    col_q = _quote_sqlite_ident(col_name)
+    signed_map = getattr(knowledge, "signed_amount_columns", None) or {}
+    s_info = signed_map.get(f"{table_name}.{col_name}")
+    if not s_info or _allows_negative_net_result(qn):
+        return f"SUM({prefix}{col_q})", None, default_alias
+
+    neg_cnt = int(s_info.get("neg_count", 0))
+    pos_cnt = int(s_info.get("pos_count", 0))
+    if neg_cnt <= 0:
+        return f"SUM({prefix}{col_q})", None, default_alias
+
+    asks_inflow = bool(
+        re.search(r"\b(?:thu(?:\s+nhap|\s+vao)?|tien\s+vao|nhan\s+duoc|nap\s+vao|hoan\s+tien|lai\s+ngan\s+hang)\b", qn)
+    ) and not re.search(r"\bthu\s+chi\b", qn)
+    asks_outflow = bool(
+        re.search(r"\b(?:chi(?:\s+tieu|\s+ra)?|tieu|ton|phi|khau\s+tru|tien\s+ra|chuyen\s+di)\b", qn)
+    )
+
+    if asks_inflow and not asks_outflow and pos_cnt > 0:
+        return f"SUM({prefix}{col_q})", f"{prefix}{col_q} > 0", "tong_tien_thu"
+    if asks_outflow or neg_cnt > pos_cnt:
+        return f"SUM(ABS({prefix}{col_q}))", f"{prefix}{col_q} < 0", "tong_so_tien"
+    return f"SUM(ABS({prefix}{col_q}))", None, "tong_so_tien"
+
+
+def _inject_sql_where_conditions(sql: str, extra_conds: Sequence[str]) -> str:
+    """Inject extra AND conditions into a single-SELECT SQLite query safely."""
+    conds = [c.strip() for c in extra_conds if c and c.strip()]
+    if not conds or re.sub(r"\s+", " ", sql.lower()).count("select ") != 1:
+        return sql
+    has_semi = sql.rstrip().endswith(";")
+    body = sql.rstrip().rstrip(";").strip()
+    m_where = re.search(
+        r"\bWHERE\b([\s\S]*?)(?=\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|\bHAVING\b|$)",
+        body,
+        flags=re.IGNORECASE,
+    )
+    extra_sql = " AND ".join(conds)
+    if m_where:
+        w_body = m_where.group(1).strip()
+        wrapped = f"({w_body})" if re.search(r"\bor\b", w_body, flags=re.IGNORECASE) else w_body
+        updated = body[: m_where.start()] + f"WHERE {wrapped} AND {extra_sql} " + body[m_where.end() :].lstrip()
+    else:
+        m_tail = re.search(r"\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b", body, flags=re.IGNORECASE)
+        if m_tail:
+            updated = body[: m_tail.start()].rstrip() + f"\nWHERE {extra_sql}\n" + body[m_tail.start() :]
+        else:
+            updated = f"{body}\nWHERE {extra_sql}"
+    return f"{updated};" if has_semi else updated
+
+
+def rewrite_signed_cashflow_sql(
+    sql: str,
+    question: str,
+    knowledge: WorkspaceKnowledge,
+    analysis: QuestionAnalysis,
+) -> str:
+    """
+    When querying signed cashflow tables (negative outflows `< 0`) for magnitude/Top-K/spending,
+    rewrite `SUM(so_tien)` -> `SUM(ABS(so_tien))`, inject `< 0` (or `> 0` for inflow),
+    and exclude NULL group keys in Top-K breakdowns.
+    """
+    signed_map = getattr(knowledge, "signed_amount_columns", None) or {}
+    if not sql or not signed_map:
+        return sql
+    qn = normalize_vn_question(normalize_nfc(question or ""))
+    if _allows_negative_net_result(qn):
+        return sql
+    if re.search(r"\babs\s*\(|\bsum\s*\(\s*-|-\s*sum\s*\(|\bcase\s+when\b", sql, flags=re.IGNORECASE):
+        return sql
+
+    kw_stop = {"where", "group", "order", "limit", "having", "on", "join", "inner", "left", "right", "cross", "union"}
+    ref_tables: List[Tuple[str, str]] = []
+    for m in re.finditer(
+        r"\b(?:from|join)\s+[`\"]?([a-zA-Z_][a-zA-Z0-9_]*)[`\"]?(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?",
+        sql,
+        flags=re.IGNORECASE,
+    ):
+        tname = m.group(1)
+        alias = m.group(2)
+        if alias and alias.lower() in kw_stop:
+            alias = None
+        ref_tables.append((tname, alias or ""))
+
+    target_hit = None
+    for full_col, s_info in signed_map.items():
+        t_part, c_part = full_col.split(".", 1)
+        for ref_t, ref_alias in ref_tables:
+            if ref_t.lower() == t_part.lower() and re.search(
+                rf"\b(?:sum|avg)\s*\(\s*(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?{re.escape(c_part)}\s*\)",
+                sql,
+                flags=re.IGNORECASE,
+            ):
+                target_hit = (t_part, c_part, ref_alias, s_info)
+                break
+        if target_hit:
+            break
+
+    if not target_hit:
+        return sql
+
+    tname, scol, ref_alias, s_info = target_hit
+    neg_cnt = int(s_info.get("neg_count", 0))
+    pos_cnt = int(s_info.get("pos_count", 0))
+    if neg_cnt <= 0:
+        return sql
+
+    asks_inflow = bool(
+        re.search(r"\b(?:thu(?:\s+nhap|\s+vao)?|tien\s+vao|nhan\s+duoc|nap\s+vao|hoan\s+tien|lai\s+ngan\s+hang)\b", qn)
+    ) and not re.search(r"\bthu\s+chi\b", qn)
+    asks_outflow = bool(
+        re.search(r"\b(?:chi(?:\s+tieu|\s+ra)?|tieu|ton|phi|khau\s+tru|tien\s+ra|chuyen\s+di)\b", qn)
+    )
+
+    col_prefix = f"{ref_alias}." if (ref_alias and f"{ref_alias.lower()}.{scol.lower()}" in sql.lower()) else (
+        f"{tname}." if f"{tname.lower()}.{scol.lower()}" in sql.lower() else ""
+    )
+    out = sql
+    extra_conds: List[str] = []
+    has_sign_filter = bool(re.search(rf"\b{re.escape(scol)}\s*[<>]=?\s*0\b", sql, flags=re.IGNORECASE))
+
+    if asks_inflow and not asks_outflow and pos_cnt > 0:
+        if not has_sign_filter:
+            extra_conds.append(f"{col_prefix}{_quote_sqlite_ident(scol)} > 0")
+    elif asks_outflow or neg_cnt > pos_cnt:
+        out = re.sub(
+            rf"\b(SUM|AVG)\s*\(\s*((?:[a-zA-Z_][a-zA-Z0-9_]*\.)?{_quote_sqlite_ident(scol)}|(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?{re.escape(scol)})\s*\)",
+            lambda m: f"{m.group(1)}(ABS({m.group(2)}))",
+            out,
+            flags=re.IGNORECASE,
+        )
+        if "doanh thu" not in qn:
+            out = re.sub(r"\bAS\s+(?:tong_)?doanh_thu\b", "AS tong_so_tien", out, flags=re.IGNORECASE)
+            out = re.sub(r"\bORDER\s+BY\s+(?:tong_)?doanh_thu\b", "ORDER BY tong_so_tien", out, flags=re.IGNORECASE)
+        if not has_sign_filter:
+            extra_conds.append(f"{col_prefix}{_quote_sqlite_ident(scol)} < 0")
+
+    # Exclude NULL/blank group keys in ranking queries unless explicitly requested
+    if (
+        "group by" in out.lower()
+        and not re.search(r"\b(?:null|trong|chua\s+phan\s+loai|chua\s+xac\s+dinh)\b", qn)
+        and re.search(r"\b(?:top\s*\d+|cao\s+nhat|lon\s+nhat|nhieu\s+nhat|thap\s+nhat|it\s+nhat|phan\s+bo)\b", qn)
+    ):
+        m_gb = re.search(
+            r"\bGROUP\s+BY\s+((?:[a-zA-Z_][a-zA-Z0-9_]*\.)?)([a-zA-Z_][a-zA-Z0-9_]*)\b",
+            out,
+            flags=re.IGNORECASE,
+        )
+        if m_gb:
+            gpfx, gcol = m_gb.group(1), m_gb.group(2)
+            # Only inject when gcol is an actual column name of a queried table (not an alias like `period`)
+            t_col_lows = {
+                getattr(c, "sql_name", str(c)).lower()
+                for ref_t, _ in ref_tables
+                if ref_t in (knowledge.workspace.tables or {})
+                for c in knowledge.workspace.tables[ref_t].columns
+            }
+            if gcol.lower() in t_col_lows and not re.search(rf"\b{re.escape(gcol)}\s+is\s+not\s+null\b", out, flags=re.IGNORECASE):
+                extra_conds.append(f"{gpfx}{_quote_sqlite_ident(gcol)} IS NOT NULL")
+                extra_conds.append(f"TRIM(CAST({gpfx}{_quote_sqlite_ident(gcol)} AS TEXT)) != ''")
+
+    if extra_conds:
+        out = _inject_sql_where_conditions(out, extra_conds)
+    return out
+
+
 def _find_join_key(fact_tbl: Any, other_tbl: Any) -> Optional[str]:
     ignore = {"ngay", "thang", "nam", "ghi_chu", "trang_thai", "status", "note", "notes"}
     fact_cols = [getattr(c, "sql_name", str(c)) for c in getattr(fact_tbl, "columns", [])]
@@ -1692,7 +1890,7 @@ def build_extreme_comparison_sql_spec(
         "doanh_thu", "doanhthu", "thanh_tien", "thanhtien", "tong_tien", "tongtien",
         "tien_hang", "tienhang", "tong_doanh_thu", "revenue", "total_revenue",
         "sales", "total_sales", "amount", "total_amount", "gia_tri", "profit",
-        "loi_nhuan", "salary", "chi_phi",
+        "loi_nhuan", "salary", "chi_phi", "so_tien", "sotien", "st_vnd",
     )
     qty_priority = ("so_luong_nhap", "so_luong", "soluong", "sl", "qty", "quantity", "so_hop", "boxes")
     debt_priority = ("con_no", "cong_no", "chua_tra", "con_thieu", "debt")
@@ -1700,7 +1898,7 @@ def build_extreme_comparison_sql_spec(
     money_col = next((fact_cols_low[k] for k in money_priority if k in fact_cols_low), None)
     if money_col is None:
         money_col = next(
-            (c for c in fact_cols if re.search(r"(?:doanh_?thu|thanh_?tien|tong_?tien|tien_?hang|revenue|sales|amount|profit|salary)", c.lower()) and not re.search(r"(?:pct|ratio|ty_le)", c.lower())),
+            (c for c in fact_cols if re.search(r"(?:doanh_?thu|thanh_?tien|tong_?tien|tien_?hang|revenue|sales|amount|profit|salary|so_?tien|st_?vnd)", c.lower()) and not re.search(r"(?:pct|ratio|ty_le)", c.lower())),
             None,
         )
     qty_col = next((fact_cols_low[k] for k in qty_priority if k in fact_cols_low), None)
@@ -1708,6 +1906,7 @@ def build_extreme_comparison_sql_spec(
     paid_col = next((fact_cols_low[k] for k in ("da_thanh_toan", "da_tra", "da_thu") if k in fact_cols_low), None)
 
     is_money_metric = True
+    signed_where_cond: Optional[str] = None
     if wants_import and ("gia_nhap" in fact_cols_low) and qty_col and not (asks_qty and not asks_money):
         pcol = fact_cols_low["gia_nhap"]
         metric_expr = f"ROUND_HALF_UP(SUM(f.{qty_col} * f.{pcol}), 0)"
@@ -1730,8 +1929,10 @@ def build_extreme_comparison_sql_spec(
         metric_alias = "tong_so_luong"
         is_money_metric = False
     elif money_col:
-        metric_expr = f"ROUND_HALF_UP(SUM(f.{money_col}), 0)"
-        metric_alias = "tong_doanh_thu"
+        raw_sum, signed_where_cond, metric_alias = resolve_signed_metric_sql(
+            fact_profile.table_name, money_col, "f.", qn, knowledge, default_alias="tong_doanh_thu"
+        )
+        metric_expr = f"ROUND_HALF_UP({raw_sum}, 0)"
     elif qty_col:
         metric_expr = f"ROUND_HALF_UP(SUM(f.{qty_col}), 0)"
         metric_alias = "tong_so_luong"
@@ -1827,8 +2028,10 @@ def build_extreme_comparison_sql_spec(
         dim_expr = f"d.{dim_col}"
         join_sql = f"\n    JOIN {_quote_sqlite_ident(dim_tbl.table_name)} d ON f.{join_key} = d.{join_key}"
 
-    # 4. Build safe WHERE predicates (status exclusion + bounded temporal filter + non-empty group)
+    # 4. Build safe WHERE predicates (status exclusion + signed cashflow direction + bounded temporal filter + non-empty group)
     where_conds: List[str] = []
+    if signed_where_cond:
+        where_conds.append(signed_where_cond)
     if not _Q_ALLOW_ALL_STATUS_RE.search(qn) and getattr(knowledge, "order_status_targets", None):
         for tgt in knowledge.order_status_targets:
             if tgt.get("table", "").lower() == fact_profile.table_name.lower():
@@ -2205,10 +2408,21 @@ def build_entity_and_metric_listing_sql_spec(
     _ent_noun_alt = (
         r"(?:thuoc|vat\s+lieu|mat\s+hang|san\s+pham|mon|dich\s+vu|hang\s+hoa|"
         r"khach(?:\s+hang)?|nha\s+cung\s+cap|ncc|kenh(?:\s+ban)?|nhom(?:\s+mon|\s+hang|\s+thuoc)?|"
-        r"nhan\s+vien|tho(?:\s+chinh|\s+phu)?|ky\s+thuat\s+vien|ktv|phong)"
+        r"danh\s+muc|khoan\s+muc|khoan\s+chi|nguon\s+thu|"
+        r"nhan\s+vien|tho(?:\s+chinh|\s+phu)?|ky\s+thuat\s+vien|ktv|phong|"
+        r"nguoi\s+thuc\s+hien|nguoi\s+chi|nguoi\s+dung|thanh\s+vien)"
+    )
+    has_named_tbl_top = bool(
+        top_m
+        and any(
+            re.search(rf"\btop\s*\d+\s+(?:cua\s+|trong\s+)?{re.escape(norm_vn(tn.replace('_', ' ')))}\b", qn)
+            or re.search(rf"\btop\s*\d+\s+(?:cua\s+|trong\s+)?{re.escape(tn.lower())}\b", q_nfc.lower())
+            for tn in tables_dict
+        )
     )
     has_entity_list_ask = bool(
-        re.search(
+        has_named_tbl_top
+        or re.search(
             rf"(?:(?:nhung|cac)\s+(?:ten\s+|loai\s+|nhom\s+|ma\s+)?{_ent_noun_alt}\s+nao\b|"
             rf"\b(?:danh\s+sach|liet\s+ke)\b[^?]{{0,80}}\b{_ent_noun_alt}\b|"
             rf"\btop\s*\d+\s+(?:ten\s+|loai\s+|nhom\s+|ma\s+)?{_ent_noun_alt}\b)",
@@ -2218,8 +2432,16 @@ def build_entity_and_metric_listing_sql_spec(
     has_agg_metric_ask = bool(
         re.search(
             r"(?:(?:\bva\b|,|\bkem\b)\s*(?:tong\s+)?(?:tien\s+nhap|gia\s+tri\s+nhap|tien\s+dich\s+vu|tien\s+hang|doanh\s+thu|doanh\s+so|thanh\s+tien|so\s+luong(?:\s+nhap|\s+ban)?|cong\s+no|con\s+no|tong\s+tien|so\s+tien|chi\s+tieu|chi\s+phi)\b|"
-            r"\b(?:dem\s+ve|mang\s+lai)\s+(?:tong\s+)?(?:tien(?:\s+dich\s+vu|\s+hang)?|doanh\s+thu|doanh\s+so|gia\s+tri)\b)",
+            r"\b(?:dem\s+ve|mang\s+lai)\s+(?:tong\s+)?(?:tien(?:\s+dich\s+vu|\s+hang)?|doanh\s+thu|doanh\s+so|gia\s+tri)\b|"
+            r"\bco\s+(?:tong\s+)?(?:so\s+tien|chi\s+tieu|chi\s+phi)\s+(?:cao|lon|nhieu|thap|it|nho)\s+nhat\b)",
             qn,
+        )
+        or (
+            has_named_tbl_top
+            and re.search(
+                r"\bco\s+(?:tong\s+)?(?:doanh\s+thu|doanh\s+so|thanh\s+tien|so\s+tien|tong\s+tien|chi\s+phi|gia\s+tri)\s+(?:cao|lon|nhieu|thap|it|nho)\s+nhat\b",
+                qn,
+            )
         )
     )
     if not (has_entity_list_ask and has_agg_metric_ask):
@@ -2262,7 +2484,7 @@ def build_entity_and_metric_listing_sql_spec(
         "tien_hang", "tienhang", "tong_doanh_thu", "revenue", "total_revenue",
         "sales", "total_sales", "amount", "total_amount", "gia_tri", "profit",
         "loi_nhuan", "salary", "chi_phi",
-        "tien_dich_vu", "t_tien", "tong_bill", "tien", "tong", "da_thu",
+        "tien_dich_vu", "t_tien", "tong_bill", "so_tien", "sotien", "st_vnd", "tien", "tong", "da_thu",
     )
     qty_priority = ("so_luong_nhap", "so_luong", "soluong", "sl", "qty", "quantity", "so_hop", "boxes")
     debt_priority = ("con_no", "cong_no", "chua_tra", "con_thieu", "debt")
@@ -2271,6 +2493,7 @@ def build_entity_and_metric_listing_sql_spec(
     best_fact_score = -10**9
     for tp in tables_list:
         tlow = tp.table_name.lower()
+        t_norm_sp = norm_vn(tp.table_name.replace("_", " "))
         cols_l = {getattr(c, "sql_name", str(c)).lower() for c in tp.columns}
         has_date_col = any(
             getattr(c, "inferred_type", "") in ("date", "datetime")
@@ -2279,6 +2502,10 @@ def build_entity_and_metric_listing_sql_spec(
         )
         has_money_col = any(m in cols_l for m in money_priority)
         sc = 0
+        if re.search(rf"(?<![a-z0-9]){re.escape(tlow)}(?![a-z0-9])", q_nfc.lower()) or (
+            len(t_norm_sp) >= 4 and re.search(rf"(?<![a-z0-9]){re.escape(t_norm_sp)}(?![a-z0-9])", qn)
+        ):
+            sc += 150
         if not wants_import and re.search(r"^(?:danh_?(?:sach|ba|muc)|dm_|bang_?gia|quy_?doi|ton_?kho)", tlow):
             sc -= 50
         if wants_import and (re.search(r"(?:phieu_?nhap|nhap_?hang)", tlow) or ("gia_nhap" in cols_l and "nha_cung_cap" in cols_l)):
@@ -2327,6 +2554,7 @@ def build_entity_and_metric_listing_sql_spec(
     metric_expr = None
     metric_alias = None
     is_money_metric = True
+    signed_where_cond: Optional[str] = None
 
     if wants_import and ("gia_nhap" in fact_cols_low) and qty_col and not (wants_qty and not wants_money):
         pcol = fact_cols_low["gia_nhap"]
@@ -2348,8 +2576,15 @@ def build_entity_and_metric_listing_sql_spec(
         metric_alias = "tong_so_luong"
         is_money_metric = False
     elif money_col:
-        metric_expr = f"ROUND_HALF_UP(SUM(f.{_quote_sqlite_ident(money_col)}), 0)"
-        metric_alias = "tong_tien_nhap" if wants_import else "tong_doanh_thu"
+        raw_sum, signed_where_cond, metric_alias = resolve_signed_metric_sql(
+            best_fact.table_name,
+            money_col,
+            "f.",
+            qn,
+            knowledge,
+            default_alias="tong_tien_nhap" if wants_import else "tong_doanh_thu",
+        )
+        metric_expr = f"ROUND_HALF_UP({raw_sum}, 0)"
     elif qty_col and price_col:
         metric_expr = f"ROUND_HALF_UP(SUM(f.{_quote_sqlite_ident(qty_col)} * f.{_quote_sqlite_ident(price_col)}), 0)"
         metric_alias = "tong_doanh_thu"
@@ -2401,7 +2636,10 @@ def build_entity_and_metric_listing_sql_spec(
         (r"(?:(?:nhung|cac)\s+(?:ten\s+)?khach(?:\s+hang)?\s+nao\b|danh\s+sach[^?]*khach(?:\s+hang)?\b|\btop\s*\d+[^?]*khach(?:\s+hang)?\b)", r"^(?:ten_?khach_?hang|khach_?hang|ten_?kh|ho_?ten|customer|companyname)$"),
         (r"(?:(?:nhung|cac)\s+(?:ten\s+)?(?:nha\s+cung\s+cap|ncc)\s+nao\b|danh\s+sach[^?]*(?:nha\s+cung\s+cap|ncc)\b|\btop\s*\d+[^?]*(?:nha\s+cung\s+cap|ncc)\b)", r"^(?:nha_?cung_?cap|ten_?ncc|supplier|companyname)$"),
         (r"(?:(?:nhung|cac)\s+(?:ten\s+)?kenh(?:\s+ban)?\s+nao\b|danh\s+sach[^?]*kenh\b)", r"^(?:kenh_?ban|kenh|channel)$"),
-        (r"(?:(?:nhung|cac)\s+(?:ten\s+)?nhom(?:\s+mon|\s+hang|\s+thuoc)?\s+nao\b)", r"^(?:nhom_?mon|nhom_?hang|nhom_?thuoc|danh_?muc|category|categoryname)$"),
+        (r"(?:(?:nhung|cac)\s+(?:ten\s+)?(?:nhom(?:\s+mon|\s+hang|\s+thuoc)?|danh\s+muc|khoan\s+muc)\s+nao\b|\btop\s*\d+[^?]*(?:danh\s+muc|nhom|khoan\s+muc)\b)", r"^(?:nhom_?mon|nhom_?hang|nhom_?thuoc|nhom|danh_?muc|k_?muc|category|categoryname)$"),
+        (r"(?:\bkhoan\s+chi\b)", r"^(?:khoan_?chi|danh_?muc|nhom)$"),
+        (r"(?:\bnguon\s+thu\b)", r"^(?:nguon_?thu|danh_?muc|nhom)$"),
+        (r"(?:\bnguoi\s+thuc\s+hien|\bnguoi\s+chi|\bnguoi\s+dung|\bthanh\s+vien\b)", r"^(?:nguoi_?thuc_?hien|nguoi_?chi|nguoi_?dung|thanh_?vien)$"),
     )
 
     dim_pick: Optional[Tuple[Any, str, Optional[Tuple[str, str, bool]]]] = None
@@ -2423,7 +2661,7 @@ def build_entity_and_metric_listing_sql_spec(
 
     if dim_pick is None:
         fallback_item_rx = re.compile(
-            r"^(?:ten_?thuoc|ten_?mon|ten_?san_?pham|ten_?hang|ten_?sp|ten_?vl|vat_?lieu|ten_?khach_?hang|khach_?hang|nha_?cung_?cap|kenh_?ban|nhom_?mon|nhom_?hang|dich_?vu|tho)$",
+            r"^(?:ten_?thuoc|ten_?mon|ten_?san_?pham|ten_?hang|ten_?sp|ten_?vl|vat_?lieu|ten_?khach_?hang|khach_?hang|nha_?cung_?cap|kenh_?ban|nhom_?mon|nhom_?hang|nhom|danh_?muc|k_?muc|khoan_?chi|nguon_?thu|nguoi_?thuc_?hien|nguoi_?chi|thanh_?vien|dich_?vu|tho)$",
             re.IGNORECASE,
         )
         for tp, j_info in candidate_tables:
@@ -2458,6 +2696,8 @@ def build_entity_and_metric_listing_sql_spec(
 
     # Attach matched filters whose table is either best_fact or reachable via join key
     where_conds: List[str] = []
+    if signed_where_cond:
+        where_conds.append(signed_where_cond)
     next_alias_idx = 2
     for f_tbl, f_col, f_val in matched_filters:
         esc_val = str(f_val).replace("'", "''")
@@ -2616,7 +2856,7 @@ def build_time_series_or_period_ranking_sql_spec(
         "doanh_thu", "doanhthu", "thanh_tien", "thanhtien", "tong_tien", "tongtien",
         "tien_hang", "tienhang", "tong_doanh_thu", "revenue", "total_revenue",
         "sales", "total_sales", "amount", "total_amount", "gia_tri",
-        "tien_dich_vu", "tien_thue", "tien_phong", "t_tien", "tong_bill", "tien",
+        "tien_dich_vu", "tien_thue", "tien_phong", "t_tien", "tong_bill", "so_tien", "sotien", "st_vnd", "tien",
     )
     qty_priority = ("so_luong_nhap", "so_luong", "soluong", "sl", "qty", "quantity", "so_hop", "boxes")
 
@@ -2644,9 +2884,14 @@ def build_time_series_or_period_ranking_sql_spec(
         if not dcol:
             continue
         tlow = tp.table_name.lower()
+        t_norm_sp = norm_vn(tp.table_name.replace("_", " "))
         cols_l = {getattr(c, "sql_name", str(c)).lower() for c in tp.columns}
         has_money = any(m in cols_l for m in money_priority) or any("chi" in c and "phi" in c for c in cols_l)
         sc = 0
+        if re.search(rf"(?<![a-z0-9]){re.escape(tlow)}(?![a-z0-9])", qn) or (
+            len(t_norm_sp) >= 4 and re.search(rf"(?<![a-z0-9]){re.escape(t_norm_sp)}(?![a-z0-9])", qn)
+        ):
+            sc += 150
         if not wants_import and re.search(r"^(?:danh_?(?:sach|ba|muc)|dm_|bang_?gia|quy_?doi|ton_?kho|lich_?hen|the_?lieu)", tlow):
             sc -= 60
         if wants_import and (re.search(r"(?:phieu_?nhap|nhap_?hang)", tlow) or ("gia_nhap" in cols_l and "nha_cung_cap" in cols_l)):
@@ -2676,7 +2921,7 @@ def build_time_series_or_period_ranking_sql_spec(
         money_col = next(
             (
                 c for c in fact_cols
-                if re.search(r"(?:doanh_?thu|thanh_?tien|tong_?tien|tien|chi_?phi|revenue|sales|amount)", c.lower())
+                if re.search(r"(?:doanh_?thu|thanh_?tien|tong_?tien|so_?tien|st_?vnd|tien|chi_?phi|revenue|sales|amount)", c.lower())
                 and not re.search(r"(?:pct|ratio|ty_le|gia_nhap)", c.lower())
             ),
             None,
@@ -2688,8 +2933,10 @@ def build_time_series_or_period_ranking_sql_spec(
     raw_metric_expr = None
     metric_expr = None
     metric_alias = None
+    signed_where_cond: Optional[str] = None
     if wants_import and "gia_nhap" in fact_cols_low and qty_col and not (wants_qty and not wants_money):
-        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(qty_col)} * f.{_quote_sqlite_ident(fact_cols_low['gia_nhap'])})"
+        pcol = fact_cols_low["gia_nhap"]
+        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(qty_col)} * f.{_quote_sqlite_ident(pcol)})"
         metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
         metric_alias = "tong_tien_nhap"
     elif wants_orders and not wants_money:
@@ -2705,9 +2952,15 @@ def build_time_series_or_period_ranking_sql_spec(
         metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
         metric_alias = "tong_so_luong"
     elif money_col:
-        raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(money_col)})"
+        raw_metric_expr, signed_where_cond, metric_alias = resolve_signed_metric_sql(
+            best_fact.table_name,
+            money_col,
+            "f.",
+            qn,
+            knowledge,
+            default_alias="tong_chi_phi" if wants_expense else ("tong_tien_nhap" if wants_import else "tong_doanh_thu"),
+        )
         metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
-        metric_alias = "tong_chi_phi" if wants_expense else ("tong_tien_nhap" if wants_import else "tong_doanh_thu")
     elif qty_col and price_col:
         raw_metric_expr = f"SUM(f.{_quote_sqlite_ident(qty_col)} * f.{_quote_sqlite_ident(price_col)})"
         metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
@@ -2732,6 +2985,8 @@ def build_time_series_or_period_ranking_sql_spec(
         f"f.{dcol_q} IS NOT NULL",
         f"TRIM(CAST(f.{dcol_q} AS TEXT)) != ''",
     ]
+    if signed_where_cond:
+        where_conds.append(signed_where_cond)
     joined_clauses = ""
     next_alias_idx = 1
     joined_tbls: Dict[str, str] = {}
@@ -3097,18 +3352,19 @@ def verify_result_sanity_bounds(
         is_strict_nonneg = bool(
             re.search(
                 r"\b(?:bao\s+nhieu\s+(?:don|hoa\s+don|khach|nguoi|nhan\s+vien|dot|chuyen|mon|loai|san\s+pham|buoi|ngay|gio|phut|chai|hop|thung|goi|vien|canh)|"
-                r"tong\s+doanh\s+thu|doanh\s+thu|tien\s+dien|tien\s+nuoc|tien\s+nhap|gia\s+ban|gia\s+nhap|don\s+gia)\b",
+                r"tong\s+doanh\s+thu|doanh\s+thu|tong\s+so\s+tien|so\s+tien|tong\s+chi|chi\s+tieu|tien\s+chi|"
+                r"phi\s+co\s+dinh|phi\s+dich\s+vu|phi\s+xu\s+ly|tien\s+dien|tien\s+nuoc|tien\s+nhap|gia\s+ban|gia\s+nhap|don\s+gia)\b",
                 qn,
             )
-        ) and not re.search(
-            r"\b(?:lai|lo|loi\s+nhuan|chenh\s+lech|tang|giam|thay\s+doi|con\s+du|de\s+danh|thieu|am\b|rong|sao\s+ke|dieu\s+chinh|cong\s+no|con\s+no|hoan|tra\s+hang)\b",
+        ) and not _allows_negative_net_result(qn) and not re.search(
+            r"\b(?:dieu\s+chinh|cong\s+no|con\s+no|hoan|tra\s+hang)\b",
             qn,
         )
         if is_strict_nonneg:
             return (
                 False,
                 f"LỖI GIÁ TRỊ ÂM PHI LÝ ({sql_res.rows[0][0]} < 0): "
-                "Chỉ số số lượng/doanh thu/chi phí gộp không thể âm! Kiểm tra lại phép trừ ngược chiều hoặc điều kiện lọc.",
+                "Chỉ số số lượng/doanh thu/chi phí gộp không thể âm! Nếu bảng lưu khoản chi/phí dạng số âm (`< 0`), hãy lọc `<cột_tiền> < 0` và dùng `SUM(ABS(<cột_tiền>))`.",
                 True,
             )
 
@@ -3656,6 +3912,44 @@ def verify_sql_semantics(
                 return (
                     False,
                     f"LỖI CỘT TỬ SỐ & MẪU SỐ (%): Tỷ trọng phần trăm (%) phải chia CÙNG MỘT CHỈ SỐ — tử số đang tính `{num_col}` nhưng mẫu số lại chia cho `{den_col}`! Hãy sửa mẫu số dùng `SUM(SUM({num_col})) OVER ()` (hoặc `(SELECT SUM({num_col}) FROM ...)`) thay vì `{den_col}`.",
+                    True,
+                )
+
+    # 12c. Multi-row negative metric & NULL group-key guards on signed cashflow tables
+    if sql_res.ok and (sql_res.row_count >= 1 or len(sql_res.rows or ()) >= 1):
+        if not _allows_negative_net_result(qn) and re.search(
+            r"\b(?:doanh\s+thu|so\s+tien|tong\s+tien|chi\s+tieu|tien\s+chi|khoan\s+chi|phi|gia\s+tri|cao\s+nhat|lon\s+nhat|nhieu\s+nhat|top\s*\d+|ty\s+trong|ty\s+le\s+dong\s+gop)\b",
+            qn,
+        ):
+            m_idx = (len(sql_res.columns) - 1) if len(sql_res.columns) >= 2 else (0 if analysis.expected_type in ("number", "list") else None)
+            if m_idx is not None:
+                nums = [v for r in sql_res.rows if len(r) > m_idx and (v := _coerce_float(r[m_idx])) is not None]
+                nonzero = [v for v in nums if abs(v) > 1e-9]
+                is_neg_ranking = bool(
+                    nonzero
+                    and (
+                        all(v < -1e-6 for v in nonzero)
+                        or (re.search(r"\b(?:cao\s+nhat|lon\s+nhat|nhieu\s+nhat|top\s*\d+)\b", qn) and nums[0] < -1e-6)
+                    )
+                )
+                if is_neg_ranking:
+                    return (
+                        False,
+                        "LỖI DẤU ÂM & ĐẢO NGƯỢC XẾP HẠNG: Cột tiền lưu khoản chi/khấu trừ dạng số âm (`< 0`) khiến tổng tiền âm và `ORDER BY ... DESC` bị ngược! "
+                        "Hãy lọc đúng chiều (VD: `WHERE so_tien < 0` cho khoản chi, kèm `<cột_nhóm> IS NOT NULL`), dùng `ROUND_HALF_UP(SUM(ABS(<cột_tiền>)), 0)` và `ORDER BY SUM(ABS(<cột_tiền>)) DESC`.",
+                        True,
+                    )
+
+        if (
+            "group by" in sql_low
+            and len(sql_res.columns) >= 2
+            and re.search(r"\b(?:top\s*\d+|cao\s+nhat|lon\s+nhat|nhieu\s+nhat|thap\s+nhat|it\s+nhat)\b", qn)
+            and not re.search(r"\b(?:null|trong|chua\s+phan\s+loai|chua\s+xac\s+dinh)\b", qn)
+        ):
+            if any(r[0] is None or str(r[0]).strip() == "" for r in sql_res.rows):
+                return (
+                    False,
+                    "LỖI NHÓM NULL TRONG BẢNG XẾP HẠNG: Kết quả `GROUP BY` đang lẫn dòng `NULL`/trống! Hãy thêm `WHERE <cột_nhóm> IS NOT NULL AND TRIM(CAST(<cột_nhóm> AS TEXT)) != ''`.",
                     True,
                 )
 
@@ -4839,6 +5133,7 @@ class DataMateAgent:
                 candidate_sql = rewrite_ranked_entity_sql(candidate_sql, resolved_question, use_round_half_up=True)
                 candidate_sql = strip_spurious_single_day_filter(candidate_sql, resolved_question, analysis)
                 candidate_sql = rewrite_misused_source_sheet_date_filter(candidate_sql, knowledge)
+                candidate_sql = rewrite_signed_cashflow_sql(candidate_sql, resolved_question, knowledge, analysis)
                 subq_cap_err = _check_subquery_column_capture(candidate_sql, knowledge)
                 if subq_cap_err:
                     res = SQLExecutionResult(

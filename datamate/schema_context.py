@@ -99,6 +99,7 @@ class WorkspaceKnowledge:
     join_graph: List[str] = field(default_factory=list)
     dictionary_summary: str = ""
     profiler_alerts: List[str] = field(default_factory=list)
+    signed_amount_columns: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 
 def _active_columns(tp: TableProfile) -> List[Any]:
@@ -319,6 +320,45 @@ def _collect_table_date_ranges(
     return per_table, data_min, data_max
 
 
+_SIGNED_AMOUNT_COL_RE = re.compile(
+    r"(?:^|_)(?:so_?tien|tien|st_?vnd|thanh_?tien|tong_?tien|gia_?tri|amount|thu_?chi|phat_?sinh)(?:$|_)",
+    re.IGNORECASE,
+)
+_SIGNED_DELTA_COL_SKIP_RE = re.compile(
+    r"(?:chenh_?lech|tang_?giam|loi_?nhuan|lai_?lo|ty_?le|pct)",
+    re.IGNORECASE,
+)
+
+
+def _profile_signed_amount_columns(
+    conn: sqlite3.Connection, tables: Dict[str, TableProfile]
+) -> Dict[str, Dict[str, int]]:
+    """Detect numeric monetary columns containing negative outflows/fees alongside or without positive inflows."""
+    signed: Dict[str, Dict[str, int]] = {}
+    for tname, tp in tables.items():
+        if tp.row_count <= 0:
+            continue
+        for cp in _active_columns(tp):
+            if cp.inferred_type not in ("integer", "real", "numeric"):
+                continue
+            cname = cp.sql_name
+            if not _SIGNED_AMOUNT_COL_RE.search(cname) or _SIGNED_DELTA_COL_SKIP_RE.search(cname):
+                continue
+            try:
+                row = conn.execute(
+                    f'SELECT SUM(CASE WHEN "{cname}" < 0 THEN 1 ELSE 0 END), '
+                    f'SUM(CASE WHEN "{cname}" > 0 THEN 1 ELSE 0 END) '
+                    f'FROM "{tname}" WHERE typeof("{cname}") IN (\'integer\', \'real\')'
+                ).fetchone()
+            except sqlite3.Error:
+                continue
+            neg_cnt = int((row[0] if row else 0) or 0)
+            pos_cnt = int((row[1] if row else 0) or 0)
+            if neg_cnt > 0:
+                signed[f"{tname}.{cname}"] = {"neg_count": neg_cnt, "pos_count": pos_cnt}
+    return signed
+
+
 def _index_entities_and_categories(
     conn: sqlite3.Connection, tables: Dict[str, TableProfile]
 ) -> Tuple[Dict[str, List[Tuple[str, int]]], List[EntityEntry]]:
@@ -415,11 +455,13 @@ def _build_order_semantics(
     ws: BusinessWorkspace,
     categorical: Dict[str, List[Tuple[str, int]]],
     date_ranges: Dict[str, Tuple[str, str]],
+    signed_cols: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]], str]:
     """Derive generic SQL grain, status filter, and metric hints directly from profiled tables."""
     targets: List[Dict[str, Any]] = []
     grains: Dict[str, Dict[str, Any]] = {}
     hint_lines: List[str] = []
+    signed_map = signed_cols or {}
 
     for tname, tp in ws.tables.items():
         if tp.row_count <= 0:
@@ -438,7 +480,7 @@ def _build_order_semantics(
                 date_col = cp.sql_name
             if status_col is None and _ORDER_STATUS_COL_RE.search(cp.sql_name) and not re.search(r"khach|nhap", tname, re.I):
                 status_col = cp.sql_name
-            if re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|tien_?hang|thanh_?tien|tt_?dong|tong_?tien_?hang|tong_?tien|tong_?bill|tien_?thue|tien_?dich_?vu|tien_?phong|gia_?thue|tien)(?:$|_)", cp.sql_name, re.I):
+            if re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|tien_?hang|thanh_?tien|tt_?dong|tong_?tien_?hang|tong_?tien|tong_?bill|tien_?thue|tien_?dich_?vu|tien_?phong|gia_?thue|so_?tien|st_?vnd|tien)(?:$|_)", cp.sql_name, re.I):
                 rev_cols.append(cp.sql_name)
             if re.search(r"(?:^|_)(?:da_?tra|da_?thu|chua_?tra|con_?no|con_?lai|khach_?da_?tra|khach_?tra)(?:$|_)", cp.sql_name, re.I):
                 debt_cols.append(cp.sql_name)
@@ -452,13 +494,17 @@ def _build_order_semantics(
             "date_col": date_col,
         }
 
+        primary_rev = rev_cols[0] if rev_cols else None
+        primary_signed = signed_map.get(f"{tname}.{primary_rev}") if primary_rev else None
+        is_neg_majority = bool(primary_signed and primary_signed.get("neg_count", 0) > primary_signed.get("pos_count", 0))
         is_sales_tbl = bool(status_col) and not _MASTER_TABLE_RE.search(tname) and not re.search(r"nhap|khach|chi_?phi|so_?quy|thanh_?toan|giao_?hang", tname, re.I)
         is_tx_without_status = (
             not status_col
             and bool(date_col and rev_cols)
+            and not is_neg_majority
             and not _MASTER_TABLE_RE.search(tname)
             and not re.search(
-                r"nhap|khach|chi_?phi|so_?quy|thanh_?toan|giao_?hang|the_?lieu_?trinh|thelieutrinh|lich_?hen|lichhen|bang_?gia|banggia",
+                r"nhap|khach|chi_?phi|so_?quy|thanh_?toan|giao_?hang|the_?lieu_?trinh|thelieutrinh|lich_?hen|lichhen|bang_?gia|banggia|sao_?ke|saoke|so_?chi|ung_?giup|unggiup|tien_?mung|sotienmung",
                 tname,
                 re.I,
             )
@@ -549,6 +595,26 @@ def _build_order_semantics(
                     f"- Bảng `{tname}` gộp dữ liệu từ nhiều kỳ/sheet trong cột `source_sheet` (VD: {samples}) "
                     f"-> Khi câu hỏi hỏi lịch sử/diễn biến qua các kỳ hoặc từng tháng, BẮT BUỘC `SELECT source_sheet, ...` (TUYỆT ĐỐI KHÔNG `SUM` gộp mất `source_sheet` thành 1 dòng!)."
                 )
+
+    for full_col, s_info in sorted(signed_map.items()):
+        t_part, c_part = full_col.split(".", 1)
+        neg_cnt = int(s_info.get("neg_count", 0))
+        pos_cnt = int(s_info.get("pos_count", 0))
+        if neg_cnt > 0 and pos_cnt > 0:
+            hint_lines.append(
+                f"- QUY ƯỚC DẤU ÂM/DƯƠNG BẢNG `{t_part}` (cột `{c_part}` có {neg_cnt} dòng âm `< 0` và {pos_cnt} dòng dương `> 0`): "
+                f"Số ÂM (`{c_part} < 0`) là khoản CHI RA / KHẤU TRỪ / PHÍ; Số DƯƠNG (`{c_part} > 0`) là khoản THU VÀO / NHẬN TIỀN. "
+                f"Khi tính tổng chi/phí, hoặc xếp hạng Top / so sánh quy mô / tỷ trọng 'tổng số tiền cao nhất' theo danh mục/đối tượng (không hỏi chênh lệch ròng): "
+                f"BẮT BUỘC lọc đúng chiều (VD: `WHERE {c_part} < 0` cho khoản chi, kèm `<cột_nhóm> IS NOT NULL`) và dùng `ROUND_HALF_UP(SUM(ABS({c_part})), 0)` "
+                f"cùng `ORDER BY SUM(ABS({c_part})) DESC` để tổng tiền DƯƠNG và không bị đảo ngược thứ tự xếp hạng! "
+                f"Chỉ giữ nguyên `SUM({c_part})` có dấu khi hỏi rõ chênh lệch thu chi / dòng tiền ròng / biến động số dư."
+            )
+        elif neg_cnt > 0:
+            hint_lines.append(
+                f"- QUY ƯỚC DẤU ÂM BẢNG `{t_part}`: cột `{c_part}` lưu toàn bộ giá trị dạng số âm (`< 0`) -> "
+                f"khi tính tổng, trung bình hoặc xếp hạng BẮT BUỘC dùng `ABS({c_part})` (`ROUND_HALF_UP(SUM(ABS({c_part})), 0)`) "
+                f"để kết quả dương và đúng thứ tự cao-thấp!"
+            )
 
     return targets, grains, "\n".join(hint_lines)
 
@@ -766,11 +832,13 @@ def _render_table_block(
     compact: bool = False,
     cat_limit: Optional[int] = None,
     include_samples: bool = True,
+    signed_cols: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> List[str]:
     """Render one table's schema lines (full or compact 1-line summary)."""
     active_cols: List[str] = []
     col_parts: List[str] = []
     empty_cols: List[str] = []
+    signed_map = signed_cols or {}
     for cp in tp.columns:
         if tp.row_count > 0 and (cp.distinct_count == 0 or cp.null_count >= tp.row_count):
             empty_cols.append(cp.sql_name)
@@ -782,6 +850,8 @@ def _render_table_block(
         dr = date_ranges.get(f"{tname}.{cp.sql_name}")
         if dr:
             tag = f"{tag}[{dr[0]}..{dr[1]}]"
+        if f"{tname}.{cp.sql_name}" in signed_map:
+            tag = f"{tag}[signed: -chi/+thu]"
         cat = categorical.get(f"{tname}.{cp.sql_name}")
         if cat:
             if _ORDER_STATUS_COL_RE.search(cp.sql_name):
@@ -817,6 +887,7 @@ def build_workspace_knowledge(ws: BusinessWorkspace) -> WorkspaceKnowledge:
     conn = ws.open_connection()
     try:
         date_ranges, data_min, data_max = _collect_table_date_ranges(conn, ws.tables)
+        signed_cols = _profile_signed_amount_columns(conn, ws.tables)
         categorical, entity_entries = _index_entities_and_categories(conn, ws.tables)
         dict_summary = _extract_dictionary_summary(conn, ws)
         join_graph = _extract_join_graph(ws, conn=conn)
@@ -824,7 +895,9 @@ def build_workspace_knowledge(ws: BusinessWorkspace) -> WorkspaceKnowledge:
         conn.close()
 
     caps = _detect_capabilities(ws)
-    status_targets, table_grains, sem_summary = _build_order_semantics(ws, categorical, date_ranges)
+    status_targets, table_grains, sem_summary = _build_order_semantics(
+        ws, categorical, date_ranges, signed_cols=signed_cols
+    )
     profiler_alerts = _extract_profiler_alerts(ws)
     datetime_cols = {
         cp.sql_name
@@ -850,7 +923,9 @@ def build_workspace_knowledge(ws: BusinessWorkspace) -> WorkspaceKnowledge:
     lines.append("Danh sách bảng SQLite (ngày đã chuẩn hoá YYYY-MM-DD; tiền là số nguyên VND):")
 
     for tname, tp in ws.tables.items():
-        lines.extend(_render_table_block(tname, tp, date_ranges, categorical, compact=False))
+        lines.extend(
+            _render_table_block(tname, tp, date_ranges, categorical, compact=False, signed_cols=signed_cols)
+        )
 
     return WorkspaceKnowledge(
         workspace=ws,
@@ -869,6 +944,7 @@ def build_workspace_knowledge(ws: BusinessWorkspace) -> WorkspaceKnowledge:
         join_graph=join_graph,
         dictionary_summary=dict_summary,
         profiler_alerts=profiler_alerts,
+        signed_amount_columns=signed_cols,
     )
 
 
@@ -988,6 +1064,7 @@ def build_focused_schema_prompt(
                     compact=(tname not in full_set),
                     cat_limit=c_lim,
                     include_samples=keep_samples,
+                    signed_cols=getattr(knowledge, "signed_amount_columns", None),
                 )
             )
         return "\n".join(lines)

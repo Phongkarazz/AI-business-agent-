@@ -36,6 +36,7 @@ from datamate.agent import (
     resolve_conversational_retraction,
     rewrite_misused_source_sheet_date_filter,
     rewrite_ranked_entity_sql,
+    rewrite_signed_cashflow_sql,
     should_prefer_python_sandbox,
     strip_spurious_single_day_filter,
     verify_sql_semantics,
@@ -1692,6 +1693,10 @@ def run_datamate_enhanced_turn(
                 candidate_sql = rewrite_misused_source_sheet_date_filter(candidate_sql, knowledge)
                 if candidate_sql != _before_sheet_fix:
                     result["logs"].append("🧹 [Date Column Guard] Tự động chuyển điều kiện lọc ngày từ `source_sheet` sang cột ngày chuẩn.")
+                _before_signed_fix = candidate_sql
+                candidate_sql = rewrite_signed_cashflow_sql(candidate_sql, effective_query, knowledge, analysis)
+                if candidate_sql != _before_signed_fix:
+                    result["logs"].append("💰 [Signed Cashflow Guard] Tự động chuẩn hóa dấu âm chi phí (`SUM(ABS(...))`) và loại nhóm NULL khỏi xếp hạng.")
                 sub_err = _check_subquery_column_capture(candidate_sql, knowledge)
                 if sub_err:
                     res = SQLExecutionResult(ok=False, sql=candidate_sql, columns=[], rows=[], error=sub_err)
