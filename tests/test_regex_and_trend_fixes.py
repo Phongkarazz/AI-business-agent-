@@ -330,6 +330,113 @@ class TestVeraxusUIAndQueryFixes(unittest.TestCase):
                 net_sql,
             )
 
+    def test_ewallet_service_top5_not_filtered_positive_and_no_cross_table_followups(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws_dir = pathlib.Path(td)
+            db_path = ws_dir / "data.sqlite"
+            conn = sqlite3.connect(str(db_path))
+            conn.executescript(
+                """
+                CREATE TABLE nganhanga_saoke (
+                    ngay_giao_dich TEXT, mo_ta TEXT, danh_muc TEXT, so_tien INTEGER, nguoi_thuc_hien TEXT, ghi_chu TEXT
+                );
+                INSERT INTO nganhanga_saoke VALUES
+                    ('2026-08-01', 'Siêu thị Mẫu', 'Đi chợ, siêu thị', -12000000, 'Thành viên A', ''),
+                    ('2026-08-03', 'Tiền điện', 'Nhà cửa', -3500000, 'Thành viên B', ''),
+                    ('2026-08-05', 'Hoàn tiền khuyến mãi', 'Khác', 250000, 'Ngân hàng', '');
+
+                CREATE TABLE so_chi (
+                    ngay TEXT, khoan_chi TEXT, nhom TEXT, so_tien INTEGER, nguoi_chi TEXT
+                );
+                INSERT INTO so_chi VALUES
+                    ('2026-08-02', 'Mua rau củ', 'Thực phẩm', 450000, 'Thành viên A'),
+                    ('2026-08-04', 'Gửi xe tháng', 'Đi lại', 300000, 'Thành viên B'),
+                    ('2026-08-06', 'Mua sách học', 'Giáo dục', 620000, 'Thành viên A');
+
+                CREATE TABLE thu (
+                    ngay TEXT, nguon_thu TEXT, so_tien INTEGER, nguoi_nhan TEXT
+                );
+                INSERT INTO thu VALUES
+                    ('2026-08-05', 'Lương tháng', 25000000, 'Thành viên A'),
+                    ('2026-08-10', 'Thưởng dự án', 8000000, 'Thành viên B');
+
+                CREATE TABLE vidientu_lichsu (
+                    thoi_gian TEXT, dich_vu TEXT, danh_muc TEXT, so_tien INTEGER, trang_thai TEXT, nguoi_dung TEXT, ghi_chu TEXT
+                );
+                INSERT INTO vidientu_lichsu VALUES
+                    ('2026-07-15 09:00:00', 'Hoàn tiền ví', 'Hoàn tiền', 120000, 'Thành công', 'Thành viên A', ''),
+                    ('2026-08-02 08:15:00', 'Điện lực Đô thị', 'Hóa đơn', -1850000, 'Thành công', 'Thành viên A', ''),
+                    ('2026-08-05 12:30:00', 'Siêu thị Xanh', 'Mua sắm', -1420000, 'Thành công', 'Thành viên B', ''),
+                    ('2026-08-09 19:00:00', 'Đặt xe Nhanh', 'Di chuyển', -680000, 'Thành công', 'Thành viên A', ''),
+                    ('2026-08-14 20:10:00', 'Internet Cáp quang', 'Viễn thông', -550000, 'Thành công', 'Thành viên B', ''),
+                    ('2026-08-18 07:45:00', 'Cà phê Sáng', 'Ăn uống', -390000, 'Thành công', 'Thành viên A', ''),
+                    ('2026-08-22 18:20:00', 'Rạp Phim Mới', 'Giải trí', -240000, 'Thành công', 'Thành viên B', '');
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            kw = build_workspace_knowledge(load_business_workspace(ws_dir))
+            # Household expense payer `nguoi_chi` must NOT trigger commercial `has_staff`
+            self.assertFalse(kw.capabilities.get("has_staff"))
+
+            # Follow-up pills must be clean per-sheet cashflow queries, NOT fake staff or cross-table stitches
+            followups = build_datamate_suggested_questions(kw, lang="vi")
+            self.assertGreaterEqual(len(followups), 3)
+            for fq in followups:
+                fq_low = fq.lower()
+                self.assertNotIn("nhân viên", fq_low)
+                self.assertNotIn("khách hàng", fq_low)
+                self.assertNotIn("thuộc nhóm", fq_low)
+
+            # Query with "Doanh Thu" on signed-outflow `vidientu_lichsu` MUST NOT trigger `so_tien > 0`!
+            q_top5 = "Top 5 dịch vụ có Doanh Thu cao nhất trong tháng 08/2026?"
+            spec_top5 = build_entity_and_metric_listing_sql_spec(
+                q_top5, kw, classify_expected_type(q_top5), entity_matches=()
+            )
+            self.assertIsNotNone(spec_top5)
+            self.assertEqual(spec_top5["fact_table"], "vidientu_lichsu")
+            self.assertIn("ABS(", spec_top5["suggested_sql"])
+            self.assertIn("so_tien < 0", spec_top5["suggested_sql"])
+            self.assertIn("substr(f.thoi_gian, 1, 10) BETWEEN '2026-08-01' AND '2026-08-", spec_top5["suggested_sql"])
+
+            fake_ewallet_client = _FakeLLMClient(
+                [
+                    '{"status":"ok","sql":"SELECT dich_vu, ROUND_HALF_UP(SUM(so_tien), 0) AS doanh_thu FROM vidientu_lichsu WHERE substr(thoi_gian, 1, 10) BETWEEN \'2026-08-01\' AND \'2026-08-31\' GROUP BY dich_vu ORDER BY doanh_thu DESC LIMIT 5;"}'
+                ]
+            )
+            out_top5 = run_datamate_enhanced_turn(
+                q_top5,
+                fake_ewallet_client,
+                "Ollama (Local AI Offline)",
+                "veraxus-coder:3b",
+                kw,
+                lang="vi",
+            )
+            self.assertIsNotNone(out_top5.get("df"))
+            df_top5 = out_top5["df"]
+            self.assertEqual(len(df_top5), 5)
+            self.assertEqual(df_top5.iloc[0, 0], "Điện lực Đô thị")
+            self.assertEqual(float(df_top5.iloc[0, 1]), 1850000.0)
+            self.assertTrue((df_top5.iloc[:, 1] > 0).all())
+
+            # Peak day for `dich_vu` in 08/2026 resolves to `vidientu_lichsu` with positive outflow magnitude
+            q_peak = "Ngày nào có Doanh Thu dịch vụ cao nhất trong tháng 08/2026?"
+            spec_peak = build_time_series_or_period_ranking_sql_spec(
+                q_peak, kw, classify_expected_type(q_peak)
+            )
+            self.assertIsNotNone(spec_peak)
+            self.assertEqual(spec_peak["fact_table"], "vidientu_lichsu")
+            self.assertIn("so_tien < 0", spec_peak["suggested_sql"])
+
+            # Genuine inflow query MUST still filter `so_tien > 0`
+            q_inflow = "Tổng khoản thu vào trong sao kê ngân hàng A là bao nhiêu?"
+            raw_inflow_sql = "SELECT ROUND_HALF_UP(SUM(so_tien), 0) AS tong_thu FROM nganhanga_saoke;"
+            rewritten_inflow = rewrite_signed_cashflow_sql(
+                raw_inflow_sql, q_inflow, kw, classify_expected_type(q_inflow)
+            )
+            self.assertIn("so_tien > 0", rewritten_inflow)
+
 
 if __name__ == "__main__":
     unittest.main()

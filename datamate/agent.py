@@ -1641,6 +1641,67 @@ def _allows_negative_net_result(qn: str) -> bool:
     )
 
 
+def _is_explicit_inflow_query(question_raw: str, qn: str) -> bool:
+    """Detect genuine cash-inflow / credit queries without false-matching 'doanh thu', 'phụ thu', or 'đứng thứ'."""
+    if not qn or re.search(r"\bthu\s+chi\b", qn):
+        return False
+    q_nfc_low = normalize_nfc(question_raw or "").lower()
+    if re.search(
+        r"(?<!doanh\s)(?<!phụ\s)\b(?:khoản\s+thu|tiền\s+thu|tổng\s+thu|nguồn\s+thu|thu\s+nhập|thu\s+vào|tiền\s+vào|nhận\s+tiền|nhận\s+được|nạp\s+vào|nạp\s+tiền|hoàn\s+tiền|lãi\s+ngân\s+hàng)\b"
+        r"|(?<!doanh\s)(?<!phụ\s)\bthu\s+(?:vào|được|về|trong\s+tháng|trong\s+kỳ|ngân\s+hàng)\b",
+        q_nfc_low,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"(?<!doanh\s)(?<!phu\s)\b(?:khoan\s+thu|tien\s+thu|tong\s+thu|nguon\s+thu|thu\s+nhap|thu\s+vao|tien\s+vao|nhan\s+tien|nap\s+vao|nap\s+tien|hoan\s+tien|lai\s+ngan\s+hang)\b",
+            qn,
+        )
+    )
+
+
+_TABLE_NATURAL_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "nganhanga_saoke": ("sao ke ngan hang a", "ngan hang a"),
+    "nganhangb_giaodich": ("giao dich ngan hang b", "ngan hang b"),
+    "vidientu_lichsu": ("lich su vi dien tu", "vi dien tu"),
+    "so_chi": ("so chi",),
+    "thu": ("bang thu",),
+    "sotienmung": ("so tien mung", "tien mung"),
+    "unggiup": ("so ung giup", "ung giup"),
+}
+
+
+def _question_mentions_table(tp: Any, q_nfc: str, qn: str) -> bool:
+    """Return True if the question references `tp` by SQL name, raw sheet name, or natural Vietnamese alias."""
+    tname = str(getattr(tp, "table_name", "") or "")
+    tlow = tname.lower()
+    if not tlow:
+        return False
+    q_nfc_low = (q_nfc or "").lower()
+    if "_" in tlow or len(tlow) >= 5:
+        if re.search(rf"(?<![a-z0-9]){re.escape(tlow)}(?![a-z0-9])", q_nfc_low) or re.search(
+            rf"(?<![a-z0-9]){re.escape(tlow)}(?![a-z0-9])", qn
+        ):
+            return True
+    else:
+        if re.search(rf"(?:\b(?:bang|sheet|table)\s+{re.escape(tlow)}(?![a-z0-9])|[`'\"]{re.escape(tlow)}[`'\"])", qn) or re.search(
+            rf"[`'\"]{re.escape(tlow)}[`'\"]", q_nfc_low
+        ):
+            return True
+    t_norm_sp = norm_vn(tname.replace("_", " "))
+    if ("_" in tlow or len(t_norm_sp) >= 5) and len(t_norm_sp) >= 4 and re.search(
+        rf"(?<![a-z0-9]){re.escape(t_norm_sp)}(?![a-z0-9])", qn
+    ):
+        return True
+    raw_norm = norm_vn(re.sub(r"[_\-]+", " ", str(getattr(tp, "raw_name", "") or "")))
+    if len(raw_norm) >= 5 and re.search(rf"(?<![a-z0-9]){re.escape(raw_norm)}(?![a-z0-9])", qn):
+        return True
+    for alias_norm in _TABLE_NATURAL_ALIASES.get(tlow, ()):
+        if re.search(rf"(?<![a-z0-9]){re.escape(alias_norm)}(?![a-z0-9])", qn):
+            return True
+    return False
+
+
 def resolve_signed_metric_sql(
     table_name: str,
     col_name: str,
@@ -1648,6 +1709,7 @@ def resolve_signed_metric_sql(
     qn: str,
     knowledge: WorkspaceKnowledge,
     default_alias: str = "tong_doanh_thu",
+    question_raw: str = "",
 ) -> Tuple[str, Optional[str], str]:
     """
     For signed cashflow columns (e.g. bank statement outflows `< 0`, inflows `> 0`),
@@ -1665,9 +1727,7 @@ def resolve_signed_metric_sql(
     if neg_cnt <= 0:
         return f"SUM({prefix}{col_q})", None, default_alias
 
-    asks_inflow = bool(
-        re.search(r"\b(?:thu(?:\s+nhap|\s+vao)?|tien\s+vao|nhan\s+duoc|nap\s+vao|hoan\s+tien|lai\s+ngan\s+hang)\b", qn)
-    ) and not re.search(r"\bthu\s+chi\b", qn)
+    asks_inflow = _is_explicit_inflow_query(question_raw or qn, qn)
     asks_outflow = bool(
         re.search(r"\b(?:chi(?:\s+tieu|\s+ra)?|tieu|ton|phi|khau\s+tru|tien\s+ra|chuyen\s+di)\b", qn)
     )
@@ -1761,9 +1821,7 @@ def rewrite_signed_cashflow_sql(
     if neg_cnt <= 0:
         return sql
 
-    asks_inflow = bool(
-        re.search(r"\b(?:thu(?:\s+nhap|\s+vao)?|tien\s+vao|nhan\s+duoc|nap\s+vao|hoan\s+tien|lai\s+ngan\s+hang)\b", qn)
-    ) and not re.search(r"\bthu\s+chi\b", qn)
+    asks_inflow = _is_explicit_inflow_query(question or "", qn)
     asks_outflow = bool(
         re.search(r"\b(?:chi(?:\s+tieu|\s+ra)?|tieu|ton|phi|khau\s+tru|tien\s+ra|chuyen\s+di)\b", qn)
     )
@@ -1930,7 +1988,13 @@ def build_extreme_comparison_sql_spec(
         is_money_metric = False
     elif money_col:
         raw_sum, signed_where_cond, metric_alias = resolve_signed_metric_sql(
-            fact_profile.table_name, money_col, "f.", qn, knowledge, default_alias="tong_doanh_thu"
+            fact_profile.table_name,
+            money_col,
+            "f.",
+            qn,
+            knowledge,
+            default_alias="tong_doanh_thu",
+            question_raw=question,
         )
         metric_expr = f"ROUND_HALF_UP({raw_sum}, 0)"
     elif qty_col:
@@ -2437,9 +2501,9 @@ def build_entity_and_metric_listing_sql_spec(
             qn,
         )
         or (
-            has_named_tbl_top
+            bool(top_m or has_named_tbl_top)
             and re.search(
-                r"\bco\s+(?:tong\s+)?(?:doanh\s+thu|doanh\s+so|thanh\s+tien|so\s+tien|tong\s+tien|chi\s+phi|gia\s+tri)\s+(?:cao|lon|nhieu|thap|it|nho)\s+nhat\b",
+                r"\bco\s+(?:tong\s+)?(?:doanh\s+thu|doanh\s+so|thanh\s+tien|so\s+tien|tong\s+tien|chi\s+tieu|chi\s+phi|gia\s+tri)\s+(?:cao|lon|nhieu|thap|it|nho)\s+nhat\b",
                 qn,
             )
         )
@@ -2502,9 +2566,7 @@ def build_entity_and_metric_listing_sql_spec(
         )
         has_money_col = any(m in cols_l for m in money_priority)
         sc = 0
-        if re.search(rf"(?<![a-z0-9]){re.escape(tlow)}(?![a-z0-9])", q_nfc.lower()) or (
-            len(t_norm_sp) >= 4 and re.search(rf"(?<![a-z0-9]){re.escape(t_norm_sp)}(?![a-z0-9])", qn)
-        ):
+        if _question_mentions_table(tp, q_nfc, qn):
             sc += 150
         if not wants_import and re.search(r"^(?:danh_?(?:sach|ba|muc)|dm_|bang_?gia|quy_?doi|ton_?kho)", tlow):
             sc -= 50
@@ -2520,6 +2582,17 @@ def build_entity_and_metric_listing_sql_spec(
                 sc += 15
         if any(f_tbl == tp.table_name for f_tbl, _, _ in matched_filters):
             sc += 60
+        for q_col_pat, c_col_pat in (
+            (r"\bdich\s+vu\b", r"^(?:ten_?dich_?vu|dich_?vu)$"),
+            (r"\bkhoan\s+chi\b", r"^khoan_?chi$"),
+            (r"\bnguon\s+thu\b", r"^nguon_?thu$"),
+            (r"\bthuoc\b", r"^(?:ten_?thuoc|thuoc)$"),
+            (r"\bmon\b", r"^(?:ten_?mon|mon)$"),
+            (r"\bvat\s+lieu\b", r"^(?:ten_?vl|ten_?vat_?lieu|vat_?lieu)$"),
+        ):
+            if re.search(q_col_pat, qn) and any(re.search(c_col_pat, c) for c in cols_l):
+                sc += 90
+                break
         if has_money_col or ("gia_nhap" in cols_l and any(q in cols_l for q in qty_priority)):
             sc += 30
         if re.search(r"(?:don_?hang|hoa_?don|chi_?tiet)", tlow):
@@ -2583,6 +2656,7 @@ def build_entity_and_metric_listing_sql_spec(
             qn,
             knowledge,
             default_alias="tong_tien_nhap" if wants_import else "tong_doanh_thu",
+            question_raw=question,
         )
         metric_expr = f"ROUND_HALF_UP({raw_sum}, 0)"
     elif qty_col and price_col:
@@ -2728,14 +2802,30 @@ def build_entity_and_metric_listing_sql_spec(
                     where_conds.append(re.sub(rf"\b{re.escape(scol)}\b", f"f.{scol}", vfilt, flags=re.IGNORECASE))
                 break
 
-    if analysis.bounded_period is not None:
+    eff_bounded = analysis.bounded_period
+    if eff_bounded is None:
+        _, _, eff_bounded, _ = extract_temporal_context(
+            question, getattr(knowledge, "data_max_date", None) or "2026-12-31", None
+        )
+    if eff_bounded is not None:
+        date_ranges_map = getattr(knowledge, "table_date_ranges", None) or {}
         dcol = next(
-            (c for c in fact_cols if re.search(r"^(?:ngay_?gd|ngay_?ban|ngay_?dat|ngay_?nhap|ngay|orderdate|date)$", c.lower())),
+            (
+                k.split(".", 1)[1]
+                for k in date_ranges_map
+                if k.lower().startswith(f"{best_fact.table_name.lower()}.")
+                and not re.search(r"(?:han_?dung|het_?han|hen_?tra|ngay_?sinh)", k.split(".", 1)[1], re.I)
+            ),
             None,
         )
+        if not dcol:
+            dcol = next(
+                (c for c in fact_cols if re.search(r"^(?:ngay_?giao_?dich|ngay_?gd|ngay_?ban|ngay_?dat|ngay_?nhap|ngay|thoi_?gian|orderdate|date)$", c.lower())),
+                None,
+            )
         if dcol:
-            w_start, w_end = analysis.bounded_period
-            where_conds.append(f"f.{_quote_sqlite_ident(dcol)} BETWEEN '{w_start}' AND '{w_end}'")
+            w_start, w_end = eff_bounded
+            where_conds.append(f"substr(f.{_quote_sqlite_ident(dcol)}, 1, 10) BETWEEN '{w_start}' AND '{w_end}'")
 
     where_conds.append(f"{dim_filter_expr} IS NOT NULL")
     where_conds.append(f"TRIM(CAST({dim_filter_expr} AS TEXT)) != ''")
@@ -2793,7 +2883,8 @@ def build_time_series_or_period_ranking_sql_spec(
     if not tables_dict:
         return None
 
-    qn = normalize_vn_question(normalize_nfc(question or ""))
+    q_nfc = normalize_nfc(question or "")
+    qn = normalize_vn_question(q_nfc)
     if not qn:
         return None
     if re.search(r"\b(?:so\s+voi|cung\s+ky|tang\s+truong|ty\s+le|ti\s+le|phan\s+tram|trung\s+binh\s+moi|binh\s+quan\s+moi)\b", qn):
@@ -2888,9 +2979,7 @@ def build_time_series_or_period_ranking_sql_spec(
         cols_l = {getattr(c, "sql_name", str(c)).lower() for c in tp.columns}
         has_money = any(m in cols_l for m in money_priority) or any("chi" in c and "phi" in c for c in cols_l)
         sc = 0
-        if re.search(rf"(?<![a-z0-9]){re.escape(tlow)}(?![a-z0-9])", qn) or (
-            len(t_norm_sp) >= 4 and re.search(rf"(?<![a-z0-9]){re.escape(t_norm_sp)}(?![a-z0-9])", qn)
-        ):
+        if _question_mentions_table(tp, q_nfc, qn):
             sc += 150
         if not wants_import and re.search(r"^(?:danh_?(?:sach|ba|muc)|dm_|bang_?gia|quy_?doi|ton_?kho|lich_?hen|the_?lieu)", tlow):
             sc -= 60
@@ -2904,6 +2993,17 @@ def build_time_series_or_period_ranking_sql_spec(
             sc += 75
         if any(f_tbl == tp.table_name for f_tbl, _, _ in matched_filters):
             sc += 40
+        for q_col_pat, c_col_pat in (
+            (r"\bdich\s+vu\b", r"^(?:ten_?dich_?vu|dich_?vu)$"),
+            (r"\bkhoan\s+chi\b", r"^khoan_?chi$"),
+            (r"\bnguon\s+thu\b", r"^nguon_?thu$"),
+            (r"\bthuoc\b", r"^(?:ten_?thuoc|thuoc)$"),
+            (r"\bmon\b", r"^(?:ten_?mon|mon)$"),
+            (r"\bvat\s+lieu\b", r"^(?:ten_?vl|ten_?vat_?lieu|vat_?lieu)$"),
+        ):
+            if re.search(q_col_pat, qn) and any(re.search(c_col_pat, c) for c in cols_l):
+                sc += 90
+                break
         if has_money or wants_orders or wants_qty:
             sc += 25
         if sc > best_score:
@@ -2959,6 +3059,7 @@ def build_time_series_or_period_ranking_sql_spec(
             qn,
             knowledge,
             default_alias="tong_chi_phi" if wants_expense else ("tong_tien_nhap" if wants_import else "tong_doanh_thu"),
+            question_raw=question,
         )
         metric_expr = f"ROUND_HALF_UP({raw_metric_expr}, 0)"
     elif qty_col and price_col:
@@ -3020,8 +3121,13 @@ def build_time_series_or_period_ranking_sql_spec(
             scol = tgt["status_col"]
             where_conds.append(re.sub(rf"\b{re.escape(scol)}\b", f"f.{scol}", tgt["valid_filter"], flags=re.IGNORECASE))
 
-    if analysis.bounded_period is not None:
-        w_start, w_end = analysis.bounded_period
+    eff_bounded = analysis.bounded_period
+    if eff_bounded is None:
+        _, _, eff_bounded, _ = extract_temporal_context(
+            question, getattr(knowledge, "data_max_date", None) or "2026-12-31", None
+        )
+    if eff_bounded is not None:
+        w_start, w_end = eff_bounded
         if w_start and w_start != "0001-01-01":
             where_conds.append(f"substr(f.{dcol_q}, 1, 10) BETWEEN '{w_start}' AND '{w_end}'")
         elif w_end:

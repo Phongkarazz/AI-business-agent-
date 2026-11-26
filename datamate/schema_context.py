@@ -233,7 +233,7 @@ def _detect_capabilities(ws: BusinessWorkspace) -> Dict[str, bool]:
     )
     has_return_reason = _has_col(r"(?:^|[.\s_])(?:nguyen_?nhan|ly_?do)(?:$|[.\s_])")
     has_staff = _has_col(
-        r"(?:^|[.\s_])(?:nhan_?vien|nhan_?su|ma_?nv|ma_?nv_?ban|ten_?nv|ho_?ten_?nv|nguoi_?ban|nguoi_?giao_?hang|nguoi_?chi|tai_?xe|tho|chuc_?vu|chuc_?danh|"
+        r"(?:^|[.\s_])(?:nhan_?vien|nhan_?su|ma_?nv|ma_?nv_?ban|ten_?nv|ho_?ten_?nv|nguoi_?ban|nguoi_?giao_?hang|tai_?xe|tho|chuc_?vu|chuc_?danh|"
         r"thu_?ngan|employee(?:s|_?id|_?name)?|emp_?no|staff|salesperson|sales_?rep|spid|job_?title|cashier|worker)(?:$|[.\s_])"
     ) or any(
         tp.row_count > 0 and re.search(r"^(?:nhan_?vien|nhan_?su|danh_?sach_?nv|danhsachtho|dm_?nhansu|employees?|staff|people|salaries|titles|dept_?emp)$", t, re.I)
@@ -536,6 +536,7 @@ def _build_order_semantics(
                 "date_col": date_col,
                 "revenue_cols": rev_cols,
                 "debt_cols": debt_cols,
+                "is_signed_outflow": is_neg_majority,
             }
         )
 
@@ -544,7 +545,12 @@ def _build_order_semantics(
             if has_rep and order_col
             else "1 dòng = 1 đơn hàng -> đếm số đơn dùng COUNT(*)"
         )
-        line = f"- {'Bảng bán hàng' if status_col else 'Bảng giao dịch/bán hàng'} `{tname}` ({grain_desc}"
+        tbl_role_lbl = (
+            "Bảng lịch sử giao dịch"
+            if is_neg_majority
+            else ("Bảng bán hàng" if status_col else "Bảng giao dịch/bán hàng")
+        )
+        line = f"- {tbl_role_lbl} `{tname}` ({grain_desc}"
         if date_col:
             line += f"; cột ngày chuẩn ISO = `{date_col}`"
         if not status_col and rev_cols:

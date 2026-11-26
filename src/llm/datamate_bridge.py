@@ -285,6 +285,22 @@ _VI_SCHEMA_TOKEN_LABELS: Dict[str, str] = {
     "doanh_thu": "doanh thu",
     "chi_phi": "chi phí",
     "tien_coc": "tiền cọc",
+    "so_tien": "số tiền",
+    "danh_muc": "danh mục",
+    "nhom": "nhóm",
+    "khoan_chi": "khoản chi",
+    "nguon_thu": "nguồn thu",
+    "nguoi_thuc_hien": "người thực hiện",
+    "nguoi_chi": "người chi",
+    "nguoi_dung": "người dùng",
+    "thanh_vien": "thành viên",
+    "nganhanga_saoke": "sao kê ngân hàng A",
+    "nganhangb_giaodich": "giao dịch ngân hàng B",
+    "vidientu_lichsu": "lịch sử ví điện tử",
+    "so_chi": "sổ chi",
+    "thu": "bảng thu",
+    "sotienmung": "sổ tiền mừng",
+    "unggiup": "sổ ứng giúp",
 }
 
 
@@ -307,7 +323,13 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
     """Inspect active non-empty tables, columns, categories, capabilities, and date span."""
     caps = knowledge.capabilities or {}
     targets = knowledge.order_status_targets or []
-    t0 = targets[0] if targets else {}
+    non_cashflow_targets = [
+        t
+        for t in targets
+        if not t.get("is_signed_outflow")
+        and not re.search(r"^(?:thu|so_?chi|ung_?giup|unggiup|sotienmung|sao_?ke|saoke|vidientu)", str(t.get("table") or ""), re.I)
+    ]
+    t0 = non_cashflow_targets[0] if non_cashflow_targets else (targets[0] if targets else {})
     sales_table = str(t0.get("table") or "")
     valid_tables = list(knowledge.valid_tables or [])
     if not sales_table:
@@ -315,6 +337,18 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
             (t for t in valid_tables if re.search(r"hoa_?don|don_?hang|ban_?hang|sales|orders|cong_?no|sothu|so_?thu|lich_?thue|dien_?nuoc|thu_?chi|sobanhoa|sovua", t, re.I)),
             next(iter(valid_tables), ""),
         )
+
+    # Determine 1-hop connected table scope around sales_table so item_col & cat_col never cross unjoined sheets
+    sales_scope_tables: Set[str] = {sales_table} if sales_table else set()
+    for edge in getattr(knowledge, "join_graph", None) or ():
+        m_e = re.match(r"^\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+\s*=\s*([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+", str(edge or ""))
+        if not m_e:
+            continue
+        t1, t2 = m_e.group(1), m_e.group(2)
+        if t1 == sales_table:
+            sales_scope_tables.add(t2)
+        elif t2 == sales_table:
+            sales_scope_tables.add(t1)
 
     active_cols: List[Tuple[str, str]] = []
     sales_cols: Set[str] = set()
@@ -335,9 +369,25 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
     if not sales_cols:
         sales_cols = {c.lower() for _, c in active_cols}
 
+    sales_scope_cols = [(t, c) for t, c in active_cols if t in sales_scope_tables] or active_cols
     all_col_lows = {c.lower() for _, c in active_cols}
 
-    # Primary item entity column & localized phrasing
+    is_personal_cashflow_tbl = bool(
+        t0.get("is_signed_outflow")
+        or re.search(r"^(?:thu|so_?chi|ung_?giup|unggiup|sotienmung|sao_?ke|saoke|nganhang|vidientu)", sales_table or "", re.I)
+    )
+    is_commercial_pos = bool(
+        not is_personal_cashflow_tbl
+        and (
+            re.search(r"hoa_?don|don_?hang|ban_?hang|sales|orders|cong_?no|sothu|so_?thu|lich_?thue|dien_?nuoc|soban|sovua|phieu_?dv|chi_?tiet", sales_table or "", re.I)
+            or any(
+                re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|thanh_?tien|tien_?hang|tien_?thue|tien_?phong|gia_?ban|so_?luong|ma_?don|ma_?hd|ma_?hoa_?don|khach_?hang|khach)(?:$|_)", c)
+                for c in sales_cols
+            )
+        )
+    )
+
+    # Primary item entity column & localized phrasing (scoped strictly to sales_table + joined tables)
     item_col = None
     item_noun_vi, item_noun_en = "mặt hàng", "item"
     sales_noun_vi, sales_noun_en = "bán hàng", "sales"
@@ -354,7 +404,7 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         (r"(?:^|_)(?:phong|so_?phong|ten_?phong)(?:$|_)", "phòng", "room", "thu tiền phòng", "room billing", "hóa đơn phòng", "room bills", "phòng", "rooms"),
         (r"(?:^|_)(?:ten_?san_?pham|san_?pham|ten_?hang|hang_?hoa|product(?:_?name)?|mat_?hang)(?:$|_)", "sản phẩm", "product", "bán hàng", "sales", "đơn hàng", "orders", "hàng", "goods"),
     ):
-        found = next((c for _, c in active_cols if re.search(pat, c, re.I)), None)
+        found = next((c for _, c in sales_scope_cols if re.search(pat, c, re.I)), None)
         if found:
             item_col = found
             item_noun_vi, item_noun_en = n_vi, n_en
@@ -363,27 +413,30 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
             import_noun_vi, import_noun_en = i_vi, i_en
             break
 
-    # Category column & phrasing
+    # Category column & phrasing (scoped strictly to sales_table + joined tables)
     cat_col = None
     cat_noun_vi, cat_noun_en = "danh mục", "category"
-    for pat, c_vi, c_en in (
-        (r"^nhom_?mon$", "nhóm món", "menu category"),
-        (r"(?:^|_)(?:nhom_?thuoc|loai_?thuoc)(?:$|_)", "nhóm thuốc", "medicine category"),
-        (r"(?:^|_)(?:nhom_?hang|danh_?muc|loai_?hang|category(?:_?name)?)(?:$|_)", "nhóm hàng", "product category"),
-    ):
-        found_cat = next((c for _, c in active_cols if re.search(pat, c, re.I)), None)
-        if found_cat:
-            cat_col = found_cat
-            cat_noun_vi, cat_noun_en = c_vi, c_en
-            break
+    if is_commercial_pos:
+        for pat, c_vi, c_en in (
+            (r"^nhom_?mon$", "nhóm món", "menu category"),
+            (r"(?:^|_)(?:nhom_?thuoc|loai_?thuoc)(?:$|_)", "nhóm thuốc", "medicine category"),
+            (r"(?:^|_)(?:nhom_?hang|danh_?muc|loai_?hang|category(?:_?name)?)(?:$|_)", "nhóm hàng", "product category"),
+        ):
+            found_cat = next((c for _, c in sales_scope_cols if re.search(pat, c, re.I)), None)
+            if found_cat:
+                cat_col = found_cat
+                cat_noun_vi, cat_noun_en = c_vi, c_en
+                break
 
-    def _collect_role_values(col_regex: str, limit: int = 10) -> List[str]:
+    def _collect_role_values(col_regex: str, limit: int = 10, allowed_tables: Optional[Set[str]] = None) -> List[str]:
         rx = re.compile(col_regex, re.I)
         vals_out: List[str] = []
         seen_low: Set[str] = set()
         for k, pairs in (knowledge.categorical_values or {}).items():
-            col_part = k.split(".")[-1].lower()
-            if rx.search(col_part):
+            tbl_part, col_part = (k.split(".", 1) + [""])[:2]
+            if allowed_tables and tbl_part not in allowed_tables:
+                continue
+            if rx.search(col_part.lower()):
                 for raw_v, _cnt in pairs:
                     if raw_v is None:
                         continue
@@ -399,6 +452,8 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
                         if len(vals_out) >= limit:
                             return vals_out
         for ent in getattr(knowledge, "entity_entries", None) or ():
+            if allowed_tables and str(getattr(ent, "table", "")) not in allowed_tables:
+                continue
             if rx.search(str(getattr(ent, "column", "")).lower()):
                 sv = str(getattr(ent, "raw_value", "") or "").strip()
                 if not sv or len(sv) < 2 or len(sv) > 45:
@@ -415,16 +470,18 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
 
     # Channel values & column
     channel_col = next(
-        (c for _, c in active_cols if re.search(r"(?:^|_)(?:kenh_?ban|kenh|channel|ban_?qua|nguon_?don|noi_?ban)(?:$|_)", c, re.I)),
+        (c for _, c in sales_scope_cols if re.search(r"(?:^|_)(?:kenh_?ban|kenh|channel|ban_?qua|nguon_?don|noi_?ban)(?:$|_)", c, re.I)),
         None,
     )
     channel_values: List[str] = _collect_role_values(
         r"(?:^|_)(?:kenh_?ban|kenh|channel|ban_?qua|nguon_?don|noi_?ban)(?:$|_)",
         limit=6,
+        allowed_tables=sales_scope_tables or None,
     )
     category_values: List[str] = _collect_role_values(
         r"(?:^|_)(?:nhom_?mon|nhom_?thuoc|nhom_?hang|danh_?muc|loai_?hang|category(?:_?name)?)(?:$|_)",
         limit=8,
+        allowed_tables=sales_scope_tables or None,
     )
     supplier_values: List[str] = _collect_role_values(
         r"(?:^|_)(?:nha_?cung_?cap|ncc|supplier(?:_?name)?)(?:$|_)",
@@ -433,6 +490,7 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
     item_values: List[str] = _collect_role_values(
         r"(?:^|_)(?:ten_?thuoc|ten_?mon|vat_?lieu|ten_?vat_?lieu|ten_?san_?pham|ten_?hang|product(?:_?name)?)(?:$|_)",
         limit=12,
+        allowed_tables=sales_scope_tables or None,
     )
     customer_values: List[str] = _collect_role_values(
         r"(?:^|_)(?:ten_?khach(?:_?hang)?|khach_?hang|customer(?:_?name)?|ben_?mua|doi_?tac)(?:$|_)",
@@ -449,9 +507,12 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         None,
     )
     has_qty = any(re.search(r"(?:^|_)(?:so_?luong|sl|qty|quantity|so_?hop|boxes)(?:$|_)", c) for c in sales_cols)
-    has_revenue = any(
-        re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|thanh_?tien|tong_?tien|tien_?hang|tien_?thue|tien_?phong|t_?tien|da_?thu|tien_?cam|tien|gia_?thue|revenue|sales|total_?amount|amount)(?:$|_)", c)
-        for c in sales_cols
+    has_revenue = bool(
+        is_commercial_pos
+        and any(
+            re.search(r"(?:^|_)(?:doanh_?thu|doanh_?so|thanh_?tien|tong_?tien|tien_?hang|tien_?thue|tien_?phong|t_?tien|da_?thu|tien_?cam|tien|gia_?thue|revenue|sales|total_?amount|amount)(?:$|_)", c)
+            for c in sales_cols
+        )
     )
     has_item_in_import = any(
         re.search(r"(?:^|_)(?:ten_?thuoc|thuoc|ten_?mon|mon|vat_?lieu|ten_?san_?pham|san_?pham|ten_?hang|hang_?hoa|product(?:_?name)?)(?:$|_)", c)
@@ -482,26 +543,76 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
     has_cancelled = bool(t0.get("cancelled_values") or t0.get("returned_values"))
 
     # Generic fallback table info when schema does not match POS sales conventions
+    def _pick_generic_table_cols(tp_obj: Any) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        if tp_obj is None:
+            return None, None, None, None
+        preferred_txt = (
+            "danh_muc", "nhom", "dich_vu", "ten_dich_vu", "khoan_chi", "nguon_thu",
+            "loai", "hang_muc", "kenh", "nguoi_thuc_hien", "nguoi_chi", "nguoi_dung",
+        )
+        preferred_num = ("so_tien", "thanh_tien", "tong_tien", "doanh_thu", "chi_phi", "tien", "gia_tri", "amount")
+        col_map = {str(cp.sql_name).lower(): cp for cp in tp_obj.columns if cp.distinct_count > 0 and cp.null_count < tp_obj.row_count}
+        g_txt_cp = None
+        for k in preferred_txt:
+            cand_cp = col_map.get(k)
+            if cand_cp is not None and cand_cp.inferred_type == "text" and 2 <= cand_cp.distinct_count <= max(80, tp_obj.row_count):
+                g_txt_cp = cand_cp
+                break
+        if g_txt_cp is None:
+            for cp in tp_obj.columns:
+                if cp.distinct_count <= 0 or cp.null_count >= tp_obj.row_count:
+                    continue
+                c_low = str(cp.sql_name).lower()
+                if cp.inferred_type == "text" and 2 <= cp.distinct_count <= max(50, tp_obj.row_count):
+                    if not re.search(r"^(?:ma_|id\b|sdt|dien_?thoai|ngay|thoi_?gian|ghi_?chu|mo_?ta|source_?sheet|trang_?thai)", c_low):
+                        g_txt_cp = cp
+                        break
+        g_num_cp = None
+        for k in preferred_num:
+            cand_cp = col_map.get(k)
+            if cand_cp is not None and cand_cp.inferred_type in ("integer", "real", "numeric"):
+                g_num_cp = cand_cp
+                break
+        if g_num_cp is None:
+            for cp in tp_obj.columns:
+                if cp.distinct_count <= 0 or cp.null_count >= tp_obj.row_count:
+                    continue
+                c_low = str(cp.sql_name).lower()
+                if cp.inferred_type in ("integer", "real", "numeric") and not re.search(r"(?:^|_)(?:id|ma_|stt)(?:$|_)", c_low):
+                    g_num_cp = cp
+                    break
+        t_col = g_txt_cp.sql_name if g_txt_cp is not None else None
+        t_disp = _humanize_vi_schema_label(getattr(g_txt_cp, "raw_name", t_col), t_col) if g_txt_cp is not None else None
+        n_col = g_num_cp.sql_name if g_num_cp is not None else None
+        n_disp = _humanize_vi_schema_label(getattr(g_num_cp, "raw_name", n_col), n_col) if g_num_cp is not None else None
+        return t_col, t_disp, n_col, n_disp
+
     fallback_table = sales_table or (valid_tables[0] if valid_tables else "data")
     tp_fb = knowledge.workspace.tables.get(fallback_table)
     fallback_table_disp = _humanize_vi_schema_label(getattr(tp_fb, "raw_name", fallback_table), fallback_table, is_table=True)
-    fb_text_col = None
-    fb_text_disp = None
-    fb_num_col = None
-    fb_num_disp = None
-    if tp_fb is not None:
-        for cp in tp_fb.columns:
-            if cp.distinct_count <= 0 or cp.null_count >= tp_fb.row_count:
-                continue
-            c_low = str(cp.sql_name).lower()
-            if fb_text_col is None and cp.inferred_type == "text" and 2 <= cp.distinct_count <= max(50, tp_fb.row_count):
-                if not re.search(r"^(?:ma_|id\b|sdt|dien_?thoai|ngay)", c_low):
-                    fb_text_col = cp.sql_name
-                    fb_text_disp = _humanize_vi_schema_label(getattr(cp, "raw_name", cp.sql_name), cp.sql_name)
-            elif fb_num_col is None and cp.inferred_type in ("integer", "real", "numeric"):
-                if not re.search(r"(?:^|_)(?:id|ma_|stt)(?:$|_)", c_low):
-                    fb_num_col = cp.sql_name
-                    fb_num_disp = _humanize_vi_schema_label(getattr(cp, "raw_name", cp.sql_name), cp.sql_name)
+    fb_text_col, fb_text_disp, fb_num_col, fb_num_disp = _pick_generic_table_cols(tp_fb)
+
+    multi_table_generics: List[Dict[str, str]] = []
+    sorted_valid = sorted(
+        valid_tables,
+        key=lambda tn: -(getattr(knowledge.workspace.tables.get(tn), "row_count", 0) or 0),
+    )
+    for tn in sorted_valid[:6]:
+        tp_cur = knowledge.workspace.tables.get(tn)
+        if tp_cur is None or getattr(tp_cur, "row_count", 0) <= 0:
+            continue
+        tc, td, nc, nd = _pick_generic_table_cols(tp_cur)
+        if tc and nc:
+            multi_table_generics.append(
+                {
+                    "table": tn,
+                    "table_disp": _humanize_vi_schema_label(getattr(tp_cur, "raw_name", tn), tn, is_table=True),
+                    "text_col": tc,
+                    "text_disp": td or tc,
+                    "num_col": nc,
+                    "num_disp": nd or nc,
+                }
+            )
 
     return {
         "caps": caps,
@@ -549,6 +660,7 @@ def _profile_datamate_followup_schema(knowledge: WorkspaceKnowledge) -> Dict[str
         "fb_text_disp": fb_text_disp or fb_text_col,
         "fb_num_col": fb_num_col,
         "fb_num_disp": fb_num_disp or fb_num_col,
+        "multi_table_generics": multi_table_generics,
         "all_col_lows": all_col_lows,
     }
 
@@ -979,7 +1091,7 @@ def build_datamate_suggested_questions(
                     f"Khách hàng {cust} đã mua những {i_vi} nào và tổng giá trị là bao nhiêu?",
                     f"Which {i_en}s did customer {cust} purchase and what is the total amount?",
                 )
-    elif prof["has_customers"] and not prof["has_debt"]:
+    elif prof["has_customers"] and not prof["has_debt"] and prof["has_revenue"]:
         _add(
             "supply_debt",
             "Top 5 khách hàng có tổng giá trị đơn hàng cao nhất là ai?",
@@ -993,7 +1105,7 @@ def build_datamate_suggested_questions(
         )
 
     # Dimension E: quality_ops (Canceled/Returned Orders)
-    if prof["has_cancelled"]:
+    if prof["has_cancelled"] and prof["has_revenue"]:
         ret_hint = " hoặc trả lại" if prof["returned_values"] else ""
         _add(
             "quality_ops",
@@ -1055,7 +1167,24 @@ def build_datamate_suggested_questions(
                 f"Top 3 {i_en}s by revenue on {ch} channel?",
             )
 
-    # Non-POS / generic database fallback (e.g. arbitrary Excel sheets without revenue/status)
+    # Non-POS / generic database fallback (e.g. personal cashflow / multi-sheet Excel without POS revenue)
+    if not prof["has_revenue"]:
+        for g_item in _rotate_list(list(prof.get("multi_table_generics") or []), rot_offset):
+            gt_tag = f"table_{g_item['table']}"
+            gt_disp = g_item["table_disp"]
+            gx_disp = g_item["text_disp"]
+            gn_disp = g_item["num_disp"]
+            _add(
+                gt_tag,
+                f"Top 5 {gx_disp} theo tổng {gn_disp} trong {gt_disp}?",
+                f"Top 5 {gx_disp} by total {gn_disp} in {gt_disp}?",
+            )
+            _add(
+                gt_tag,
+                f"{str(gx_disp).capitalize()} nào có tổng {gn_disp} cao nhất và thấp nhất trong {gt_disp}?",
+                f"Highest and lowest {gx_disp} by total {gn_disp} in {gt_disp}?",
+            )
+
     t_fb_disp = prof.get("fallback_table_disp") or prof["fallback_table"]
     fb_txt_disp = prof.get("fb_text_disp") or prof["fb_text_col"]
     fb_num_disp = prof.get("fb_num_disp") or prof["fb_num_col"]
