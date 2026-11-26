@@ -1264,6 +1264,45 @@ _FUZZY_NOISE_TOKENS = _ENTITY_STOPWORDS | frozenset({
     "la", "ti", "ty", "le", "dc", "duoc", "ze", "nha", "vay", "tinh", "xem", "giup", "kiem", "coi",
 })
 
+_STRUCTURAL_COMPOUND_NFC_RE = re.compile(
+    r"(?<!\w)(?:"
+    r"danh\s+sách|ngân\s+sách|chính\s+sách|sổ\s+sách|"
+    r"ví\s+điện\s+tử|h[oó]a\s+đơn\s+điện\s+tử|thương\s+mại\s+điện\s+tử|thư\s+điện\s+tử|số\s+điện\s+thoại|điện\s+thoại|"
+    r"cửa\s+hàng|ngân\s+hàng|khách\s+hàng|mặt\s+hàng|nhóm\s+hàng|loại\s+hàng|ngành\s+hàng|kho\s+hàng|đơn\s+hàng|"
+    r"h[oó]a\s+đơn|đơn\s+giá|đơn\s+vị\s+tính|đơn\s+vị|giao\s+hàng|trả\s+hàng|nhập\s+hàng|bán\s+hàng|hết\s+hàng|tồn\s+kho|"
+    r"sản\s+phẩm|danh\s+mục|dịch\s+vụ|doanh\s+thu|doanh\s+số|phụ\s+thu|thu\s+nhập|lợi\s+nhuận|chi\s+phí|chi\s+tiêu|công\s+nợ|"
+    r"số\s+tiền|thành\s+tiền|tổng\s+tiền|giá\s+trị|số\s+lượng|t[ỷỉ]\s+lệ|t[ỷỉ]\s+trọng|phần\s+trăm|"
+    r"xu\s+hướng|biến\s+động|diễn\s+biến|trung\s+bình|bình\s+quân|chênh\s+lệch|so\s+sánh|xếp\s+hạng|thứ\s+hạng|"
+    r"thống\s+kê|báo\s+cáo|phân\s+tích|chi\s+tiết|tổng\s+hợp|tổng\s+cộng|thời\s+gian|kết\s+quả|trạng\s+thái|tình\s+trạng"
+    r")(?!\w)",
+    re.IGNORECASE,
+)
+
+_STRUCTURAL_COMPOUND_NORM_RE = re.compile(
+    r"\b(?:"
+    r"danh\s+sach|ngan\s+sach|chinh\s+sach|so\s+sach|"
+    r"vi\s+dien\s+tu|hoa\s+don\s+dien\s+tu|thuong\s+mai\s+dien\s+tu|thu\s+dien\s+tu|so\s+dien\s+thoai|dien\s+thoai|"
+    r"cua\s+hang|ngan\s+hang|khach\s+hang|mat\s+hang|nhom\s+hang|loai\s+hang|nganh\s+hang|kho\s+hang|don\s+hang|"
+    r"hoa\s+don|don\s+gia|don\s+vi\s+tinh|don\s+vi|giao\s+hang|tra\s+hang|nhap\s+hang|ban\s+hang|het\s+hang|ton\s+kho|"
+    r"san\s+pham|danh\s+muc|dich\s+vu|doanh\s+thu|doanh\s+so|phu\s+thu|thu\s+nhap|loi\s+nhuan|chi\s+phi|chi\s+tieu|cong\s+no|"
+    r"so\s+tien|thanh\s+tien|tong\s+tien|gia\s+tri|so\s+luong|ty\s+le|ti\s+le|ty\s+trong|ti\s+trong|phan\s+tram|"
+    r"xu\s+huong|bien\s+dong|dien\s+bien|trung\s+binh|binh\s+quan|chenh\s+lech|so\s+sanh|xep\s+hang|thu\s+hang|"
+    r"thong\s+ke|bao\s+cao|phan\s+tich|chi\s+tiet|tong\s+hop|tong\s+cong|thoi\s+gian|ket\s+qua|trang\s+thai|tinh\s+trang"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def strip_structural_query_compounds(text_nfc_low: str, text_norm: str) -> Tuple[str, str]:
+    """
+    Mask Vietnamese structural/analytical compound phrases (e.g. 'danh sách', 'nhóm hàng', 'ví điện tử')
+    before matching single-word DB entities so 'Danh sách' never false-matches an item named 'Sách'.
+    """
+    return (
+        _STRUCTURAL_COMPOUND_NFC_RE.sub(" ", text_nfc_low or ""),
+        _STRUCTURAL_COMPOUND_NORM_RE.sub(" ", text_norm or ""),
+    )
+
 
 def _norm_unit_code_variant(text: str) -> str:
     s = re.sub(r"\b(?:phong|p)[.\s_-]*0*(\d+)\b", r"phong \1", text)
@@ -1286,10 +1325,11 @@ def ground_query_entities(
         return []
     q_unit = _norm_unit_code_variant(q_norm)
     q_nfc_low = normalize_nfc(query).lower()
+    q_single_nfc, q_single_norm = strip_structural_query_compounds(q_nfc_low, q_norm)
     q_fuzzy_text = re.sub(
-        r"\b(?:san pham|mat hang|khach hang|doanh thu|doanh so|don hang|hoa don|gia tri|bao nhieu|cao nhat|thap nhat|nhieu nhat)\b",
+        r"\b(?:bao nhieu|cao nhat|thap nhat|nhieu nhat|lon nhat|it nhat)\b",
         " ",
-        q_norm,
+        q_single_norm,
     )
     q_tokens = {
         tok for tok in re.findall(r"[a-z0-9]+", q_fuzzy_text) if tok not in _FUZZY_NOISE_TOKENS
@@ -1297,19 +1337,21 @@ def ground_query_entities(
     scored: List[Tuple[float, str, str, str]] = []
 
     for ent in knowledge.entity_entries:
-        # Word-boundary normalized phrase check (prevents substring hallucinations like 'qua' inside 'hom qua')
+        is_single_tok = len(ent.tokens) == 1
+        target_norm = q_single_norm if is_single_tok else q_norm
+        # Word-boundary normalized phrase check (prevents substring hallucinations like 'qua' inside 'hom qua' or 'Sách' inside 'Danh sách')
         if len(ent.norm_value) >= 3 and re.search(
             rf"(?<![a-z0-9]){re.escape(ent.norm_value)}(?![a-z0-9])",
-            q_norm,
+            target_norm,
         ):
-            if len(ent.tokens) == 1:
+            if is_single_tok:
                 tok = ent.tokens[0]
                 if tok in _ENTITY_STOPWORDS:
                     continue
-                # For short 1-word values (<=4 chars, e.g. 'quả', 'kg', 'ly'), require exact accented word match
+                # For short 1-word values (<=4 chars, e.g. 'quả', 'sách', 'kg', 'ly'), require exact accented word match outside compounds
                 if len(ent.norm_value) <= 4:
                     raw_low = normalize_nfc(ent.raw_value).lower()
-                    if not re.search(rf"(?<!\w){re.escape(raw_low)}(?!\w)", q_nfc_low):
+                    if not re.search(rf"(?<!\w){re.escape(raw_low)}(?!\w)", q_single_nfc):
                         continue
             score = 100.0 + len(ent.norm_value)
             scored.append((score, ent.table, ent.column, ent.raw_value))

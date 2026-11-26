@@ -17,6 +17,7 @@ from datamate.schema_context import (
     build_workspace_knowledge,
     ground_query_entities,
     run_deterministic_probes,
+    strip_structural_query_compounds,
 )
 from datamate.sql_executor import (
     SQLExecutionResult,
@@ -3284,7 +3285,11 @@ def _select_rulebook_prompt(
                     getattr(c, "sql_name", str(c))
                     for c in other.columns
                     if getattr(c, "sql_name", str(c)) in tgt_cols
-                    and getattr(c, "sql_name", str(c)).lower() not in {"ngay", "thang", "nam", "ghi_chu", "trang_thai"}
+                    and getattr(c, "sql_name", str(c)).lower()
+                    not in {
+                        "ngay", "thang", "nam", "ghi_chu", "trang_thai", "mo_ta", "source_sheet",
+                        "so_tien", "thanh_tien", "tong_tien", "doanh_thu", "chi_phi", "so_luong", "don_gia", "gia",
+                    }
                 ]
                 if common:
                     k = common[0]
@@ -3856,15 +3861,61 @@ def verify_sql_semantics(
     # 6b. Dropped grounded non-status entity filter explicitly named in question
     if entity_matches:
         q_raw_norm = norm_vn(question)
+        _, q_single_norm = strip_structural_query_compounds(normalize_nfc(question).lower(), q_raw_norm)
         sql_norm = norm_vn(sql)
+        queried_tbls_low = {
+            tp.table_name.lower()
+            for tp in knowledge.workspace.tables.values()
+            if re.search(rf"\b(?:from|join)\s+[`\"]?{re.escape(tp.table_name.lower())}[`\"]?\b", sql_low)
+        }
+        reachable_tbls_low = set(queried_tbls_low)
+        for edge in getattr(knowledge, "join_graph", None) or ():
+            edge_clean = edge.split(" (", 1)[0]
+            if " = " in edge_clean:
+                lhs, rhs = edge_clean.split(" = ", 1)
+                t_a = lhs.strip().split(".", 1)[0].lower()
+                t_b = rhs.strip().split(".", 1)[0].lower()
+                if t_a in queried_tbls_low:
+                    reachable_tbls_low.add(t_b)
+                if t_b in queried_tbls_low:
+                    reachable_tbls_low.add(t_a)
+        for q_tl in list(queried_tbls_low):
+            q_tp = next((tp for tp in knowledge.workspace.tables.values() if tp.table_name.lower() == q_tl), None)
+            if q_tp is not None:
+                for o_tp in knowledge.workspace.tables.values():
+                    if o_tp.table_name.lower() not in reachable_tbls_low and _resolve_fact_dim_join(
+                        q_tp, o_tp, getattr(knowledge, "join_graph", None) or ()
+                    ):
+                        reachable_tbls_low.add(o_tp.table_name.lower())
+
+        satisfied_vals = {
+            norm_vn(ev)
+            for et, ec, ev in entity_matches
+            if norm_vn(ev) in sql_norm
+            or (et.lower() in queried_tbls_low and ec.lower() in where_part)
+        }
+
         for ent_tbl, ent_col, ent_val in entity_matches:
             if re.search(r"(?:trang_thai|status|tinh_trang|ket_qua)", ent_col.lower()):
                 continue
             val_norm = norm_vn(ent_val)
-            if len(val_norm) < 3:
+            if len(val_norm) < 3 or val_norm in satisfied_vals:
                 continue
-            if re.search(rf"(?<![a-z0-9]){re.escape(val_norm)}(?![a-z0-9])", q_raw_norm):
+            is_single_word_val = len(re.findall(r"[a-z0-9]+", val_norm)) <= 1
+            check_q_norm = q_single_norm if is_single_word_val else q_raw_norm
+            if re.search(rf"(?<![a-z0-9]){re.escape(val_norm)}(?![a-z0-9])", check_q_norm):
                 if val_norm not in sql_norm and ent_col.lower() not in sql_low:
+                    ent_tl = ent_tbl.lower()
+                    if ent_tl not in reachable_tbls_low and queried_tbls_low:
+                        # Unjoinable sibling table: if the query already applies a grounded entity filter on the active table,
+                        # never force an impossible cross-table JOIN to an unrelated sheet!
+                        if satisfied_vals:
+                            continue
+                        return (
+                            False,
+                            f"LỖI CHỌN BẢNG / BỎ SÓT BỘ LỌC: Câu hỏi nhắc rõ đối tượng `{ent_val}` nằm ở `{ent_tbl}.{ent_col}` (không có khóa nối sang bảng đang truy vấn)! Hãy truy vấn trực tiếp bảng `{ent_tbl}` và giữ điều kiện lọc `{ent_col} = '{ent_val}'`.",
+                            True,
+                        )
                     return (
                         False,
                         f"LỖI BỎ SÓT BỘ LỌC: Câu hỏi nhắc rõ đối tượng `{ent_val}` (tại `{ent_tbl}.{ent_col}`), nhưng SQL chưa lọc theo đối tượng này! Hãy `JOIN {ent_tbl}` (nếu ở bảng khác) và giữ điều kiện lọc `{ent_col} = '{ent_val}'`.",

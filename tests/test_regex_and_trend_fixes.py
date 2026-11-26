@@ -20,7 +20,7 @@ from datamate.agent import (
     verify_sql_semantics,
 )
 from datamate.loader import load_business_workspace
-from datamate.schema_context import build_workspace_knowledge
+from datamate.schema_context import build_workspace_knowledge, ground_query_entities
 from datamate.sql_executor import SQLExecutionResult
 from src.analytics.anomaly import analyze_data_anomalies
 from src.analytics.heuristics import (
@@ -351,7 +351,8 @@ class TestVeraxusUIAndQueryFixes(unittest.TestCase):
                 INSERT INTO so_chi VALUES
                     ('2026-08-02', 'Mua rau củ', 'Thực phẩm', 450000, 'Thành viên A'),
                     ('2026-08-04', 'Gửi xe tháng', 'Đi lại', 300000, 'Thành viên B'),
-                    ('2026-08-06', 'Mua sách học', 'Giáo dục', 620000, 'Thành viên A');
+                    ('2026-08-06', 'Sách', 'Giáo dục', 620000, 'Thành viên A'),
+                    ('2026-08-08', 'Áo sơ mi', 'Quần áo, mua sắm', 750000, 'Thành viên B');
 
                 CREATE TABLE thu (
                     ngay TEXT, nguon_thu TEXT, so_tien INTEGER, nguoi_nhan TEXT
@@ -366,10 +367,10 @@ class TestVeraxusUIAndQueryFixes(unittest.TestCase):
                 INSERT INTO vidientu_lichsu VALUES
                     ('2026-07-15 09:00:00', 'Hoàn tiền ví', 'Hoàn tiền', 120000, 'Thành công', 'Thành viên A', ''),
                     ('2026-08-02 08:15:00', 'Điện lực Đô thị', 'Hóa đơn', -1850000, 'Thành công', 'Thành viên A', ''),
-                    ('2026-08-05 12:30:00', 'Siêu thị Xanh', 'Mua sắm', -1420000, 'Thành công', 'Thành viên B', ''),
+                    ('2026-08-05 12:30:00', 'Siêu thị Xanh', 'Quần áo, mua sắm', -1420000, 'Thành công', 'Thành viên B', ''),
                     ('2026-08-09 19:00:00', 'Đặt xe Nhanh', 'Di chuyển', -680000, 'Thành công', 'Thành viên A', ''),
                     ('2026-08-14 20:10:00', 'Internet Cáp quang', 'Viễn thông', -550000, 'Thành công', 'Thành viên B', ''),
-                    ('2026-08-18 07:45:00', 'Cà phê Sáng', 'Ăn uống', -390000, 'Thành công', 'Thành viên A', ''),
+                    ('2026-08-18 07:45:00', 'Cửa hàng Thời trang Mẫu', 'Quần áo, mua sắm', -390000, 'Thành công', 'Thành viên A', ''),
                     ('2026-08-22 18:20:00', 'Rạp Phim Mới', 'Giải trí', -240000, 'Thành công', 'Thành viên B', '');
                 """
             )
@@ -436,6 +437,38 @@ class TestVeraxusUIAndQueryFixes(unittest.TestCase):
                 raw_inflow_sql, q_inflow, kw, classify_expected_type(q_inflow)
             )
             self.assertIn("so_tien > 0", rewritten_inflow)
+
+            # Structural compound 'Danh sách' MUST NOT false-ground `so_chi.khoan_chi = 'Sách'`!
+            q_list_cat = "Danh sách các dịch vụ thuộc nhóm hàng Quần áo, mua sắm là gì?"
+            grounded_list = ground_query_entities(q_list_cat, kw)
+            self.assertFalse(
+                any(val == "Sách" for _, _, val in grounded_list),
+                f"'Danh sách' falsely grounded 'Sách': {grounded_list}",
+            )
+            self.assertIn(("vidientu_lichsu", "danh_muc", "Quần áo, mua sắm"), grounded_list)
+
+            # Meanwhile, an actual standalone mention of 'Sách' MUST still ground cleanly!
+            grounded_book = ground_query_entities("Danh sách các lần chi mua Sách là gì?", kw)
+            self.assertIn(("so_chi", "khoan_chi", "Sách"), grounded_book)
+
+            fake_list_client = _FakeLLMClient(
+                [
+                    '{"status":"ok","sql":"SELECT DISTINCT dich_vu FROM vidientu_lichsu WHERE NORM_VN(danh_muc) = NORM_VN(\'Quần áo, mua sắm\') ORDER BY dich_vu;"}'
+                ]
+            )
+            out_list = run_datamate_enhanced_turn(
+                q_list_cat,
+                fake_list_client,
+                "Ollama (Local AI Offline)",
+                "veraxus-coder:3b",
+                kw,
+                lang="vi",
+            )
+            self.assertIsNotNone(out_list.get("df"))
+            self.assertEqual(
+                list(out_list["df"].iloc[:, 0]),
+                ["Cửa hàng Thời trang Mẫu", "Siêu thị Xanh"],
+            )
 
 
 if __name__ == "__main__":
